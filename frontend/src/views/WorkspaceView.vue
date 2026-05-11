@@ -40,7 +40,8 @@ const panelComponents = {
 };
 
 const workspaceClass = computed(() => `workspace-main--${focusMode.value || 'balanced'}`);
-const isStackedLayout = computed(() => viewportWidth.value <= 980);
+const isCompactLayout = computed(() => viewportWidth.value <= 1180);
+const isStackedLayout = computed(() => viewportWidth.value <= 860);
 const hasManagerBrief = computed(() => Boolean(manager.value.latestReport));
 const hasScheduledTasks = computed(() => (system.value.scheduledTasks || []).length > 0);
 const hasProfileContent = computed(() => {
@@ -116,6 +117,20 @@ const finalColumns = computed(() => {
     right,
   };
 });
+const orderedColumns = computed(() => {
+  if (isStackedLayout.value) {
+    return [
+      { key: 'center', panels: finalColumns.value.center },
+      { key: 'left', panels: finalColumns.value.left },
+      { key: 'right', panels: finalColumns.value.right },
+    ];
+  }
+  return [
+    { key: 'left', panels: finalColumns.value.left },
+    { key: 'center', panels: finalColumns.value.center },
+    { key: 'right', panels: finalColumns.value.right },
+  ];
+});
 const workspaceGridStyle = computed(() => {
   if (isStackedLayout.value) {
     return {
@@ -127,11 +142,11 @@ const workspaceGridStyle = computed(() => {
   const rightCount = finalColumns.value.right.length;
   const isChatMode = focusMode.value === 'chat';
   const leftTrack = leftCount
-    ? `minmax(${leftCount >= 4 ? 250 : 270}px, ${isChatMode ? 2.55 : 2.95}fr)`
+    ? `minmax(${isCompactLayout.value ? 220 : (leftCount >= 4 ? 250 : 270)}px, ${isCompactLayout.value ? (isChatMode ? 1.65 : 1.85) : (isChatMode ? 2.55 : 2.95)}fr)`
     : '0px';
-  const centerTrack = `minmax(${isChatMode ? 430 : 380}px, ${isChatMode ? 5.5 : 5}fr)`;
+  const centerTrack = `minmax(${isCompactLayout.value ? (isChatMode ? 420 : 360) : (isChatMode ? 430 : 380)}px, ${isCompactLayout.value ? (isChatMode ? 6.1 : 5.7) : (isChatMode ? 5.5 : 5)}fr)`;
   const rightTrack = rightCount
-    ? `minmax(${rightCount <= 2 ? 250 : 230}px, ${rightCount <= 2 ? 2.7 : 2.45}fr)`
+    ? `minmax(${isCompactLayout.value ? 190 : (rightCount <= 2 ? 250 : 230)}px, ${isCompactLayout.value ? 1.3 : (rightCount <= 2 ? 2.7 : 2.45)}fr)`
     : '0px';
   return {
     gridTemplateColumns: `${leftTrack} ${centerTrack} ${rightTrack}`,
@@ -179,28 +194,15 @@ onUnmounted(() => {
     </header>
 
     <main class="workspace-main" :class="workspaceClass" :style="workspaceGridStyle">
-      <section class="workspace-column" :class="{ 'workspace-column--stacked': isStackedLayout }">
+      <section
+        v-for="column in orderedColumns"
+        :key="column.key"
+        class="workspace-column"
+        :class="{ 'workspace-column--stacked': isStackedLayout }"
+      >
         <component
           :is="panelComponents[panel.id]"
-          v-for="panel in finalColumns.left"
-          :key="panel.id"
-          :panel="panel"
-        />
-      </section>
-
-      <section class="workspace-column" :class="{ 'workspace-column--stacked': isStackedLayout }">
-        <component
-          :is="panelComponents[panel.id]"
-          v-for="panel in finalColumns.center"
-          :key="panel.id"
-          :panel="panel"
-        />
-      </section>
-
-      <section class="workspace-column" :class="{ 'workspace-column--stacked': isStackedLayout }">
-        <component
-          :is="panelComponents[panel.id]"
-          v-for="panel in finalColumns.right"
+          v-for="panel in column.panels"
           :key="panel.id"
           :panel="panel"
         />

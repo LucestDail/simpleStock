@@ -346,7 +346,8 @@ function onComposerKeydown(event) {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
   padding: 4px;
 }
@@ -366,7 +367,9 @@ function onComposerKeydown(event) {
 .thread-item__main {
   border: none;
   background: transparent;
+  color: inherit;
   padding: 0;
+  min-width: 0;
   text-align: left;
   display: grid;
   gap: 2px;
@@ -397,6 +400,11 @@ function onComposerKeydown(event) {
   color: var(--color-ink);
 }
 
+.thread-item.active span,
+.thread-item.active em {
+  color: rgba(238, 242, 248, 0.78);
+}
+
 .thread-item__delete {
   border: none;
   background: transparent;
@@ -406,6 +414,7 @@ function onComposerKeydown(event) {
   cursor: pointer;
   padding: 1px 0 0;
   white-space: nowrap;
+  align-self: start;
 }
 
 .conversation {

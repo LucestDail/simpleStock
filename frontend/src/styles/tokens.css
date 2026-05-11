@@ -44,12 +44,12 @@
   --shadow-soft: 0 8px 22px rgba(0, 0, 0, 0.34);
 
   --space-xxs: 2px;
-  --space-xs: 4px;
-  --space-sm: 6px;
-  --space-base: 8px;
-  --space-md: 10px;
-  --space-lg: 12px;
-  --space-xl: 14px;
+  --space-xs: 5px;
+  --space-sm: 7px;
+  --space-base: 9px;
+  --space-md: 11px;
+  --space-lg: 13px;
+  --space-xl: 15px;
   --space-xxl: 24px;
   --space-section: 56px;
 
@@ -73,7 +73,7 @@ body,
 body {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 400;
   line-height: 1.5;
   color: var(--color-body);
