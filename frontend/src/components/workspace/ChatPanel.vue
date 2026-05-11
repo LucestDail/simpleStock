@@ -21,6 +21,7 @@ const {
   system,
   loading,
   sending,
+  error: chatError,
   createThread,
   selectThread,
   sendMessageContent,
@@ -32,6 +33,25 @@ const { applyWorkspacePatch, recordActivity, handleAssistantMetadata, openDrawer
 
 const draft = ref('');
 const canSend = computed(() => Boolean(draft.value.trim()) && !sending.value);
+const composerNotice = computed(() => {
+  if (sending.value) {
+    return {
+      tone: 'info',
+      title: '응답 생성 중',
+      message: '요청이 길어질 경우 자동 재시도 후 실패 사유를 안내합니다.',
+    };
+  }
+
+  if (chatError.value) {
+    return {
+      tone: 'error',
+      title: '전송 실패',
+      message: chatError.value,
+    };
+  }
+
+  return null;
+});
 const headerStats = computed(() => [
   {
     label: '총 자산',
@@ -116,7 +136,9 @@ async function submit() {
     });
     handleAssistantMetadata(assistantMessage?.metadata);
   } catch (error) {
-    draft.value = content;
+    if (error?.restoreDraft !== false) {
+      draft.value = content;
+    }
     notify({
       tone: 'error',
       message: error.message || '메시지 전송 실패',
@@ -197,6 +219,10 @@ function onComposerKeydown(event) {
     </div>
 
     <div class="composer">
+      <div v-if="composerNotice" class="chat-notice" :class="composerNotice.tone">
+        <strong>{{ composerNotice.title }}</strong>
+        <p>{{ composerNotice.message }}</p>
+      </div>
       <textarea
         v-model="draft"
         class="composer-input"
@@ -382,6 +408,36 @@ function onComposerKeydown(event) {
 .composer {
   display: grid;
   gap: var(--space-sm);
+}
+
+.chat-notice {
+  border-radius: var(--rounded-lg);
+  padding: 8px 10px;
+  border: 1px solid var(--color-hairline);
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.chat-notice.info {
+  background: rgba(0, 82, 255, 0.08);
+  border-color: rgba(0, 82, 255, 0.2);
+}
+
+.chat-notice.error {
+  background: rgba(255, 92, 92, 0.08);
+  border-color: rgba(255, 92, 92, 0.2);
+}
+
+.chat-notice strong {
+  color: var(--color-ink);
+}
+
+.chat-notice p {
+  margin: 0;
+  color: var(--color-body);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .composer-input {

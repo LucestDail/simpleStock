@@ -6,6 +6,9 @@ const { logInfo, logError, logWarn } = require('./logger');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-pro-preview';
 const GEMINI_THINKING_LEVEL = process.env.GEMINI_THINKING_LEVEL || 'high';
+const GEMINI_TIMEOUT_MS = Math.max(15_000, Number(process.env.GEMINI_TIMEOUT_MS) || 90_000);
+const GEMINI_MAX_RETRIES = Math.max(0, Number(process.env.GEMINI_MAX_RETRIES) || 2);
+const GEMINI_RETRY_BASE_MS = Math.max(250, Number(process.env.GEMINI_RETRY_BASE_MS) || 1_500);
 const AI_DAILY_CRON = process.env.AI_DAILY_CRON || '5 21 * * *';
 
 let googleGenAiCtorPromise = null;
@@ -479,6 +482,66 @@ function getGroundingSources(response) {
     .slice(0, 6);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createAiTimeoutError(timeoutMs) {
+  const error = new Error(`Gemini 응답이 ${Math.round(timeoutMs / 1000)}초 안에 완료되지 않았습니다.`);
+  error.code = 'AI_TIMEOUT';
+  error.retryable = true;
+  return error;
+}
+
+async function withTimeout(promise, timeoutMs) {
+  let timeoutId = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(createAiTimeoutError(timeoutMs));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+function isRetryableAiError(error) {
+  if (!error) return false;
+  if (error.retryable || error.code === 'AI_TIMEOUT') return true;
+
+  const status = Number(error.status || error.statusCode || error.cause?.status || 0);
+  if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status)) {
+    return true;
+  }
+
+  const message = String(error.message || error);
+  return /(fetch failed|sending request|network|socket|timed out|timeout|econnreset|etimedout|eai_again|enotfound|unavailable|resource_exhausted|temporarily unavailable|overloaded|internal error|service unavailable)/i.test(
+    message
+  );
+}
+
+function buildAiUserFacingError(error, { maxAttempts } = {}) {
+  if (error?.code === 'AI_TIMEOUT') {
+    return new Error(
+      `AI 응답이 ${Math.round(GEMINI_TIMEOUT_MS / 1000)}초 안에 완료되지 않아 중단했습니다. 잠시 후 다시 시도해 주세요.`
+    );
+  }
+
+  if (isRetryableAiError(error)) {
+    return new Error(
+      maxAttempts > 1
+        ? 'AI 응답 생성이 일시적으로 불안정했습니다. 자동 재시도 후에도 완료되지 않아 중단했습니다. 잠시 후 다시 시도해 주세요.'
+        : 'AI 응답 생성이 일시적으로 불안정합니다. 잠시 후 다시 시도해 주세요.'
+    );
+  }
+
+  return new Error('AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+}
+
 async function generateContent({
   systemPrompt,
   userPrompt,
@@ -493,6 +556,7 @@ async function generateContent({
   const GoogleGenAI = await getGoogleGenAI();
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const startedAt = Date.now();
+  const maxAttempts = GEMINI_MAX_RETRIES + 1;
 
   logInfo('ai.generate.start', {
     logLabel,
@@ -500,48 +564,100 @@ async function generateContent({
     thinkingLevel: GEMINI_THINKING_LEVEL,
     useGoogleSearch,
     hasSchema: Boolean(schema),
+    timeoutMs: GEMINI_TIMEOUT_MS,
+    maxAttempts,
     systemPromptPreview: String(systemPrompt || '').slice(0, 160),
     userPromptPreview: String(userPrompt || '').slice(0, 200),
   });
 
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const attemptStartedAt = Date.now();
+
+    try {
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: buildEnvelope(systemPrompt, userPrompt),
+          config: {
+            thinkingConfig: {
+              thinkingLevel: GEMINI_THINKING_LEVEL,
+            },
+            ...(schema
+              ? {
+                  responseFormat: {
+                    text: {
+                      mimeType: 'application/json',
+                      schema,
+                    },
+                  },
+                }
+              : {}),
+            ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
+          },
+        }),
+        GEMINI_TIMEOUT_MS
+      );
+
+      logInfo('ai.generate.finish', {
+        logLabel,
+        attempt,
+        durationMs: Date.now() - startedAt,
+        attemptDurationMs: Date.now() - attemptStartedAt,
+        outputPreview: extractTextFromResponse(response).slice(0, 200),
+        groundingSourceCount: getGroundingSources(response).length,
+      });
+
+      return response;
+    } catch (error) {
+      const retryable = isRetryableAiError(error);
+      const waitMs = retryable && attempt < maxAttempts
+        ? GEMINI_RETRY_BASE_MS * 2 ** (attempt - 1)
+        : 0;
+
+      if (waitMs > 0) {
+        logWarn('ai.generate.retry', {
+          logLabel,
+          attempt,
+          maxAttempts,
+          durationMs: Date.now() - startedAt,
+          attemptDurationMs: Date.now() - attemptStartedAt,
+          waitMs,
+          retryable,
+          message: String(error?.message || error).slice(0, 220),
+          useGoogleSearch,
+          hasSchema: Boolean(schema),
+        });
+        await sleep(waitMs);
+        continue;
+      }
+
+      const userFacingError = buildAiUserFacingError(error, { maxAttempts });
+      logError('ai.generate.failed', error, {
+        logLabel,
+        attempt,
+        maxAttempts,
+        durationMs: Date.now() - startedAt,
+        attemptDurationMs: Date.now() - attemptStartedAt,
+        useGoogleSearch,
+        hasSchema: Boolean(schema),
+        retryable,
+        userMessage: userFacingError.message,
+      });
+      throw userFacingError;
+    }
+  }
+
   try {
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: buildEnvelope(systemPrompt, userPrompt),
-      config: {
-        thinkingConfig: {
-          thinkingLevel: GEMINI_THINKING_LEVEL,
-        },
-        ...(schema
-          ? {
-              responseFormat: {
-                text: {
-                  mimeType: 'application/json',
-                  schema,
-                },
-              },
-            }
-          : {}),
-        ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
-      },
-    });
-
-    logInfo('ai.generate.finish', {
-      logLabel,
-      durationMs: Date.now() - startedAt,
-      outputPreview: extractTextFromResponse(response).slice(0, 200),
-      groundingSourceCount: getGroundingSources(response).length,
-    });
-
-    return response;
+    throw new Error('AI 응답 생성 루프가 예상치 못하게 종료되었습니다.');
   } catch (error) {
     logError('ai.generate.failed', error, {
       logLabel,
       durationMs: Date.now() - startedAt,
       useGoogleSearch,
       hasSchema: Boolean(schema),
+      retryable: false,
     });
-    throw error;
+    throw buildAiUserFacingError(error, { maxAttempts });
   }
 }
 

@@ -119,6 +119,22 @@ function removeThreadLocal(threadId) {
   }
 }
 
+async function syncThreadState(threadId) {
+  if (!threadId) return null;
+  const res = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || '대화 상태를 다시 불러오지 못했습니다.');
+  }
+  activeThread.value = data.thread;
+  replaceMessages(threadId, data.messages || []);
+  upsertThread({
+    ...data.thread,
+    messageCount: Array.isArray(data.messages) ? data.messages.length : data.thread?.messageCount,
+  });
+  return data;
+}
+
 export function useChat() {
   async function fetchThreads({ autoCreate = false } = {}) {
     loading.value = true;
@@ -170,17 +186,7 @@ export function useChat() {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}`);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || '대화 내용을 불러오지 못했습니다.');
-      }
-      activeThread.value = data.thread;
-      replaceMessages(threadId, data.messages || []);
-      upsertThread({
-        ...data.thread,
-        messageCount: Array.isArray(data.messages) ? data.messages.length : data.thread?.messageCount,
-      });
+      await syncThreadState(threadId);
     } catch (e) {
       error.value = e.message || '오류';
       throw e;
@@ -214,14 +220,31 @@ export function useChat() {
     sending.value = true;
     error.value = null;
     try {
-      const res = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-      });
+      let res;
+      try {
+        res = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+        });
+      } catch {
+        const nextError = new Error('메시지 요청을 전송하지 못했습니다. 네트워크 상태를 확인하고 다시 시도해 주세요.');
+        nextError.restoreDraft = true;
+        throw nextError;
+      }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || '메시지 전송 실패');
+        const nextError = new Error(data.error || '메시지 전송 실패');
+        nextError.restoreDraft = res.status < 500;
+        if (res.status >= 500) {
+          try {
+            await syncThreadState(threadId);
+            nextError.restoreDraft = false;
+          } catch {
+            nextError.restoreDraft = false;
+          }
+        }
+        throw nextError;
       }
 
       activeThread.value = data.thread;
