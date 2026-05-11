@@ -10,13 +10,18 @@ function parseNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function extractNumericToken(value) {
+  const match = normalizeText(value).match(/-?\$?\s*[\d,]+(?:\.\d+)?/);
+  return match ? match[0] : '';
+}
+
 function parseKrw(value) {
-  const parsed = parseNumber(value);
+  const parsed = parseNumber(extractNumericToken(value));
   return parsed == null ? null : Math.round(parsed);
 }
 
 function parseUsd(value) {
-  const parsed = parseNumber(value);
+  const parsed = parseNumber(extractNumericToken(value));
   return parsed == null ? null : Math.round(parsed * 100) / 100;
 }
 
@@ -59,7 +64,8 @@ function parseAssetBlock(sectionLabel, header, lines) {
   const quantityLine = lines.find((line) => /보유 수량/.test(line)) || '';
   const averagePriceLine = lines.find((line) => /평단가/.test(line)) || '';
   const currentPriceLine = lines.find((line) => /현재가/.test(line)) || '';
-  const quantity = parseNumber(quantityLine);
+  const quantityMatch = quantityLine.match(/보유 수량:\s*([\d,]+(?:\.\d+)?)/);
+  const quantity = quantityMatch ? parseNumber(quantityMatch[1]) : null;
   const averagePrice = sectionLabel === 'usd' ? parseUsd(averagePriceLine) : parseKrw(averagePriceLine);
   const currentPrice = sectionLabel === 'usd' ? parseUsd(currentPriceLine) : parseKrw(currentPriceLine);
   const orders = parseOrderLines(lines);
