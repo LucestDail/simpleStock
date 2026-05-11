@@ -30,6 +30,36 @@ function isInvalidApiKeyError(error) {
   return /API_KEY_INVALID|API key not valid/i.test(message);
 }
 
+function normalizeActionKey(action = {}) {
+  const type = String(action?.type || '').trim();
+  if (action?.holding?.name) {
+    return `${type || 'holding'}:${String(action.holding.name).trim().toLowerCase()}:${String(action.holding.category || '').trim()}`;
+  }
+  if (action?.profileChanges) return 'updateProfile';
+  if (action?.scheduleTask?.title) {
+    return `schedule:${String(action.scheduleTask.title).trim().toLowerCase()}:${String(action.scheduleTask.taskType || '').trim()}`;
+  }
+  if (action?.cancelTarget?.title) {
+    return `cancel:${String(action.cancelTarget.title).trim().toLowerCase()}:${String(action.cancelTarget.taskType || '').trim()}`;
+  }
+  return `${type}:${JSON.stringify(action)}`;
+}
+
+function mergeConversationActions(primary = [], secondary = []) {
+  const merged = [];
+  const seen = new Set();
+
+  for (const action of [...primary, ...secondary]) {
+    if (!action || typeof action !== 'object') continue;
+    const key = normalizeActionKey(action);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(action);
+  }
+
+  return merged;
+}
+
 async function persistAssistantResponse(threadId, assistantMessage) {
   return mutateStore((store) => {
     const thread = store.chat.threads.find((item) => item.id === threadId);
@@ -326,6 +356,7 @@ async function sendMessage(threadId, content) {
   let actionState = null;
   let assistantMessage = null;
   let skipMaintenance = false;
+  const structuredImportPlan = buildStructuredImportPlan(cleanContent);
 
   try {
     aiResult = await runConversationGraph({
@@ -333,6 +364,19 @@ async function sendMessage(threadId, content) {
       threadId,
       context,
     });
+
+    if (structuredImportPlan?.actions?.length) {
+      aiResult = {
+        ...aiResult,
+        actions: mergeConversationActions(structuredImportPlan.actions, aiResult.actions || []),
+        workspacePatch: structuredImportPlan.workspacePatch || aiResult.workspacePatch || null,
+      };
+      logInfo('chat.actions.structured_import_supplemented', {
+        threadId,
+        structuredActionCount: structuredImportPlan.actions.length,
+        aiActionCount: Array.isArray(aiResult.actions) ? aiResult.actions.length : 0,
+      });
+    }
 
     actionState = await applyConversationActions(aiResult.actions || []);
     logInfo('chat.actions.applied', {
@@ -369,7 +413,7 @@ async function sendMessage(threadId, content) {
       },
     };
   } catch (error) {
-    const structuredImport = buildStructuredImportPlan(cleanContent);
+    const structuredImport = structuredImportPlan;
     if (structuredImport) {
       actionState = await applyConversationActions(structuredImport.actions || []);
       assistantMessage = {

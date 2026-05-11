@@ -18,11 +18,11 @@ import { useUi } from '../composables/useUi';
 import { useWorkspace } from '../composables/useWorkspace';
 import { useRealtimeSubscription } from '../composables/useRealtimeSubscription';
 
-const { fetchPortfolio } = usePortfolio();
+const { fetchPortfolio, holdings, manager, system } = usePortfolio();
 const { fetchThreads } = useChat();
-const { fetchProfile } = useProfile();
+const { fetchProfile, profile } = useProfile();
 const { notify } = useUi();
-const { columns, focusMode, recordActivity, openDrawer } = useWorkspace();
+const { columns, focusMode, recordActivity, openDrawer, generatedInsights } = useWorkspace();
 const { connect, disconnect } = useRealtimeSubscription();
 
 const panelComponents = {
@@ -39,6 +39,73 @@ const panelComponents = {
 };
 
 const workspaceClass = computed(() => `workspace-main--${focusMode.value || 'balanced'}`);
+const hasManagerBrief = computed(() => Boolean(manager.value.latestReport));
+const hasScheduledTasks = computed(() => (system.value.scheduledTasks || []).length > 0);
+const hasProfileContent = computed(() => {
+  const userProfile = profile.value.userProfile || {};
+  const aiProfile = profile.value.aiProfile || {};
+  return Boolean(
+    userProfile.displayName ||
+      userProfile.investorType ||
+      userProfile.investmentGoal ||
+      userProfile.riskTolerance ||
+      userProfile.notes ||
+      aiProfile.summary ||
+      (aiProfile.inferredTraits || []).length
+  );
+});
+const hasInsights = computed(() => generatedInsights.value.length > 0 || holdings.value.length > 0);
+const renderedColumns = computed(() => {
+  const leftPanels = columns.value.left
+    .map((panel) => {
+      if (panel.id === 'status') {
+        return { ...panel, span: columns.value.left.length <= 3 ? 'sm' : 'xs' };
+      }
+      if (panel.id === 'overview') {
+        return { ...panel, span: 'sm' };
+      }
+      if (panel.id === 'system') {
+        return { ...panel, span: hasManagerBrief.value || hasScheduledTasks.value ? 'xs' : 'sm' };
+      }
+      return panel;
+    });
+
+  const rightPanels = columns.value.right
+    .filter((panel) => panel.id !== 'managerBrief' || hasManagerBrief.value)
+    .filter((panel) => panel.id !== 'snapshots' || hasScheduledTasks.value)
+    .filter((panel) => panel.id !== 'profile' || hasProfileContent.value)
+    .filter((panel) => panel.id !== 'insights' || hasInsights.value)
+    .map((panel, _, list) => {
+      if (panel.id === 'profile') {
+        return { ...panel, span: list.length <= 2 ? 'md' : 'sm' };
+      }
+      if (panel.id === 'insights') {
+        return { ...panel, span: list.length <= 2 ? 'sm' : panel.span };
+      }
+      return panel;
+    });
+
+  return {
+    left: leftPanels,
+    center: columns.value.center,
+    right: rightPanels,
+  };
+});
+const workspaceGridStyle = computed(() => {
+  const leftCount = renderedColumns.value.left.length;
+  const rightCount = renderedColumns.value.right.length;
+  const isChatMode = focusMode.value === 'chat';
+  const leftTrack = leftCount
+    ? `minmax(${leftCount >= 4 ? 220 : 240}px, ${isChatMode ? 2.4 : 2.7}fr)`
+    : '0px';
+  const centerTrack = `minmax(${isChatMode ? 430 : 380}px, ${isChatMode ? 5.5 : 5}fr)`;
+  const rightTrack = rightCount
+    ? `minmax(${rightCount <= 2 ? 260 : 235}px, ${rightCount <= 2 ? 3 : 2.7}fr)`
+    : '0px';
+  return {
+    gridTemplateColumns: `${leftTrack} ${centerTrack} ${rightTrack}`,
+  };
+});
 
 onMounted(async () => {
   try {
@@ -74,11 +141,11 @@ onUnmounted(() => {
       </button>
     </header>
 
-    <main class="workspace-main" :class="workspaceClass">
+    <main class="workspace-main" :class="workspaceClass" :style="workspaceGridStyle">
       <section class="workspace-column">
         <component
           :is="panelComponents[panel.id]"
-          v-for="panel in columns.left"
+          v-for="panel in renderedColumns.left"
           :key="panel.id"
           :panel="panel"
         />
@@ -87,7 +154,7 @@ onUnmounted(() => {
       <section class="workspace-column">
         <component
           :is="panelComponents[panel.id]"
-          v-for="panel in columns.center"
+          v-for="panel in renderedColumns.center"
           :key="panel.id"
           :panel="panel"
         />
@@ -96,7 +163,7 @@ onUnmounted(() => {
       <section class="workspace-column">
         <component
           :is="panelComponents[panel.id]"
-          v-for="panel in columns.right"
+          v-for="panel in renderedColumns.right"
           :key="panel.id"
           :panel="panel"
         />
@@ -167,28 +234,10 @@ onUnmounted(() => {
 .workspace-main {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(200px, 2.55fr) minmax(360px, 4.8fr) minmax(220px, 2.65fr);
   gap: 6px;
   align-items: stretch;
   overflow: hidden;
   transition: grid-template-columns 0.22s ease;
-}
-
-.workspace-main--balanced {
-  grid-template-columns: minmax(200px, 2.55fr) minmax(360px, 4.8fr) minmax(220px, 2.65fr);
-}
-
-.workspace-main--rebalance,
-.workspace-main--manager {
-  grid-template-columns: minmax(200px, 2.5fr) minmax(360px, 4.9fr) minmax(220px, 2.6fr);
-}
-
-.workspace-main--research {
-  grid-template-columns: minmax(200px, 2.5fr) minmax(360px, 4.9fr) minmax(220px, 2.6fr);
-}
-
-.workspace-main--chat {
-  grid-template-columns: minmax(200px, 2.35fr) minmax(420px, 5.25fr) minmax(210px, 2.4fr);
 }
 
 .workspace-column {
@@ -202,15 +251,6 @@ onUnmounted(() => {
 @media (max-width: 1380px) {
   .workspace {
     padding: var(--space-sm);
-  }
-
-  .workspace-main,
-  .workspace-main--balanced,
-  .workspace-main--rebalance,
-  .workspace-main--manager,
-  .workspace-main--research,
-  .workspace-main--chat {
-    grid-template-columns: minmax(190px, 2.4fr) minmax(320px, 4.6fr) minmax(200px, 2.5fr);
   }
 }
 </style>

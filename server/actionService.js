@@ -48,6 +48,51 @@ function normalizeHoldingDetails(details) {
   };
 }
 
+function normalizeActionType(action) {
+  const rawType = normalizeText(action?.type);
+  if (rawType === 'upsertHolding') return 'upsertHolding';
+  if (rawType === 'removeHolding') return 'removeHolding';
+  if (rawType === 'updateProfile') return 'updateProfile';
+  if (rawType === 'scheduleTask') return 'scheduleTask';
+  if (rawType === 'cancelScheduledTask') return 'cancelScheduledTask';
+
+  if (['holding', 'asset', 'addHolding', 'saveHolding', 'updateHolding'].includes(rawType)) {
+    return 'upsertHolding';
+  }
+
+  if (['deleteHolding', 'deleteAsset', 'removeAsset'].includes(rawType)) {
+    return 'removeHolding';
+  }
+
+  if (['profile', 'updateSettings', 'saveProfile'].includes(rawType)) {
+    return 'updateProfile';
+  }
+
+  if (['schedule', 'createSchedule', 'upsertSchedule'].includes(rawType)) {
+    return 'scheduleTask';
+  }
+
+  if (['cancelSchedule', 'disableSchedule'].includes(rawType)) {
+    return 'cancelScheduledTask';
+  }
+
+  if (action?.holding && !action?.profileChanges && !action?.scheduleTask && !action?.cancelTarget) {
+    return 'upsertHolding';
+  }
+  if (action?.profileChanges) return 'updateProfile';
+  if (action?.scheduleTask) return 'scheduleTask';
+  if (action?.cancelTarget) return 'cancelScheduledTask';
+  return '';
+}
+
+function normalizeIncomingAction(action) {
+  if (!action || typeof action !== 'object') return null;
+  return {
+    ...action,
+    type: normalizeActionType(action),
+  };
+}
+
 function findHoldingIndex(holdings, name, category) {
   const targetName = normalizeText(name).toLowerCase();
   const targetCategory = normalizeText(category);
@@ -77,9 +122,17 @@ async function applyConversationActions(actions = []) {
     let changedProfile = false;
     let changedSchedules = false;
 
-    for (const action of safeActions) {
+    for (const rawAction of safeActions) {
+      const action = normalizeIncomingAction(rawAction);
       const type = normalizeText(action?.type);
-      if (!type) continue;
+      if (!type) {
+        actionResults.push({
+          type: normalizeText(rawAction?.type) || 'unknown',
+          status: 'ignored',
+          message: '액션 타입을 해석하지 못해 반영하지 않았습니다.',
+        });
+        continue;
+      }
 
       if (type === 'upsertHolding') {
         const payload = action.holding || {};
@@ -248,6 +301,12 @@ async function applyConversationActions(actions = []) {
         needsScheduleSync = true;
         continue;
       }
+
+      actionResults.push({
+        type,
+        status: 'ignored',
+        message: `${type} 액션 타입은 아직 처리하지 않습니다.`,
+      });
     }
 
     return {

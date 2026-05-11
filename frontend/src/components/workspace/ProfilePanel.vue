@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue';
 import PanelShell from './PanelShell.vue';
 import { useProfile } from '../../composables/useProfile';
 import { useWorkspace } from '../../composables/useWorkspace';
@@ -12,6 +13,19 @@ const props = defineProps({
 
 const { profile, loading } = useProfile();
 const { openDrawer } = useWorkspace();
+const profileFields = computed(() => {
+  const userProfile = profile.value.userProfile || {};
+  const entries = [
+    ['이름', userProfile.displayName],
+    ['투자자 유형', userProfile.investorType],
+    ['투자 목표', userProfile.investmentGoal],
+    ['리스크 허용도', userProfile.riskTolerance],
+  ].filter(([, value]) => value);
+
+  return entries.length ? entries : [['이름', '미입력']];
+});
+const summaryText = computed(() => profile.value.aiProfile?.summary || profile.value.userProfile?.notes || '');
+const traitChips = computed(() => (profile.value.aiProfile?.inferredTraits || []).filter(Boolean));
 </script>
 
 <template>
@@ -29,31 +43,19 @@ const { openDrawer } = useWorkspace();
     </template>
 
     <div class="profile-grid">
-      <div class="mini-field">
-        <span>이름</span>
-        <strong>{{ profile.userProfile?.displayName || '미입력' }}</strong>
-      </div>
-      <div class="mini-field">
-        <span>투자자 유형</span>
-        <strong>{{ profile.userProfile?.investorType || '미입력' }}</strong>
-      </div>
-      <div class="mini-field">
-        <span>투자 목표</span>
-        <strong>{{ profile.userProfile?.investmentGoal || '미입력' }}</strong>
-      </div>
-      <div class="mini-field">
-        <span>리스크 허용도</span>
-        <strong>{{ profile.userProfile?.riskTolerance || '미입력' }}</strong>
+      <div v-for="[label, value] in profileFields" :key="label" class="mini-field">
+        <span>{{ label }}</span>
+        <strong>{{ value }}</strong>
       </div>
     </div>
 
-    <div class="summary-box">
+    <div v-if="summaryText" class="summary-box">
       <strong>{{ profile.aiProfile?.summary ? 'AI 요약' : '운용 메모' }}</strong>
-      <p>{{ profile.aiProfile?.summary || profile.userProfile?.notes || '아직 추론된 프로필 요약이 없습니다.' }}</p>
+      <p>{{ summaryText }}</p>
     </div>
 
-    <div class="chip-row">
-      <span v-for="item in profile.aiProfile?.inferredTraits || []" :key="item" class="chip">
+    <div v-if="traitChips.length" class="chip-row">
+      <span v-for="item in traitChips" :key="item" class="chip">
         {{ item }}
       </span>
     </div>
@@ -78,7 +80,7 @@ const { openDrawer } = useWorkspace();
 
 .profile-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 5px;
 }
 
@@ -137,9 +139,4 @@ const { openDrawer } = useWorkspace();
   font-weight: 700;
 }
 
-@media (max-width: 1280px) {
-  .profile-grid {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

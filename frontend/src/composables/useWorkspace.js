@@ -96,7 +96,7 @@ const BASE_PANELS = [
 const ALLOWED_COLUMNS = new Set(['left', 'center', 'right']);
 const ALLOWED_SPANS = new Set(['xs', 'sm', 'md', 'lg', 'xl', 'full']);
 const PANEL_IDS = new Set(BASE_PANELS.map((panel) => panel.id));
-const HIDEABLE_PANELS = new Set(['activity', 'profile', 'system', 'snapshots', 'insights']);
+const HIDEABLE_PANELS = new Set(['activity', 'profile', 'system', 'snapshots', 'insights', 'managerBrief']);
 
 const focusMode = ref('balanced');
 const layoutReason = ref('기본 워크스페이스 레이아웃');

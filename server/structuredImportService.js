@@ -29,6 +29,16 @@ function convertUsdToKrw(amountUsd) {
   return Math.round((Number(amountUsd) || 0) * USD_KRW_FALLBACK_RATE);
 }
 
+function inferCategoryFromName(name) {
+  const normalized = normalizeText(name).toLowerCase();
+  if (!normalized) return 'deposit';
+  if (/(irp|연금)/i.test(normalized)) return 'pension';
+  if (/(펀드|신탁|인덱스)/i.test(normalized)) return 'fund';
+  if (/(청약|도약|적금)/i.test(normalized)) return 'installment';
+  if (/(주식|etf|tiger|ace|qld|jepi)/i.test(normalized)) return 'stock';
+  return 'deposit';
+}
+
 function buildHoldingAction({
   name,
   category,
@@ -169,9 +179,11 @@ function buildWorkspacePatch() {
     },
     reason: '구조화된 자산 입력을 반영해 포트폴리오, 보유 자산, 프로필 패널을 갱신했습니다.',
     panelPatches: [
-      { id: 'overview', column: 'left', span: 'sm', priority: 10, visible: true },
+      { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
       { id: 'holdings', column: 'left', span: 'xl', priority: 20, visible: true },
-      { id: 'profile', column: 'right', span: 'sm', priority: 40, visible: true },
+      { id: 'profile', column: 'right', span: 'md', priority: 40, visible: true },
+      { id: 'managerBrief', column: 'right', span: 'xs', priority: 10, visible: false },
+      { id: 'snapshots', column: 'right', span: 'xs', priority: 20, visible: false },
     ],
     generatedInsights: [
       {
@@ -190,11 +202,12 @@ function buildWorkspacePatch() {
 }
 
 function buildStructuredImportPlan(content) {
-  if (!/\[Portfolio Baseline & Rules\]/.test(String(content || ''))) {
-    return null;
+  const source = String(content || '');
+  if (!/\[Portfolio Baseline & Rules\]/.test(source)) {
+    return buildSimpleAssetImportPlan(source);
   }
 
-  const lines = String(content || '')
+  const lines = source
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
@@ -275,6 +288,77 @@ function buildStructuredImportPlan(content) {
   return {
     actions,
     answer,
+    workspacePatch: buildWorkspacePatch(),
+    usedFallback: true,
+  };
+}
+
+function buildSimpleAssetImportPlan(content) {
+  const source = String(content || '').trim();
+  if (!source || !/(반영|추가|저장|등록|업데이트)/.test(source)) {
+    return null;
+  }
+
+  const actions = [];
+  const parsedNames = [];
+  const amountPattern = /([\d,]+(?:\.\d+)?)\s*(원|USD|usd|달러|\$)/g;
+  let previousEnd = 0;
+
+  for (const match of source.matchAll(amountPattern)) {
+    const rawSegment = source.slice(previousEnd, match.index);
+    previousEnd = match.index + match[0].length;
+    const rawName = normalizeText(
+      rawSegment
+        .replace(/^(다음 정보를 현재 포트폴리오와 설정에 즉시 반영해줘\.?\s*가능하면 자산, 계좌 현황, 규칙, 목표 비중, 고정 루틴까지 저장하고 반영 결과를 요약해줘\.?\s*)/i, '')
+        .replace(/^(자산|계좌|현황)\s+/i, '')
+        .replace(/\s*(자산\s*)?(반영해줘|추가해줘|저장해줘|등록해줘)\s*$/i, '')
+    );
+    const unit = String(match[2] || '').toUpperCase();
+    const amount = unit === 'USD' || unit === '$' || /달러/i.test(match[2] || '')
+      ? convertUsdToKrw(parseUsd(match[1]))
+      : parseKrw(match[1]);
+
+    if (!rawName || amount == null) continue;
+
+    actions.push(
+      buildHoldingAction({
+        name: rawName,
+        category: inferCategoryFromName(rawName),
+        amount,
+        rationale: `${rawName} 금액 표현을 읽어 자산으로 반영했습니다.`,
+        details: {
+          currency: unit === 'USD' || unit === '$' || /달러/i.test(match[2] || '') ? 'USD' : 'KRW',
+          nativeAmount:
+            unit === 'USD' || unit === '$' || /달러/i.test(match[2] || '')
+              ? parseUsd(match[1])
+              : parseKrw(match[1]),
+          fxRate:
+            unit === 'USD' || unit === '$' || /달러/i.test(match[2] || '')
+              ? USD_KRW_FALLBACK_RATE
+              : null,
+          summary:
+            unit === 'USD' || unit === '$' || /달러/i.test(match[2] || '')
+              ? `${rawName} ${match[1]} USD`
+              : `${rawName} ${amount.toLocaleString('ko-KR')}원`,
+          orders: [],
+        },
+      })
+    );
+    parsedNames.push(rawName);
+  }
+
+  if (!actions.length) {
+    return null;
+  }
+
+  return {
+    actions,
+    answer: [
+      '입력한 자산 정보를 구조화해 반영했습니다.',
+      '',
+      `반영 자산: ${parsedNames.join(', ')}`,
+      '필요하면 같은 형식으로 추가 자산도 계속 반영할 수 있습니다.',
+    ].join('\n'),
     workspacePatch: buildWorkspacePatch(),
     usedFallback: true,
   };

@@ -85,9 +85,6 @@ async function handleRefreshMarket() {
       <li><span>USD/KRW</span><code>{{ formatUsdKrw(marketSummary.usdKrw) }}</code></li>
       <li><span>시세 갱신</span><strong>{{ formatTime(marketSummary.lastRefreshAt) }}</strong></li>
     </ul>
-    <p class="system-note">
-      {{ system.orchestrationNotes || '상세 오케스트레이션 정보는 설정 패널에서 확인할 수 있습니다.' }}
-    </p>
     <p v-if="market.lastError" class="market-error">{{ market.lastError }}</p>
   </PanelShell>
 </template>
@@ -115,15 +112,16 @@ async function handleRefreshMarket() {
   padding: 0;
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 4px 8px;
   min-height: 0;
 }
 
 .meta-list li {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  align-items: start;
+  gap: 4px 6px;
   border-bottom: 1px solid var(--color-hairline-soft);
   padding-bottom: 2px;
   color: var(--color-body);
@@ -144,20 +142,6 @@ async function handleRefreshMarket() {
   border-radius: var(--rounded-xs);
   padding: 1px 4px;
   overflow-wrap: anywhere;
-}
-
-.system-note {
-  margin: 0;
-  border-radius: var(--rounded-lg);
-  background: var(--color-surface-soft);
-  padding: 6px 8px;
-  color: var(--color-body);
-  font-size: 9px;
-  line-height: 1.25;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
 }
 
 .market-error {

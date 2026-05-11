@@ -86,7 +86,7 @@ function formatTime(value) {
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
   gap: 5px;
   min-height: 0;
 }
@@ -121,9 +121,4 @@ strong {
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 1200px) {
-  .status-grid {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

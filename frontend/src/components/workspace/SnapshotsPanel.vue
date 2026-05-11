@@ -117,21 +117,11 @@ function resolveTaskRunLabel(task) {
 }
 
 const displayTasks = computed(() =>
-  (scheduledTasks.value.length ? scheduledTasks.value : [fallbackTask.value]).slice(0, 6).map((task) => ({
+  scheduledTasks.value.slice(0, 6).map((task) => ({
     ...task,
     displayRunLabel: resolveTaskRunLabel(task),
   }))
 );
-
-const fallbackTask = computed(() => ({
-  id: 'default-manager-brief',
-  title: '기본 Quant Manager 브리핑',
-  description: '시스템 기본 브리핑 스케줄입니다.',
-  cronExpression: system.value.ai?.dailyCron || '-',
-  nextRunLabel: system.value.ai?.dailyCron ? resolveTaskRunLabel({ enabled: true, cronExpression: system.value.ai.dailyCron }) : '미설정',
-  taskType: 'managerBrief',
-  enabled: Boolean(system.value.ai?.dailyCron),
-}));
 </script>
 
 <template>
@@ -145,7 +135,7 @@ const fallbackTask = computed(() => ({
       <button type="button" class="btn-secondary" @click="openDrawer('settings', null, '설정')">설정</button>
     </template>
 
-    <div class="snapshot-list">
+    <div v-if="displayTasks.length" class="snapshot-list">
       <article
         v-for="task in displayTasks"
         :key="task.id"
@@ -163,6 +153,7 @@ const fallbackTask = computed(() => ({
         </div>
       </article>
     </div>
+    <div v-else class="empty-box">등록된 예정 작업이 없습니다.</div>
   </PanelShell>
 </template>
 
@@ -184,6 +175,14 @@ const fallbackTask = computed(() => ({
   gap: 4px;
   min-height: 0;
   overflow: auto;
+}
+
+.empty-box {
+  border: 1px dashed var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  padding: 8px;
+  color: var(--color-muted);
+  font-size: 10px;
 }
 
 .snapshot-row {

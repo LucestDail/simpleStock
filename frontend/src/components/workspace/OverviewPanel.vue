@@ -19,11 +19,13 @@ const summaryCards = computed(() => [
     id: 'total',
     label: '총 자산',
     value: formatKRW(total.value),
+    visible: true,
   },
   {
     id: 'lastSnapshot',
     label: '최근 스냅샷',
     value: lastSnapshot.value ? formatKRW(lastSnapshot.value.total) : '없음',
+    visible: Boolean(lastSnapshot.value),
   },
   {
     id: 'delta',
@@ -31,8 +33,11 @@ const summaryCards = computed(() => [
     value: dayOverDay.value
       ? `${dayOverDay.value.delta >= 0 ? '+' : ''}${formatKRW(dayOverDay.value.delta)}`
       : '—',
+    visible: Boolean(dayOverDay.value),
   },
 ]);
+const visibleSummaryCards = computed(() => summaryCards.value.filter((item) => item.visible !== false));
+const visibleCategoryShares = computed(() => categoryShares.value.filter((item) => Number(item.amount) > 0));
 
 function inspectCategory(categoryId) {
   selectCategory(categoryId);
@@ -49,15 +54,15 @@ function inspectCategory(categoryId) {
     :loading="busyState.fetchPortfolio"
   >
     <div class="summary-grid">
-      <article v-for="item in summaryCards" :key="item.id" class="summary-card">
+      <article v-for="item in visibleSummaryCards" :key="item.id" class="summary-card">
         <span class="summary-label">{{ item.label }}</span>
         <strong class="summary-value mono-num">{{ item.value }}</strong>
       </article>
     </div>
 
-    <div class="share-list">
+    <div v-if="visibleCategoryShares.length" class="share-list">
       <button
-        v-for="item in categoryShares"
+        v-for="item in visibleCategoryShares"
         :key="item.id"
         type="button"
         class="share-item"
@@ -73,13 +78,14 @@ function inspectCategory(categoryId) {
         </div>
       </button>
     </div>
+    <div v-else class="empty-box">표시할 카테고리 요약이 아직 없습니다.</div>
   </PanelShell>
 </template>
 
 <style scoped>
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
   gap: 5px;
 }
 
@@ -111,6 +117,14 @@ function inspectCategory(categoryId) {
   gap: 5px;
   min-height: 0;
   overflow: auto;
+}
+
+.empty-box {
+  border: 1px dashed var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  padding: 8px;
+  color: var(--color-muted);
+  font-size: 10px;
 }
 
 .share-item {
@@ -154,9 +168,4 @@ function inspectCategory(categoryId) {
   background: var(--color-primary);
 }
 
-@media (max-width: 1280px) {
-  .summary-grid {
-    grid-template-columns: 1fr;
-  }
-}
 </style>
