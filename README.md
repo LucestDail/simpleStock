@@ -9,9 +9,10 @@
 - **자산 입력** — 분류별(예금 / 적금 / 주식 / 펀드 / 연금) 항목·평가금액(원) 등록·수정·삭제
 - **대시보드** — 총 자산, 카테고리별 비중(도넛·카드·표), 최근 스냅샷 대비 증감 표시
 - **일별 기록** — 선택한 날짜 기준으로 당시 보유 합계를 스냅샷으로 저장·삭제
-- **설정** — 데이터 경로 안내, AI 연계는 추후 확장(현재 미구현)
+- **AI 브리핑** — Gemini 기반 일일 자산 관리 브리핑, 수동 실행 + KST 기준 일 1회 스케줄
+- **설정** — 데이터 경로, 시간대, AI 상태, Quant Manager 시스템 프롬프트 안내
 
-DB 없이 **`data/portfolio.json`** 한 파일에 보유 목록(`holdings`)과 일별 스냅샷(`snapshots`)을 저장합니다.
+DB 없이 **`data/portfolio.json`** 한 파일에 보유 목록(`holdings`), 일별 스냅샷(`snapshots`), AI 브리핑 결과(`ai`)를 저장합니다.
 
 ## 디자인
 
@@ -29,7 +30,7 @@ Coinbase 공개 마케팅 서피스 톤을 준용합니다.
 
 | 구분 | 기술 |
 |------|------|
-| 백엔드 | Node.js, Express |
+| 백엔드 | Node.js, Express, node-cron, Gemini SDK |
 | 프론트엔드 | Vue 3, Vue Router 4, Vite 5 |
 | 스타일 | 순수 CSS + 디자인 토큰 (Coinbase 톤 준용) |
 | 저장소 | 파일 (`data/portfolio.json`) |
@@ -42,7 +43,7 @@ simpleStock/
 ├── package.json
 ├── server.js              # Express API + 정적 dist
 ├── data/
-│   └── portfolio.json     # holdings + snapshots (런타임)
+│   └── portfolio.json     # holdings + snapshots + ai (런타임)
 ├── dist/                  # 프론트 빌드 산출물
 ├── frontend/
 │   ├── index.html
@@ -66,6 +67,7 @@ simpleStock/
 ### 설치 및 로컬 실행
 
 ```bash
+cp .env.example .env   # 필요 시 Gemini 키/시간대 설정
 npm run install:all
 npm run build
 npm start    # http://0.0.0.0:3000
@@ -86,6 +88,23 @@ docker compose up -d --build
 
 `./data`가 컨테이너 `/app/data`에 마운트됩니다.
 
+### 환경 변수
+
+실제 키는 `.env`에만 넣고, Git에는 커밋하지 않습니다.
+
+```bash
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_THINKING_LEVEL=medium
+APP_TIMEZONE=Asia/Seoul
+AI_DAILY_CRON=5 21 * * *
+TZ=Asia/Seoul
+```
+
+- `APP_TIMEZONE`: 앱 기준 날짜/시각 계산용. 기본값 `Asia/Seoul`
+- `AI_DAILY_CRON`: 일일 AI 브리핑 스케줄. 기본값은 **매일 21:05 KST**
+- `GEMINI_API_KEY`가 없으면 앱은 정상 동작하지만 AI 브리핑만 비활성화됩니다.
+
 ## API 요약
 
 | 메서드 | 경로 | 설명 |
@@ -94,6 +113,8 @@ docker compose up -d --build
 | PUT | `/api/portfolio` | `{ "holdings": [...] }` 로 목록 전체 교체 |
 | POST | `/api/snapshots` | 본문 `{ "date": "YYYY-MM-DD" }` 선택, 생략 시 오늘 — 현재 holdings 합계로 스냅샷 저장 |
 | DELETE | `/api/snapshots/:date` | 해당 날짜 스냅샷 삭제 |
+| POST | `/api/ai/run` | 오늘 기준 스냅샷을 반영한 뒤 Gemini AI 브리핑 생성 |
+| GET | `/api/system/status` | 앱 시간대, 현재 서버 시각, AI 설정 상태 조회 |
 
 ## 라이선스
 

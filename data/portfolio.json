@@ -1,4 +1,15 @@
 {
   "holdings": [],
-  "snapshots": []
+  "snapshots": [],
+  "ai": {
+    "latestReport": null,
+    "history": [],
+    "lastRunAt": "2026-05-11T05:13:43.511Z",
+    "lastError": {
+      "at": "2026-05-11T05:13:43.511Z",
+      "trigger": "manual",
+      "message": "GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다."
+    },
+    "lastRunSource": "manual"
+  }
 }

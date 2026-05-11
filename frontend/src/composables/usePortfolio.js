@@ -10,6 +10,26 @@ export const CATEGORIES = [
 
 const holdings = ref([]);
 const snapshots = ref([]);
+const ai = ref({
+  latestReport: null,
+  history: [],
+  lastRunAt: null,
+  lastError: null,
+  lastRunSource: null,
+});
+const system = ref({
+  timezone: 'Asia/Seoul',
+  serverTimeIso: null,
+  serverTimeLocal: null,
+  todayLocalDate: null,
+  aiConfigured: false,
+  aiCronExpression: '',
+  aiCronValid: false,
+  aiCronMode: 'node-cron',
+  geminiModel: '',
+  geminiThinkingLevel: '',
+  quantManagerSystemPrompt: '',
+});
 const loading = ref(false);
 const error = ref(null);
 
@@ -53,6 +73,8 @@ export function usePortfolio() {
       const data = await res.json();
       holdings.value = data.holdings || [];
       snapshots.value = data.snapshots || [];
+      ai.value = data.ai || ai.value;
+      system.value = data.system || system.value;
     } catch (e) {
       error.value = e.message || '오류';
     } finally {
@@ -73,6 +95,8 @@ export function usePortfolio() {
       const data = await res.json();
       holdings.value = data.holdings || [];
       snapshots.value = data.snapshots || [];
+      ai.value = data.ai || ai.value;
+      system.value = data.system || system.value;
     } catch (e) {
       error.value = e.message || '오류';
       throw e;
@@ -91,7 +115,11 @@ export function usePortfolio() {
       const j = await res.json().catch(() => ({}));
       throw new Error(j.error || '스냅샷 저장 실패');
     }
-    await fetchPortfolio();
+    const data = await res.json();
+    holdings.value = data.holdings || [];
+    snapshots.value = data.snapshots || [];
+    ai.value = data.ai || ai.value;
+    system.value = data.system || system.value;
   }
 
   async function deleteSnapshot(date) {
@@ -99,7 +127,27 @@ export function usePortfolio() {
       method: 'DELETE',
     });
     if (!res.ok) throw new Error('삭제 실패');
-    await fetchPortfolio();
+    const data = await res.json();
+    holdings.value = data.holdings || [];
+    snapshots.value = data.snapshots || [];
+    ai.value = data.ai || ai.value;
+    system.value = data.system || system.value;
+  }
+
+  async function runAiReview() {
+    const res = await fetch('/api/ai/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || 'AI 브리핑 생성 실패');
+    }
+    const data = await res.json();
+    holdings.value = data.holdings || [];
+    snapshots.value = data.snapshots || [];
+    ai.value = data.ai || ai.value;
+    system.value = data.system || system.value;
   }
 
   const sortedSnapshots = computed(() =>
@@ -127,6 +175,8 @@ export function usePortfolio() {
   return {
     holdings,
     snapshots,
+    ai,
+    system,
     sortedSnapshots,
     loading,
     error,
@@ -139,5 +189,6 @@ export function usePortfolio() {
     saveHoldings,
     addSnapshot,
     deleteSnapshot,
+    runAiReview,
   };
 }
