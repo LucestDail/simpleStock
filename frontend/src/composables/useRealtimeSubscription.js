@@ -150,14 +150,17 @@ export function useRealtimeSubscription() {
       case 'market.quote.updated':
       case 'market.session.updated':
       case 'fx.rate.updated':
-        recordActivity({
-          id: eventId,
-          type: 'market',
-          title: '시장 데이터 훅 이벤트',
-          description: `${eventType} 이벤트가 수신되었습니다.`,
-          tone: 'info',
-          metadata: payload,
-        });
+        applyPortfolioPayload(payload);
+        if (payload.reason === 'manual') {
+          recordActivity({
+            id: eventId,
+            type: 'market',
+            title: '시장 시세 갱신',
+            description: '미국 주식과 환율 데이터를 수동으로 다시 불러왔습니다.',
+            tone: 'info',
+            metadata: payload,
+          });
+        }
         return;
       default:
     }

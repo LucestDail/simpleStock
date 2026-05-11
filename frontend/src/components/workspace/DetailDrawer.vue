@@ -80,6 +80,31 @@ async function submitSettings() {
     });
   }
 }
+
+function formatPrice(details) {
+  if (!details || !Number.isFinite(Number(details.currentPrice ?? details.lastQuote))) return '-';
+  const value = Number(details.currentPrice ?? details.lastQuote);
+  return details.currency === 'USD' ? `$${value.toFixed(2)}` : `${Math.round(value).toLocaleString('ko-KR')}원`;
+}
+
+function formatQuoteChange(details) {
+  if (!details || !Number.isFinite(Number(details.priceChangePct))) return '변동 정보 없음';
+  const pct = Number(details.priceChangePct);
+  const raw = Number.isFinite(Number(details.priceChange)) ? Number(details.priceChange) : 0;
+  const amount =
+    details.currency === 'USD'
+      ? `${raw >= 0 ? '+' : '-'}$${Math.abs(raw).toFixed(2)}`
+      : `${raw >= 0 ? '+' : '-'}${Math.abs(raw).toLocaleString('ko-KR')}원`;
+  return `${amount} · ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+}
+
+function formatTime(value) {
+  if (!value) return '-';
+  return new Intl.DateTimeFormat('ko-KR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value));
+}
 </script>
 
 <template>
@@ -172,6 +197,10 @@ async function submitSettings() {
                   <span>계좌</span>
                   <strong>{{ activeHolding.details.account }}</strong>
                 </div>
+                <div v-if="activeHolding.details.market" class="detail-card">
+                  <span>시장</span>
+                  <strong>{{ activeHolding.details.market }}</strong>
+                </div>
                 <div v-if="activeHolding.details.ticker" class="detail-card">
                   <span>티커</span>
                   <strong>{{ activeHolding.details.ticker }}</strong>
@@ -182,9 +211,23 @@ async function submitSettings() {
                 </div>
                 <div v-if="activeHolding.details.currentPrice != null" class="detail-card">
                   <span>현재가</span>
-                  <strong>
-                    {{ activeHolding.details.currency === 'USD' ? `$${activeHolding.details.currentPrice}` : `${activeHolding.details.currentPrice.toLocaleString('ko-KR')}원` }}
-                  </strong>
+                  <strong>{{ formatPrice(activeHolding.details) }}</strong>
+                </div>
+                <div v-if="activeHolding.details.priceChangePct != null" class="detail-card">
+                  <span>등락</span>
+                  <strong>{{ formatQuoteChange(activeHolding.details) }}</strong>
+                </div>
+                <div v-if="activeHolding.details.fxRate != null" class="detail-card">
+                  <span>환율</span>
+                  <strong>{{ Number(activeHolding.details.fxRate).toLocaleString('ko-KR', { maximumFractionDigits: 2 }) }}</strong>
+                </div>
+                <div v-if="activeHolding.details.lastQuoteAt" class="detail-card">
+                  <span>시세 시각</span>
+                  <strong>{{ formatTime(activeHolding.details.lastQuoteAt) }}</strong>
+                </div>
+                <div v-if="activeHolding.details.quoteSource" class="detail-card">
+                  <span>출처</span>
+                  <strong>{{ activeHolding.details.quoteSource }}</strong>
                 </div>
               </div>
               <ul v-if="activeHolding.details?.orders?.length" class="simple-list">

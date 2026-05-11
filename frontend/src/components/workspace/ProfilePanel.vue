@@ -62,11 +62,11 @@ const { openDrawer } = useWorkspace();
 
 <style scoped>
 .btn-secondary {
-  height: 36px;
+  height: 28px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 var(--space-sm);
-  font-size: 13px;
+  padding: 0 10px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -100,6 +100,7 @@ const { openDrawer } = useWorkspace();
   color: var(--color-ink);
   font-size: 13px;
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .summary-box {
@@ -118,6 +119,7 @@ const { openDrawer } = useWorkspace();
   color: var(--color-body);
   line-height: 1.45;
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .chip-row {
@@ -135,8 +137,8 @@ const { openDrawer } = useWorkspace();
   font-weight: 700;
 }
 
-@media (max-width: 720px) {
-  .profile-form {
+@media (max-width: 1280px) {
+  .profile-grid {
     grid-template-columns: 1fr;
   }
 }

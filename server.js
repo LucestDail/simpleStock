@@ -29,6 +29,12 @@ const {
   buildServerStatusPayload,
 } = require('./server/payloadService');
 const { subscribe, unsubscribe, sendToClient, broadcast, getSubscriberCount } = require('./server/realtimeService');
+const {
+  refreshMarketData,
+  scheduleMarketRefresh,
+  startMarketDataPolling,
+  getMarketSnapshot,
+} = require('./server/marketDataService');
 
 const PORT = Number(process.env.PORT) || 3000;
 const app = express();
@@ -99,6 +105,10 @@ function sanitizeHoldings(holdings) {
           averagePrice: Number.isFinite(Number(holding.details.averagePrice)) ? Number(holding.details.averagePrice) : null,
           currentPrice: Number.isFinite(Number(holding.details.currentPrice)) ? Number(holding.details.currentPrice) : null,
           lastQuote: Number.isFinite(Number(holding.details.lastQuote)) ? Number(holding.details.lastQuote) : null,
+          previousClose: Number.isFinite(Number(holding.details.previousClose)) ? Number(holding.details.previousClose) : null,
+          priceChange: Number.isFinite(Number(holding.details.priceChange)) ? Number(holding.details.priceChange) : null,
+          priceChangePct: Number.isFinite(Number(holding.details.priceChangePct)) ? Number(holding.details.priceChangePct) : null,
+          marketState: String(holding.details.marketState || '').slice(0, 24),
           lastQuoteAt: holding.details.lastQuoteAt ? String(holding.details.lastQuoteAt).slice(0, 40) : null,
           quoteSource: String(holding.details.quoteSource || '').slice(0, 80),
           nativeAmount: Number.isFinite(Number(holding.details.nativeAmount)) ? Number(holding.details.nativeAmount) : null,
@@ -132,6 +142,25 @@ function buildSnapshot(holdings, date) {
 
 app.get('/api/portfolio', (req, res) => {
   res.json(buildPortfolioPayload());
+});
+
+app.post('/api/market/refresh', async (req, res) => {
+  try {
+    const payload = await refreshMarketData({
+      reason: 'manual',
+      force: true,
+    });
+    res.json(payload);
+  } catch (error) {
+    logError('market.refresh.manual_failed', error, {
+      requestId: req.requestId,
+    });
+    res.status(500).json({ error: error.message || '시세 갱신 실패' });
+  }
+});
+
+app.get('/api/market/status', (req, res) => {
+  res.json(getMarketSnapshot());
 });
 
 app.get('/api/stream', (req, res) => {
@@ -179,6 +208,7 @@ app.put('/api/portfolio', async (req, res) => {
     });
     const payload = buildPortfolioPayload();
     broadcast('portfolio.updated', payload);
+    scheduleMarketRefresh('portfolio:manual_save', { force: true, delayMs: 300 });
     res.json(payload);
   } catch (error) {
     logError('portfolio.save.failed', error, { requestId: req.requestId });
@@ -347,6 +377,7 @@ app.post('/api/ai/run', async (req, res) => {
 app.get('/api/system/status', (req, res) => {
   res.json({
     ...getSystemStatus(),
+    market: getMarketSnapshot(),
     dataFiles: buildServerStatusPayload().system.dataFiles,
     orchestrationNotes: ORCHESTRATION_NOTES,
     ai: getAiSettings(),
@@ -367,6 +398,7 @@ app.get('*', (req, res, next) => {
 
 function startAiSchedule() {
   syncScheduledTasks();
+  startMarketDataPolling();
 
   if (!isAiConfigured()) {
     logInfo('schedule.disabled', {

@@ -102,6 +102,7 @@ function inspectCategory(categoryId) {
 .summary-value {
   color: var(--color-ink);
   font-size: 15px;
+  overflow-wrap: anywhere;
 }
 
 .share-list {
@@ -151,7 +152,7 @@ function inspectCategory(categoryId) {
   background: var(--color-primary);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 1280px) {
   .summary-grid {
     grid-template-columns: 1fr;
   }

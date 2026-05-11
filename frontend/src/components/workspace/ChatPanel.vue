@@ -260,6 +260,7 @@ function onComposerKeydown(event) {
   color: var(--color-ink);
   font-size: 12px;
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .thread-strip {
@@ -372,6 +373,7 @@ function onComposerKeydown(event) {
 .message-text {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: var(--color-body);
   line-height: 1.5;
   font-size: 11px;
@@ -405,11 +407,13 @@ function onComposerKeydown(event) {
   align-items: center;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 1280px) {
   .chat-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
 
+@media (max-width: 720px) {
   .composer-foot,
   .message-top {
     flex-direction: column;

@@ -164,6 +164,7 @@ const cards = computed(() =>
 .insight-head strong {
   color: var(--color-ink);
   font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 .insight-head span {
@@ -208,6 +209,7 @@ const cards = computed(() =>
   color: var(--color-ink);
   font-size: 10px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .bullet-list {
@@ -216,5 +218,11 @@ const cards = computed(() =>
   color: var(--color-body);
   font-size: 10px;
   line-height: 1.35;
+}
+
+@media (max-width: 1280px) {
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -54,6 +54,35 @@ function formatHoldingMeta(holding) {
   );
 }
 
+function formatQuotePrice(holding) {
+  const details = holding.details || {};
+  if (!Number.isFinite(Number(details.lastQuote || details.currentPrice))) return '';
+  const price = Number(details.lastQuote || details.currentPrice);
+  return details.currency === 'USD' ? `$${price.toFixed(2)}` : `${Math.round(price).toLocaleString('ko-KR')}원`;
+}
+
+function formatQuoteChange(holding) {
+  const details = holding.details || {};
+  if (!Number.isFinite(Number(details.priceChangePct))) return '';
+  const pct = Number(details.priceChangePct);
+  return `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+}
+
+function quoteTone(holding) {
+  const change = Number(holding?.details?.priceChangePct);
+  if (!Number.isFinite(change)) return '';
+  return change >= 0 ? 'up' : 'down';
+}
+
+function formatUpdatedAt(holding) {
+  const value = holding?.details?.lastQuoteAt;
+  if (!value) return '';
+  return new Intl.DateTimeFormat('ko-KR', {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
 watch(
   selectedCategoryId,
   (categoryId) => {
@@ -272,7 +301,16 @@ function inspectHolding(target) {
           <strong>{{ holding.name }}</strong>
           <span>{{ formatHoldingMeta(holding) }}</span>
         </button>
-        <strong class="mono-num">{{ formatKRW(holding.amount) }}</strong>
+        <div class="holding-value">
+          <strong class="mono-num">{{ formatKRW(holding.amount) }}</strong>
+          <span v-if="formatQuotePrice(holding)" class="quote-line">
+            <em class="mono-num">{{ formatQuotePrice(holding) }}</em>
+            <em v-if="formatQuoteChange(holding)" class="quote-chip" :class="quoteTone(holding)">
+              {{ formatQuoteChange(holding) }}
+            </em>
+            <em v-if="formatUpdatedAt(holding)" class="quote-time mono-num">{{ formatUpdatedAt(holding) }}</em>
+          </span>
+        </div>
         <div class="row-actions">
           <button type="button" class="btn-text" @click="editHolding(holding)">수정</button>
           <button type="button" class="btn-text danger" @click="removeHolding(holding)">삭제</button>
@@ -420,6 +458,45 @@ function inspectHolding(target) {
 .holding-main span {
   color: var(--color-muted);
   font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.holding-value {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+
+.quote-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  color: var(--color-muted);
+  font-size: 10px;
+  text-align: right;
+}
+
+.quote-line em {
+  font-style: normal;
+}
+
+.quote-chip {
+  padding: 1px 5px;
+  border-radius: var(--rounded-pill);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.quote-chip.up {
+  color: var(--color-semantic-up);
+}
+
+.quote-chip.down {
+  color: var(--color-semantic-down);
+}
+
+.quote-time {
+  color: var(--color-muted-soft);
 }
 
 .row-actions {
@@ -440,6 +517,26 @@ function inspectHolding(target) {
   color: var(--color-semantic-down);
 }
 
+@media (max-width: 1280px) {
+  .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  .holding-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .row-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}
+
 @media (max-width: 720px) {
   .form-grid,
   .holding-row {
@@ -449,6 +546,15 @@ function inspectHolding(target) {
   .actions,
   .row-actions {
     flex-wrap: wrap;
+  }
+
+  .holding-value {
+    justify-items: start;
+  }
+
+  .quote-line {
+    justify-content: flex-start;
+    text-align: left;
   }
 }
 </style>

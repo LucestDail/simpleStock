@@ -28,6 +28,30 @@ const system = ref({
   orchestrationNotes: '',
   dataFiles: {},
   scheduledTasks: [],
+  market: {
+    provider: 'yahoo-finance',
+    refreshStatus: 'idle',
+    lastRefreshAt: null,
+    lastSuccessAt: null,
+    lastError: '',
+    trackedTickers: [],
+    quotes: {},
+    fx: {
+      USDKRW: {
+        pair: 'USDKRW',
+        rate: null,
+        previousClose: null,
+        change: null,
+        changePct: null,
+        updatedAt: null,
+        source: '',
+      },
+    },
+    sessions: {
+      kr: { market: 'KRX', state: 'closed' },
+      us: { market: 'US', state: 'closed' },
+    },
+  },
 });
 const busyState = ref({
   fetchPortfolio: false,
@@ -35,6 +59,7 @@ const busyState = ref({
   addSnapshot: false,
   deleteSnapshot: false,
   managerReview: false,
+  refreshMarket: false,
 });
 const loading = computed(() => Object.values(busyState.value).some(Boolean));
 const error = ref(null);
@@ -62,6 +87,18 @@ function applyPortfolioPayload(data = {}) {
       ai: {
         ...system.value.ai,
         ...(data.system.ai || {}),
+      },
+      market: {
+        ...system.value.market,
+        ...(data.system.market || {}),
+        fx: {
+          ...system.value.market.fx,
+          ...(data.system.market?.fx || {}),
+        },
+        sessions: {
+          ...system.value.market.sessions,
+          ...(data.system.market?.sessions || {}),
+        },
       },
     };
   }
@@ -201,6 +238,28 @@ export function usePortfolio() {
     }
   }
 
+  async function refreshMarket() {
+    busyState.value.refreshMarket = true;
+    error.value = null;
+    try {
+      const res = await fetch('/api/market/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || '시세 갱신 실패');
+      }
+      applyPortfolioPayload(data);
+      return data;
+    } catch (e) {
+      error.value = e.message || '오류';
+      throw e;
+    } finally {
+      busyState.value.refreshMarket = false;
+    }
+  }
+
   const sortedSnapshots = computed(() =>
     [...snapshots.value].sort((a, b) => b.date.localeCompare(a.date))
   );
@@ -245,6 +304,7 @@ export function usePortfolio() {
     saveHoldings,
     addSnapshot,
     deleteSnapshot,
+    refreshMarket,
     runManagerReview,
   };
 }

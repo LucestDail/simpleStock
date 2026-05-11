@@ -1,6 +1,8 @@
 <script setup>
+import { computed } from 'vue';
 import PanelShell from './PanelShell.vue';
 import { usePortfolio } from '../../composables/usePortfolio';
+import { useUi } from '../../composables/useUi';
 import { useWorkspace } from '../../composables/useWorkspace';
 
 const props = defineProps({
@@ -10,8 +12,50 @@ const props = defineProps({
   },
 });
 
-const { system } = usePortfolio();
-const { openDrawer } = useWorkspace();
+const { system, refreshMarket, busyState } = usePortfolio();
+const { notify } = useUi();
+const { openDrawer, recordActivity } = useWorkspace();
+const market = computed(() => system.value.market || {});
+
+const marketSummary = computed(() => ({
+  tracked: (market.value.trackedTickers || []).length,
+  usdKrw: market.value.fx?.USDKRW?.rate,
+  session: market.value.sessions?.us?.state || 'closed',
+  lastRefreshAt: market.value.lastSuccessAt || market.value.lastRefreshAt,
+}));
+
+function formatUsdKrw(rate) {
+  return Number.isFinite(Number(rate)) ? Number(rate).toLocaleString('ko-KR', { maximumFractionDigits: 2 }) : '-';
+}
+
+function formatTime(value) {
+  if (!value) return '대기';
+  return new Intl.DateTimeFormat('ko-KR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value));
+}
+
+async function handleRefreshMarket() {
+  try {
+    await refreshMarket();
+    notify({
+      tone: 'success',
+      message: '미국 주식 시세와 USD/KRW 환율을 갱신했습니다.',
+    });
+    recordActivity({
+      type: 'market',
+      title: '시장 시세 수동 갱신',
+      description: `${marketSummary.value.tracked}개 티커를 다시 확인했습니다.`,
+      tone: 'info',
+    });
+  } catch (error) {
+    notify({
+      tone: 'error',
+      message: error.message || '시세 갱신 실패',
+    });
+  }
+}
 </script>
 
 <template>
@@ -22,6 +66,9 @@ const { openDrawer } = useWorkspace();
     :highlighted="panel.highlighted"
   >
     <template #actions>
+      <button type="button" class="btn-secondary" :disabled="busyState.refreshMarket" @click="handleRefreshMarket">
+        {{ busyState.refreshMarket ? '갱신 중…' : '시세' }}
+      </button>
       <button type="button" class="btn-secondary" @click="openDrawer('settings', null, '설정')">
         설정
       </button>
@@ -33,10 +80,15 @@ const { openDrawer } = useWorkspace();
       <li><span>모델</span><code>{{ system.ai?.model || '-' }}</code></li>
       <li><span>Thinking</span><code>{{ system.ai?.thinkingLevel || '-' }}</code></li>
       <li><span>브리핑</span><code>{{ system.ai?.dailyCron ? '예약됨' : '미설정' }}</code></li>
+      <li><span>미국장</span><code>{{ marketSummary.session }}</code></li>
+      <li><span>추적 티커</span><strong>{{ marketSummary.tracked }}개</strong></li>
+      <li><span>USD/KRW</span><code>{{ formatUsdKrw(marketSummary.usdKrw) }}</code></li>
+      <li><span>시세 갱신</span><strong>{{ formatTime(marketSummary.lastRefreshAt) }}</strong></li>
     </ul>
     <p class="system-note">
       {{ system.orchestrationNotes || '상세 오케스트레이션 정보는 설정 패널에서 확인할 수 있습니다.' }}
     </p>
+    <p v-if="market.lastError" class="market-error">{{ market.lastError }}</p>
   </PanelShell>
 </template>
 
@@ -51,6 +103,11 @@ const { openDrawer } = useWorkspace();
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .meta-list {
@@ -96,5 +153,13 @@ const { openDrawer } = useWorkspace();
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   overflow: hidden;
+}
+
+.market-error {
+  margin: 0;
+  color: var(--color-accent-yellow);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 </style>

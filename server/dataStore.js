@@ -37,6 +37,40 @@ function createDefaultMemory() {
     longTermMemories: [],
     managerReports: [],
     scheduledTasks: [],
+    market: createDefaultMarketState(),
+  };
+}
+
+function createDefaultMarketState() {
+  return {
+    provider: 'yahoo-finance',
+    refreshStatus: 'idle',
+    lastRefreshAt: null,
+    lastSuccessAt: null,
+    lastError: '',
+    trackedTickers: [],
+    quotes: {},
+    fx: {
+      USDKRW: {
+        pair: 'USDKRW',
+        rate: null,
+        previousClose: null,
+        change: null,
+        changePct: null,
+        updatedAt: null,
+        source: '',
+      },
+    },
+    sessions: {
+      kr: {
+        market: 'KRX',
+        state: 'closed',
+      },
+      us: {
+        market: 'US',
+        state: 'closed',
+      },
+    },
   };
 }
 
@@ -94,6 +128,10 @@ function normalizeHoldingDetails(details) {
     averagePrice: Number.isFinite(Number(details.averagePrice)) ? Number(details.averagePrice) : null,
     currentPrice: Number.isFinite(Number(details.currentPrice)) ? Number(details.currentPrice) : null,
     lastQuote: Number.isFinite(Number(details.lastQuote)) ? Number(details.lastQuote) : null,
+    previousClose: Number.isFinite(Number(details.previousClose)) ? Number(details.previousClose) : null,
+    priceChange: Number.isFinite(Number(details.priceChange)) ? Number(details.priceChange) : null,
+    priceChangePct: Number.isFinite(Number(details.priceChangePct)) ? Number(details.priceChangePct) : null,
+    marketState: String(details.marketState || '').slice(0, 24),
     lastQuoteAt: details.lastQuoteAt ? String(details.lastQuoteAt).slice(0, 40) : null,
     quoteSource: String(details.quoteSource || '').slice(0, 80),
     nativeAmount: Number.isFinite(Number(details.nativeAmount)) ? Number(details.nativeAmount) : null,
@@ -182,6 +220,7 @@ function normalizeMemory(data) {
   if (!Array.isArray(memory.longTermMemories)) memory.longTermMemories = [];
   if (!Array.isArray(memory.managerReports)) memory.managerReports = [];
   if (!Array.isArray(memory.scheduledTasks)) memory.scheduledTasks = [];
+  memory.market = normalizeMarketState(memory.market);
 
   memory.threadSummaries = memory.threadSummaries
     .filter((item) => item && item.id && item.threadId)
@@ -258,6 +297,85 @@ function normalizeMemory(data) {
     .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
 
   return memory;
+}
+
+function normalizeMarketState(data) {
+  const market = data && typeof data === 'object' ? data : createDefaultMarketState();
+  const defaults = createDefaultMarketState();
+
+  market.provider = String(market.provider || defaults.provider);
+  market.refreshStatus = String(market.refreshStatus || defaults.refreshStatus);
+  market.lastRefreshAt = market.lastRefreshAt || null;
+  market.lastSuccessAt = market.lastSuccessAt || null;
+  market.lastError = String(market.lastError || '').slice(0, 300);
+  market.trackedTickers = Array.isArray(market.trackedTickers)
+    ? market.trackedTickers
+        .filter((item) => item && item.symbol)
+        .map((item) => ({
+          symbol: String(item.symbol || '').slice(0, 40),
+          name: String(item.name || '').slice(0, 120),
+          market: String(item.market || '').slice(0, 24),
+          currency: String(item.currency || '').slice(0, 16),
+          holdingIds: Array.isArray(item.holdingIds) ? item.holdingIds.map(String).slice(0, 30) : [],
+        }))
+    : [];
+
+  const rawQuotes = market.quotes && typeof market.quotes === 'object' ? market.quotes : {};
+  market.quotes = Object.fromEntries(
+    Object.entries(rawQuotes)
+      .filter(([symbol]) => symbol)
+      .map(([symbol, quote]) => [
+        String(symbol).slice(0, 40),
+        {
+          symbol: String(quote?.symbol || symbol).slice(0, 40),
+          shortName: String(quote?.shortName || '').slice(0, 120),
+          market: String(quote?.market || '').slice(0, 24),
+          currency: String(quote?.currency || '').slice(0, 16),
+          price: Number.isFinite(Number(quote?.price)) ? Number(quote.price) : null,
+          previousClose: Number.isFinite(Number(quote?.previousClose)) ? Number(quote.previousClose) : null,
+          change: Number.isFinite(Number(quote?.change)) ? Number(quote.change) : null,
+          changePct: Number.isFinite(Number(quote?.changePct)) ? Number(quote.changePct) : null,
+          marketState: String(quote?.marketState || '').slice(0, 24),
+          updatedAt: quote?.updatedAt || null,
+          source: String(quote?.source || '').slice(0, 80),
+        },
+      ])
+  );
+
+  const rawFx = market.fx && typeof market.fx === 'object' ? market.fx : {};
+  market.fx = {
+    USDKRW: {
+      ...defaults.fx.USDKRW,
+      ...(rawFx.USDKRW && typeof rawFx.USDKRW === 'object' ? rawFx.USDKRW : {}),
+      pair: 'USDKRW',
+      rate: Number.isFinite(Number(rawFx.USDKRW?.rate)) ? Number(rawFx.USDKRW.rate) : null,
+      previousClose: Number.isFinite(Number(rawFx.USDKRW?.previousClose))
+        ? Number(rawFx.USDKRW.previousClose)
+        : null,
+      change: Number.isFinite(Number(rawFx.USDKRW?.change)) ? Number(rawFx.USDKRW.change) : null,
+      changePct: Number.isFinite(Number(rawFx.USDKRW?.changePct)) ? Number(rawFx.USDKRW.changePct) : null,
+      updatedAt: rawFx.USDKRW?.updatedAt || null,
+      source: String(rawFx.USDKRW?.source || '').slice(0, 80),
+    },
+  };
+
+  const rawSessions = market.sessions && typeof market.sessions === 'object' ? market.sessions : {};
+  market.sessions = {
+    kr: {
+      ...defaults.sessions.kr,
+      ...(rawSessions.kr && typeof rawSessions.kr === 'object' ? rawSessions.kr : {}),
+      market: String(rawSessions.kr?.market || defaults.sessions.kr.market).slice(0, 24),
+      state: String(rawSessions.kr?.state || defaults.sessions.kr.state).slice(0, 24),
+    },
+    us: {
+      ...defaults.sessions.us,
+      ...(rawSessions.us && typeof rawSessions.us === 'object' ? rawSessions.us : {}),
+      market: String(rawSessions.us?.market || defaults.sessions.us.market).slice(0, 24),
+      state: String(rawSessions.us?.state || defaults.sessions.us.state).slice(0, 24),
+    },
+  };
+
+  return market;
 }
 
 function normalizeProfile(data) {
@@ -339,6 +457,7 @@ module.exports = {
   createDefaultPortfolio,
   createDefaultChat,
   createDefaultMemory,
+  createDefaultMarketState,
   createDefaultProfile,
   loadStore,
   saveStore,
@@ -346,5 +465,6 @@ module.exports = {
   normalizePortfolio,
   normalizeChat,
   normalizeMemory,
+  normalizeMarketState,
   normalizeProfile,
 };

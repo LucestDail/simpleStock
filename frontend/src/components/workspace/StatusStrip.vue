@@ -17,13 +17,25 @@ const { activeThread } = useChat();
 const { focusMode, layoutReason, openDrawer } = useWorkspace();
 
 const latestReportTime = computed(() => manager.value?.latestReport?.createdAt || null);
+const latestMarketTime = computed(() => system.value.market?.lastSuccessAt || system.value.market?.lastRefreshAt || null);
 const cards = computed(() => [
   { label: '현재', value: system.value.serverTimeLocal || '시간 확인 중' },
   { label: '포커스', value: focusMode.value || 'balanced' },
   { label: '활성 스레드', value: activeThread.value?.title || '없음' },
   { label: '보유 자산', value: `${holdings.value.length}개` },
+  {
+    label: '추적 티커',
+    value: `${(system.value.market?.trackedTickers || []).length}개`,
+  },
+  {
+    label: 'USD/KRW',
+    value: Number.isFinite(Number(system.value.market?.fx?.USDKRW?.rate))
+      ? Number(system.value.market.fx.USDKRW.rate).toLocaleString('ko-KR', { maximumFractionDigits: 2 })
+      : '대기',
+  },
   { label: '예정 작업', value: `${(system.value.scheduledTasks || []).length}건` },
   { label: '최근 브리핑', value: formatTime(latestReportTime.value) },
+  { label: '최근 시세', value: formatTime(latestMarketTime.value) },
   { label: '레이아웃 사유', value: layoutReason.value || '기본 레이아웃', wide: true },
 ]);
 
@@ -112,5 +124,12 @@ strong {
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1200px) {
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

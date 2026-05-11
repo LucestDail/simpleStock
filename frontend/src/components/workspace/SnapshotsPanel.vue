@@ -205,6 +205,7 @@ const fallbackTask = computed(() => ({
 .snapshot-main strong {
   color: var(--color-ink);
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .snapshot-main span {
@@ -225,6 +226,7 @@ const fallbackTask = computed(() => ({
   max-width: 180px;
   text-align: right;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .delta.up {
@@ -235,7 +237,7 @@ const fallbackTask = computed(() => ({
   color: var(--color-semantic-down);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 1280px) {
   .snapshot-row {
     grid-template-columns: 1fr;
   }

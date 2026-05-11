@@ -86,6 +86,7 @@ function parseAssetBlock(sectionLabel, header, lines) {
       account: sectionLabel === 'usd' ? '미국 계좌' : '한국 계좌',
       currency: sectionLabel === 'usd' ? 'USD' : 'KRW',
       ticker: ticker || name,
+      market: sectionLabel === 'usd' ? 'US' : 'KR',
       quantity,
       averagePrice,
       currentPrice,
@@ -117,6 +118,7 @@ function parseCashHolding(line, sectionLabel) {
     details: {
       account: sectionLabel === 'usd' ? '미국 계좌' : '한국 계좌',
       currency: sectionLabel === 'usd' ? 'USD' : 'KRW',
+      market: sectionLabel === 'usd' ? 'US' : 'KR',
       nativeAmount,
       fxRate: sectionLabel === 'usd' ? USD_KRW_FALLBACK_RATE : null,
       summary:

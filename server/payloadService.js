@@ -18,6 +18,7 @@ function buildPortfolioPayload(store = loadStore()) {
     },
     system: {
       ...getSystemStatus(),
+      market: store.memory.market,
       dataFiles: FILES,
       orchestrationNotes: ORCHESTRATION_NOTES,
     },
@@ -38,9 +39,11 @@ function buildChatThreadsPayload(store = loadStore()) {
 }
 
 function buildServerStatusPayload() {
+  const store = loadStore();
   return {
     system: {
       ...getSystemStatus(),
+      market: store.memory.market,
       dataFiles: FILES,
       orchestrationNotes: ORCHESTRATION_NOTES,
     },

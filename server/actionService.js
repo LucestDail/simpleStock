@@ -6,6 +6,7 @@ const { syncScheduledTasks } = require('./taskService');
 const { logInfo, logWarn, logError } = require('./logger');
 const { buildPortfolioPayload, buildProfilePayload } = require('./payloadService');
 const { broadcast } = require('./realtimeService');
+const { scheduleMarketRefresh } = require('./marketDataService');
 
 const PROFILE_FIELDS = new Set([
   'displayName',
@@ -34,6 +35,10 @@ function normalizeHoldingDetails(details) {
     averagePrice: Number.isFinite(Number(details.averagePrice)) ? Number(details.averagePrice) : null,
     currentPrice: Number.isFinite(Number(details.currentPrice)) ? Number(details.currentPrice) : null,
     lastQuote: Number.isFinite(Number(details.lastQuote)) ? Number(details.lastQuote) : null,
+    previousClose: Number.isFinite(Number(details.previousClose)) ? Number(details.previousClose) : null,
+    priceChange: Number.isFinite(Number(details.priceChange)) ? Number(details.priceChange) : null,
+    priceChangePct: Number.isFinite(Number(details.priceChangePct)) ? Number(details.priceChangePct) : null,
+    marketState: normalizeText(details.marketState),
     lastQuoteAt: normalizeText(details.lastQuoteAt),
     quoteSource: normalizeText(details.quoteSource),
     nativeAmount: Number.isFinite(Number(details.nativeAmount)) ? Number(details.nativeAmount) : null,
@@ -279,6 +284,10 @@ async function applyConversationActions(actions = []) {
 
   if (result.changedPortfolio) {
     broadcast('portfolio.updated', buildPortfolioPayload());
+    scheduleMarketRefresh('portfolio:conversation_action', {
+      force: true,
+      delayMs: 300,
+    });
   }
 
   if (result.changedProfile) {
