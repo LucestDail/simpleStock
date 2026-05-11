@@ -80,20 +80,20 @@ function inspectCategory(categoryId) {
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-sm);
+  gap: 5px;
 }
 
 .summary-card {
-  padding: 10px 12px;
+  padding: 6px 8px;
   border-radius: var(--rounded-lg);
   background: var(--color-surface-soft);
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .summary-label {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 8px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -101,13 +101,14 @@ function inspectCategory(categoryId) {
 
 .summary-value {
   color: var(--color-ink);
-  font-size: 15px;
+  font-size: 11px;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
 .share-list {
   display: grid;
-  gap: var(--space-sm);
+  gap: 5px;
   min-height: 0;
   overflow: auto;
 }
@@ -116,11 +117,11 @@ function inspectCategory(categoryId) {
   border: 1px solid var(--color-hairline);
   background: rgba(255, 255, 255, 0.02);
   border-radius: var(--rounded-lg);
-  padding: 10px 12px;
+  padding: 6px 8px;
   text-align: left;
   cursor: pointer;
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .share-item:hover {
@@ -130,18 +131,19 @@ function inspectCategory(categoryId) {
 .share-head {
   display: flex;
   justify-content: space-between;
-  gap: var(--space-sm);
+  gap: 6px;
   align-items: center;
   color: var(--color-ink);
+  font-size: 10px;
 }
 
 .share-amount {
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .share-bar {
-  height: 6px;
+  height: 4px;
   border-radius: var(--rounded-pill);
   background: var(--color-surface-strong);
   overflow: hidden;

@@ -110,10 +110,10 @@ onUnmounted(() => {
 <style scoped>
 .workspace {
   height: 100dvh;
-  padding: 8px;
+  padding: 6px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 8px;
+  gap: 6px;
   overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(110, 123, 255, 0.04), transparent 24%),
@@ -134,9 +134,9 @@ onUnmounted(() => {
 }
 
 .workspace-kicker {
-  margin: 0 0 4px;
+  margin: 0 0 2px;
   color: var(--color-primary);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -145,7 +145,7 @@ onUnmounted(() => {
 .workspace-title {
   margin: 0;
   color: var(--color-ink);
-  font-size: clamp(15px, 1.25vw, 18px);
+  font-size: clamp(13px, 1.05vw, 16px);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.12;
@@ -153,13 +153,13 @@ onUnmounted(() => {
 
 .workspace-settings-button {
   flex: 0 0 auto;
-  height: 28px;
-  padding: 0 10px;
+  height: 24px;
+  padding: 0 8px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-pill);
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -167,35 +167,35 @@ onUnmounted(() => {
 .workspace-main {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(220px, 2.8fr) minmax(320px, 4.2fr) minmax(260px, 3.2fr);
-  gap: 8px;
+  grid-template-columns: minmax(200px, 2.55fr) minmax(360px, 4.8fr) minmax(220px, 2.65fr);
+  gap: 6px;
   align-items: stretch;
   overflow: hidden;
   transition: grid-template-columns 0.22s ease;
 }
 
 .workspace-main--balanced {
-  grid-template-columns: minmax(220px, 2.8fr) minmax(320px, 4.2fr) minmax(260px, 3.2fr);
+  grid-template-columns: minmax(200px, 2.55fr) minmax(360px, 4.8fr) minmax(220px, 2.65fr);
 }
 
 .workspace-main--rebalance,
 .workspace-main--manager {
-  grid-template-columns: minmax(220px, 2.8fr) minmax(340px, 4.2fr) minmax(270px, 3.2fr);
+  grid-template-columns: minmax(200px, 2.5fr) minmax(360px, 4.9fr) minmax(220px, 2.6fr);
 }
 
 .workspace-main--research {
-  grid-template-columns: minmax(220px, 2.8fr) minmax(340px, 4.2fr) minmax(270px, 3.2fr);
+  grid-template-columns: minmax(200px, 2.5fr) minmax(360px, 4.9fr) minmax(220px, 2.6fr);
 }
 
 .workspace-main--chat {
-  grid-template-columns: minmax(220px, 2.8fr) minmax(340px, 4.2fr) minmax(270px, 3.2fr);
+  grid-template-columns: minmax(200px, 2.35fr) minmax(420px, 5.25fr) minmax(210px, 2.4fr);
 }
 
 .workspace-column {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   overflow: hidden;
 }
 
@@ -210,7 +210,7 @@ onUnmounted(() => {
   .workspace-main--manager,
   .workspace-main--research,
   .workspace-main--chat {
-    grid-template-columns: minmax(200px, 2.7fr) minmax(300px, 4fr) minmax(220px, 3fr);
+    grid-template-columns: minmax(190px, 2.4fr) minmax(320px, 4.6fr) minmax(200px, 2.5fr);
   }
 }
 </style>

@@ -5,7 +5,7 @@ const BASE_PANELS = [
     id: 'status',
     title: '운영 상태',
     column: 'left',
-    span: 'sm',
+    span: 'xs',
     priority: 5,
     visible: true,
     detailType: 'system',
@@ -14,7 +14,7 @@ const BASE_PANELS = [
     id: 'overview',
     title: '포트폴리오 개요',
     column: 'left',
-    span: 'sm',
+    span: 'xs',
     priority: 10,
     visible: true,
     detailType: 'assetDetail',
@@ -23,7 +23,7 @@ const BASE_PANELS = [
     id: 'holdings',
     title: '보유 자산',
     column: 'left',
-    span: 'lg',
+    span: 'md',
     priority: 20,
     visible: true,
     detailType: 'assetDetail',
@@ -41,7 +41,7 @@ const BASE_PANELS = [
     id: 'insights',
     title: '라이브 인사이트',
     column: 'right',
-    span: 'sm',
+    span: 'xs',
     priority: 5,
     visible: true,
     detailType: 'insight',
@@ -50,7 +50,7 @@ const BASE_PANELS = [
     id: 'managerBrief',
     title: 'Quant Manager',
     column: 'right',
-    span: 'sm',
+    span: 'xs',
     priority: 10,
     visible: true,
     detailType: 'managerBrief',
@@ -59,7 +59,7 @@ const BASE_PANELS = [
     id: 'snapshots',
     title: '예정 작업',
     column: 'right',
-    span: 'sm',
+    span: 'xs',
     priority: 20,
     visible: true,
     detailType: 'system',
@@ -68,7 +68,7 @@ const BASE_PANELS = [
     id: 'activity',
     title: '실시간 활동',
     column: 'right',
-    span: 'sm',
+    span: 'xs',
     priority: 30,
     visible: true,
     detailType: 'threadDetail',
@@ -77,7 +77,7 @@ const BASE_PANELS = [
     id: 'profile',
     title: '프로필',
     column: 'right',
-    span: 'sm',
+    span: 'xs',
     priority: 40,
     visible: true,
     detailType: 'profile',
@@ -86,7 +86,7 @@ const BASE_PANELS = [
     id: 'system',
     title: '시스템',
     column: 'left',
-    span: 'sm',
+    span: 'xs',
     priority: 30,
     visible: true,
     detailType: 'system',
@@ -94,7 +94,7 @@ const BASE_PANELS = [
 ];
 
 const ALLOWED_COLUMNS = new Set(['left', 'center', 'right']);
-const ALLOWED_SPANS = new Set(['sm', 'md', 'lg', 'xl', 'full']);
+const ALLOWED_SPANS = new Set(['xs', 'sm', 'md', 'lg', 'xl', 'full']);
 const PANEL_IDS = new Set(BASE_PANELS.map((panel) => panel.id));
 const HIDEABLE_PANELS = new Set(['activity', 'profile', 'system', 'snapshots', 'insights']);
 

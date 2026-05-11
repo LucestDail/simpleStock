@@ -57,14 +57,14 @@ function toggleExpand(id) {
 .empty-box {
   border: 1px dashed var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 12px;
+  padding: 8px;
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .activity-list {
   display: grid;
-  gap: var(--space-sm);
+  gap: 5px;
   min-height: 0;
   overflow: auto;
 }
@@ -72,12 +72,12 @@ function toggleExpand(id) {
 .activity-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
-  gap: var(--space-sm);
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 6px;
   align-items: start;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 8px 10px;
+  padding: 6px 8px;
   background: rgba(255, 255, 255, 0.02);
   text-align: left;
   cursor: pointer;
@@ -88,10 +88,10 @@ function toggleExpand(id) {
 }
 
 .dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: var(--rounded-full);
-  margin-top: 6px;
+  margin-top: 4px;
   background: var(--color-primary);
 }
 
@@ -105,34 +105,32 @@ function toggleExpand(id) {
 
 .activity-copy {
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .activity-copy strong {
   color: var(--color-ink);
-  font-size: 11px;
-  line-height: 1.35;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 9px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .activity-copy p {
   margin: 2px 0 0;
   color: var(--color-body);
-  line-height: 1.4;
-  font-size: 11px;
+  line-height: 1.2;
+  font-size: 9px;
   white-space: pre-wrap;
 }
 
 .time {
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 9px;
 }
 
 @media (max-width: 720px) {
   .activity-row {
-    grid-template-columns: 10px minmax(0, 1fr);
+    grid-template-columns: 8px minmax(0, 1fr);
   }
 
   .time {

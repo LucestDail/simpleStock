@@ -62,11 +62,11 @@ const { openDrawer } = useWorkspace();
 
 <style scoped>
 .btn-secondary {
-  height: 28px;
+  height: 24px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 10px;
-  font-size: 11px;
+  padding: 0 8px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -79,34 +79,34 @@ const { openDrawer } = useWorkspace();
 .profile-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-sm);
+  gap: 5px;
 }
 
 .mini-field {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md);
-  padding: 10px 12px;
+  padding: 6px 8px;
   display: grid;
-  gap: 4px;
+  gap: 2px;
   background: rgba(255, 255, 255, 0.02);
 }
 
 .mini-field span {
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 9px;
 }
 
 .mini-field strong {
   color: var(--color-ink);
-  font-size: 13px;
-  line-height: 1.3;
+  font-size: 10px;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
 .summary-box {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 10px 12px;
+  padding: 6px 8px;
   background: var(--color-surface-soft);
 }
 
@@ -115,25 +115,25 @@ const { openDrawer } = useWorkspace();
 }
 
 .summary-box p {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--color-body);
-  line-height: 1.45;
-  font-size: 12px;
+  line-height: 1.2;
+  font-size: 9px;
   overflow-wrap: anywhere;
 }
 
 .chip-row {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-xs);
+  gap: 4px;
 }
 
 .chip {
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-radius: var(--rounded-pill);
   background: var(--color-surface-strong);
   color: var(--color-body-strong);
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
 }
 

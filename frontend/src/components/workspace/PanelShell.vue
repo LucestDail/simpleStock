@@ -83,27 +83,31 @@ const props = defineProps({
 }
 
 .panel-shell--sm {
-  flex: 0.56 1 0;
+  flex: 0.4 1 0;
+}
+
+.panel-shell--xs {
+  flex: 0.28 1 0;
 }
 
 .panel-shell--md {
-  flex: 0.74 1 0;
+  flex: 0.58 1 0;
 }
 
 .panel-shell--lg {
-  flex: 0.9 1 0;
+  flex: 0.76 1 0;
 }
 
 .panel-shell--xl {
-  flex: 1.06 1 0;
+  flex: 0.92 1 0;
 }
 
 .panel-shell--full {
-  flex: 1.2 1 0;
+  flex: 1.05 1 0;
 }
 
 .panel-shell__head {
-  padding: var(--space-base) var(--space-base) var(--space-sm);
+  padding: var(--space-sm) var(--space-base) var(--space-xs);
   display: flex;
   justify-content: space-between;
   gap: var(--space-sm);
@@ -112,7 +116,7 @@ const props = defineProps({
 
 .panel-shell__subtitle {
   margin: 0 0 4px;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -121,7 +125,7 @@ const props = defineProps({
 
 .panel-shell__title {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-ink);
   letter-spacing: -0.02em;
@@ -146,10 +150,10 @@ const props = defineProps({
 .panel-shell__body {
   flex: 1;
   min-height: 0;
-  padding: 0 var(--space-base) var(--space-base);
+  padding: 0 var(--space-base) var(--space-sm);
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
   overflow: hidden;
 }
 

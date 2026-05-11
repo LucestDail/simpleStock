@@ -68,7 +68,7 @@ const cards = computed(() =>
       metrics: (card.metrics || []).slice(0, 2),
       bullets: (card.bullets || []).slice(0, 2),
     }))
-    .slice(0, 2)
+    .slice(0, 1)
 );
 </script>
 
@@ -113,28 +113,28 @@ const cards = computed(() =>
 
 <style scoped>
 .btn-secondary {
-  height: 28px;
+  height: 24px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 10px;
+  padding: 0 8px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
 }
 
 .insight-list {
   display: grid;
-  gap: var(--space-sm);
+  gap: 5px;
   min-height: 0;
   overflow: auto;
 }
 
 .insight-card {
   display: grid;
-  gap: 6px;
-  padding: 7px 9px;
+  gap: 4px;
+  padding: 6px 8px;
   border-radius: var(--rounded-lg);
   border: 1px solid var(--color-hairline);
   background: rgba(255, 255, 255, 0.02);
@@ -163,13 +163,13 @@ const cards = computed(() =>
 
 .insight-head strong {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 10px;
   overflow-wrap: anywhere;
 }
 
 .insight-head span {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 8px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -178,8 +178,8 @@ const cards = computed(() =>
 .insight-summary {
   margin: 0;
   color: var(--color-body);
-  font-size: 10px;
-  line-height: 1.35;
+  font-size: 9px;
+  line-height: 1.2;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -189,35 +189,35 @@ const cards = computed(() =>
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-sm);
+  gap: 4px;
 }
 
 .metric-card {
   display: grid;
-  gap: 4px;
-  padding: 5px 7px;
+  gap: 2px;
+  padding: 4px 6px;
   border-radius: var(--rounded-md);
   background: rgba(255, 255, 255, 0.03);
 }
 
 .metric-card span {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 8px;
 }
 
 .metric-card strong {
   color: var(--color-ink);
-  font-size: 10px;
-  line-height: 1.35;
+  font-size: 9px;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
 .bullet-list {
   margin: 0;
-  padding-left: 16px;
+  padding-left: 14px;
   color: var(--color-body);
-  font-size: 10px;
-  line-height: 1.35;
+  font-size: 9px;
+  line-height: 1.2;
 }
 
 @media (max-width: 1280px) {

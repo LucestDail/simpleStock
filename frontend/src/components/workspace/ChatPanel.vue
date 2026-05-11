@@ -1,9 +1,9 @@
 <script setup>
 import { computed, ref } from 'vue';
+import MarkdownIt from 'markdown-it';
 import PanelShell from './PanelShell.vue';
 import { useChat } from '../../composables/useChat';
 import { formatKRW, usePortfolio } from '../../composables/usePortfolio';
-import { useProfile } from '../../composables/useProfile';
 import { useUi } from '../../composables/useUi';
 import { useWorkspace } from '../../composables/useWorkspace';
 
@@ -27,12 +27,22 @@ const {
   sendMessageContent,
 } = useChat();
 const { total, system: portfolioSystem } = usePortfolio();
-const { profile } = useProfile();
 const { notify } = useUi();
 const { applyWorkspacePatch, recordActivity, handleAssistantMetadata, openDrawer, selectThread: focusThread } = useWorkspace();
+const markdown = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true,
+});
 
 const draft = ref('');
 const canSend = computed(() => Boolean(draft.value.trim()) && !sending.value);
+const visibleThreads = computed(() => threads.value.slice(0, 12));
+const chatStatusItems = computed(() => [
+  `스레드 ${threads.value.length}개`,
+  `총 자산 ${formatKRW(total.value)}`,
+  portfolioSystem.value.latestManagerReport ? '브리핑 반영됨' : '브리핑 대기',
+]);
 const composerNotice = computed(() => {
   if (sending.value) {
     return {
@@ -52,30 +62,19 @@ const composerNotice = computed(() => {
 
   return null;
 });
-const headerStats = computed(() => [
-  {
-    label: '총 자산',
-    value: formatKRW(total.value),
-  },
-  {
-    label: '포커스',
-    value: activeThread.value?.title || '새 대화',
-  },
-  {
-    label: '브리핑',
-    value: portfolioSystem.value.latestManagerReport ? '반영됨' : '대기',
-  },
-  {
-    label: '설정 상태',
-    value: profile.value.userProfile?.displayName || '미입력',
-  },
-]);
+
 function formatTimestamp(value) {
   if (!value) return '';
   return new Intl.DateTimeFormat('ko-KR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
   }).format(new Date(value));
+}
+
+function renderAssistantMessage(content) {
+  return markdown.render(String(content || ''));
 }
 
 async function handleCreateThread() {
@@ -170,72 +169,88 @@ function onComposerKeydown(event) {
       <button type="button" class="btn-primary" @click="handleCreateThread">새 대화</button>
     </template>
 
-    <div class="chat-stats">
-      <article v-for="item in headerStats" :key="item.label" class="chat-stat">
-        <span>{{ item.label }}</span>
-        <strong>{{ item.value }}</strong>
-      </article>
-    </div>
-
-    <div class="thread-strip">
-      <button
-        v-for="thread in threads.slice(0, 4)"
-        :key="thread.id"
-        type="button"
-        class="thread-chip"
-        :class="{ active: activeThread?.id === thread.id }"
-        @click="activateThread(thread)"
-      >
-        <span>{{ thread.title }}</span>
-        <em class="thread-count">{{ thread.messageCount || 0 }}</em>
-      </button>
-    </div>
-
-    <div v-if="!system.aiConfigured" class="disabled-box">
-      <strong>Gemini 키가 없어서 대화 응답은 비활성화되어 있습니다.</strong>
-      <p>키를 넣으면 대화와 함께 패널 배치 지시도 실시간으로 반영됩니다.</p>
-    </div>
-
-    <div class="messages">
-      <div v-if="!messages.length" class="empty-box">
-        <strong>{{ activeThread?.title || '새 대화' }}</strong>
-        <p>
-          {{ activeThread ? '이 스레드에는 아직 저장된 대화 이력이 없습니다. 바로 새 메시지를 보내 이어서 사용할 수 있습니다.' : '자산 입력, 설정 변경, 반복 브리핑 등록도 자연어로 요청할 수 있습니다.' }}
-        </p>
-      </div>
-
-      <article
-        v-for="message in messages.slice(-8)"
-        :key="message.id"
-        class="message"
-        :class="message.role"
-      >
-        <div class="message-top">
-          <strong>{{ message.role === 'assistant' ? 'Quant Manager' : '나' }}</strong>
-          <span class="mono-num">{{ formatTimestamp(message.createdAt) }}</span>
+    <div class="chat-layout">
+      <aside class="thread-panel">
+        <div class="thread-panel__head">
+          <strong>대화 목록</strong>
+          <span>{{ chatStatusItems.join(' · ') }}</span>
         </div>
-        <p class="message-text">{{ message.content }}</p>
-      </article>
-    </div>
+        <div class="thread-list">
+          <button
+            v-for="thread in visibleThreads"
+            :key="thread.id"
+            type="button"
+            class="thread-item"
+            :class="{ active: activeThread?.id === thread.id }"
+            @click="activateThread(thread)"
+          >
+            <strong>{{ thread.title }}</strong>
+            <span>{{ formatTimestamp(thread.updatedAt || thread.createdAt) }}</span>
+            <em>{{ thread.messageCount || 0 }}개</em>
+          </button>
+        </div>
+      </aside>
 
-    <div class="composer">
-      <div v-if="composerNotice" class="chat-notice" :class="composerNotice.tone">
-        <strong>{{ composerNotice.title }}</strong>
-        <p>{{ composerNotice.message }}</p>
-      </div>
-      <textarea
-        v-model="draft"
-        class="composer-input"
-        rows="3"
-        placeholder="Enter 전송, Shift+Enter 줄바꿈"
-        :disabled="sending || !system.aiConfigured"
-        @keydown="onComposerKeydown"
-      />
-      <div class="composer-foot">
-        <button type="button" class="btn-primary" :disabled="!canSend || !system.aiConfigured" @click="submit">
-          {{ sending ? '전송 중…' : '보내기' }}
-        </button>
-      </div>
+      <section class="chat-main">
+        <div v-if="!system.aiConfigured" class="disabled-box">
+          <strong>Gemini 키가 없어서 대화 응답은 비활성화되어 있습니다.</strong>
+          <p>키를 넣으면 대화와 함께 패널 배치 지시도 실시간으로 반영됩니다.</p>
+        </div>
+
+        <div v-else class="conversation">
+          <div class="conversation-head">
+            <strong>{{ activeThread?.title || '새 대화' }}</strong>
+            <span>{{ activeThread ? '목록에서 대화를 선택해 이어서 볼 수 있습니다.' : '처음 메시지를 보내면 Quant Manager가 대화를 시작합니다.' }}</span>
+          </div>
+
+          <div class="messages">
+            <div v-if="!messages.length" class="empty-box">
+              <strong>{{ activeThread?.title || '새 대화' }}</strong>
+              <p>
+                {{ activeThread ? '이 스레드에는 아직 저장된 대화 이력이 없습니다. 바로 새 메시지를 보내 이어서 사용할 수 있습니다.' : '자산 입력, 설정 변경, 반복 브리핑 등록도 자연어로 요청할 수 있습니다.' }}
+              </p>
+            </div>
+
+            <article
+              v-for="message in messages.slice(-12)"
+              :key="message.id"
+              class="message"
+              :class="message.role"
+            >
+              <div class="message-meta">
+                <strong>{{ message.role === 'assistant' ? 'Quant Manager' : '나' }}</strong>
+                <span class="mono-num">{{ formatTimestamp(message.createdAt) }}</span>
+              </div>
+              <div
+                v-if="message.role === 'assistant'"
+                class="message-markdown"
+                v-html="renderAssistantMessage(message.content)"
+              />
+              <p v-else class="message-text">{{ message.content }}</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="composer">
+          <div v-if="composerNotice" class="chat-notice" :class="composerNotice.tone">
+            <strong>{{ composerNotice.title }}</strong>
+            <p>{{ composerNotice.message }}</p>
+          </div>
+          <textarea
+            v-model="draft"
+            class="composer-input"
+            rows="3"
+            placeholder="Enter 전송, Shift+Enter 줄바꿈"
+            :disabled="sending || !system.aiConfigured"
+            @keydown="onComposerKeydown"
+          />
+          <div class="composer-foot">
+            <button type="button" class="btn-primary" :disabled="!canSend || !system.aiConfigured" @click="submit">
+              {{ sending ? '전송 중…' : '보내기' }}
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
   </PanelShell>
 </template>
@@ -243,11 +258,11 @@ function onComposerKeydown(event) {
 <style scoped>
 .btn-primary,
 .btn-secondary {
-  height: 28px;
+  height: 24px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 10px;
-  font-size: 11px;
+  padding: 0 8px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -262,161 +277,276 @@ function onComposerKeydown(event) {
   color: var(--color-ink);
 }
 
-.chat-stats {
+.chat-layout {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-xs);
+  grid-template-columns: minmax(150px, 176px) minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
 }
 
-.chat-stat {
+.thread-panel,
+.chat-main {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.thread-panel {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.thread-panel__head {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-hairline-soft);
   display: grid;
   gap: 2px;
-  padding: 8px 10px;
-  border-radius: var(--rounded-md);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--color-hairline-soft);
 }
 
-.chat-stat span {
-  color: var(--color-muted);
+.thread-panel__head strong {
+  color: var(--color-ink);
   font-size: 10px;
 }
 
-.chat-stat strong {
-  color: var(--color-ink);
-  font-size: 12px;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
+.thread-panel__head span {
+  color: var(--color-muted);
+  font-size: 8px;
+  line-height: 1.2;
 }
 
-.thread-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-xs);
-  overflow: hidden;
+.thread-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 1px;
+  padding: 4px;
 }
 
-.thread-chip {
-  border: 1px solid var(--color-hairline);
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: var(--rounded-pill);
-  padding: 5px 9px;
-  font-size: 11px;
+.thread-item {
+  border: 1px solid transparent;
+  border-radius: var(--rounded-md);
+  background: transparent;
   color: var(--color-body);
   cursor: pointer;
-  max-width: 100%;
-  overflow: hidden;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  text-align: left;
+  display: grid;
+  gap: 2px;
+  padding: 6px 7px;
 }
 
-.thread-chip.active {
-  border-color: rgba(0, 82, 255, 0.4);
-  background: rgba(0, 82, 255, 0.12);
-  color: var(--color-primary);
-}
-
-.thread-chip span {
-  display: block;
+.thread-item strong {
+  color: inherit;
+  font-size: 10px;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.thread-count {
-  font-style: normal;
-  font-size: 10px;
+.thread-item span,
+.thread-item em {
   color: var(--color-muted);
+  font-size: 8px;
+  font-style: normal;
+  line-height: 1.2;
+}
+
+.thread-item.active {
+  border-color: rgba(0, 82, 255, 0.28);
+  background: rgba(0, 82, 255, 0.12);
+  color: var(--color-ink);
+}
+
+.conversation {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.conversation-head {
+  display: grid;
+  gap: 2px;
+}
+
+.conversation-head strong {
+  color: var(--color-ink);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.conversation-head span {
+  color: var(--color-muted);
+  font-size: 8px;
+  line-height: 1.2;
 }
 
 .disabled-box,
 .empty-box {
   border-radius: var(--rounded-lg);
-  padding: 8px 10px;
+  padding: 7px 8px;
   background: var(--color-surface-soft);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .empty-box strong {
   display: block;
   color: var(--color-ink);
   margin-bottom: 4px;
+  font-size: 10px;
 }
 
-.empty-box p {
+.empty-box p,
+.disabled-box p {
   margin: 0;
   color: var(--color-body);
-  line-height: 1.4;
+  line-height: 1.3;
+  font-size: 9px;
 }
 
 .disabled-box strong {
   color: var(--color-ink);
 }
 
-.disabled-box p {
-  margin: var(--space-xs) 0 0;
-  color: var(--color-body);
-}
-
 .messages {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  display: grid;
-  gap: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 2px;
 }
 
 .message {
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--rounded-lg);
-  padding: 8px 10px;
+  max-width: min(88%, 720px);
+  border-radius: 12px;
+  padding: 7px 9px;
   display: grid;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--color-hairline);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .message.user {
-  background: rgba(0, 82, 255, 0.08);
+  align-self: flex-end;
+  background: rgba(0, 82, 255, 0.12);
 }
 
-.message-top {
+.message.assistant {
+  align-self: flex-start;
+}
+
+.message-meta {
   display: flex;
   justify-content: space-between;
-  gap: var(--space-sm);
+  gap: 8px;
   align-items: center;
 }
 
-.message-top strong {
+.message-meta strong {
   color: var(--color-ink);
+  font-size: 9px;
 }
 
-.message-top span {
+.message-meta span {
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 8px;
 }
 
 .message-text {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: var(--color-body);
-  line-height: 1.5;
+  color: var(--color-body-strong);
+  line-height: 1.4;
+  font-size: 10px;
+}
+
+.message-markdown {
+  color: var(--color-body-strong);
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.message-markdown :deep(p),
+.message-markdown :deep(ul),
+.message-markdown :deep(ol),
+.message-markdown :deep(blockquote),
+.message-markdown :deep(pre) {
+  margin: 0 0 6px;
+}
+
+.message-markdown :deep(p:last-child),
+.message-markdown :deep(ul:last-child),
+.message-markdown :deep(ol:last-child),
+.message-markdown :deep(blockquote:last-child),
+.message-markdown :deep(pre:last-child) {
+  margin-bottom: 0;
+}
+
+.message-markdown :deep(h1),
+.message-markdown :deep(h2),
+.message-markdown :deep(h3),
+.message-markdown :deep(h4) {
+  margin: 0 0 6px;
+  color: var(--color-ink);
   font-size: 11px;
+  line-height: 1.3;
+}
+
+.message-markdown :deep(ul),
+.message-markdown :deep(ol) {
+  padding-left: 16px;
+}
+
+.message-markdown :deep(li) {
+  margin: 0 0 2px;
+}
+
+.message-markdown :deep(code) {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 3px;
+  border-radius: var(--rounded-xs);
+}
+
+.message-markdown :deep(pre) {
+  overflow: auto;
+  padding: 7px 8px;
+  border-radius: var(--rounded-md);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.message-markdown :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+
+.message-markdown :deep(a) {
+  color: var(--color-primary);
 }
 
 .composer {
   display: grid;
-  gap: var(--space-sm);
+  gap: 5px;
+  margin-top: 4px;
 }
 
 .chat-notice {
   border-radius: var(--rounded-lg);
-  padding: 8px 10px;
+  padding: 6px 8px;
   border: 1px solid var(--color-hairline);
   display: grid;
-  gap: 4px;
-  font-size: 11px;
+  gap: 3px;
+  font-size: 9px;
 }
 
 .chat-notice.info {
@@ -431,12 +561,13 @@ function onComposerKeydown(event) {
 
 .chat-notice strong {
   color: var(--color-ink);
+  font-size: 9px;
 }
 
 .chat-notice p {
   margin: 0;
   color: var(--color-body);
-  line-height: 1.4;
+  line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
@@ -445,33 +576,43 @@ function onComposerKeydown(event) {
   resize: none;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 8px 10px;
+  padding: 7px 8px;
   color: var(--color-ink);
   background: rgba(255, 255, 255, 0.02);
+  min-height: 72px;
+  font-size: 10px;
 }
 
 .composer-input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.08);
+  box-shadow: 0 0 0 2px rgba(0, 82, 255, 0.08);
 }
 
 .composer-foot {
   display: flex;
   justify-content: flex-end;
-  gap: var(--space-sm);
+  gap: 6px;
   align-items: center;
 }
 
-@media (max-width: 1280px) {
-  .chat-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+@media (max-width: 1180px) {
+  .chat-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .thread-list {
+    max-height: 120px;
+  }
+
+  .message {
+    max-width: 100%;
   }
 }
 
 @media (max-width: 720px) {
-  .composer-foot,
-  .message-top {
+  .message-meta,
+  .composer-foot {
     flex-direction: column;
     align-items: stretch;
   }

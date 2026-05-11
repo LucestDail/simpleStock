@@ -34,23 +34,23 @@
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
   --rounded-xs: 4px;
-  --rounded-sm: 8px;
-  --rounded-md: 10px;
-  --rounded-lg: 14px;
-  --rounded-xl: 18px;
+  --rounded-sm: 7px;
+  --rounded-md: 9px;
+  --rounded-lg: 12px;
+  --rounded-xl: 15px;
   --rounded-pill: 100px;
   --rounded-full: 9999px;
 
   --shadow-soft: 0 8px 22px rgba(0, 0, 0, 0.34);
 
-  --space-xxs: 3px;
-  --space-xs: 6px;
-  --space-sm: 8px;
-  --space-base: 10px;
-  --space-md: 12px;
-  --space-lg: 14px;
-  --space-xl: 18px;
-  --space-xxl: 30px;
+  --space-xxs: 2px;
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-base: 8px;
+  --space-md: 10px;
+  --space-lg: 12px;
+  --space-xl: 14px;
+  --space-xxl: 24px;
   --space-section: 56px;
 
   --nav-height: 64px;
@@ -73,7 +73,7 @@ body,
 body {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 400;
   line-height: 1.5;
   color: var(--color-body);

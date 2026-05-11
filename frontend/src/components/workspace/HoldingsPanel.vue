@@ -324,17 +324,17 @@ function inspectHolding(target) {
 .category-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .chip {
-  height: 26px;
+  height: 22px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-pill);
-  padding: 0 10px;
+  padding: 0 8px;
   background: rgba(255, 255, 255, 0.02);
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -352,29 +352,29 @@ function inspectHolding(target) {
 
 .section-head strong {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .section-head span {
   color: var(--color-muted);
-  font-size: 10px;
-  line-height: 1.35;
+  font-size: 9px;
+  line-height: 1.25;
 }
 
 .form-grid {
   display: grid;
-  grid-template-columns: 1.3fr 0.9fr 1fr auto;
-  gap: var(--space-sm);
+  grid-template-columns: 1.1fr 0.8fr 0.9fr auto;
+  gap: 5px;
 }
 
 .input {
-  height: 32px;
-  padding: 0 9px;
+  height: 26px;
+  padding: 0 7px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md);
   background: rgba(255, 255, 255, 0.02);
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .input:focus {
@@ -385,16 +385,16 @@ function inspectHolding(target) {
 
 .actions {
   display: flex;
-  gap: var(--space-xs);
+  gap: 4px;
 }
 
 .btn-primary,
 .btn-secondary {
-  height: 32px;
+  height: 26px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 12px;
-  font-size: 11px;
+  padding: 0 8px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -417,14 +417,14 @@ function inspectHolding(target) {
 .empty-box {
   border: 1px dashed var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 12px;
+  padding: 8px;
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .holding-list {
   display: grid;
-  gap: var(--space-sm);
+  gap: 5px;
   min-height: 0;
   overflow: auto;
 }
@@ -432,11 +432,11 @@ function inspectHolding(target) {
 .holding-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: var(--space-sm);
+  gap: 6px;
   align-items: center;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 8px 10px;
+  padding: 6px 8px;
   background: rgba(255, 255, 255, 0.02);
 }
 
@@ -447,33 +447,41 @@ function inspectHolding(target) {
   padding: 0;
   cursor: pointer;
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .holding-main strong {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .holding-main span {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 9px;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
 .holding-value {
   display: grid;
   justify-items: end;
-  gap: 3px;
+  gap: 2px;
+  min-width: 88px;
+}
+
+.holding-value strong {
+  font-size: 10px;
+  line-height: 1.2;
 }
 
 .quote-line {
   display: inline-flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 3px;
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 9px;
   text-align: right;
 }
 
@@ -482,7 +490,7 @@ function inspectHolding(target) {
 }
 
 .quote-chip {
-  padding: 1px 5px;
+  padding: 1px 4px;
   border-radius: var(--rounded-pill);
   background: rgba(255, 255, 255, 0.04);
 }
@@ -501,16 +509,18 @@ function inspectHolding(target) {
 
 .row-actions {
   display: flex;
-  gap: var(--space-xs);
+  gap: 4px;
+  align-items: center;
 }
 
 .btn-text {
   border: none;
   background: transparent;
   color: var(--color-primary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
+  padding: 0;
 }
 
 .btn-text.danger {

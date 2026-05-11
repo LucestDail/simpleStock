@@ -17,6 +17,7 @@ const { notify } = useUi();
 const { applyWorkspacePatch, recordActivity, openDrawer } = useWorkspace();
 const busy = ref(false);
 const latestManagerReport = computed(() => manager.value?.latestReport || null);
+const effectiveSpan = computed(() => (latestManagerReport.value ? props.panel.span : 'xs'));
 
 async function generateBrief() {
   busy.value = true;
@@ -59,7 +60,7 @@ async function generateBrief() {
   <PanelShell
     title="Quant Manager"
     subtitle="brief"
-    :span="panel.span"
+    :span="effectiveSpan"
     :highlighted="panel.highlighted"
     :loading="busy"
   >
@@ -101,11 +102,11 @@ async function generateBrief() {
 <style scoped>
 .btn-primary,
 .btn-secondary {
-  height: 28px;
+  height: 24px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 10px;
-  font-size: 11px;
+  padding: 0 8px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -128,9 +129,9 @@ async function generateBrief() {
 .disabled-box,
 .empty-box {
   border-radius: var(--rounded-lg);
-  padding: 8px 10px;
+  padding: 6px 8px;
   background: var(--color-surface-soft);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .disabled-box strong,
@@ -145,7 +146,7 @@ async function generateBrief() {
 
 .brief-layout {
   display: grid;
-  gap: var(--space-sm);
+  gap: 5px;
   min-height: 0;
   overflow: auto;
 }
@@ -153,14 +154,14 @@ async function generateBrief() {
 .brief-card {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 8px 10px;
+  padding: 6px 8px;
   display: grid;
-  gap: 4px;
+  gap: 3px;
   background: rgba(255, 255, 255, 0.02);
 }
 
 .kicker {
-  font-size: 10px;
+  font-size: 8px;
   color: var(--color-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -169,14 +170,15 @@ async function generateBrief() {
 
 .summary {
   margin: 0;
-  line-height: 1.35;
-  font-size: 11px;
+  line-height: 1.2;
+  font-size: 9px;
 }
 
 .list {
   margin: 0;
-  padding-left: 16px;
+  padding-left: 14px;
   color: var(--color-body);
-  font-size: 11px;
+  font-size: 9px;
+  line-height: 1.2;
 }
 </style>

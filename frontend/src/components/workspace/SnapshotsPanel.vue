@@ -168,20 +168,20 @@ const fallbackTask = computed(() => ({
 
 <style scoped>
 .btn-secondary {
-  height: 30px;
+  height: 24px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 12px;
+  padding: 0 8px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
 }
 
 .snapshot-list {
   display: grid;
-  gap: var(--space-xs);
+  gap: 4px;
   min-height: 0;
   overflow: auto;
 }
@@ -189,44 +189,48 @@ const fallbackTask = computed(() => ({
 .snapshot-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-sm);
+  gap: 6px;
   align-items: center;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 8px 10px;
+  padding: 6px 8px;
   background: rgba(255, 255, 255, 0.02);
 }
 
 .snapshot-main {
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .snapshot-main strong {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 10px;
   overflow-wrap: anywhere;
 }
 
 .snapshot-main span {
   color: var(--color-muted);
-  font-size: 10px;
-  line-height: 1.35;
+  font-size: 9px;
+  line-height: 1.2;
 }
 
 .snapshot-metrics {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   justify-items: end;
 }
 
 .snapshot-metrics strong {
   color: var(--color-ink);
-  font-size: 11px;
-  max-width: 180px;
+  font-size: 9px;
+  max-width: 130px;
   text-align: right;
-  line-height: 1.35;
+  line-height: 1.2;
   overflow-wrap: anywhere;
+}
+
+.delta {
+  font-size: 9px;
 }
 
 .delta.up {

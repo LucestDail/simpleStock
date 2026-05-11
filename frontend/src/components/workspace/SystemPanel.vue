@@ -94,13 +94,13 @@ async function handleRefreshMarket() {
 
 <style scoped>
 .btn-secondary {
-  height: 28px;
+  height: 24px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 10px;
+  padding: 0 8px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -115,51 +115,56 @@ async function handleRefreshMarket() {
   padding: 0;
   margin: 0;
   display: grid;
-  gap: var(--space-xs);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
   min-height: 0;
 }
 
 .meta-list li {
   display: flex;
   justify-content: space-between;
-  gap: var(--space-sm);
-  border-bottom: 1px solid var(--color-hairline);
-  padding-bottom: 4px;
+  gap: 6px;
+  border-bottom: 1px solid var(--color-hairline-soft);
+  padding-bottom: 2px;
   color: var(--color-body);
-  font-size: 11px;
+  font-size: 9px;
 }
 
 .meta-list strong {
   color: var(--color-ink);
+  font-size: 10px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .meta-list code {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9px;
   background: var(--color-surface-soft);
   border-radius: var(--rounded-xs);
-  padding: 1px 5px;
+  padding: 1px 4px;
+  overflow-wrap: anywhere;
 }
 
 .system-note {
   margin: 0;
   border-radius: var(--rounded-lg);
   background: var(--color-surface-soft);
-  padding: 8px 10px;
+  padding: 6px 8px;
   color: var(--color-body);
-  font-size: 10px;
-  line-height: 1.35;
+  font-size: 9px;
+  line-height: 1.25;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   overflow: hidden;
 }
 
 .market-error {
   margin: 0;
   color: var(--color-accent-yellow);
-  font-size: 10px;
-  line-height: 1.35;
+  font-size: 9px;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 </style>

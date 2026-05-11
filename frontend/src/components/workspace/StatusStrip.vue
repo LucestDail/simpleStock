@@ -2,7 +2,6 @@
 import { computed } from 'vue';
 import PanelShell from './PanelShell.vue';
 import { usePortfolio } from '../../composables/usePortfolio';
-import { useChat } from '../../composables/useChat';
 import { useWorkspace } from '../../composables/useWorkspace';
 
 const props = defineProps({
@@ -13,15 +12,13 @@ const props = defineProps({
 });
 
 const { system, manager, holdings } = usePortfolio();
-const { activeThread } = useChat();
-const { focusMode, layoutReason, openDrawer } = useWorkspace();
+const { openDrawer } = useWorkspace();
 
 const latestReportTime = computed(() => manager.value?.latestReport?.createdAt || null);
 const latestMarketTime = computed(() => system.value.market?.lastSuccessAt || system.value.market?.lastRefreshAt || null);
 const cards = computed(() => [
   { label: '현재', value: system.value.serverTimeLocal || '시간 확인 중' },
-  { label: '포커스', value: focusMode.value || 'balanced' },
-  { label: '활성 스레드', value: activeThread.value?.title || '없음' },
+  { label: 'Gemini', value: system.value.aiConfigured ? '활성' : '비활성' },
   { label: '보유 자산', value: `${holdings.value.length}개` },
   {
     label: '추적 티커',
@@ -34,9 +31,8 @@ const cards = computed(() => [
       : '대기',
   },
   { label: '예정 작업', value: `${(system.value.scheduledTasks || []).length}건` },
-  { label: '최근 브리핑', value: formatTime(latestReportTime.value) },
   { label: '최근 시세', value: formatTime(latestMarketTime.value) },
-  { label: '레이아웃 사유', value: layoutReason.value || '기본 레이아웃', wide: true },
+  { label: '최근 브리핑', value: formatTime(latestReportTime.value), wide: true },
 ]);
 
 function formatTime(value) {
@@ -77,13 +73,13 @@ function formatTime(value) {
 
 <style scoped>
 .btn-secondary {
-  height: 28px;
+  height: 24px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 10px;
+  padding: 0 8px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -91,16 +87,16 @@ function formatTime(value) {
 .status-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-sm);
+  gap: 5px;
   min-height: 0;
 }
 
 .status-item {
-  min-height: 44px;
+  min-height: 38px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
   background: rgba(255, 255, 255, 0.02);
-  padding: 7px 9px;
+  padding: 5px 7px;
   display: grid;
   gap: 4px;
   overflow: hidden;
@@ -111,7 +107,7 @@ function formatTime(value) {
 }
 
 .label {
-  font-size: 10px;
+  font-size: 8px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -120,10 +116,8 @@ function formatTime(value) {
 
 strong {
   color: var(--color-ink);
-  font-size: 11px;
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 10px;
+  line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
