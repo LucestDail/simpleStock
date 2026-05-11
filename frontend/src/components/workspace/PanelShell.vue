@@ -60,12 +60,13 @@ const props = defineProps({
   box-shadow: var(--shadow-soft);
   display: flex;
   flex-direction: column;
+  flex: none;
   overflow: hidden;
   transition:
     transform 0.22s ease,
     box-shadow 0.22s ease,
     border-color 0.22s ease,
-    flex 0.22s ease,
+    min-height 0.22s ease,
     opacity 0.22s ease;
 }
 
@@ -83,27 +84,27 @@ const props = defineProps({
 }
 
 .panel-shell--sm {
-  flex: 0.4 1 0;
+  min-height: 130px;
 }
 
 .panel-shell--xs {
-  flex: 0.28 1 0;
+  min-height: 110px;
 }
 
 .panel-shell--md {
-  flex: 0.58 1 0;
+  min-height: 180px;
 }
 
 .panel-shell--lg {
-  flex: 0.76 1 0;
+  min-height: 250px;
 }
 
 .panel-shell--xl {
-  flex: 0.92 1 0;
+  min-height: 320px;
 }
 
 .panel-shell--full {
-  flex: 1.05 1 0;
+  min-height: 440px;
 }
 
 .panel-shell__head {

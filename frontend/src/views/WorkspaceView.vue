@@ -93,6 +93,29 @@ const renderedColumns = computed(() => {
     right: rightPanels,
   };
 });
+const finalColumns = computed(() => {
+  const left = [...renderedColumns.value.left];
+  const right = [...renderedColumns.value.right];
+
+  if (!isStackedLayout.value) {
+    const systemIndex = left.findIndex((panel) => panel.id === 'system');
+    if (systemIndex >= 0) {
+      const [systemPanel] = left.splice(systemIndex, 1);
+      right.push({ ...systemPanel, column: 'right', span: 'sm' });
+    }
+
+    const statusIndex = left.findIndex((panel) => panel.id === 'status');
+    if (statusIndex >= 0) {
+      left[statusIndex] = { ...left[statusIndex], span: 'md' };
+    }
+  }
+
+  return {
+    left,
+    center: renderedColumns.value.center,
+    right,
+  };
+});
 const workspaceGridStyle = computed(() => {
   if (isStackedLayout.value) {
     return {
@@ -100,15 +123,15 @@ const workspaceGridStyle = computed(() => {
     };
   }
 
-  const leftCount = renderedColumns.value.left.length;
-  const rightCount = renderedColumns.value.right.length;
+  const leftCount = finalColumns.value.left.length;
+  const rightCount = finalColumns.value.right.length;
   const isChatMode = focusMode.value === 'chat';
   const leftTrack = leftCount
-    ? `minmax(${leftCount >= 4 ? 220 : 240}px, ${isChatMode ? 2.4 : 2.7}fr)`
+    ? `minmax(${leftCount >= 4 ? 250 : 270}px, ${isChatMode ? 2.55 : 2.95}fr)`
     : '0px';
   const centerTrack = `minmax(${isChatMode ? 430 : 380}px, ${isChatMode ? 5.5 : 5}fr)`;
   const rightTrack = rightCount
-    ? `minmax(${rightCount <= 2 ? 260 : 235}px, ${rightCount <= 2 ? 3 : 2.7}fr)`
+    ? `minmax(${rightCount <= 2 ? 250 : 230}px, ${rightCount <= 2 ? 2.7 : 2.45}fr)`
     : '0px';
   return {
     gridTemplateColumns: `${leftTrack} ${centerTrack} ${rightTrack}`,
@@ -159,7 +182,7 @@ onUnmounted(() => {
       <section class="workspace-column" :class="{ 'workspace-column--stacked': isStackedLayout }">
         <component
           :is="panelComponents[panel.id]"
-          v-for="panel in renderedColumns.left"
+          v-for="panel in finalColumns.left"
           :key="panel.id"
           :panel="panel"
         />
@@ -168,7 +191,7 @@ onUnmounted(() => {
       <section class="workspace-column" :class="{ 'workspace-column--stacked': isStackedLayout }">
         <component
           :is="panelComponents[panel.id]"
-          v-for="panel in renderedColumns.center"
+          v-for="panel in finalColumns.center"
           :key="panel.id"
           :panel="panel"
         />
@@ -177,7 +200,7 @@ onUnmounted(() => {
       <section class="workspace-column" :class="{ 'workspace-column--stacked': isStackedLayout }">
         <component
           :is="panelComponents[panel.id]"
-          v-for="panel in renderedColumns.right"
+          v-for="panel in finalColumns.right"
           :key="panel.id"
           :panel="panel"
         />
@@ -259,7 +282,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  overflow: hidden;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .workspace--stacked {
