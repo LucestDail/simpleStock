@@ -1,8 +1,10 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { usePortfolio, formatKRW, CATEGORIES } from '../composables/usePortfolio';
+import { useUi } from '../composables/useUi';
 
 const { holdings, fetchPortfolio, saveHoldings, loading, error } = usePortfolio();
+const { confirmAction, notify } = useUi();
 
 const form = ref({
   name: '',
@@ -11,6 +13,7 @@ const form = ref({
 });
 
 const editingId = ref(null);
+const formCard = ref(null);
 
 onMounted(fetchPortfolio);
 
@@ -26,7 +29,7 @@ function edit(h) {
     category: h.category,
     amount: String(h.amount),
   };
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  formCard.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function submit() {
@@ -40,14 +43,44 @@ async function submit() {
   const next = editingId.value
     ? holdings.value.map((x) => (x.id === editingId.value ? { ...x, ...row, id: x.id } : x))
     : [...holdings.value, row];
-  await saveHoldings(next);
-  resetForm();
+  try {
+    await saveHoldings(next);
+    notify({
+      tone: 'success',
+      message: editingId.value ? '자산 정보를 수정했습니다.' : '자산 항목을 추가했습니다.',
+    });
+    resetForm();
+  } catch (e) {
+    notify({
+      tone: 'error',
+      message: e.message || '자산 저장에 실패했습니다.',
+    });
+  }
 }
 
-async function remove(id) {
-  if (!confirm('이 자산을 삭제할까요?')) return;
-  await saveHoldings(holdings.value.filter((x) => x.id !== id));
-  if (editingId.value === id) resetForm();
+async function remove(target) {
+  const ok = await confirmAction({
+    title: '자산 삭제',
+    message: `${target.name} 항목을 삭제할까요? 이 작업은 즉시 반영됩니다.`,
+    confirmLabel: '삭제',
+    cancelLabel: '취소',
+    tone: 'danger',
+  });
+  if (!ok) return;
+
+  try {
+    await saveHoldings(holdings.value.filter((x) => x.id !== target.id));
+    if (editingId.value === target.id) resetForm();
+    notify({
+      tone: 'success',
+      message: '자산 항목을 삭제했습니다.',
+    });
+  } catch (e) {
+    notify({
+      tone: 'error',
+      message: e.message || '자산 삭제에 실패했습니다.',
+    });
+  }
 }
 </script>
 
@@ -61,7 +94,7 @@ async function remove(id) {
 
       <p v-if="error" class="banner-error">{{ error }}</p>
 
-      <section class="card form-card">
+      <section ref="formCard" class="card form-card">
         <h2 class="card-h">{{ editingId ? '자산 수정' : '자산 추가' }}</h2>
         <form class="form" @submit.prevent="submit">
           <label class="field">
@@ -126,7 +159,7 @@ async function remove(id) {
             <span class="mono-num amt">{{ formatKRW(h.amount) }}</span>
             <div class="row-actions">
               <button type="button" class="btn-text" @click="edit(h)">수정</button>
-              <button type="button" class="btn-text danger" @click="remove(h.id)">삭제</button>
+              <button type="button" class="btn-text danger" @click="remove(h)">삭제</button>
             </div>
           </div>
         </div>

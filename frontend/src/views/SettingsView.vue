@@ -12,6 +12,23 @@
       </p>
 
       <section class="card">
+        <h2 class="card-h">저장 방식</h2>
+        <p class="body">
+          현재 데이터는 별도 DB 없이 서버 파일 시스템의 <code>data/portfolio.json</code>에 저장됩니다.
+          개인 전용 사용을 전제로 보유 자산 목록과 일별 스냅샷만 JSON 형태로 관리합니다.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2 class="card-h">분류 기준</h2>
+        <p class="body">
+          지금 버전의 비중은 자산군이 아니라 상품 분류 기준입니다. 예금, 적금, 주식, 펀드, 연금의
+          5개 버킷으로 단순하게 시작하고, 이후 필요하면 현금성 / 투자 / 연금 같은 상위 자산군을
+          추가할 수 있습니다.
+        </p>
+      </section>
+
+      <section class="card">
         <h2 class="card-h">AI 연계</h2>
         <p class="body">
           자산 해석, 뉴스 요약, 포트폴리오 코멘트 등 AI 기능은 추후 연동 예정입니다. 현재 버전에서는
@@ -68,6 +85,14 @@
   border-radius: var(--rounded-xl);
   padding: var(--space-xl);
   margin-bottom: var(--space-xl);
+}
+
+.card code {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  background: var(--color-surface-soft);
+  padding: 2px 6px;
+  border-radius: var(--rounded-xs);
 }
 
 .card-h {

@@ -1,9 +1,11 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { usePortfolio, formatKRW, CATEGORIES } from '../composables/usePortfolio';
+import { useUi } from '../composables/useUi';
 
 const { sortedSnapshots, fetchPortfolio, addSnapshot, deleteSnapshot, loading, error } =
   usePortfolio();
+const { confirmAction, notify } = useUi();
 
 const snapDate = ref('');
 const busy = ref(false);
@@ -30,20 +32,42 @@ async function saveSnapshot() {
   busy.value = true;
   try {
     await addSnapshot(snapDate.value || undefined);
+    notify({
+      tone: 'success',
+      message: `${snapDate.value || '오늘'} 기준 스냅샷을 저장했습니다.`,
+    });
   } catch (e) {
-    alert(e.message || '저장 실패');
+    notify({
+      tone: 'error',
+      message: e.message || '스냅샷 저장에 실패했습니다.',
+    });
   } finally {
     busy.value = false;
   }
 }
 
 async function remove(date) {
-  if (!confirm(`${date} 스냅샷을 삭제할까요?`)) return;
+  const ok = await confirmAction({
+    title: '스냅샷 삭제',
+    message: `${date} 기록을 삭제할까요? 삭제하면 전일 대비 계산에서도 제외됩니다.`,
+    confirmLabel: '삭제',
+    cancelLabel: '취소',
+    tone: 'danger',
+  });
+  if (!ok) return;
+
   busy.value = true;
   try {
     await deleteSnapshot(date);
-  } catch {
-    alert('삭제 실패');
+    notify({
+      tone: 'success',
+      message: `${date} 스냅샷을 삭제했습니다.`,
+    });
+  } catch (e) {
+    notify({
+      tone: 'error',
+      message: e.message || '스냅샷 삭제에 실패했습니다.',
+    });
   } finally {
     busy.value = false;
   }
@@ -60,15 +84,15 @@ function breakdownLine(by) {
     <div class="container">
       <h1 class="page-title">일별 기록</h1>
       <p class="page-lead">
-        특정 일자의 총 자산(현재 입력된 보유 자산 합계)을 스냅샷으로 남깁니다. 하루에 한 번 기록해
-        두면 대시보드에서 전일 대비 변동을 볼 수 있습니다.
+        특정 날짜의 총 자산을 하루 마감값처럼 고정 저장하는 기능입니다. 입력된 현재 보유 자산 합계를
+        날짜별로 남겨 두면, 대시보드에서 전일 대비 증감을 계산할 수 있습니다.
       </p>
 
       <p v-if="error" class="banner-error">{{ error }}</p>
 
       <section class="card">
         <h2 class="card-h">스냅샷 저장</h2>
-        <p class="hint">선택한 날짜의 합계가 이미 있으면 덮어씁니다.</p>
+        <p class="hint">선택한 날짜의 합계가 이미 있으면 덮어씁니다. 일별 자산 마감 기록 용도입니다.</p>
         <div class="row-form">
           <input v-model="snapDate" type="date" class="input" />
           <button

@@ -88,7 +88,7 @@ const donutGradient = computed(() => {
     <section class="band-soft">
       <div class="container">
         <h2 class="section-title">포트폴리오 비율</h2>
-        <p class="section-lead">예금 · 적금 · 주식 · 펀드 · 연금별 자산 비중입니다.</p>
+        <p class="section-lead">현재는 상품 분류 기준으로 예금 · 적금 · 주식 · 펀드 · 연금 비중을 보여줍니다.</p>
 
         <div v-if="loading" class="muted">불러오는 중…</div>
         <div v-else class="grid-cards">
