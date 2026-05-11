@@ -1,0 +1,15 @@
+# SimpleStock — 개인 자산 추적
+# 사용: docker compose up -d
+# 접속: http://localhost:3000
+
+services:
+  app:
+    build: .
+    image: simple-stock-app
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PORT=3000
+    restart: unless-stopped

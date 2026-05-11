@@ -1,0 +1,19 @@
+{
+  "name": "simple-stock",
+  "version": "2.0.0",
+  "private": true,
+  "description": "개인 전용 자산 현황·일 단위 변동 추적",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "cd frontend && npm ci && npm run build",
+    "install:all": "npm install && cd frontend && npm install"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
