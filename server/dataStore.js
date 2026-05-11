@@ -83,6 +83,22 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
+function normalizeHoldingDetails(details) {
+  if (!details || typeof details !== 'object') return null;
+  return {
+    account: String(details.account || '').slice(0, 120),
+    currency: String(details.currency || '').slice(0, 16),
+    ticker: String(details.ticker || '').slice(0, 40),
+    quantity: Number.isFinite(Number(details.quantity)) ? Number(details.quantity) : null,
+    averagePrice: Number.isFinite(Number(details.averagePrice)) ? Number(details.averagePrice) : null,
+    currentPrice: Number.isFinite(Number(details.currentPrice)) ? Number(details.currentPrice) : null,
+    nativeAmount: Number.isFinite(Number(details.nativeAmount)) ? Number(details.nativeAmount) : null,
+    fxRate: Number.isFinite(Number(details.fxRate)) ? Number(details.fxRate) : null,
+    summary: String(details.summary || '').slice(0, 240),
+    orders: Array.isArray(details.orders) ? details.orders.map((item) => String(item || '').slice(0, 160)).filter(Boolean).slice(0, 6) : [],
+  };
+}
+
 function normalizePortfolio(data) {
   const portfolio = data && typeof data === 'object' ? data : createDefaultPortfolio();
   if (!Array.isArray(portfolio.holdings)) portfolio.holdings = [];
@@ -93,6 +109,7 @@ function normalizePortfolio(data) {
     name: String(item.name || '이름 없음').slice(0, 200),
     category: CATEGORIES.includes(item.category) ? item.category : 'deposit',
     amount: Math.max(0, Math.round(Number(item.amount) || 0)),
+    details: normalizeHoldingDetails(item.details),
   }));
 
   portfolio.snapshots = portfolio.snapshots

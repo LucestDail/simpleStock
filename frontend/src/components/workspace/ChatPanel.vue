@@ -76,7 +76,6 @@ async function handleCreateThread() {
         panelPatches: [
           { id: 'chat', column: 'center', span: 'full', priority: 20, visible: true },
         ],
-        openDrawer: { type: 'threadDetail', entityId: thread.id, title: thread.title },
         reason: '새 대화를 시작해 채팅 패널을 확장합니다.',
       },
       'local-action'
@@ -97,7 +96,6 @@ async function activateThread(thread) {
       focusMode: 'chat',
       highlightPanelIds: ['chat', 'activity'],
       panelPatches: [],
-      openDrawer: { type: 'threadDetail', entityId: thread.id, title: thread.title },
       reason: '활성 스레드에 맞춰 채팅 컨텍스트를 전면에 둡니다.',
     },
     'local-action'

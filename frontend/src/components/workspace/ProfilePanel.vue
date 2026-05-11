@@ -48,8 +48,8 @@ const { openDrawer } = useWorkspace();
     </div>
 
     <div class="summary-box">
-      <strong>AI 요약</strong>
-      <p>{{ profile.aiProfile?.summary || '아직 추론된 프로필 요약이 없습니다.' }}</p>
+      <strong>{{ profile.aiProfile?.summary ? 'AI 요약' : '운용 메모' }}</strong>
+      <p>{{ profile.aiProfile?.summary || profile.userProfile?.notes || '아직 추론된 프로필 요약이 없습니다.' }}</p>
     </div>
 
     <div class="chip-row">

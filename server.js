@@ -94,11 +94,28 @@ function sanitizeHoldings(holdings) {
     let id = holding.id ? String(holding.id) : crypto.randomUUID();
     if (seen.has(id)) id = crypto.randomUUID();
     seen.add(id);
+    const details = holding.details && typeof holding.details === 'object'
+      ? {
+          account: String(holding.details.account || '').slice(0, 120),
+          currency: String(holding.details.currency || '').slice(0, 16),
+          ticker: String(holding.details.ticker || '').slice(0, 40),
+          quantity: Number.isFinite(Number(holding.details.quantity)) ? Number(holding.details.quantity) : null,
+          averagePrice: Number.isFinite(Number(holding.details.averagePrice)) ? Number(holding.details.averagePrice) : null,
+          currentPrice: Number.isFinite(Number(holding.details.currentPrice)) ? Number(holding.details.currentPrice) : null,
+          nativeAmount: Number.isFinite(Number(holding.details.nativeAmount)) ? Number(holding.details.nativeAmount) : null,
+          fxRate: Number.isFinite(Number(holding.details.fxRate)) ? Number(holding.details.fxRate) : null,
+          summary: String(holding.details.summary || '').slice(0, 240),
+          orders: Array.isArray(holding.details.orders)
+            ? holding.details.orders.map((item) => String(item || '').slice(0, 160)).filter(Boolean).slice(0, 6)
+            : [],
+        }
+      : null;
     return {
       id,
       name: String(holding.name || '이름 없음').slice(0, 200),
       category: CATEGORIES.includes(holding.category) ? holding.category : 'deposit',
       amount: Math.max(0, Math.round(Number(holding.amount) || 0)),
+      details,
     };
   });
 }

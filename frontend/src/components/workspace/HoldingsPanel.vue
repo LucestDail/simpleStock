@@ -39,6 +39,21 @@ const selectedCategoryLabel = computed(
   () => CATEGORIES.find((item) => item.id === selectedCategoryId.value)?.label || '전체 자산'
 );
 
+function formatHoldingMeta(holding) {
+  const details = holding.details || {};
+  return (
+    details.summary ||
+    [
+      details.account,
+      details.ticker,
+      Number.isFinite(Number(details.quantity)) ? `${details.quantity}주` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ') ||
+    CATEGORIES.find((item) => item.id === holding.category)?.label
+  );
+}
+
 watch(
   selectedCategoryId,
   (categoryId) => {
@@ -255,7 +270,7 @@ function inspectHolding(target) {
       <article v-for="holding in filteredHoldings" :key="holding.id" class="holding-row">
         <button type="button" class="holding-main" @click="inspectHolding(holding)">
           <strong>{{ holding.name }}</strong>
-          <span>{{ CATEGORIES.find((item) => item.id === holding.category)?.label }}</span>
+          <span>{{ formatHoldingMeta(holding) }}</span>
         </button>
         <strong class="mono-num">{{ formatKRW(holding.amount) }}</strong>
         <div class="row-actions">

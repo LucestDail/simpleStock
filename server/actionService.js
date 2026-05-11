@@ -21,6 +21,22 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function normalizeHoldingDetails(details) {
+  if (!details || typeof details !== 'object') return null;
+  return {
+    account: normalizeText(details.account),
+    currency: normalizeText(details.currency),
+    ticker: normalizeText(details.ticker),
+    quantity: Number.isFinite(Number(details.quantity)) ? Number(details.quantity) : null,
+    averagePrice: Number.isFinite(Number(details.averagePrice)) ? Number(details.averagePrice) : null,
+    currentPrice: Number.isFinite(Number(details.currentPrice)) ? Number(details.currentPrice) : null,
+    nativeAmount: Number.isFinite(Number(details.nativeAmount)) ? Number(details.nativeAmount) : null,
+    fxRate: Number.isFinite(Number(details.fxRate)) ? Number(details.fxRate) : null,
+    summary: normalizeText(details.summary),
+    orders: Array.isArray(details.orders) ? details.orders.map(normalizeText).filter(Boolean).slice(0, 6) : [],
+  };
+}
+
 function findHoldingIndex(holdings, name, category) {
   const targetName = normalizeText(name).toLowerCase();
   const targetCategory = normalizeText(category);
@@ -60,6 +76,7 @@ async function applyConversationActions(actions = []) {
         const category = CATEGORIES.includes(payload.category) ? payload.category : 'deposit';
         const amount = Math.max(0, Math.round(Number(payload.amount) || 0));
         const mode = payload.mode === 'delta' ? 'delta' : 'set';
+        const details = normalizeHoldingDetails(payload.details);
         if (!name) {
           actionResults.push({ type, status: 'ignored', message: '자산 이름이 없어 반영하지 않았습니다.' });
           continue;
@@ -70,6 +87,7 @@ async function applyConversationActions(actions = []) {
           const current = store.portfolio.holdings[index];
           current.amount = mode === 'delta' ? Math.max(0, current.amount + amount) : amount;
           current.category = category;
+          current.details = details || current.details || null;
           actionResults.push({
             type,
             status: 'applied',
@@ -81,6 +99,7 @@ async function applyConversationActions(actions = []) {
             name,
             category,
             amount,
+            details,
           });
           actionResults.push({
             type,

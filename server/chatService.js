@@ -3,6 +3,7 @@ const { loadStore, mutateStore } = require('./dataStore');
 const { buildConversationContext, formatMessagesForPrompt, getThreadMessages } = require('./contextBuilder');
 const { isAiConfigured, runConversationGraph, summarizeThread, inferAiProfile } = require('./aiService');
 const { applyConversationActions } = require('./actionService');
+const { buildStructuredImportPlan } = require('./structuredImportService');
 const { logInfo, logError } = require('./logger');
 
 function sanitizeMessage(content) {
@@ -20,6 +21,29 @@ function getThreadIndex(threads, threadId) {
 
 function sortThreads(threads) {
   return [...threads].sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+}
+
+function isInvalidApiKeyError(error) {
+  const message = String(error?.message || '');
+  return /API_KEY_INVALID|API key not valid/i.test(message);
+}
+
+async function persistAssistantResponse(threadId, assistantMessage) {
+  return mutateStore((store) => {
+    const thread = store.chat.threads.find((item) => item.id === threadId);
+    const messages = Array.isArray(store.chat.messagesByThread[threadId])
+      ? store.chat.messagesByThread[threadId]
+      : [];
+    messages.push(assistantMessage);
+    store.chat.messagesByThread[threadId] = messages;
+    thread.messageCount = messages.length;
+    thread.updatedAt = assistantMessage.createdAt;
+    return {
+      thread,
+      messages,
+      assistantMessage,
+    };
+  });
 }
 
 function listThreads() {
@@ -258,62 +282,107 @@ async function sendMessage(threadId, content) {
     existingMessageCount: context.messages.length,
   });
 
-  const aiResult = await runConversationGraph({
-    userInput: cleanContent,
-    threadId,
-    context,
-  });
+  let aiResult = null;
+  let actionState = null;
+  let assistantMessage = null;
+  let skipMaintenance = false;
 
-  const actionState = await applyConversationActions(aiResult.actions || []);
-  logInfo('chat.actions.applied', {
-    threadId,
-    actionCount: Array.isArray(aiResult.actions) ? aiResult.actions.length : 0,
-    appliedCount: actionState.actionResults.filter((item) => item.status === 'applied').length,
-    ignoredCount: actionState.actionResults.filter((item) => item.status !== 'applied').length,
-    results: actionState.actionResults,
-  });
-  if (actionState.changedProfile) {
-    refreshAiProfileSummary().catch((error) => {
-      logError('chat.profile_refresh_after_action.failed', error, {
+  try {
+    aiResult = await runConversationGraph({
+      userInput: cleanContent,
+      threadId,
+      context,
+    });
+
+    actionState = await applyConversationActions(aiResult.actions || []);
+    logInfo('chat.actions.applied', {
+      threadId,
+      actionCount: Array.isArray(aiResult.actions) ? aiResult.actions.length : 0,
+      appliedCount: actionState.actionResults.filter((item) => item.status === 'applied').length,
+      ignoredCount: actionState.actionResults.filter((item) => item.status !== 'applied').length,
+      results: actionState.actionResults,
+    });
+    if (actionState.changedProfile) {
+      refreshAiProfileSummary().catch((error) => {
+        logError('chat.profile_refresh_after_action.failed', error, {
+          threadId,
+        });
+      });
+    }
+
+    assistantMessage = {
+      id: randomUUID(),
+      role: 'assistant',
+      content: aiResult.answer,
+      createdAt: new Date().toISOString(),
+      model: 'gemini',
+      metadata: {
+        citations: aiResult.citations || [],
+        supervisorPlan: aiResult.supervisorPlan || null,
+        specialistOutputs: aiResult.specialistOutputs || [],
+        actionResults: actionState.actionResults || [],
+        workspacePatch: aiResult.workspacePatch || null,
+        focusEntities: aiResult.workspacePatch?.openDrawer?.entityId
+          ? [aiResult.workspacePatch.openDrawer.entityId]
+          : [],
+        reason: aiResult.workspacePatch?.reason || '',
+      },
+    };
+  } catch (error) {
+    const structuredImport = buildStructuredImportPlan(cleanContent);
+    if (structuredImport) {
+      actionState = await applyConversationActions(structuredImport.actions || []);
+      assistantMessage = {
+        id: randomUUID(),
+        role: 'assistant',
+        content: structuredImport.answer,
+        createdAt: new Date().toISOString(),
+        model: 'fallback-import',
+        metadata: {
+          citations: [],
+          supervisorPlan: null,
+          specialistOutputs: [],
+          actionResults: actionState.actionResults || [],
+          workspacePatch: structuredImport.workspacePatch || null,
+          focusEntities: [],
+          reason: structuredImport.workspacePatch?.reason || '',
+          fallbackImport: true,
+        },
+      };
+      skipMaintenance = true;
+      logInfo('chat.message.fallback_import', {
+        threadId,
+        actionCount: Array.isArray(structuredImport.actions) ? structuredImport.actions.length : 0,
+        appliedCount: actionState.actionResults.filter((item) => item.status === 'applied').length,
+      });
+    } else if (isInvalidApiKeyError(error)) {
+      assistantMessage = {
+        id: randomUUID(),
+        role: 'assistant',
+        content: '현재 Gemini API 키가 유효하지 않아 AI 응답을 생성하지 못했습니다. 키를 점검한 뒤 다시 시도해 주세요.',
+        createdAt: new Date().toISOString(),
+        model: 'system',
+        metadata: {
+          citations: [],
+          supervisorPlan: null,
+          specialistOutputs: [],
+          actionResults: [],
+          workspacePatch: null,
+          focusEntities: [],
+          reason: 'AI 키 오류로 응답이 중단되었습니다.',
+          aiError: 'invalid_api_key',
+        },
+      };
+      skipMaintenance = true;
+      logInfo('chat.message.ai_key_invalid', {
         threadId,
       });
-    });
+    } else {
+      throw error;
+    }
   }
 
-  const assistantMessage = {
-    id: randomUUID(),
-    role: 'assistant',
-    content: aiResult.answer,
-    createdAt: new Date().toISOString(),
-    model: 'gemini',
-    metadata: {
-      citations: aiResult.citations || [],
-      supervisorPlan: aiResult.supervisorPlan || null,
-      specialistOutputs: aiResult.specialistOutputs || [],
-      actionResults: actionState.actionResults || [],
-      workspacePatch: aiResult.workspacePatch || null,
-      focusEntities: aiResult.workspacePatch?.openDrawer?.entityId
-        ? [aiResult.workspacePatch.openDrawer.entityId]
-        : [],
-      reason: aiResult.workspacePatch?.reason || '',
-    },
-  };
-
-  const response = await mutateStore((store) => {
-    const thread = store.chat.threads.find((item) => item.id === threadId);
-    const messages = Array.isArray(store.chat.messagesByThread[threadId])
-      ? store.chat.messagesByThread[threadId]
-      : [];
-    messages.push(assistantMessage);
-    store.chat.messagesByThread[threadId] = messages;
-    thread.messageCount = messages.length;
-    thread.updatedAt = assistantMessage.createdAt;
-    return {
-      thread,
-      messages,
-      assistantMessage,
-    };
-  });
+  const response = await persistAssistantResponse(threadId, assistantMessage);
 
   logInfo('chat.message.finish', {
     threadId,
@@ -322,7 +391,9 @@ async function sendMessage(threadId, content) {
     focusMode: assistantMessage.metadata.workspacePatch?.focusMode || '',
     messageCount: response.messages.length,
   });
-  queueConversationMaintenance(threadId);
+  if (!skipMaintenance) {
+    queueConversationMaintenance(threadId);
+  }
   return response;
 }
 

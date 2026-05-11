@@ -167,6 +167,29 @@ async function submitSettings() {
               <strong>{{ activeHolding.name }}</strong>
               <p>분류: {{ CATEGORIES.find((item) => item.id === activeHolding.category)?.label }}</p>
               <p class="mono-num">{{ formatKRW(activeHolding.amount) }}</p>
+              <div v-if="activeHolding.details" class="detail-grid">
+                <div v-if="activeHolding.details.account" class="detail-card">
+                  <span>계좌</span>
+                  <strong>{{ activeHolding.details.account }}</strong>
+                </div>
+                <div v-if="activeHolding.details.ticker" class="detail-card">
+                  <span>티커</span>
+                  <strong>{{ activeHolding.details.ticker }}</strong>
+                </div>
+                <div v-if="activeHolding.details.quantity != null" class="detail-card">
+                  <span>수량</span>
+                  <strong>{{ activeHolding.details.quantity }}주</strong>
+                </div>
+                <div v-if="activeHolding.details.currentPrice != null" class="detail-card">
+                  <span>현재가</span>
+                  <strong>
+                    {{ activeHolding.details.currency === 'USD' ? `$${activeHolding.details.currentPrice}` : `${activeHolding.details.currentPrice.toLocaleString('ko-KR')}원` }}
+                  </strong>
+                </div>
+              </div>
+              <ul v-if="activeHolding.details?.orders?.length" class="simple-list">
+                <li v-for="item in activeHolding.details.orders" :key="item">{{ item }}</li>
+              </ul>
             </div>
             <div v-else-if="categoryDetail" class="detail-block">
               <strong>{{ categoryDetail.category.label }}</strong>
