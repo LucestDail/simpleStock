@@ -10,7 +10,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY server.js ./
-COPY --from=builder /app/frontend/dist ./dist
+COPY --from=builder /app/dist ./dist
 RUN mkdir -p data
 ENV NODE_ENV=production
 EXPOSE 3000
