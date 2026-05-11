@@ -84,11 +84,11 @@ function formatTime(value) {
 }
 
 .status-item {
-  min-height: 58px;
+  min-height: 50px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
   background: rgba(255, 255, 255, 0.02);
-  padding: 10px 12px;
+  padding: 8px 10px;
   display: grid;
   gap: 4px;
   overflow: hidden;
@@ -108,7 +108,7 @@ function formatTime(value) {
 
 strong {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;

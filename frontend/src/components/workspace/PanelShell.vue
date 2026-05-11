@@ -56,7 +56,7 @@ const props = defineProps({
   min-height: 0;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-xl);
-  background: rgba(15, 23, 36, 0.9);
+  background: rgba(6, 8, 12, 0.94);
   box-shadow: var(--shadow-soft);
   display: flex;
   flex-direction: column;
@@ -70,9 +70,9 @@ const props = defineProps({
 }
 
 .panel-shell--highlighted {
-  border-color: rgba(0, 82, 255, 0.4);
+  border-color: rgba(77, 116, 255, 0.32);
   box-shadow:
-    0 16px 30px rgba(0, 82, 255, 0.14),
+    0 14px 26px rgba(77, 116, 255, 0.12),
     var(--shadow-soft);
   transform: translateY(-1px);
 }
@@ -83,23 +83,23 @@ const props = defineProps({
 }
 
 .panel-shell--sm {
-  flex: 0.72 1 0;
+  flex: 0.64 1 0;
 }
 
 .panel-shell--md {
-  flex: 0.95 1 0;
+  flex: 0.84 1 0;
 }
 
 .panel-shell--lg {
-  flex: 1.15 1 0;
+  flex: 1.02 1 0;
 }
 
 .panel-shell--xl {
-  flex: 1.45 1 0;
+  flex: 1.2 1 0;
 }
 
 .panel-shell--full {
-  flex: 1.8 1 0;
+  flex: 1.42 1 0;
 }
 
 .panel-shell__head {
@@ -121,7 +121,7 @@ const props = defineProps({
 
 .panel-shell__title {
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-ink);
   letter-spacing: -0.02em;

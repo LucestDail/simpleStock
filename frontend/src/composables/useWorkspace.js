@@ -57,7 +57,7 @@ const BASE_PANELS = [
   },
   {
     id: 'snapshots',
-    title: '스냅샷',
+    title: '예정 작업',
     column: 'right',
     span: 'sm',
     priority: 20,
@@ -328,6 +328,16 @@ function handleAssistantMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object') return;
   if (metadata.workspacePatch) {
     applyWorkspacePatch(metadata.workspacePatch, 'assistant');
+  }
+  for (const item of metadata.actionResults || []) {
+    if (item?.status !== 'applied') continue;
+    recordActivity({
+      type: 'assistant-action',
+      title: '대화 액션 반영',
+      description: item.message || '자연어 요청이 데이터에 반영되었습니다.',
+      tone: 'info',
+      metadata: item,
+    });
   }
   recordActivity({
     type: 'assistant',

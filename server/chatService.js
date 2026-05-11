@@ -2,6 +2,7 @@ const { randomUUID } = require('crypto');
 const { loadStore, mutateStore } = require('./dataStore');
 const { buildConversationContext, formatMessagesForPrompt, getThreadMessages } = require('./contextBuilder');
 const { isAiConfigured, runConversationGraph, summarizeThread, inferAiProfile } = require('./aiService');
+const { applyConversationActions } = require('./actionService');
 
 function sanitizeMessage(content) {
   return String(content || '').replace(/\r\n/g, '\n').trim();
@@ -235,6 +236,13 @@ async function sendMessage(threadId, content) {
     context,
   });
 
+  const actionState = await applyConversationActions(aiResult.actions || []);
+  if (actionState.changedProfile) {
+    refreshAiProfileSummary().catch((error) => {
+      console.error('[CHAT] 프로필 액션 후 AI 프로필 갱신 실패:', error.message);
+    });
+  }
+
   const assistantMessage = {
     id: randomUUID(),
     role: 'assistant',
@@ -245,6 +253,7 @@ async function sendMessage(threadId, content) {
       citations: aiResult.citations || [],
       supervisorPlan: aiResult.supervisorPlan || null,
       specialistOutputs: aiResult.specialistOutputs || [],
+      actionResults: actionState.actionResults || [],
       workspacePatch: aiResult.workspacePatch || null,
       focusEntities: aiResult.workspacePatch?.openDrawer?.entityId
         ? [aiResult.workspacePatch.openDrawer.entityId]

@@ -27,6 +27,7 @@ const system = ref({
   },
   orchestrationNotes: '',
   dataFiles: {},
+  scheduledTasks: [],
 });
 const busyState = ref({
   fetchPortfolio: false,

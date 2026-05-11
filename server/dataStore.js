@@ -36,6 +36,7 @@ function createDefaultMemory() {
     threadSummaries: [],
     longTermMemories: [],
     managerReports: [],
+    scheduledTasks: [],
   };
 }
 
@@ -159,6 +160,7 @@ function normalizeMemory(data) {
   if (!Array.isArray(memory.threadSummaries)) memory.threadSummaries = [];
   if (!Array.isArray(memory.longTermMemories)) memory.longTermMemories = [];
   if (!Array.isArray(memory.managerReports)) memory.managerReports = [];
+  if (!Array.isArray(memory.scheduledTasks)) memory.scheduledTasks = [];
 
   memory.threadSummaries = memory.threadSummaries
     .filter((item) => item && item.id && item.threadId)
@@ -211,6 +213,28 @@ function normalizeMemory(data) {
       profileUpdates: Array.isArray(item.profileUpdates) ? item.profileUpdates.map(String) : [],
     }))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+  memory.scheduledTasks = memory.scheduledTasks
+    .filter((item) => item && item.id && item.title)
+    .map((item) => ({
+      id: String(item.id),
+      title: String(item.title || '').slice(0, 120),
+      description: String(item.description || '').slice(0, 400),
+      taskType: String(item.taskType || 'custom'),
+      cronExpression: String(item.cronExpression || ''),
+      timezone: String(item.timezone || 'Asia/Seoul'),
+      nextRunLabel: String(item.nextRunLabel || ''),
+      prompt: String(item.prompt || '').slice(0, 500),
+      indicatorName: String(item.indicatorName || '').slice(0, 120),
+      enabled: Boolean(item.enabled),
+      createdAt: item.createdAt || null,
+      updatedAt: item.updatedAt || null,
+      lastRunAt: item.lastRunAt || null,
+      lastRunStatus: String(item.lastRunStatus || ''),
+      lastRunMessage: String(item.lastRunMessage || '').slice(0, 300),
+      source: String(item.source || 'manual'),
+    }))
+    .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
 
   return memory;
 }

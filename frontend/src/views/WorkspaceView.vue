@@ -103,14 +103,14 @@ onMounted(async () => {
 <style scoped>
 .workspace {
   height: 100dvh;
-  padding: var(--space-md);
+  padding: var(--space-sm);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: var(--space-md);
+  gap: var(--space-sm);
   overflow: hidden;
   background:
-    radial-gradient(circle at top left, rgba(0, 82, 255, 0.14), transparent 32%),
-    radial-gradient(circle at right top, rgba(35, 66, 120, 0.18), transparent 22%),
+    radial-gradient(circle at top left, rgba(77, 116, 255, 0.08), transparent 24%),
+    radial-gradient(circle at right top, rgba(255, 255, 255, 0.02), transparent 18%),
     var(--color-canvas);
 }
 
@@ -129,7 +129,7 @@ onMounted(async () => {
 .workspace-kicker {
   margin: 0 0 4px;
   color: var(--color-primary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -138,7 +138,7 @@ onMounted(async () => {
 .workspace-title {
   margin: 0;
   color: var(--color-ink);
-  font-size: clamp(18px, 1.9vw, 24px);
+  font-size: clamp(16px, 1.4vw, 20px);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.12;
@@ -146,13 +146,13 @@ onMounted(async () => {
 
 .workspace-settings-button {
   flex: 0 0 auto;
-  height: 36px;
-  padding: 0 14px;
+  height: 32px;
+  padding: 0 12px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-pill);
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -160,28 +160,28 @@ onMounted(async () => {
 .workspace-main {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, 0.86fr) minmax(420px, 1.55fr) minmax(300px, 1fr);
-  gap: var(--space-md);
+  grid-template-columns: minmax(240px, 3fr) minmax(320px, 4fr) minmax(240px, 3fr);
+  gap: var(--space-sm);
   align-items: stretch;
   overflow: hidden;
   transition: grid-template-columns 0.22s ease;
 }
 
 .workspace-main--balanced {
-  grid-template-columns: minmax(280px, 0.86fr) minmax(420px, 1.55fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(240px, 3fr) minmax(320px, 4fr) minmax(240px, 3fr);
 }
 
 .workspace-main--rebalance,
 .workspace-main--manager {
-  grid-template-columns: minmax(270px, 0.82fr) minmax(440px, 1.68fr) minmax(320px, 1.04fr);
+  grid-template-columns: minmax(240px, 3fr) minmax(340px, 4fr) minmax(250px, 3fr);
 }
 
 .workspace-main--research {
-  grid-template-columns: minmax(260px, 0.8fr) minmax(440px, 1.62fr) minmax(330px, 1.08fr);
+  grid-template-columns: minmax(240px, 3fr) minmax(340px, 4fr) minmax(250px, 3fr);
 }
 
 .workspace-main--chat {
-  grid-template-columns: minmax(260px, 0.78fr) minmax(460px, 1.78fr) minmax(320px, 0.98fr);
+  grid-template-columns: minmax(240px, 3fr) minmax(340px, 4fr) minmax(250px, 3fr);
 }
 
 .workspace-column {
@@ -203,7 +203,7 @@ onMounted(async () => {
   .workspace-main--manager,
   .workspace-main--research,
   .workspace-main--chat {
-    grid-template-columns: minmax(220px, 0.8fr) minmax(340px, 1.5fr) minmax(240px, 0.9fr);
+    grid-template-columns: minmax(200px, 3fr) minmax(280px, 4fr) minmax(200px, 3fr);
   }
 }
 </style>

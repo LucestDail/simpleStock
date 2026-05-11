@@ -1,8 +1,7 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import PanelShell from './PanelShell.vue';
-import { CATEGORIES, formatKRW, usePortfolio } from '../../composables/usePortfolio';
-import { useUi } from '../../composables/useUi';
+import { usePortfolio } from '../../composables/usePortfolio';
 import { useWorkspace } from '../../composables/useWorkspace';
 
 const props = defineProps({
@@ -12,211 +11,85 @@ const props = defineProps({
   },
 });
 
-const { sortedSnapshots, addSnapshot, deleteSnapshot } = usePortfolio();
-const { notify, confirmAction } = useUi();
-const { applyWorkspacePatch, recordActivity } = useWorkspace();
-const busy = ref(false);
-const snapDate = ref(new Date().toISOString().slice(0, 10));
-
-const rows = computed(() => {
-  const list = [...sortedSnapshots.value].sort((a, b) => a.date.localeCompare(b.date));
-  return list
-    .map((item, index) => {
-      const prev = index > 0 ? list[index - 1] : null;
-      const delta = prev ? item.total - prev.total : null;
-      const pct =
-        prev && prev.total > 0 ? Math.round(((item.total - prev.total) / prev.total) * 1000) / 10 : null;
-      return {
-        ...item,
-        delta,
-        pct,
-      };
-    })
-    .reverse();
-});
-
-function breakdownLine(byCategory) {
-  return CATEGORIES.map((category) => `${category.label} ${formatKRW(byCategory?.[category.id] || 0)}`).join(' · ');
-}
-
-async function saveSnapshot() {
-  busy.value = true;
-  try {
-    await addSnapshot(snapDate.value || undefined);
-    notify({
-      tone: 'success',
-      message: `${snapDate.value || '오늘'} 스냅샷을 저장했습니다.`,
-    });
-    recordActivity({
-      type: 'snapshot',
-      title: '스냅샷 저장',
-      description: snapDate.value || '오늘',
-    });
-    applyWorkspacePatch(
-      {
-        focusMode: 'balanced',
-        highlightPanelIds: ['snapshots', 'overview', 'activity'],
-        panelPatches: [],
-        openDrawer: { type: 'system', entityId: '', title: '스냅샷 반영' },
-        reason: '새 스냅샷이 저장되어 변동 패널을 강조합니다.',
-      },
-      'local-action'
-    );
-  } catch (error) {
-    notify({
-      tone: 'error',
-      message: error.message || '스냅샷 저장 실패',
-    });
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function removeSnapshot(date) {
-  const ok = await confirmAction({
-    title: '스냅샷 삭제',
-    message: `${date} 기록을 삭제할까요?`,
-    confirmLabel: '삭제',
-    cancelLabel: '취소',
-    tone: 'danger',
-  });
-  if (!ok) return;
-
-  busy.value = true;
-  try {
-    await deleteSnapshot(date);
-    notify({
-      tone: 'success',
-      message: `${date} 스냅샷을 삭제했습니다.`,
-    });
-    recordActivity({
-      type: 'snapshot',
-      title: '스냅샷 삭제',
-      description: date,
-      tone: 'warning',
-    });
-    applyWorkspacePatch(
-      {
-        focusMode: 'balanced',
-        highlightPanelIds: ['snapshots', 'activity'],
-        panelPatches: [],
-        openDrawer: { type: 'system', entityId: '', title: '스냅샷 상태' },
-        reason: '스냅샷 삭제 후 기록 패널을 강조합니다.',
-      },
-      'local-action'
-    );
-  } catch (error) {
-    notify({
-      tone: 'error',
-      message: error.message || '스냅샷 삭제 실패',
-    });
-  } finally {
-    busy.value = false;
-  }
-}
+const { system, snapshots } = usePortfolio();
+const { openDrawer } = useWorkspace();
+const scheduledTasks = computed(() => system.value.scheduledTasks || []);
+const fallbackTask = computed(() => ({
+  id: 'default-manager-brief',
+  title: '기본 Quant Manager 브리핑',
+  description: '시스템 기본 브리핑 스케줄입니다.',
+  cronExpression: system.value.ai?.dailyCron || '-',
+  nextRunLabel: system.value.ai?.dailyCron ? `cron ${system.value.ai.dailyCron}` : '미설정',
+  taskType: 'managerBrief',
+  enabled: Boolean(system.value.ai?.dailyCron),
+}));
 </script>
 
 <template>
   <PanelShell
-    title="스냅샷"
-    subtitle="history"
+    title="예정 작업"
+    subtitle="schedule"
     :span="panel.span"
     :highlighted="panel.highlighted"
-    :loading="busy"
   >
-    <div class="toolbar">
-      <input v-model="snapDate" class="date-input" type="date" />
-      <button type="button" class="btn-primary" :disabled="busy" @click="saveSnapshot">저장</button>
-    </div>
+    <template #actions>
+      <button type="button" class="btn-secondary" @click="openDrawer('settings', null, '설정')">설정</button>
+    </template>
 
-    <div v-if="!rows.length" class="empty-box">스냅샷이 없습니다.</div>
-    <div v-else class="snapshot-list">
-      <article v-for="row in rows.slice(0, 8)" :key="row.date" class="snapshot-row">
+    <div class="snapshot-list">
+      <article
+        v-for="task in (scheduledTasks.length ? scheduledTasks : [fallbackTask]).slice(0, 6)"
+        :key="task.id"
+        class="snapshot-row"
+      >
         <div class="snapshot-main">
-          <strong class="mono-num">{{ row.date }}</strong>
-          <span>{{ breakdownLine(row.byCategory) }}</span>
+          <strong>{{ task.title }}</strong>
+          <span>{{ task.description || '자연어 대화로 반복 작업을 등록할 수 있습니다.' }}</span>
         </div>
         <div class="snapshot-metrics">
-          <strong class="mono-num">{{ formatKRW(row.total) }}</strong>
-          <span
-            v-if="row.delta != null"
-            class="mono-num delta"
-            :class="row.delta >= 0 ? 'up' : 'down'"
-          >
-            {{ row.delta >= 0 ? '+' : '' }}{{ formatKRW(row.delta) }}
+          <strong>{{ task.nextRunLabel || task.cronExpression || '대기' }}</strong>
+          <span class="mono-num delta" :class="task.enabled ? 'up' : 'down'">
+            {{ task.enabled ? '활성' : '비활성' }}
           </span>
-          <span v-else class="mono-num delta">—</span>
         </div>
-        <button type="button" class="btn-text danger" :disabled="busy" @click="removeSnapshot(row.date)">
-          삭제
-        </button>
       </article>
+    </div>
+
+    <div class="snapshot-note">
+      스냅샷은 내부적으로 일별 자산 변동 기준선을 보존하기 위한 기록이며, 메인 화면에서는 예정 작업 중심으로 노출합니다.
+      현재 저장된 스냅샷 {{ snapshots.length }}건
     </div>
   </PanelShell>
 </template>
 
 <style scoped>
-.toolbar {
-  display: flex;
-  gap: var(--space-sm);
-}
-
-.date-input {
-  flex: 1;
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--rounded-md);
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--color-ink);
-}
-
-.date-input:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.08);
-}
-
-.btn-primary {
-  height: 34px;
+.btn-secondary {
+  height: 30px;
   border: none;
   border-radius: var(--rounded-pill);
   padding: 0 12px;
-  background: var(--color-primary);
-  color: var(--color-on-primary);
+  background: var(--color-surface-strong);
+  color: var(--color-ink);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
 
-.btn-primary:disabled {
-  background: var(--color-primary-disabled);
-  cursor: not-allowed;
-}
-
-.empty-box {
-  border: 1px dashed var(--color-hairline);
-  border-radius: var(--rounded-lg);
-  padding: 12px;
-  color: var(--color-muted);
-  font-size: 12px;
-}
-
 .snapshot-list {
   display: grid;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
   min-height: 0;
   overflow: auto;
 }
 
 .snapshot-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-sm);
   align-items: center;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: rgba(255, 255, 255, 0.02);
 }
 
@@ -227,11 +100,12 @@ async function removeSnapshot(date) {
 
 .snapshot-main strong {
   color: var(--color-ink);
+  font-size: 12px;
 }
 
 .snapshot-main span {
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.35;
 }
 
@@ -243,6 +117,7 @@ async function removeSnapshot(date) {
 
 .snapshot-metrics strong {
   color: var(--color-ink);
+  font-size: 11px;
 }
 
 .delta.up {
@@ -253,21 +128,16 @@ async function removeSnapshot(date) {
   color: var(--color-semantic-down);
 }
 
-.btn-text {
-  border: none;
-  background: transparent;
-  color: var(--color-primary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.btn-text.danger {
-  color: var(--color-semantic-down);
+.snapshot-note {
+  padding: 8px 10px;
+  border-radius: var(--rounded-lg);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--color-muted);
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 @media (max-width: 720px) {
-  .toolbar,
   .snapshot-row {
     grid-template-columns: 1fr;
   }

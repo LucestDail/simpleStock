@@ -1,4 +1,5 @@
 <script setup>
+import { ref } from 'vue';
 import PanelShell from './PanelShell.vue';
 import { useWorkspace } from '../../composables/useWorkspace';
 
@@ -10,12 +11,17 @@ const props = defineProps({
 });
 
 const { activityFeed } = useWorkspace();
+const expandedId = ref(null);
 
 function formatTime(value) {
   if (!value) return '';
   return new Intl.DateTimeFormat('ko-KR', {
     timeStyle: 'medium',
   }).format(new Date(value));
+}
+
+function toggleExpand(id) {
+  expandedId.value = expandedId.value === id ? null : id;
 }
 </script>
 
@@ -28,14 +34,21 @@ function formatTime(value) {
   >
     <div v-if="!activityFeed.length" class="empty-box">아직 기록된 활동이 없습니다.</div>
     <div v-else class="activity-list">
-      <article v-for="item in activityFeed.slice(0, 12)" :key="item.id" class="activity-row">
+      <button
+        v-for="item in activityFeed.slice(0, 12)"
+        :key="item.id"
+        type="button"
+        class="activity-row"
+        :class="{ 'activity-row--expanded': expandedId === item.id }"
+        @click="toggleExpand(item.id)"
+      >
         <div class="dot" :class="`dot--${item.tone}`" />
         <div class="activity-copy">
-          <strong>{{ item.title }}</strong>
-          <p>{{ item.description }}</p>
+          <strong>{{ item.title }} · {{ item.description }}</strong>
+          <p v-if="expandedId === item.id">{{ item.description }}</p>
         </div>
         <span class="mono-num time">{{ formatTime(item.createdAt) }}</span>
-      </article>
+      </button>
     </div>
   </PanelShell>
 </template>
@@ -57,14 +70,21 @@ function formatTime(value) {
 }
 
 .activity-row {
+  width: 100%;
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) auto;
   gap: var(--space-sm);
   align-items: start;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: rgba(255, 255, 255, 0.02);
+  text-align: left;
+  cursor: pointer;
+}
+
+.activity-row--expanded {
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .dot {
@@ -90,13 +110,19 @@ function formatTime(value) {
 
 .activity-copy strong {
   color: var(--color-ink);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .activity-copy p {
-  margin: 0;
+  margin: 2px 0 0;
   color: var(--color-body);
   line-height: 1.4;
-  font-size: 12px;
+  font-size: 11px;
+  white-space: pre-wrap;
 }
 
 .time {

@@ -105,7 +105,7 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 
 <style scoped>
 .btn-secondary {
-  height: 32px;
+  height: 30px;
   border: none;
   border-radius: var(--rounded-pill);
   padding: 0 12px;
@@ -126,7 +126,7 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 .insight-card {
   display: grid;
   gap: var(--space-sm);
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-radius: var(--rounded-lg);
   border: 1px solid var(--color-hairline);
   background: rgba(255, 255, 255, 0.02);
@@ -155,7 +155,7 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 
 .insight-head strong {
   color: var(--color-ink);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .insight-head span {
@@ -169,7 +169,7 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 .insight-summary {
   margin: 0;
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.45;
 }
 
@@ -182,7 +182,7 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 .metric-card {
   display: grid;
   gap: 4px;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border-radius: var(--rounded-md);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -194,7 +194,7 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 
 .metric-card strong {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.35;
 }
 
@@ -202,7 +202,7 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
   margin: 0;
   padding-left: 18px;
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.45;
 }
 </style>

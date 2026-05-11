@@ -46,6 +46,7 @@ function getSystemStatus() {
     aiConfigured: isAiConfigured(),
     ai: getAiSettings(),
     latestManagerReport: store.memory.managerReports[0] || null,
+    scheduledTasks: (store.memory.scheduledTasks || []).slice(0, 12),
   };
 }
 

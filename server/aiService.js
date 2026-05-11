@@ -46,6 +46,76 @@ const GENERATED_INSIGHT_SCHEMA = {
   required: ['id', 'title', 'summary', 'tone', 'metrics', 'bullets'],
 };
 
+const ACTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    type: {
+      type: 'string',
+      enum: ['upsertHolding', 'removeHolding', 'updateProfile', 'scheduleTask', 'cancelScheduledTask'],
+    },
+    rationale: {
+      type: 'string',
+    },
+    holding: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        category: {
+          type: 'string',
+          enum: ['deposit', 'installment', 'stock', 'fund', 'pension'],
+        },
+        amount: { type: 'number' },
+        mode: {
+          type: 'string',
+          enum: ['set', 'delta'],
+        },
+      },
+    },
+    profileChanges: {
+      type: 'object',
+      properties: {
+        displayName: { type: 'string' },
+        investorType: { type: 'string' },
+        investmentGoal: { type: 'string' },
+        riskTolerance: { type: 'string' },
+        timeHorizon: { type: 'string' },
+        liquidityNeeds: { type: 'string' },
+        responseStyle: { type: 'string' },
+        focusAreas: { type: 'string' },
+        notes: { type: 'string' },
+      },
+    },
+    scheduleTask: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        description: { type: 'string' },
+        taskType: {
+          type: 'string',
+          enum: ['managerBrief', 'marketReview', 'indicatorCheck', 'custom'],
+        },
+        cronExpression: { type: 'string' },
+        timezone: { type: 'string' },
+        nextRunLabel: { type: 'string' },
+        prompt: { type: 'string' },
+        indicatorName: { type: 'string' },
+        enabled: { type: 'boolean' },
+      },
+    },
+    cancelTarget: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        taskType: {
+          type: 'string',
+          enum: ['managerBrief', 'marketReview', 'indicatorCheck', 'custom'],
+        },
+      },
+    },
+  },
+  required: ['type', 'rationale'],
+};
+
 const WORKSPACE_PATCH_SCHEMA = {
   type: 'object',
   properties: {
@@ -162,8 +232,12 @@ const SUPERVISOR_SCHEMA = {
         required: ['id', 'agentType', 'title', 'objective', 'systemPrompt', 'needsSearch', 'searchQuery'],
       },
     },
+    actions: {
+      type: 'array',
+      items: ACTION_SCHEMA,
+    },
   },
-  required: ['personaLabel', 'personaSystemPrompt', 'synthesisInstructions', 'workspacePatch', 'tasks'],
+  required: ['personaLabel', 'personaSystemPrompt', 'synthesisInstructions', 'workspacePatch', 'tasks', 'actions'],
 };
 
 const THREAD_SUMMARY_SCHEMA = {
@@ -615,6 +689,7 @@ function buildFallbackPlan(userInput, context) {
     synthesisInstructions:
       '전문가 출력들을 종합해서 하나의 최종 답변으로 정리하되, 필요한 경우 오늘 할 일과 주의사항을 분리한다.',
     tasks,
+    actions: [],
     workspacePatch,
   };
 }
@@ -633,10 +708,14 @@ async function buildSupervisorPlan(userInput, context) {
         '전문화된 agent 는 고정된 집합이 아니라 이번 질의에 맞게 동적으로 구성한다.',
         '외부 조사가 필요한 경우 research task 를 포함하고 searchQuery 를 한국어 또는 영어 혼합으로 더 검색 친화적으로 재작성한다.',
         'task 는 portfolio, memory, manager, research 타입만 사용한다.',
+        '사용자 요청이 자산 입력/수정/삭제, 설정 변경, 반복 작업 예약/취소에 해당하면 actions 배열에 실제 변경 계획을 넣는다.',
+        '자산 입력은 holding 정보, 설정 변경은 profileChanges, 반복 작업은 scheduleTask, 취소는 cancelTarget에 담는다.',
+        '반복 작업은 가능하면 cronExpression, nextRunLabel, taskType 을 함께 채운다.',
         '추가로 workspacePatch 를 반환해 어떤 패널을 강조/확장/숨김/이동할지 제안한다.',
         'workspacePatch 안에는 generatedInsights 배열도 포함해 지금 턴에 보여줄 실시간 카드/통계/집계 패널 내용을 만든다.',
         'workspacePatch 는 허용된 panel id 와 제한된 focusMode/column/span 값만 사용한다.',
         'chat 패널은 primary 영역이므로 이를 전제로 나머지 패널을 재배치한다.',
+        '요청이 모호하면 actions 는 비워 둔다.',
         '반드시 JSON 으로만 답한다.',
       ].join('\n'),
       userPrompt: JSON.stringify(
@@ -745,12 +824,14 @@ async function synthesizeFinalAnswer({ userInput, context, plan, specialistOutpu
       plan.synthesisInstructions,
       '최종 답변은 한국어로 작성하고, 필요한 경우 짧은 섹션 제목을 사용한다.',
       '숫자/우선순위/리스크/후속 행동을 최대한 구조적으로 정리한다.',
+      'plannedActions 가 있으면 실제로 반영될 자산/설정/예약 변경 사항을 답변 안에 분명히 언급한다.',
     ].join('\n'),
     userPrompt: JSON.stringify(
       {
         userInput,
         context,
         specialistOutputs,
+        plannedActions: plan.actions || [],
       },
       null,
       2
@@ -831,6 +912,7 @@ async function runConversationGraph({ userInput, threadId, context }) {
     supervisorPlan: result.supervisorPlan,
     specialistOutputs: result.specialistOutputs,
     citations: result.citations || [],
+    actions: result.supervisorPlan?.actions || [],
     workspacePatch: result.supervisorPlan?.workspacePatch || null,
   };
 }

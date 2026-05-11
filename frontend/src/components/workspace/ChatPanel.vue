@@ -2,6 +2,8 @@
 import { computed, ref } from 'vue';
 import PanelShell from './PanelShell.vue';
 import { useChat } from '../../composables/useChat';
+import { formatKRW, usePortfolio } from '../../composables/usePortfolio';
+import { useProfile } from '../../composables/useProfile';
 import { useUi } from '../../composables/useUi';
 import { useWorkspace } from '../../composables/useWorkspace';
 
@@ -21,14 +23,33 @@ const {
   sending,
   createThread,
   selectThread,
-  removeThread,
   sendMessageContent,
 } = useChat();
-const { confirmAction, notify } = useUi();
+const { total, system: portfolioSystem, fetchPortfolio } = usePortfolio();
+const { profile, fetchProfile } = useProfile();
+const { notify } = useUi();
 const { applyWorkspacePatch, recordActivity, handleAssistantMetadata, openDrawer, selectThread: focusThread } = useWorkspace();
 
 const draft = ref('');
 const canSend = computed(() => Boolean(draft.value.trim()) && !sending.value);
+const headerStats = computed(() => [
+  {
+    label: '총 자산',
+    value: formatKRW(total.value),
+  },
+  {
+    label: '포커스',
+    value: activeThread.value?.title || '새 대화',
+  },
+  {
+    label: '브리핑',
+    value: portfolioSystem.value.latestManagerReport ? '반영됨' : '대기',
+  },
+  {
+    label: '설정 상태',
+    value: profile.value.userProfile?.displayName || '미입력',
+  },
+]);
 
 function formatTimestamp(value) {
   if (!value) return '';
@@ -69,40 +90,6 @@ async function handleCreateThread() {
   }
 }
 
-async function handleDeleteThread(thread) {
-  const ok = await confirmAction({
-    title: '대화 삭제',
-    message: `${thread.title} 스레드를 삭제할까요?`,
-    confirmLabel: '삭제',
-    cancelLabel: '취소',
-    tone: 'danger',
-  });
-  if (!ok) return;
-
-  try {
-    await removeThread(thread.id);
-    recordActivity({
-      type: 'chat',
-      title: '대화 삭제',
-      description: thread.title,
-      entityId: thread.id,
-      tone: 'warning',
-    });
-    notify({
-      tone: 'success',
-      message: '대화를 삭제했습니다.',
-    });
-    if (!threads.value.length) {
-      await handleCreateThread();
-    }
-  } catch (error) {
-    notify({
-      tone: 'error',
-      message: error.message || '대화 삭제 실패',
-    });
-  }
-}
-
 async function activateThread(thread) {
   await selectThread(thread.id);
   focusThread(thread.id);
@@ -124,6 +111,7 @@ async function submit() {
   draft.value = '';
   try {
     const assistantMessage = await sendMessageContent(content);
+    await Promise.all([fetchPortfolio(), fetchProfile()]);
     recordActivity({
       type: 'chat',
       title: '질문 전송',
@@ -164,6 +152,13 @@ function onComposerKeydown(event) {
       <button type="button" class="btn-primary" @click="handleCreateThread">새 대화</button>
     </template>
 
+    <div class="chat-stats">
+      <article v-for="item in headerStats" :key="item.label" class="chat-stat">
+        <span>{{ item.label }}</span>
+        <strong>{{ item.value }}</strong>
+      </article>
+    </div>
+
     <div class="thread-strip">
       <button
         v-for="thread in threads.slice(0, 4)"
@@ -184,7 +179,7 @@ function onComposerKeydown(event) {
 
     <div class="messages">
       <div v-if="!messages.length" class="empty-box">
-        이 패널이 워크스페이스의 primary 영역입니다. 질문을 보내면 나머지 패널과 카드가 현재 대화 흐름에 맞춰 즉시 재배치됩니다.
+        자산 입력, 설정 변경, 반복 브리핑 등록도 자연어로 요청할 수 있습니다.
       </div>
 
       <article
@@ -211,14 +206,6 @@ function onComposerKeydown(event) {
         @keydown="onComposerKeydown"
       />
       <div class="composer-foot">
-        <button
-          v-if="activeThread"
-          type="button"
-          class="btn-text danger"
-          @click="handleDeleteThread(activeThread)"
-        >
-          현재 대화 삭제
-        </button>
         <button type="button" class="btn-primary" :disabled="!canSend || !system.aiConfigured" @click="submit">
           {{ sending ? '전송 중…' : '보내기' }}
         </button>
@@ -230,7 +217,7 @@ function onComposerKeydown(event) {
 <style scoped>
 .btn-primary,
 .btn-secondary {
-  height: 32px;
+  height: 30px;
   border: none;
   border-radius: var(--rounded-pill);
   padding: 0 12px;
@@ -247,6 +234,32 @@ function onComposerKeydown(event) {
 .btn-secondary {
   background: var(--color-surface-strong);
   color: var(--color-ink);
+}
+
+.chat-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-xs);
+}
+
+.chat-stat {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--rounded-md);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--color-hairline-soft);
+}
+
+.chat-stat span {
+  color: var(--color-muted);
+  font-size: 10px;
+}
+
+.chat-stat strong {
+  color: var(--color-ink);
+  font-size: 12px;
+  line-height: 1.3;
 }
 
 .thread-strip {
@@ -284,9 +297,9 @@ function onComposerKeydown(event) {
 .disabled-box,
 .empty-box {
   border-radius: var(--rounded-lg);
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: var(--color-surface-soft);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .disabled-box strong {
@@ -309,7 +322,7 @@ function onComposerKeydown(event) {
 .message {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 10px 12px;
+  padding: 8px 10px;
   display: grid;
   gap: 4px;
   background: rgba(255, 255, 255, 0.02);
@@ -340,7 +353,7 @@ function onComposerKeydown(event) {
   white-space: pre-wrap;
   color: var(--color-body);
   line-height: 1.5;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .composer {
@@ -353,7 +366,7 @@ function onComposerKeydown(event) {
   resize: none;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 10px 12px;
+  padding: 8px 10px;
   color: var(--color-ink);
   background: rgba(255, 255, 255, 0.02);
 }
@@ -366,25 +379,16 @@ function onComposerKeydown(event) {
 
 .composer-foot {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-sm);
   align-items: center;
 }
 
-.btn-text {
-  border: none;
-  background: transparent;
-  color: var(--color-primary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.btn-text.danger {
-  color: var(--color-semantic-down);
-}
-
 @media (max-width: 720px) {
+  .chat-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .composer-foot,
   .message-top {
     flex-direction: column;
