@@ -1,6 +1,7 @@
 const { loadStore, mutateStore } = require('./dataStore');
 const { buildManagerReport, getAiSettings, isAiConfigured } = require('./aiService');
 const { getDateInTimezone } = require('./time');
+const { broadcast } = require('./realtimeService');
 
 function getLatestManagerReport() {
   const store = loadStore();
@@ -27,6 +28,28 @@ async function runManagerReview(trigger = 'manual') {
   await mutateStore((draft) => {
     draft.memory.managerReports.unshift(report);
     draft.memory.managerReports = draft.memory.managerReports.slice(0, 30);
+  });
+
+  const nextStore = loadStore();
+  broadcast('manager.report.created', {
+    manager: {
+      latestReport: nextStore.memory.managerReports[0] || report,
+      history: nextStore.memory.managerReports.slice(0, 10),
+    },
+    system: getSystemStatus(),
+  });
+  broadcast('activity.created', {
+    activity: {
+      type: 'manager',
+      title: 'Quant Manager 브리핑 갱신',
+      description: `${report.targetDate || '오늘'} 기준 브리핑이 생성되었습니다.`,
+      tone: 'info',
+      entityId: report.id,
+      metadata: {
+        reportId: report.id,
+        trigger,
+      },
+    },
   });
 
   return report;

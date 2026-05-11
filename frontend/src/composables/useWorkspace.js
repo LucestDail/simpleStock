@@ -279,6 +279,7 @@ function resetWorkspaceLayout() {
 }
 
 function recordActivity({
+  id = null,
   type = 'system',
   title = '',
   description = '',
@@ -286,8 +287,12 @@ function recordActivity({
   entityId = null,
   metadata = {},
 } = {}) {
+  const activityId = id || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  if (activityFeed.value.some((item) => item.id === activityId)) {
+    return;
+  }
   activityFeed.value.unshift({
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id: activityId,
     type,
     title,
     description,

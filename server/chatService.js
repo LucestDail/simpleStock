@@ -5,6 +5,8 @@ const { isAiConfigured, runConversationGraph, summarizeThread, inferAiProfile } 
 const { applyConversationActions } = require('./actionService');
 const { buildStructuredImportPlan } = require('./structuredImportService');
 const { logInfo, logError } = require('./logger');
+const { buildProfilePayload } = require('./payloadService');
+const { broadcast } = require('./realtimeService');
 
 function sanitizeMessage(content) {
   return String(content || '').replace(/\r\n/g, '\n').trim();
@@ -72,6 +74,7 @@ async function createThread(title = '새 대화') {
     threadId: thread.id,
     title: thread.title,
   });
+  broadcast('chat.thread.created', { thread });
   return thread;
 }
 
@@ -101,6 +104,9 @@ async function deleteThread(threadId) {
     threadId,
     removed,
   });
+  if (removed) {
+    broadcast('chat.thread.deleted', { threadId });
+  }
   return removed;
 }
 
@@ -172,9 +178,10 @@ async function refreshThreadMemory(threadId) {
     sourceMessageIds: messages.slice(-16).map((item) => item.id),
   });
 
-  await mutateStore((draft) => {
+  const nextThread = await mutateStore((draft) => {
     upsertThreadSummary(draft, summary);
     upsertLongTermMemories(draft, summary);
+    return draft.chat.threads.find((item) => item.id === threadId) || null;
   });
 
   logInfo('chat.memory.summary_refreshed', {
@@ -182,6 +189,14 @@ async function refreshThreadMemory(threadId) {
     tagCount: summary.tags.length,
     factCount: summary.importantFacts.length,
   });
+  broadcast('chat.memory.updated', {
+    threadId,
+    summary,
+    thread: nextThread,
+  });
+  if (nextThread) {
+    broadcast('chat.thread.updated', { thread: nextThread });
+  }
   return summary;
 }
 
@@ -208,6 +223,19 @@ async function refreshAiProfileSummary() {
   logInfo('chat.profile.ai_refreshed', {
     inferredTraitCount: nextProfile.inferredTraits.length,
     preferenceCount: nextProfile.preferences.length,
+  });
+  broadcast('profile.ai.updated', buildProfilePayload());
+  broadcast('activity.created', {
+    activity: {
+      type: 'profile',
+      title: 'AI 프로필 갱신',
+      description: '대화 맥락과 장기 기억을 기반으로 투자자 프로필을 다시 정리했습니다.',
+      tone: 'info',
+      metadata: {
+        inferredTraitCount: nextProfile.inferredTraits.length,
+        preferenceCount: nextProfile.preferences.length,
+      },
+    },
   });
   return nextProfile;
 }
@@ -246,7 +274,7 @@ async function sendMessage(threadId, content) {
     metadata: {},
   };
 
-  await mutateStore((store) => {
+  const userState = await mutateStore((store) => {
     const thread = store.chat.threads.find((item) => item.id === threadId);
     if (!thread) {
       throw new Error('대화 스레드를 찾을 수 없습니다.');
@@ -265,6 +293,18 @@ async function sendMessage(threadId, content) {
     thread.updatedAt = new Date().toISOString();
 
     snapshot = JSON.parse(JSON.stringify(store));
+    return {
+      thread: { ...thread },
+      messages,
+    };
+  });
+
+  broadcast('chat.message.created', {
+    thread: userState.thread,
+    message: userMessage,
+  });
+  broadcast('chat.thread.updated', {
+    thread: userState.thread,
   });
 
   const context = buildConversationContext({
@@ -383,6 +423,19 @@ async function sendMessage(threadId, content) {
   }
 
   const response = await persistAssistantResponse(threadId, assistantMessage);
+  broadcast('chat.message.created', {
+    thread: response.thread,
+    message: assistantMessage,
+  });
+  broadcast('chat.thread.updated', {
+    thread: response.thread,
+  });
+  if (assistantMessage.metadata?.workspacePatch) {
+    broadcast('workspace.patch', {
+      threadId,
+      workspacePatch: assistantMessage.metadata.workspacePatch,
+    });
+  }
 
   logInfo('chat.message.finish', {
     threadId,

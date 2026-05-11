@@ -39,11 +39,54 @@ const busyState = ref({
 const loading = computed(() => Object.values(busyState.value).some(Boolean));
 const error = ref(null);
 
-function applyPayload(data) {
-  holdings.value = data.holdings || [];
-  snapshots.value = data.snapshots || [];
-  manager.value = data.manager || manager.value;
-  system.value = data.system || system.value;
+function applyPortfolioPayload(data = {}) {
+  if (Array.isArray(data.holdings)) {
+    holdings.value = data.holdings;
+  }
+
+  if (Array.isArray(data.snapshots)) {
+    snapshots.value = data.snapshots;
+  }
+
+  if (data.manager && typeof data.manager === 'object') {
+    manager.value = {
+      ...manager.value,
+      ...data.manager,
+    };
+  }
+
+  if (data.system && typeof data.system === 'object') {
+    system.value = {
+      ...system.value,
+      ...data.system,
+      ai: {
+        ...system.value.ai,
+        ...(data.system.ai || {}),
+      },
+    };
+  }
+}
+
+function upsertHolding(holding) {
+  if (!holding?.id) return;
+  const next = [...holdings.value];
+  const index = next.findIndex((item) => item.id === holding.id);
+  if (index >= 0) next[index] = holding;
+  else next.unshift(holding);
+  holdings.value = next;
+}
+
+function removeHolding(holdingId) {
+  holdings.value = holdings.value.filter((item) => item.id !== holdingId);
+}
+
+function upsertSnapshot(snapshot) {
+  if (!snapshot?.date) return;
+  const next = [...snapshots.value];
+  const index = next.findIndex((item) => item.date === snapshot.date);
+  if (index >= 0) next[index] = snapshot;
+  else next.unshift(snapshot);
+  snapshots.value = next.sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
 }
 
 export function formatKRW(n) {
@@ -83,7 +126,7 @@ export function usePortfolio() {
     try {
       const res = await fetch('/api/portfolio');
       if (!res.ok) throw new Error('불러오기 실패');
-      applyPayload(await res.json());
+      applyPortfolioPayload(await res.json());
     } catch (e) {
       error.value = e.message || '오류';
     } finally {
@@ -101,7 +144,7 @@ export function usePortfolio() {
         body: JSON.stringify({ holdings: list }),
       });
       if (!res.ok) throw new Error('저장 실패');
-      applyPayload(await res.json());
+      applyPortfolioPayload(await res.json());
     } catch (e) {
       error.value = e.message || '오류';
       throw e;
@@ -122,7 +165,7 @@ export function usePortfolio() {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || '스냅샷 저장 실패');
       }
-      applyPayload(await res.json());
+      applyPortfolioPayload(await res.json());
     } finally {
       busyState.value.addSnapshot = false;
     }
@@ -135,7 +178,7 @@ export function usePortfolio() {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('삭제 실패');
-      applyPayload(await res.json());
+      applyPortfolioPayload(await res.json());
     } finally {
       busyState.value.deleteSnapshot = false;
     }
@@ -152,7 +195,7 @@ export function usePortfolio() {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || '매니저 브리핑 생성 실패');
       }
-      applyPayload(await res.json());
+      applyPortfolioPayload(await res.json());
     } finally {
       busyState.value.managerReview = false;
     }
@@ -194,6 +237,10 @@ export function usePortfolio() {
     categoryShares,
     lastSnapshot,
     dayOverDay,
+    applyPortfolioPayload,
+    upsertHolding,
+    removeHolding,
+    upsertSnapshot,
     fetchPortfolio,
     saveHoldings,
     addSnapshot,

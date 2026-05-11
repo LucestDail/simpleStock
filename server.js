@@ -6,19 +6,13 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const cron = require('node-cron');
-const {
-  CATEGORIES,
-  FILES,
-  loadStore,
-  mutateStore,
-} = require('./server/dataStore');
+const { CATEGORIES, mutateStore } = require('./server/dataStore');
 const { getCategoryShares } = require('./server/contextBuilder');
 const { APP_TIMEZONE, getDateInTimezone, getDateTimeInTimezone } = require('./server/time');
 const { AI_DAILY_CRON, getAiSettings, isAiConfigured } = require('./server/aiService');
 const { syncScheduledTasks } = require('./server/taskService');
 const { logInfo, logError } = require('./server/logger');
 const {
-  listThreads,
   createThread,
   getThread,
   deleteThread,
@@ -27,16 +21,17 @@ const {
 } = require('./server/chatService');
 const { getProfileState, updateUserProfile } = require('./server/profileService');
 const { getLatestManagerReport, runManagerReview, getSystemStatus } = require('./server/managerService');
+const {
+  ORCHESTRATION_NOTES,
+  buildPortfolioPayload,
+  buildProfilePayload,
+  buildChatThreadsPayload,
+  buildServerStatusPayload,
+} = require('./server/payloadService');
+const { subscribe, unsubscribe, sendToClient, broadcast, getSubscriberCount } = require('./server/realtimeService');
 
 const PORT = Number(process.env.PORT) || 3000;
 const app = express();
-
-const ORCHESTRATION_NOTES = [
-  'Supervisor는 매 턴마다 사용자 질문, 장기 기억, 사용자 프로필, 자산 데이터를 읽고 동적으로 persona/system prompt와 specialist task를 생성합니다.',
-  'Specialist는 portfolio, memory, manager, research 역할 중 필요한 조합으로 동적으로 생성되며, research는 Gemini googleSearch 툴만 사용합니다.',
-  '자산 입력, 설정 변경, 반복 브리핑/시황/indicator 예약 요청은 conversation action으로 해석되면 실제 JSON 데이터와 예약 작업에 반영됩니다.',
-  '대화 후에는 thread summary, long-term memory, inferred profile이 JSON 파일로 갱신됩니다.',
-].join('\n');
 
 app.use(express.json({ limit: '2mb' }));
 
@@ -99,9 +94,13 @@ function sanitizeHoldings(holdings) {
           account: String(holding.details.account || '').slice(0, 120),
           currency: String(holding.details.currency || '').slice(0, 16),
           ticker: String(holding.details.ticker || '').slice(0, 40),
+          market: String(holding.details.market || '').slice(0, 24),
           quantity: Number.isFinite(Number(holding.details.quantity)) ? Number(holding.details.quantity) : null,
           averagePrice: Number.isFinite(Number(holding.details.averagePrice)) ? Number(holding.details.averagePrice) : null,
           currentPrice: Number.isFinite(Number(holding.details.currentPrice)) ? Number(holding.details.currentPrice) : null,
+          lastQuote: Number.isFinite(Number(holding.details.lastQuote)) ? Number(holding.details.lastQuote) : null,
+          lastQuoteAt: holding.details.lastQuoteAt ? String(holding.details.lastQuoteAt).slice(0, 40) : null,
+          quoteSource: String(holding.details.quoteSource || '').slice(0, 80),
           nativeAmount: Number.isFinite(Number(holding.details.nativeAmount)) ? Number(holding.details.nativeAmount) : null,
           fxRate: Number.isFinite(Number(holding.details.fxRate)) ? Number(holding.details.fxRate) : null,
           summary: String(holding.details.summary || '').slice(0, 240),
@@ -131,24 +130,42 @@ function buildSnapshot(holdings, date) {
   };
 }
 
-function buildPortfolioPayload(store = loadStore()) {
-  return {
-    holdings: store.portfolio.holdings,
-    snapshots: store.portfolio.snapshots,
-    manager: {
-      latestReport: store.memory.managerReports[0] || null,
-      history: store.memory.managerReports.slice(0, 10),
-    },
-    system: {
-      ...getSystemStatus(),
-      dataFiles: FILES,
-      orchestrationNotes: ORCHESTRATION_NOTES,
-    },
-  };
-}
-
 app.get('/api/portfolio', (req, res) => {
   res.json(buildPortfolioPayload());
+});
+
+app.get('/api/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders();
+  }
+  res.write(': connected\n\n');
+
+  const clientId = subscribe(res);
+  logInfo('realtime.connected', {
+    requestId: req.requestId,
+    clientId,
+    subscribers: getSubscriberCount(),
+  });
+
+  sendToClient(clientId, 'hello', {
+    clientId,
+    connectedAt: new Date().toISOString(),
+  });
+  sendToClient(clientId, 'server.status', buildServerStatusPayload());
+
+  req.on('close', () => {
+    const removed = unsubscribe(clientId);
+    logInfo('realtime.disconnected', {
+      requestId: req.requestId,
+      clientId,
+      removed,
+      subscribers: getSubscriberCount(),
+    });
+  });
 });
 
 app.put('/api/portfolio', async (req, res) => {
@@ -160,7 +177,9 @@ app.put('/api/portfolio', async (req, res) => {
     await mutateStore((store) => {
       store.portfolio.holdings = sanitizeHoldings(req.body.holdings);
     });
-    res.json(buildPortfolioPayload());
+    const payload = buildPortfolioPayload();
+    broadcast('portfolio.updated', payload);
+    res.json(payload);
   } catch (error) {
     logError('portfolio.save.failed', error, { requestId: req.requestId });
     res.status(500).json({ error: error.message || '자산 저장 실패' });
@@ -180,7 +199,9 @@ app.post('/api/snapshots', async (req, res) => {
       store.portfolio.snapshots.push(snapshot);
       store.portfolio.snapshots.sort((a, b) => a.date.localeCompare(b.date));
     });
-    res.json(buildPortfolioPayload());
+    const payload = buildPortfolioPayload();
+    broadcast('snapshots.updated', payload);
+    res.json(payload);
   } catch (error) {
     logError('snapshot.save.failed', error, { requestId: req.requestId, date });
     res.status(500).json({ error: error.message || '스냅샷 저장 실패' });
@@ -199,7 +220,9 @@ app.delete('/api/snapshots/:date', async (req, res) => {
     if (!removed) {
       return res.status(404).json({ error: '스냅샷을 찾을 수 없습니다.' });
     }
-    res.json(buildPortfolioPayload());
+    const payload = buildPortfolioPayload();
+    broadcast('snapshots.updated', payload);
+    res.json(payload);
   } catch (error) {
     logError('snapshot.delete.failed', error, { requestId: req.requestId, date });
     res.status(500).json({ error: error.message || '스냅샷 삭제 실패' });
@@ -213,6 +236,7 @@ app.get('/api/profile', (req, res) => {
 app.put('/api/profile', async (req, res) => {
   try {
     const profile = await updateUserProfile(req.body || {});
+    broadcast('profile.user.updated', buildProfilePayload());
     res.json(profile);
   } catch (error) {
     logError('profile.update.failed', error, { requestId: req.requestId });
@@ -221,10 +245,7 @@ app.put('/api/profile', async (req, res) => {
 });
 
 app.get('/api/chat/threads', (req, res) => {
-  res.json({
-    threads: listThreads(),
-    system: getSystemStatus(),
-  });
+  res.json(buildChatThreadsPayload());
 });
 
 app.post('/api/chat/threads', async (req, res) => {
@@ -326,7 +347,7 @@ app.post('/api/ai/run', async (req, res) => {
 app.get('/api/system/status', (req, res) => {
   res.json({
     ...getSystemStatus(),
-    dataFiles: FILES,
+    dataFiles: buildServerStatusPayload().system.dataFiles,
     orchestrationNotes: ORCHESTRATION_NOTES,
     ai: getAiSettings(),
     latestManagerReport: getLatestManagerReport(),

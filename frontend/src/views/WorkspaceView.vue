@@ -1,5 +1,5 @@
 <script setup>
-import { computed, markRaw, onMounted } from 'vue';
+import { computed, markRaw, onMounted, onUnmounted } from 'vue';
 import StatusStrip from '../components/workspace/StatusStrip.vue';
 import DetailDrawer from '../components/workspace/DetailDrawer.vue';
 import OverviewPanel from '../components/workspace/OverviewPanel.vue';
@@ -16,12 +16,14 @@ import { useChat } from '../composables/useChat';
 import { useProfile } from '../composables/useProfile';
 import { useUi } from '../composables/useUi';
 import { useWorkspace } from '../composables/useWorkspace';
+import { useRealtimeSubscription } from '../composables/useRealtimeSubscription';
 
 const { fetchPortfolio } = usePortfolio();
 const { fetchThreads } = useChat();
 const { fetchProfile } = useProfile();
 const { notify } = useUi();
 const { columns, focusMode, recordActivity, openDrawer } = useWorkspace();
+const { connect, disconnect } = useRealtimeSubscription();
 
 const panelComponents = {
   status: markRaw(StatusStrip),
@@ -41,10 +43,11 @@ const workspaceClass = computed(() => `workspace-main--${focusMode.value || 'bal
 onMounted(async () => {
   try {
     await Promise.all([fetchPortfolio(), fetchProfile(), fetchThreads({ autoCreate: true })]);
+    await connect();
     recordActivity({
       type: 'system',
       title: '워크스페이스 로드',
-      description: '단일 화면 워크스페이스가 초기화되었습니다.',
+      description: '단일 화면 워크스페이스와 실시간 구독이 초기화되었습니다.',
     });
   } catch (error) {
     notify({
@@ -52,6 +55,10 @@ onMounted(async () => {
       message: error.message || '워크스페이스 초기화에 실패했습니다.',
     });
   }
+});
+
+onUnmounted(() => {
+  disconnect();
 });
 </script>
 

@@ -4,6 +4,8 @@ const { CATEGORIES, mutateStore } = require('./dataStore');
 const { APP_TIMEZONE } = require('./time');
 const { syncScheduledTasks } = require('./taskService');
 const { logInfo, logWarn, logError } = require('./logger');
+const { buildPortfolioPayload, buildProfilePayload } = require('./payloadService');
+const { broadcast } = require('./realtimeService');
 
 const PROFILE_FIELDS = new Set([
   'displayName',
@@ -27,9 +29,13 @@ function normalizeHoldingDetails(details) {
     account: normalizeText(details.account),
     currency: normalizeText(details.currency),
     ticker: normalizeText(details.ticker),
+    market: normalizeText(details.market),
     quantity: Number.isFinite(Number(details.quantity)) ? Number(details.quantity) : null,
     averagePrice: Number.isFinite(Number(details.averagePrice)) ? Number(details.averagePrice) : null,
     currentPrice: Number.isFinite(Number(details.currentPrice)) ? Number(details.currentPrice) : null,
+    lastQuote: Number.isFinite(Number(details.lastQuote)) ? Number(details.lastQuote) : null,
+    lastQuoteAt: normalizeText(details.lastQuoteAt),
+    quoteSource: normalizeText(details.quoteSource),
     nativeAmount: Number.isFinite(Number(details.nativeAmount)) ? Number(details.nativeAmount) : null,
     fxRate: Number.isFinite(Number(details.fxRate)) ? Number(details.fxRate) : null,
     summary: normalizeText(details.summary),
@@ -269,6 +275,14 @@ async function applyConversationActions(actions = []) {
     logWarn('action.batch.partial', {
       actionResults: result.actionResults.filter((item) => item.status !== 'applied'),
     });
+  }
+
+  if (result.changedPortfolio) {
+    broadcast('portfolio.updated', buildPortfolioPayload());
+  }
+
+  if (result.changedProfile) {
+    broadcast('profile.user.updated', buildProfilePayload());
   }
 
   return result;

@@ -25,8 +25,8 @@ const {
   selectThread,
   sendMessageContent,
 } = useChat();
-const { total, system: portfolioSystem, fetchPortfolio } = usePortfolio();
-const { profile, fetchProfile } = useProfile();
+const { total, system: portfolioSystem } = usePortfolio();
+const { profile } = useProfile();
 const { notify } = useUi();
 const { applyWorkspacePatch, recordActivity, handleAssistantMetadata, openDrawer, selectThread: focusThread } = useWorkspace();
 
@@ -108,7 +108,6 @@ async function submit() {
   draft.value = '';
   try {
     const assistantMessage = await sendMessageContent(content);
-    await Promise.all([fetchPortfolio(), fetchProfile()]);
     recordActivity({
       type: 'chat',
       title: '질문 전송',

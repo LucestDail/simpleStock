@@ -28,6 +28,25 @@ const profile = ref({
 const loading = ref(false);
 const error = ref(null);
 
+function applyProfilePayload(payload = {}) {
+  profile.value = {
+    ...profile.value,
+    ...payload,
+    userProfile: {
+      ...profile.value.userProfile,
+      ...(payload.userProfile || {}),
+    },
+    aiProfile: {
+      ...profile.value.aiProfile,
+      ...(payload.aiProfile || {}),
+    },
+    metadata: {
+      ...profile.value.metadata,
+      ...(payload.metadata || {}),
+    },
+  };
+}
+
 export function useProfile() {
   async function fetchProfile() {
     loading.value = true;
@@ -35,7 +54,7 @@ export function useProfile() {
     try {
       const res = await fetch('/api/profile');
       if (!res.ok) throw new Error('프로필을 불러오지 못했습니다.');
-      profile.value = await res.json();
+      applyProfilePayload(await res.json());
     } catch (e) {
       error.value = e.message || '오류';
     } finally {
@@ -56,7 +75,7 @@ export function useProfile() {
       if (!res.ok) {
         throw new Error(data.error || '프로필 저장 실패');
       }
-      profile.value = data;
+      applyProfilePayload(data);
       return data;
     } catch (e) {
       error.value = e.message || '오류';
@@ -70,6 +89,7 @@ export function useProfile() {
     profile,
     loading,
     error,
+    applyProfilePayload,
     fetchProfile,
     saveProfile,
   };

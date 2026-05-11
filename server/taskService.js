@@ -3,6 +3,8 @@ const { loadStore, mutateStore } = require('./dataStore');
 const { APP_TIMEZONE } = require('./time');
 const { runManagerReview } = require('./managerService');
 const { logInfo, logError } = require('./logger');
+const { buildPortfolioPayload } = require('./payloadService');
+const { broadcast } = require('./realtimeService');
 
 const scheduledHandles = new Map();
 
@@ -22,6 +24,17 @@ async function markTaskRun(taskId, status, message) {
     target.lastRunStatus = status;
     target.lastRunMessage = String(message || '').slice(0, 300);
     target.updatedAt = new Date().toISOString();
+  });
+  broadcast('schedule.run.updated', buildPortfolioPayload());
+  broadcast('activity.created', {
+    activity: {
+      type: 'schedule',
+      title: '예약 작업 실행',
+      description: String(message || '예약 작업 상태가 갱신되었습니다.'),
+      tone: status === 'success' ? 'info' : 'warning',
+      entityId: taskId,
+      metadata: { taskId, status },
+    },
   });
 }
 
@@ -94,6 +107,8 @@ function syncScheduledTasks() {
       timezone: task.timezone || APP_TIMEZONE,
     });
   }
+
+  broadcast('schedule.updated', buildPortfolioPayload());
 }
 
 function getScheduledTasks() {
