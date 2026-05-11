@@ -11,7 +11,7 @@ const GEMINI_MAX_RETRIES = Math.max(0, Number(process.env.GEMINI_MAX_RETRIES) ||
 const GEMINI_RETRY_BASE_MS = Math.max(250, Number(process.env.GEMINI_RETRY_BASE_MS) || 1_500);
 const AI_DAILY_CRON = process.env.AI_DAILY_CRON || '5 21 * * *';
 
-let googleGenAiCtorPromise = null;
+let googleGenAiModulePromise = null;
 let conversationGraphPromise = null;
 const CATEGORY_LABELS = {
   deposit: '예금',
@@ -302,10 +302,83 @@ function getAiSettings() {
 }
 
 async function getGoogleGenAI() {
-  if (!googleGenAiCtorPromise) {
-    googleGenAiCtorPromise = import('@google/genai').then((module) => module.GoogleGenAI);
+  if (!googleGenAiModulePromise) {
+    googleGenAiModulePromise = import('@google/genai');
   }
-  return googleGenAiCtorPromise;
+  return googleGenAiModulePromise.then((module) => module.GoogleGenAI);
+}
+
+async function getGoogleGenAiModule() {
+  if (!googleGenAiModulePromise) {
+    googleGenAiModulePromise = import('@google/genai');
+  }
+  return googleGenAiModulePromise;
+}
+
+function convertJsonSchemaToGeminiSchema(schema, Type) {
+  if (!schema || typeof schema !== 'object') return null;
+
+  const type = String(schema.type || 'string').toLowerCase();
+  const converted = {};
+
+  if (type === 'object') {
+    converted.type = Type.OBJECT;
+    const properties = Object.fromEntries(
+      Object.entries(schema.properties || {})
+        .map(([key, value]) => [key, convertJsonSchemaToGeminiSchema(value, Type)])
+        .filter(([, value]) => Boolean(value))
+    );
+    if (Object.keys(properties).length) {
+      converted.properties = properties;
+    }
+    if (Array.isArray(schema.required) && schema.required.length) {
+      converted.required = schema.required;
+    }
+  } else if (type === 'array') {
+    converted.type = Type.ARRAY;
+    const items = convertJsonSchemaToGeminiSchema(schema.items, Type);
+    if (items) {
+      converted.items = items;
+    }
+  } else if (type === 'number') {
+    converted.type = Type.NUMBER;
+  } else if (type === 'integer') {
+    converted.type = Type.INTEGER;
+  } else if (type === 'boolean') {
+    converted.type = Type.BOOLEAN;
+  } else {
+    converted.type = Type.STRING;
+  }
+
+  if (schema.description) {
+    converted.description = String(schema.description);
+  }
+  if (Array.isArray(schema.enum) && schema.enum.length) {
+    converted.enum = schema.enum;
+  }
+  if (schema.nullable === true) {
+    converted.nullable = true;
+  }
+
+  return converted;
+}
+
+async function buildGenerateConfig({ schema = null, useGoogleSearch = false }) {
+  const config = {
+    thinkingConfig: {
+      thinkingLevel: GEMINI_THINKING_LEVEL,
+    },
+    ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
+  };
+
+  if (!schema) {
+    return config;
+  }
+
+  const { Type } = await getGoogleGenAiModule();
+  config.responseMimeType = 'application/json';
+  config.responseSchema = convertJsonSchemaToGeminiSchema(schema, Type);
+  return config;
 }
 
 function buildEnvelope(systemPrompt, userPrompt) {
@@ -340,13 +413,25 @@ function stripFence(value) {
     .trim();
 }
 
-function safeParseJson(value, fallback) {
+function safeParseJson(value, fallback, options = {}) {
+  const {
+    throwOnFailure = false,
+    logLabel = 'structured_output',
+  } = options;
   try {
     return JSON.parse(stripFence(value));
-  } catch {
+  } catch (error) {
     logWarn('ai.json_parse_fallback', {
+      logLabel,
       preview: String(value || '').slice(0, 240),
+      message: String(error?.message || error),
     });
+    if (throwOnFailure) {
+      const parseError = new Error('AI 구조화 응답을 파싱하지 못했습니다.');
+      parseError.code = 'AI_JSON_PARSE_FAILED';
+      parseError.rawText = String(value || '').slice(0, 4000);
+      throw parseError;
+    }
     return fallback;
   }
 }
@@ -479,6 +564,14 @@ function getGroundingSources(response) {
     .slice(0, 6);
 }
 
+function mergeGroundingSources(...groups) {
+  return groups
+    .flat()
+    .filter((item) => item?.url)
+    .filter((item, index, array) => array.findIndex((x) => x.url === item.url) === index)
+    .slice(0, 6);
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -554,6 +647,7 @@ async function generateContent({
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const startedAt = Date.now();
   const maxAttempts = GEMINI_MAX_RETRIES + 1;
+  const config = await buildGenerateConfig({ schema, useGoogleSearch });
 
   logInfo('ai.generate.start', {
     logLabel,
@@ -569,28 +663,14 @@ async function generateContent({
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const attemptStartedAt = Date.now();
+    let emittedChunk = false;
 
     try {
       const response = await withTimeout(
         ai.models.generateContent({
           model: GEMINI_MODEL,
           contents: buildEnvelope(systemPrompt, userPrompt),
-          config: {
-            thinkingConfig: {
-              thinkingLevel: GEMINI_THINKING_LEVEL,
-            },
-            ...(schema
-              ? {
-                  responseFormat: {
-                    text: {
-                      mimeType: 'application/json',
-                      schema,
-                    },
-                  },
-                }
-              : {}),
-            ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
-          },
+          config,
         }),
         GEMINI_TIMEOUT_MS
       );
@@ -658,12 +738,142 @@ async function generateContent({
   }
 }
 
-async function generateStructuredOutput(options, fallback) {
+async function generateContentStream({
+  systemPrompt,
+  userPrompt,
+  useGoogleSearch = false,
+  logLabel = 'generate_content_stream',
+  onChunk = null,
+}) {
+  if (!isAiConfigured()) {
+    throw new Error('GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
+  }
+
+  const GoogleGenAI = await getGoogleGenAI();
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const startedAt = Date.now();
+  const maxAttempts = GEMINI_MAX_RETRIES + 1;
+  const config = await buildGenerateConfig({ useGoogleSearch });
+
+  logInfo('ai.generate.start', {
+    logLabel,
+    model: GEMINI_MODEL,
+    thinkingLevel: GEMINI_THINKING_LEVEL,
+    useGoogleSearch,
+    hasSchema: false,
+    timeoutMs: GEMINI_TIMEOUT_MS,
+    maxAttempts,
+    streaming: true,
+    systemPromptPreview: String(systemPrompt || '').slice(0, 160),
+    userPromptPreview: String(userPrompt || '').slice(0, 200),
+  });
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const attemptStartedAt = Date.now();
+
+    try {
+      const stream = await withTimeout(
+        ai.models.generateContentStream({
+          model: GEMINI_MODEL,
+          contents: buildEnvelope(systemPrompt, userPrompt),
+          config,
+        }),
+        GEMINI_TIMEOUT_MS
+      );
+      let answer = '';
+      const groundingSources = [];
+
+      for await (const chunk of stream) {
+        const text = String(chunk?.text || extractTextFromResponse(chunk) || '');
+        if (text) {
+          answer += text;
+          emittedChunk = true;
+          if (typeof onChunk === 'function') {
+            await onChunk(text);
+          }
+        }
+        groundingSources.push(...getGroundingSources(chunk));
+      }
+
+      logInfo('ai.generate.finish', {
+        logLabel,
+        attempt,
+        durationMs: Date.now() - startedAt,
+        attemptDurationMs: Date.now() - attemptStartedAt,
+        outputPreview: answer.slice(0, 200),
+        groundingSourceCount: mergeGroundingSources(groundingSources).length,
+        streaming: true,
+      });
+
+      return {
+        text: answer,
+        citations: mergeGroundingSources(groundingSources),
+      };
+    } catch (error) {
+      const retryable = isRetryableAiError(error);
+      const waitMs = retryable && attempt < maxAttempts && !emittedChunk
+        ? GEMINI_RETRY_BASE_MS * 2 ** (attempt - 1)
+        : 0;
+
+      if (waitMs > 0) {
+        logWarn('ai.generate.retry', {
+          logLabel,
+          attempt,
+          maxAttempts,
+          durationMs: Date.now() - startedAt,
+          attemptDurationMs: Date.now() - attemptStartedAt,
+          waitMs,
+          retryable,
+          message: String(error?.message || error).slice(0, 220),
+          useGoogleSearch,
+          hasSchema: false,
+          streaming: true,
+        });
+        await sleep(waitMs);
+        continue;
+      }
+
+      const userFacingError = buildAiUserFacingError(error, { maxAttempts });
+      logError('ai.generate.failed', error, {
+        logLabel,
+        attempt,
+        maxAttempts,
+        durationMs: Date.now() - startedAt,
+        attemptDurationMs: Date.now() - attemptStartedAt,
+        useGoogleSearch,
+        hasSchema: false,
+        retryable,
+        streaming: true,
+        userMessage: userFacingError.message,
+      });
+      throw userFacingError;
+    }
+  }
+
+  try {
+    throw new Error('AI 스트리밍 응답 생성 루프가 예상치 못하게 종료되었습니다.');
+  } catch (error) {
+    logError('ai.generate.failed', error, {
+      logLabel,
+      durationMs: Date.now() - startedAt,
+      useGoogleSearch,
+      hasSchema: false,
+      retryable: false,
+      streaming: true,
+    });
+    throw buildAiUserFacingError(error, { maxAttempts });
+  }
+}
+
+async function generateStructuredOutput(options, fallback, extraOptions = {}) {
   const response = await generateContent({
     ...options,
     logLabel: options.logLabel || 'structured_output',
   });
-  return safeParseJson(extractTextFromResponse(response), fallback);
+  return safeParseJson(extractTextFromResponse(response), fallback, {
+    throwOnFailure: Boolean(extraOptions.throwOnParseFailure),
+    logLabel: options.logLabel || 'structured_output',
+  });
 }
 
 function buildFallbackPlan(userInput, context) {
@@ -1019,6 +1229,37 @@ async function synthesizeFinalAnswer({ userInput, context, plan, specialistOutpu
   };
 }
 
+async function synthesizeFinalAnswerStream({ userInput, context, plan, specialistOutputs, onChunk }) {
+  const response = await generateContentStream({
+    systemPrompt: [
+      plan.personaSystemPrompt,
+      '',
+      '추가 지시:',
+      plan.synthesisInstructions,
+      '최종 답변은 한국어로 작성하고, 필요한 경우 짧은 섹션 제목을 사용한다.',
+      '숫자/우선순위/리스크/후속 행동을 최대한 구조적으로 정리한다.',
+      'plannedActions 가 있으면 실제로 반영될 자산/설정/예약 변경 사항을 답변 안에 분명히 언급한다.',
+    ].join('\n'),
+    userPrompt: JSON.stringify(
+      {
+        userInput,
+        context,
+        specialistOutputs,
+        plannedActions: plan.actions || [],
+      },
+      null,
+      2
+    ),
+    logLabel: 'synthesizer_stream',
+    onChunk,
+  });
+
+  return {
+    answer: response.text,
+    citations: response.citations || [],
+  };
+}
+
 async function buildConversationGraph() {
   if (!conversationGraphPromise) {
     conversationGraphPromise = (async () => {
@@ -1071,12 +1312,11 @@ async function buildConversationGraph() {
   return conversationGraphPromise;
 }
 
-async function runConversationGraph({ userInput, threadId, context }) {
+async function runConversationGraph({ userInput, threadId, context, onAnswerChunk = null, onStage = null }) {
   if (!isAiConfigured()) {
     throw new Error('GEMINI_API_KEY가 설정되지 않아 채팅 기능이 비활성화되어 있습니다.');
   }
 
-  const graph = await buildConversationGraph();
   const startedAt = Date.now();
   logInfo('ai.graph.start', {
     threadId,
@@ -1086,11 +1326,51 @@ async function runConversationGraph({ userInput, threadId, context }) {
 
   let result;
   try {
-    result = await graph.invoke({
-      userInput,
-      threadId,
-      context,
-    });
+    if (typeof onAnswerChunk === 'function' || typeof onStage === 'function') {
+      if (typeof onStage === 'function') {
+        await onStage({
+          key: 'supervisor',
+          message: '대화 맥락과 작업 계획을 정리하고 있습니다.',
+        });
+      }
+      const supervisorPlan = await buildSupervisorPlan(userInput, context);
+
+      if (typeof onStage === 'function') {
+        await onStage({
+          key: 'specialists',
+          message: '자산, 기억, 매니저 컨텍스트를 분석하고 있습니다.',
+        });
+      }
+      const specialistResult = await executeSpecialistTasks(supervisorPlan, context, userInput);
+
+      if (typeof onStage === 'function') {
+        await onStage({
+          key: 'synthesizer',
+          message: '답변을 스트리밍으로 작성하고 있습니다.',
+        });
+      }
+      const synthesisResult = await synthesizeFinalAnswerStream({
+        userInput,
+        context,
+        plan: supervisorPlan,
+        specialistOutputs: specialistResult.outputs,
+        onChunk: onAnswerChunk,
+      });
+
+      result = {
+        answer: synthesisResult.answer,
+        supervisorPlan,
+        specialistOutputs: specialistResult.outputs,
+        citations: mergeGroundingSources(specialistResult.citations || [], synthesisResult.citations || []),
+      };
+    } else {
+      const graph = await buildConversationGraph();
+      result = await graph.invoke({
+        userInput,
+        threadId,
+        context,
+      });
+    }
 
     logInfo('ai.graph.finish', {
       threadId,
@@ -1234,7 +1514,10 @@ async function buildManagerReport({ portfolio, profile, memory, trigger }) {
       ),
       schema: MANAGER_REPORT_SCHEMA,
     },
-    fallback
+    fallback,
+    {
+      throwOnParseFailure: true,
+    }
   );
 
   return {

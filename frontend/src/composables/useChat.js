@@ -11,6 +11,7 @@ const system = ref({
 const loading = ref(false);
 const sending = ref(false);
 const error = ref(null);
+const streamStatus = ref('');
 
 function sortThreadsList(list = []) {
   return [...list].sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
@@ -91,7 +92,7 @@ function replaceMessages(threadId, nextMessages = []) {
   }
 }
 
-function appendMessage({ threadId, message, thread } = {}) {
+function upsertMessage({ threadId, message, thread } = {}) {
   if (!threadId || !message?.id) return;
   if (thread) {
     upsertThread(thread);
@@ -99,15 +100,52 @@ function appendMessage({ threadId, message, thread } = {}) {
   if (activeThread.value?.id !== threadId) {
     return;
   }
-  if (messages.value.some((item) => item.id === message.id)) {
-    return;
+  const next = [...messages.value];
+  const index = next.findIndex((item) => item.id === message.id);
+  if (index >= 0) {
+    next[index] = {
+      ...next[index],
+      ...message,
+      content: message.content ?? next[index].content,
+      metadata: {
+        ...(next[index].metadata || {}),
+        ...(message.metadata || {}),
+      },
+    };
+  } else {
+    next.push(message);
   }
-  messages.value = [...messages.value, message];
+  messages.value = dedupeMessages(next);
   upsertThread({
     ...(thread || activeThread.value || {}),
     id: threadId,
     messageCount: messages.value.length,
     updatedAt: message.createdAt || thread?.updatedAt || activeThread.value?.updatedAt || null,
+  });
+}
+
+function appendMessage({ threadId, message, thread } = {}) {
+  upsertMessage({ threadId, message, thread });
+}
+
+function applyMessageDelta({ threadId, messageId, delta, message, thread } = {}) {
+  if (!threadId || !messageId || !delta) return;
+  const existing = activeThread.value?.id === threadId
+    ? messages.value.find((item) => item.id === messageId)
+    : null;
+  upsertMessage({
+    threadId,
+    thread,
+    message: {
+      ...(existing || {}),
+      ...(message || {}),
+      id: messageId,
+      content: `${String(existing?.content || '')}${delta}`,
+      metadata: {
+        ...(existing?.metadata || {}),
+        ...(message?.metadata || {}),
+      },
+    },
   });
 }
 
@@ -133,6 +171,33 @@ async function syncThreadState(threadId) {
     messageCount: Array.isArray(data.messages) ? data.messages.length : data.thread?.messageCount,
   });
   return data;
+}
+
+async function consumeNdjsonStream(body, onEvent) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+    let lineBreakIndex = buffer.indexOf('\n');
+    while (lineBreakIndex >= 0) {
+      const line = buffer.slice(0, lineBreakIndex).trim();
+      buffer = buffer.slice(lineBreakIndex + 1);
+      if (line) {
+        onEvent(JSON.parse(line));
+      }
+      lineBreakIndex = buffer.indexOf('\n');
+    }
+
+    if (done) break;
+  }
+
+  if (buffer.trim()) {
+    onEvent(JSON.parse(buffer.trim()));
+  }
 }
 
 export function useChat() {
@@ -219,10 +284,11 @@ export function useChat() {
 
     sending.value = true;
     error.value = null;
+    streamStatus.value = '';
     try {
       let res;
       try {
-        res = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}/messages`, {
+        res = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}/messages/stream`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content }),
@@ -232,8 +298,8 @@ export function useChat() {
         nextError.restoreDraft = true;
         throw nextError;
       }
-      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         const nextError = new Error(data.error || '메시지 전송 실패');
         nextError.restoreDraft = res.status < 500;
         if (res.status >= 500) {
@@ -246,18 +312,74 @@ export function useChat() {
         }
         throw nextError;
       }
+      if (!res.body) {
+        throw new Error('스트리밍 응답 본문이 비어 있습니다.');
+      }
 
-      activeThread.value = data.thread;
-      replaceMessages(threadId, data.messages || messages.value);
-      upsertThread({
-        ...data.thread,
-        messageCount: Array.isArray(data.messages) ? data.messages.length : data.thread?.messageCount,
+      let assistantMessage = null;
+      await consumeNdjsonStream(res.body, (event) => {
+        if (!event || typeof event !== 'object') return;
+
+        if (event.type === 'start') {
+          streamStatus.value = event.message || '대화 맥락을 정리하고 있습니다.';
+          if (event.thread) {
+            activeThread.value = event.thread;
+            upsertThread(event.thread);
+          }
+          return;
+        }
+
+        if (event.type === 'stage') {
+          streamStatus.value = event.message || '응답 생성 중';
+          return;
+        }
+
+        if (event.type === 'delta') {
+          streamStatus.value = '답변을 작성하고 있습니다.';
+          applyMessageDelta({
+            threadId,
+            messageId: event.assistantMessageId,
+            delta: event.delta,
+            message: event.message,
+            thread: event.thread,
+          });
+          return;
+        }
+
+        if (event.type === 'done') {
+          streamStatus.value = '';
+          if (event.thread) {
+            activeThread.value = event.thread;
+            upsertThread(event.thread);
+          }
+          if (event.assistantMessage) {
+            upsertMessage({
+              threadId,
+              thread: event.thread,
+              message: event.assistantMessage,
+            });
+            assistantMessage = event.assistantMessage;
+          }
+          return;
+        }
+
+        if (event.type === 'error') {
+          const nextError = new Error(event.error || '메시지 스트리밍 전송 실패');
+          nextError.restoreDraft = false;
+          throw nextError;
+        }
       });
-      return data.assistantMessage;
+
+      if (!assistantMessage) {
+        await syncThreadState(threadId);
+        assistantMessage = messages.value.at(-1) || null;
+      }
+      return assistantMessage;
     } catch (e) {
       error.value = e.message || '오류';
       throw e;
     } finally {
+      streamStatus.value = '';
       sending.value = false;
     }
   }
@@ -270,10 +392,13 @@ export function useChat() {
     loading,
     sending,
     error,
+    streamStatus,
     applySystemPayload,
     applyThreadsPayload,
     upsertThread,
     appendMessage,
+    upsertMessage,
+    applyMessageDelta,
     replaceMessages,
     removeThreadLocal,
     fetchThreads,

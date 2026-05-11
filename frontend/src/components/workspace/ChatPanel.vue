@@ -21,6 +21,7 @@ const {
   system,
   loading,
   sending,
+  streamStatus,
   error: chatError,
   createThread,
   selectThread,
@@ -51,7 +52,7 @@ const composerNotice = computed(() => {
     return {
       tone: 'info',
       title: '응답 생성 중',
-      message: '요청이 길어질 경우 자동 재시도 후 실패 사유를 안내합니다.',
+      message: streamStatus.value || '요청이 길어질 경우 자동 재시도 후 실패 사유를 안내합니다.',
     };
   }
 
@@ -190,14 +191,25 @@ function onComposerKeydown(event) {
 }
 
 watch(
-  () => [activeThread.value?.id || '', messages.value.length, sending.value],
-  async ([nextThreadId, nextMessageCount, nextSending], [prevThreadId, prevMessageCount, prevSending] = []) => {
+  () => [
+    activeThread.value?.id || '',
+    messages.value.length,
+    messages.value.at(-1)?.id || '',
+    messages.value.at(-1)?.content?.length || 0,
+    sending.value,
+  ],
+  async (
+    [nextThreadId, nextMessageCount, nextLastMessageId, nextLastMessageLength, nextSending],
+    [prevThreadId, prevMessageCount, prevLastMessageId, prevLastMessageLength, prevSending] = []
+  ) => {
     const changedThread = nextThreadId !== prevThreadId;
     const appendedMessage = Number(nextMessageCount) !== Number(prevMessageCount);
+    const streamingMessageUpdated =
+      nextLastMessageId === prevLastMessageId && Number(nextLastMessageLength) !== Number(prevLastMessageLength);
     const sendingStarted = nextSending && !prevSending;
-    if (!changedThread && !appendedMessage && !sendingStarted) return;
+    if (!changedThread && !appendedMessage && !streamingMessageUpdated && !sendingStarted) return;
     await nextTick();
-    if (changedThread || sendingStarted || shouldStickToBottom.value) {
+    if (changedThread || sendingStarted || streamingMessageUpdated || shouldStickToBottom.value) {
       scrollMessagesToBottom(changedThread ? 'auto' : 'smooth');
     }
   },
@@ -643,9 +655,9 @@ watch(
 
 .composer-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
+  grid-template-columns: minmax(0, 1fr) 56px;
   gap: 8px;
-  align-items: end;
+  align-items: stretch;
 }
 
 .chat-notice {
@@ -689,6 +701,7 @@ watch(
   background: rgba(255, 255, 255, 0.02);
   min-height: 72px;
   font-size: 12px;
+  box-sizing: border-box;
 }
 
 .composer-input:focus {
@@ -698,10 +711,11 @@ watch(
 }
 
 .composer-send {
-  height: 42px;
-  width: 42px;
+  width: 56px;
+  min-height: 72px;
+  height: 100%;
   border: none;
-  border-radius: 14px;
+  border-radius: var(--rounded-lg);
   background: var(--color-primary);
   color: var(--color-on-primary);
   display: inline-flex;
@@ -709,6 +723,7 @@ watch(
   justify-content: center;
   cursor: pointer;
   box-shadow: 0 8px 18px rgba(102, 116, 216, 0.28);
+  align-self: stretch;
 }
 
 .composer-send svg {

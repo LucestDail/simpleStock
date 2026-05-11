@@ -17,6 +17,7 @@ const {
   getThread,
   deleteThread,
   sendMessage,
+  sendMessageStream,
   refreshThreadMemory,
 } = require('./server/chatService');
 const { getProfileState, updateUserProfile } = require('./server/profileService');
@@ -312,6 +313,36 @@ app.post('/api/chat/threads/:threadId/messages', async (req, res) => {
         ? 400
         : 500;
     res.status(status).json({ error: error.message || '메시지 전송 실패' });
+  }
+});
+
+app.post('/api/chat/threads/:threadId/messages/stream', async (req, res) => {
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders();
+  }
+
+  const writeEvent = (event) => {
+    res.write(`${JSON.stringify(event)}\n`);
+  };
+
+  try {
+    await sendMessageStream(req.params.threadId, req.body?.content || '', writeEvent);
+    res.end();
+  } catch (error) {
+    logError('chat.message.stream.failed', error, {
+      requestId: req.requestId,
+      threadId: req.params.threadId,
+      contentPreview: String(req.body?.content || '').slice(0, 120),
+    });
+    writeEvent({
+      type: 'error',
+      error: error.message || '메시지 스트리밍 전송 실패',
+    });
+    res.end();
   }
 });
 

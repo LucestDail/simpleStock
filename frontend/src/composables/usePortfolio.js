@@ -260,11 +260,14 @@ export function usePortfolio() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error || '매니저 브리핑 생성 실패');
+        throw new Error(data.error || '매니저 브리핑 생성 실패');
       }
-      applyPortfolioPayload(await res.json());
+      if (data.report?.summary === 'AI 브리핑을 생성하지 못했습니다.') {
+        throw new Error('AI 브리핑 응답이 비어 있습니다. 서버 로그를 확인해 주세요.');
+      }
+      applyPortfolioPayload(data);
     } finally {
       busyState.value.managerReview = false;
     }

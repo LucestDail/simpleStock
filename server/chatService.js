@@ -285,15 +285,24 @@ function queueConversationMaintenance(threadId) {
   }, 0);
 }
 
-async function sendMessage(threadId, content) {
-  const cleanContent = sanitizeMessage(content);
-  if (!cleanContent) {
-    throw new Error('보낼 메시지를 입력해 주세요.');
-  }
-  if (!isAiConfigured()) {
-    throw new Error('GEMINI_API_KEY가 설정되지 않아 채팅 기능이 비활성화되어 있습니다.');
-  }
+function buildAssistantMessage({
+  id = randomUUID(),
+  createdAt = new Date().toISOString(),
+  content = '',
+  model = 'gemini',
+  metadata = {},
+}) {
+  return {
+    id,
+    role: 'assistant',
+    content,
+    createdAt,
+    model,
+    metadata,
+  };
+}
 
+async function prepareUserTurn(threadId, cleanContent) {
   let snapshot = null;
   const userMessage = {
     id: randomUUID(),
@@ -352,6 +361,36 @@ async function sendMessage(threadId, content) {
     existingMessageCount: context.messages.length,
   });
 
+  return {
+    snapshot,
+    userMessage,
+    userState,
+    context,
+  };
+}
+
+function buildAssistantMetadata(aiResult, actionState, workspacePatch, extra = {}) {
+  return {
+    citations: aiResult?.citations || [],
+    supervisorPlan: aiResult?.supervisorPlan || null,
+    specialistOutputs: aiResult?.specialistOutputs || [],
+    actionResults: actionState?.actionResults || [],
+    workspacePatch: workspacePatch || null,
+    focusEntities: workspacePatch?.openDrawer?.entityId ? [workspacePatch.openDrawer.entityId] : [],
+    reason: workspacePatch?.reason || '',
+    ...extra,
+  };
+}
+
+async function resolveAssistantTurn({
+  cleanContent,
+  threadId,
+  context,
+  assistantMessageId = randomUUID(),
+  assistantCreatedAt = new Date().toISOString(),
+  onAnswerChunk = null,
+  onStage = null,
+}) {
   let aiResult = null;
   let actionState = null;
   let assistantMessage = null;
@@ -363,6 +402,8 @@ async function sendMessage(threadId, content) {
       userInput: cleanContent,
       threadId,
       context,
+      onAnswerChunk,
+      onStage,
     });
 
     if (structuredImportPlan?.actions?.length) {
@@ -394,45 +435,26 @@ async function sendMessage(threadId, content) {
       });
     }
 
-    assistantMessage = {
-      id: randomUUID(),
-      role: 'assistant',
+    assistantMessage = buildAssistantMessage({
+      id: assistantMessageId,
+      createdAt: assistantCreatedAt,
       content: aiResult.answer,
-      createdAt: new Date().toISOString(),
       model: 'gemini',
-      metadata: {
-        citations: aiResult.citations || [],
-        supervisorPlan: aiResult.supervisorPlan || null,
-        specialistOutputs: aiResult.specialistOutputs || [],
-        actionResults: actionState.actionResults || [],
-        workspacePatch: aiResult.workspacePatch || null,
-        focusEntities: aiResult.workspacePatch?.openDrawer?.entityId
-          ? [aiResult.workspacePatch.openDrawer.entityId]
-          : [],
-        reason: aiResult.workspacePatch?.reason || '',
-      },
-    };
+      metadata: buildAssistantMetadata(aiResult, actionState, aiResult.workspacePatch || null),
+    });
   } catch (error) {
     const structuredImport = structuredImportPlan;
     if (structuredImport) {
       actionState = await applyConversationActions(structuredImport.actions || []);
-      assistantMessage = {
-        id: randomUUID(),
-        role: 'assistant',
+      assistantMessage = buildAssistantMessage({
+        id: assistantMessageId,
+        createdAt: assistantCreatedAt,
         content: structuredImport.answer,
-        createdAt: new Date().toISOString(),
         model: 'fallback-import',
-        metadata: {
-          citations: [],
-          supervisorPlan: null,
-          specialistOutputs: [],
-          actionResults: actionState.actionResults || [],
-          workspacePatch: structuredImport.workspacePatch || null,
-          focusEntities: [],
-          reason: structuredImport.workspacePatch?.reason || '',
+        metadata: buildAssistantMetadata(null, actionState, structuredImport.workspacePatch || null, {
           fallbackImport: true,
-        },
-      };
+        }),
+      });
       skipMaintenance = true;
       logInfo('chat.message.fallback_import', {
         threadId,
@@ -440,23 +462,16 @@ async function sendMessage(threadId, content) {
         appliedCount: actionState.actionResults.filter((item) => item.status === 'applied').length,
       });
     } else if (isInvalidApiKeyError(error)) {
-      assistantMessage = {
-        id: randomUUID(),
-        role: 'assistant',
+      assistantMessage = buildAssistantMessage({
+        id: assistantMessageId,
+        createdAt: assistantCreatedAt,
         content: '현재 Gemini API 키가 유효하지 않아 AI 응답을 생성하지 못했습니다. 키를 점검한 뒤 다시 시도해 주세요.',
-        createdAt: new Date().toISOString(),
         model: 'system',
-        metadata: {
-          citations: [],
-          supervisorPlan: null,
-          specialistOutputs: [],
-          actionResults: [],
-          workspacePatch: null,
-          focusEntities: [],
+        metadata: buildAssistantMetadata(null, null, null, {
           reason: 'AI 키 오류로 응답이 중단되었습니다.',
           aiError: 'invalid_api_key',
-        },
-      };
+        }),
+      });
       skipMaintenance = true;
       logInfo('chat.message.ai_key_invalid', {
         threadId,
@@ -466,6 +481,13 @@ async function sendMessage(threadId, content) {
     }
   }
 
+  return {
+    assistantMessage,
+    skipMaintenance,
+  };
+}
+
+async function finalizeAssistantTurn(threadId, assistantMessage, { skipMaintenance = false } = {}) {
   const response = await persistAssistantResponse(threadId, assistantMessage);
   broadcast('chat.message.created', {
     thread: response.thread,
@@ -494,12 +516,92 @@ async function sendMessage(threadId, content) {
   return response;
 }
 
+async function sendMessage(threadId, content) {
+  const cleanContent = sanitizeMessage(content);
+  if (!cleanContent) {
+    throw new Error('보낼 메시지를 입력해 주세요.');
+  }
+  if (!isAiConfigured()) {
+    throw new Error('GEMINI_API_KEY가 설정되지 않아 채팅 기능이 비활성화되어 있습니다.');
+  }
+
+  const { context } = await prepareUserTurn(threadId, cleanContent);
+  const { assistantMessage, skipMaintenance } = await resolveAssistantTurn({
+    cleanContent,
+    threadId,
+    context,
+  });
+  return finalizeAssistantTurn(threadId, assistantMessage, { skipMaintenance });
+}
+
+async function sendMessageStream(threadId, content, emit = () => {}) {
+  const cleanContent = sanitizeMessage(content);
+  if (!cleanContent) {
+    throw new Error('보낼 메시지를 입력해 주세요.');
+  }
+  if (!isAiConfigured()) {
+    throw new Error('GEMINI_API_KEY가 설정되지 않아 채팅 기능이 비활성화되어 있습니다.');
+  }
+
+  const assistantMessageId = randomUUID();
+  const assistantCreatedAt = new Date().toISOString();
+  const { userState, context } = await prepareUserTurn(threadId, cleanContent);
+
+  emit({
+    type: 'start',
+    thread: userState.thread,
+    assistantMessageId,
+    assistantCreatedAt,
+    message: '대화 맥락을 정리하고 있습니다.',
+  });
+
+  const { assistantMessage, skipMaintenance } = await resolveAssistantTurn({
+    cleanContent,
+    threadId,
+    context,
+    assistantMessageId,
+    assistantCreatedAt,
+    onStage: async (stage) => {
+      emit({
+        type: 'stage',
+        ...stage,
+      });
+    },
+    onAnswerChunk: async (delta) => {
+      emit({
+        type: 'delta',
+        threadId,
+        assistantMessageId,
+        delta,
+        message: {
+          id: assistantMessageId,
+          role: 'assistant',
+          createdAt: assistantCreatedAt,
+          model: 'gemini',
+          metadata: {
+            streaming: true,
+          },
+        },
+      });
+    },
+  });
+
+  const response = await finalizeAssistantTurn(threadId, assistantMessage, { skipMaintenance });
+  emit({
+    type: 'done',
+    thread: response.thread,
+    assistantMessage,
+  });
+  return response;
+}
+
 module.exports = {
   listThreads,
   createThread,
   getThread,
   deleteThread,
   sendMessage,
+  sendMessageStream,
   refreshThreadMemory,
   refreshAiProfileSummary,
 };
