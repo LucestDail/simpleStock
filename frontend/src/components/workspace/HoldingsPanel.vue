@@ -363,12 +363,15 @@ function inspectHolding(target) {
 
 .form-grid {
   display: grid;
-  grid-template-columns: 1.1fr 0.8fr 0.9fr auto;
+  grid-template-columns: minmax(0, 1.15fr) 84px minmax(0, 1fr) minmax(64px, auto);
   gap: 5px;
+  align-items: stretch;
 }
 
 .input {
   height: 26px;
+  width: 100%;
+  min-width: 0;
   padding: 0 7px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md);
@@ -386,6 +389,8 @@ function inspectHolding(target) {
 .actions {
   display: flex;
   gap: 4px;
+  min-width: 64px;
+  justify-content: flex-end;
 }
 
 .btn-primary,
@@ -397,6 +402,8 @@ function inspectHolding(target) {
   font-size: 10px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
+  min-width: 56px;
 }
 
 .btn-primary {
@@ -454,6 +461,7 @@ function inspectHolding(target) {
   color: var(--color-ink);
   font-size: 11px;
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .holding-main span {
@@ -511,6 +519,7 @@ function inspectHolding(target) {
   display: flex;
   gap: 4px;
   align-items: center;
+  flex: 0 0 auto;
 }
 
 .btn-text {
@@ -529,7 +538,7 @@ function inspectHolding(target) {
 
 @media (max-width: 1280px) {
   .form-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .actions {
@@ -548,9 +557,21 @@ function inspectHolding(target) {
 }
 
 @media (max-width: 720px) {
-  .form-grid,
   .holding-row {
     grid-template-columns: 1fr;
+  }
+
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr) 88px;
+  }
+
+  .form-grid .input:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .form-grid .actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
   }
 
   .actions,
@@ -565,6 +586,21 @@ function inspectHolding(target) {
   .quote-line {
     justify-content: flex-start;
     text-align: left;
+  }
+}
+
+@media (max-width: 480px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .actions {
+    justify-content: stretch;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    flex: 1 1 auto;
   }
 }
 </style>

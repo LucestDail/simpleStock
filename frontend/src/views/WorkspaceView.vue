@@ -1,5 +1,5 @@
 <script setup>
-import { computed, markRaw, onMounted, onUnmounted } from 'vue';
+import { computed, markRaw, onMounted, onUnmounted, ref } from 'vue';
 import StatusStrip from '../components/workspace/StatusStrip.vue';
 import DetailDrawer from '../components/workspace/DetailDrawer.vue';
 import OverviewPanel from '../components/workspace/OverviewPanel.vue';
@@ -24,6 +24,7 @@ const { fetchProfile, profile } = useProfile();
 const { notify } = useUi();
 const { columns, focusMode, recordActivity, openDrawer, generatedInsights } = useWorkspace();
 const { connect, disconnect } = useRealtimeSubscription();
+const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth);
 
 const panelComponents = {
   status: markRaw(StatusStrip),
@@ -39,6 +40,7 @@ const panelComponents = {
 };
 
 const workspaceClass = computed(() => `workspace-main--${focusMode.value || 'balanced'}`);
+const isStackedLayout = computed(() => viewportWidth.value <= 980);
 const hasManagerBrief = computed(() => Boolean(manager.value.latestReport));
 const hasScheduledTasks = computed(() => (system.value.scheduledTasks || []).length > 0);
 const hasProfileContent = computed(() => {
@@ -92,6 +94,12 @@ const renderedColumns = computed(() => {
   };
 });
 const workspaceGridStyle = computed(() => {
+  if (isStackedLayout.value) {
+    return {
+      gridTemplateColumns: '1fr',
+    };
+  }
+
   const leftCount = renderedColumns.value.left.length;
   const rightCount = renderedColumns.value.right.length;
   const isChatMode = focusMode.value === 'chat';
@@ -107,7 +115,12 @@ const workspaceGridStyle = computed(() => {
   };
 });
 
+function handleResize() {
+  viewportWidth.value = window.innerWidth;
+}
+
 onMounted(async () => {
+  window.addEventListener('resize', handleResize, { passive: true });
   try {
     await Promise.all([fetchPortfolio(), fetchProfile(), fetchThreads({ autoCreate: true })]);
     await connect();
@@ -125,12 +138,13 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('resize', handleResize);
   disconnect();
 });
 </script>
 
 <template>
-  <div class="workspace">
+  <div class="workspace" :class="{ 'workspace--stacked': isStackedLayout }">
     <header class="workspace-header">
       <div class="workspace-header__copy">
         <p class="workspace-kicker">SimpleStock Workspace</p>
@@ -142,7 +156,7 @@ onUnmounted(() => {
     </header>
 
     <main class="workspace-main" :class="workspaceClass" :style="workspaceGridStyle">
-      <section class="workspace-column">
+      <section class="workspace-column" :class="{ 'workspace-column--stacked': isStackedLayout }">
         <component
           :is="panelComponents[panel.id]"
           v-for="panel in renderedColumns.left"
@@ -151,7 +165,7 @@ onUnmounted(() => {
         />
       </section>
 
-      <section class="workspace-column">
+      <section class="workspace-column" :class="{ 'workspace-column--stacked': isStackedLayout }">
         <component
           :is="panelComponents[panel.id]"
           v-for="panel in renderedColumns.center"
@@ -160,7 +174,7 @@ onUnmounted(() => {
         />
       </section>
 
-      <section class="workspace-column">
+      <section class="workspace-column" :class="{ 'workspace-column--stacked': isStackedLayout }">
         <component
           :is="panelComponents[panel.id]"
           v-for="panel in renderedColumns.right"
@@ -246,6 +260,24 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 6px;
   overflow: hidden;
+}
+
+.workspace--stacked {
+  height: auto;
+  min-height: 100dvh;
+  overflow: auto;
+}
+
+.workspace--stacked .workspace-main {
+  overflow: visible;
+}
+
+.workspace-column--stacked {
+  overflow: visible;
+}
+
+.workspace-column--stacked :deep(.panel-shell) {
+  flex: none;
 }
 
 @media (max-width: 1380px) {
