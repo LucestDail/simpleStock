@@ -236,23 +236,31 @@ function inspectHolding(holding) {
 
 .summary-label {
   color: var(--color-muted);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .summary-value {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .summary-note {
   color: var(--color-body);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .share-list {
@@ -265,7 +273,7 @@ function inspectHolding(holding) {
   border-radius: var(--rounded-lg);
   padding: 8px;
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .share-item {
@@ -294,12 +302,24 @@ function inspectHolding(holding) {
   gap: 6px;
   align-items: center;
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.share-head strong,
+.share-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .share-amount {
   color: var(--color-body);
-  font-size: 10px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .share-bar {
@@ -321,13 +341,19 @@ function inspectHolding(holding) {
 
 .section-head strong {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .section-head span {
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .asset-list {
@@ -358,16 +384,20 @@ function inspectHolding(holding) {
 
 .holding-main strong {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .holding-main span {
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .holding-value {
@@ -378,14 +408,20 @@ function inspectHolding(holding) {
 }
 
 .holding-value strong {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .holding-secondary {
   color: var(--color-muted);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .quote-line {
@@ -394,8 +430,9 @@ function inspectHolding(holding) {
   justify-content: flex-end;
   gap: 3px;
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 11px;
   text-align: right;
+  min-width: 0;
 }
 
 .quote-line em {
@@ -418,6 +455,9 @@ function inspectHolding(holding) {
 
 .quote-time {
   color: var(--color-muted-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {

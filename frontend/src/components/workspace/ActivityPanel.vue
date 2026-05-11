@@ -59,7 +59,7 @@ function toggleExpand(id) {
   border-radius: var(--rounded-lg);
   padding: 8px;
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .activity-list {
@@ -110,22 +110,27 @@ function toggleExpand(id) {
 
 .activity-copy strong {
   color: var(--color-ink);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .activity-copy p {
   margin: 2px 0 0;
   color: var(--color-body);
   line-height: 1.2;
-  font-size: 9px;
+  font-size: 11px;
   white-space: pre-wrap;
 }
 
 .time {
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {

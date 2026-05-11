@@ -92,7 +92,7 @@ function formatCurrentTime(value) {
   padding: 0 8px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -119,19 +119,23 @@ function formatCurrentTime(value) {
 }
 
 .label {
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--color-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 strong {
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.25;
-  overflow-wrap: anywhere;
-  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 </style>

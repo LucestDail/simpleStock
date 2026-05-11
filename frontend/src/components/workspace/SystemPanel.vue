@@ -97,7 +97,7 @@ async function handleRefreshMarket() {
   padding: 0 8px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -125,30 +125,36 @@ async function handleRefreshMarket() {
   border-bottom: 1px solid var(--color-hairline-soft);
   padding-bottom: 2px;
   color: var(--color-body);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .meta-list strong {
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .meta-list code {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 11px;
   background: var(--color-surface-soft);
   border-radius: var(--rounded-xs);
   padding: 1px 4px;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .market-error {
   margin: 0;
   color: var(--color-accent-yellow);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
