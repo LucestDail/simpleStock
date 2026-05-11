@@ -44,22 +44,60 @@ const drawerClass = computed(() => ({
   'drawer--asset': drawer.value.type === 'assetDetail',
   'drawer--thread': drawer.value.type === 'threadDetail',
 }));
+const activeHoldingMetaChips = computed(() => {
+  if (!activeHolding.value) return [];
+  const details = activeHolding.value.details || {};
+  return [
+    CATEGORIES.find((item) => item.id === activeHolding.value.category)?.label || '',
+    details.account || '',
+    details.market || '',
+    details.ticker || '',
+  ].filter(Boolean);
+});
 const activeHoldingDetailCards = computed(() => {
-  if (!activeHolding.value?.details) return [];
-  const details = activeHolding.value.details;
+  if (!activeHolding.value) return [];
+  const details = activeHolding.value.details || {};
   const cards = [
-    details.account ? ['계좌', details.account] : null,
-    details.market ? ['시장', details.market] : null,
-    details.ticker ? ['티커', details.ticker] : null,
+    ['평가 금액', formatHoldingPrimaryAmount(activeHolding.value)],
+    formatHoldingSecondaryAmount(activeHolding.value)
+      ? ['원화 환산', formatHoldingSecondaryAmount(activeHolding.value).replace(/^원화 환산\s*/, '')]
+      : null,
     details.quantity != null ? ['수량', `${details.quantity}주`] : null,
     details.currentPrice != null ? ['현재가', formatPrice(details)] : null,
     details.priceChangePct != null ? ['등락', formatQuoteChange(details)] : null,
-    details.fxRate != null ? ['환율', Number(details.fxRate).toLocaleString('ko-KR', { maximumFractionDigits: 2 })] : null,
     details.lastQuoteAt ? ['시세 시각', formatTime(details.lastQuoteAt)] : null,
+    details.fxRate != null && Number(details.fxRate) > 0
+      ? ['환율', Number(details.fxRate).toLocaleString('ko-KR', { maximumFractionDigits: 2 })]
+      : null,
     details.quoteSource ? ['출처', details.quoteSource] : null,
   ].filter(Boolean);
   return cards;
 });
+const activeHoldingSummaryText = computed(() => {
+  if (!activeHolding.value) return '';
+  const details = activeHolding.value.details || {};
+  const summary = normalizeText(details.summary);
+  if (!summary) return '';
+  const redundantTokens = [
+    details.account,
+    details.market,
+    details.ticker,
+    details.quantity != null ? `${details.quantity}주` : '',
+    details.currentPrice != null ? `현재가 ${formatPrice(details)}` : '',
+    details.currentPrice != null ? formatPrice(details) : '',
+  ]
+    .map(normalizeText)
+    .filter(Boolean);
+  const summaryChunks = summary
+    .split(/[·,/]/)
+    .map(normalizeText)
+    .filter(Boolean);
+  if (summaryChunks.length && summaryChunks.every((chunk) => redundantTokens.includes(chunk))) {
+    return '';
+  }
+  return details.summary || '';
+});
+const activeHoldingOrderLines = computed(() => activeHolding.value?.details?.orders || []);
 
 const settingsForm = reactive({
   displayName: '',
@@ -136,7 +174,13 @@ function formatHoldingSecondaryAmount(holding) {
         : holding.amount;
     return `원화 환산 ${formatKRW(converted)}`;
   }
-  return details.summary || '';
+  return '';
+}
+
+function normalizeText(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function formatTime(value) {
@@ -233,15 +277,14 @@ function formatTime(value) {
               <div class="asset-summary-card">
                 <div class="asset-summary-card__head">
                   <strong>{{ activeHolding.name }}</strong>
-                  <span>{{ CATEGORIES.find((item) => item.id === activeHolding.category)?.label }}</span>
                 </div>
                 <div class="asset-summary-card__amounts">
                   <strong class="mono-num">{{ formatHoldingPrimaryAmount(activeHolding) }}</strong>
-                  <span class="mono-num">{{ formatHoldingSecondaryAmount(activeHolding) }}</span>
+                  <span v-if="formatHoldingSecondaryAmount(activeHolding)" class="mono-num">{{ formatHoldingSecondaryAmount(activeHolding) }}</span>
                 </div>
-                <p class="asset-summary-card__brief">
-                  {{ activeHolding.details?.summary || '보유 자산의 현재 시세와 계좌 정보를 기준으로 정리한 상세 정보입니다.' }}
-                </p>
+                <div v-if="activeHoldingMetaChips.length" class="asset-chip-row">
+                  <span v-for="item in activeHoldingMetaChips" :key="item" class="asset-chip">{{ item }}</span>
+                </div>
               </div>
               <div v-if="activeHoldingDetailCards.length" class="detail-grid detail-grid--asset">
                 <div v-for="[label, value] in activeHoldingDetailCards" :key="label" class="detail-card">
@@ -249,9 +292,16 @@ function formatTime(value) {
                   <strong>{{ value }}</strong>
                 </div>
               </div>
-              <ul v-if="activeHolding.details?.orders?.length" class="simple-list">
-                <li v-for="item in activeHolding.details.orders" :key="item">{{ item }}</li>
-              </ul>
+              <div v-if="activeHoldingSummaryText" class="detail-note-block">
+                <strong>자산 요약</strong>
+                <p>{{ activeHoldingSummaryText }}</p>
+              </div>
+              <div v-if="activeHoldingOrderLines.length" class="detail-note-block">
+                <strong>예약/메모</strong>
+                <ul class="simple-list">
+                  <li v-for="item in activeHoldingOrderLines" :key="item">{{ item }}</li>
+                </ul>
+              </div>
             </div>
             <div v-else-if="categoryDetail" class="detail-block">
               <strong>{{ categoryDetail.category.label }}</strong>
@@ -422,12 +472,6 @@ function formatTime(value) {
   align-items: center;
 }
 
-.asset-summary-card__head span {
-  color: var(--color-muted);
-  font-size: 11px;
-  font-weight: 700;
-}
-
 .asset-summary-card__amounts {
   display: grid;
   gap: 2px;
@@ -443,11 +487,39 @@ function formatTime(value) {
   font-size: 12px;
 }
 
-.asset-summary-card__brief {
+.asset-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.asset-chip {
+  border-radius: var(--rounded-pill);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px 9px;
+  color: var(--color-body-strong);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.detail-note-block {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px 14px;
+}
+
+.detail-note-block strong {
+  font-size: 13px;
+}
+
+.detail-note-block p {
   margin: 0;
   color: var(--color-body);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .settings-section {
