@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import PanelShell from './PanelShell.vue';
 import { useChat } from '../../composables/useChat';
@@ -37,6 +37,8 @@ const markdown = new MarkdownIt({
 });
 
 const draft = ref('');
+const messagesRef = ref(null);
+const shouldStickToBottom = ref(true);
 const canSend = computed(() => Boolean(draft.value.trim()) && !sending.value);
 const visibleThreads = computed(() => threads.value.slice(0, 12));
 const chatStatusItems = computed(() => [
@@ -76,6 +78,21 @@ function formatTimestamp(value) {
 
 function renderAssistantMessage(content) {
   return markdown.render(String(content || ''));
+}
+
+function scrollMessagesToBottom(behavior = 'auto') {
+  const el = messagesRef.value;
+  if (!el) return;
+  el.scrollTo({
+    top: el.scrollHeight,
+    behavior,
+  });
+}
+
+function handleMessagesScroll() {
+  const el = messagesRef.value;
+  if (!el) return;
+  shouldStickToBottom.value = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
 }
 
 async function handleCreateThread() {
@@ -171,6 +188,21 @@ function onComposerKeydown(event) {
     submit();
   }
 }
+
+watch(
+  () => [activeThread.value?.id || '', messages.value.length, sending.value],
+  async ([nextThreadId, nextMessageCount, nextSending], [prevThreadId, prevMessageCount, prevSending] = []) => {
+    const changedThread = nextThreadId !== prevThreadId;
+    const appendedMessage = Number(nextMessageCount) !== Number(prevMessageCount);
+    const sendingStarted = nextSending && !prevSending;
+    if (!changedThread && !appendedMessage && !sendingStarted) return;
+    await nextTick();
+    if (changedThread || sendingStarted || shouldStickToBottom.value) {
+      scrollMessagesToBottom(changedThread ? 'auto' : 'smooth');
+    }
+  },
+  { flush: 'post' }
+);
 </script>
 
 <template>
@@ -228,7 +260,7 @@ function onComposerKeydown(event) {
             <span>{{ activeThread ? '목록에서 대화를 선택해 이어서 볼 수 있습니다.' : '처음 메시지를 보내면 Quant Manager가 대화를 시작합니다.' }}</span>
           </div>
 
-          <div class="messages">
+          <div ref="messagesRef" class="messages" @scroll="handleMessagesScroll">
             <div v-if="!messages.length" class="empty-box">
               <strong>{{ activeThread?.title || '새 대화' }}</strong>
               <p>
@@ -261,17 +293,26 @@ function onComposerKeydown(event) {
             <strong>{{ composerNotice.title }}</strong>
             <p>{{ composerNotice.message }}</p>
           </div>
-          <textarea
-            v-model="draft"
-            class="composer-input"
-            rows="3"
-            placeholder="Enter 전송, Shift+Enter 줄바꿈"
-            :disabled="sending || !system.aiConfigured"
-            @keydown="onComposerKeydown"
-          />
-          <div class="composer-foot">
-            <button type="button" class="btn-primary" :disabled="!canSend || !system.aiConfigured" @click="submit">
-              {{ sending ? '전송 중…' : '보내기' }}
+          <div class="composer-row">
+            <textarea
+              v-model="draft"
+              class="composer-input"
+              rows="3"
+              placeholder="Enter 전송, Shift+Enter 줄바꿈"
+              :disabled="sending || !system.aiConfigured"
+              @keydown="onComposerKeydown"
+            />
+            <button
+              type="button"
+              class="composer-send"
+              :disabled="!canSend || !system.aiConfigured"
+              @click="submit"
+              aria-label="보내기"
+              title="보내기"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3.4 20.6 21 12 3.4 3.4l1.8 6.8 8.7 1.8-8.7 1.8-1.8 6.8Z" />
+              </svg>
             </button>
           </div>
         </div>
@@ -600,6 +641,13 @@ function onComposerKeydown(event) {
   margin-top: 4px;
 }
 
+.composer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+  align-items: end;
+}
+
 .chat-notice {
   border-radius: var(--rounded-lg);
   padding: 6px 8px;
@@ -649,11 +697,30 @@ function onComposerKeydown(event) {
   box-shadow: 0 0 0 2px rgba(0, 82, 255, 0.08);
 }
 
-.composer-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
+.composer-send {
+  height: 42px;
+  width: 42px;
+  border: none;
+  border-radius: 14px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(102, 116, 216, 0.28);
+}
+
+.composer-send svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.composer-send:disabled {
+  background: var(--color-primary-disabled);
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 @media (max-width: 1180px) {
@@ -672,9 +739,17 @@ function onComposerKeydown(event) {
 
 @media (max-width: 720px) {
   .message-meta,
-  .composer-foot {
+  .composer-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .composer-row {
+    grid-template-columns: 1fr;
+  }
+
+  .composer-send {
+    width: 100%;
   }
 }
 </style>
