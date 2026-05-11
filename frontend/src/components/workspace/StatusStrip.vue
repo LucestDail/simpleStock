@@ -1,14 +1,31 @@
 <script setup>
 import { computed } from 'vue';
+import PanelShell from './PanelShell.vue';
 import { usePortfolio } from '../../composables/usePortfolio';
 import { useChat } from '../../composables/useChat';
 import { useWorkspace } from '../../composables/useWorkspace';
 
+const props = defineProps({
+  panel: {
+    type: Object,
+    required: true,
+  },
+});
+
 const { system, manager, holdings, snapshots } = usePortfolio();
 const { activeThread } = useChat();
-const { focusMode, layoutReason } = useWorkspace();
+const { focusMode, layoutReason, openDrawer } = useWorkspace();
 
 const latestReportTime = computed(() => manager.value?.latestReport?.createdAt || null);
+const cards = computed(() => [
+  { label: '현재', value: system.value.serverTimeLocal || '시간 확인 중' },
+  { label: '포커스', value: focusMode.value || 'balanced' },
+  { label: '활성 스레드', value: activeThread.value?.title || '없음' },
+  { label: '보유 자산', value: `${holdings.value.length}개` },
+  { label: '스냅샷', value: `${snapshots.value.length}건` },
+  { label: '최근 브리핑', value: formatTime(latestReportTime.value) },
+  { label: '레이아웃 사유', value: layoutReason.value || '기본 레이아웃', wide: true },
+]);
 
 function formatTime(value) {
   if (!value) return '없음';
@@ -20,90 +37,80 @@ function formatTime(value) {
 </script>
 
 <template>
-  <div class="status-strip">
-    <div class="status-item">
-      <span class="label">현재</span>
-      <strong>{{ system.serverTimeLocal || '시간 확인 중' }}</strong>
+  <PanelShell
+    title="운영 상태"
+    subtitle="status"
+    :span="panel.span"
+    :highlighted="panel.highlighted"
+  >
+    <template #actions>
+      <button type="button" class="btn-secondary" @click="openDrawer('system', null, '운영 상태')">
+        상세
+      </button>
+    </template>
+
+    <div class="status-grid">
+      <article
+        v-for="item in cards"
+        :key="item.label"
+        class="status-item"
+        :class="{ 'status-item--wide': item.wide }"
+      >
+        <span class="label">{{ item.label }}</span>
+        <strong>{{ item.value }}</strong>
+      </article>
     </div>
-    <div class="status-item">
-      <span class="label">포커스</span>
-      <strong>{{ focusMode }}</strong>
-    </div>
-    <div class="status-item">
-      <span class="label">활성 스레드</span>
-      <strong>{{ activeThread?.title || '없음' }}</strong>
-    </div>
-    <div class="status-item">
-      <span class="label">보유 자산</span>
-      <strong>{{ holdings.length }}개</strong>
-    </div>
-    <div class="status-item">
-      <span class="label">스냅샷</span>
-      <strong>{{ snapshots.length }}건</strong>
-    </div>
-    <div class="status-item">
-      <span class="label">최근 브리핑</span>
-      <strong>{{ formatTime(latestReportTime) }}</strong>
-    </div>
-    <div class="status-item status-item--wide">
-      <span class="label">레이아웃 사유</span>
-      <strong>{{ layoutReason }}</strong>
-    </div>
-  </div>
+  </PanelShell>
 </template>
 
 <style scoped>
-.status-strip {
+.btn-secondary {
+  height: 32px;
+  border: none;
+  border-radius: var(--rounded-pill);
+  padding: 0 12px;
+  background: var(--color-surface-strong);
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.status-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-sm);
+  min-height: 0;
 }
 
 .status-item {
-  min-height: 72px;
+  min-height: 58px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  background: var(--color-canvas);
-  padding: var(--space-sm) var(--space-base);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 10px 12px;
   display: grid;
-  gap: 8px;
+  gap: 4px;
+  overflow: hidden;
 }
 
 .status-item--wide {
-  grid-column: span 2;
+  grid-column: 1 / -1;
 }
 
 .label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   color: var(--color-muted);
 }
 
 strong {
   color: var(--color-ink);
-  font-size: 14px;
-  line-height: 1.45;
-}
-
-@media (max-width: 1200px) {
-  .status-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .status-item--wide {
-    grid-column: span 3;
-  }
-}
-
-@media (max-width: 720px) {
-  .status-strip {
-    grid-template-columns: 1fr;
-  }
-
-  .status-item--wide {
-    grid-column: span 1;
-  }
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

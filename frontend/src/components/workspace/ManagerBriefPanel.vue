@@ -101,12 +101,11 @@ async function generateBrief() {
 <style scoped>
 .btn-primary,
 .btn-secondary {
-  height: 36px;
+  height: 32px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 var(--space-sm);
-  font: inherit;
-  font-size: 13px;
+  padding: 0 12px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -129,8 +128,9 @@ async function generateBrief() {
 .disabled-box,
 .empty-box {
   border-radius: var(--rounded-lg);
-  padding: var(--space-base);
+  padding: 10px 12px;
   background: var(--color-surface-soft);
+  font-size: 12px;
 }
 
 .disabled-box strong,
@@ -146,32 +146,37 @@ async function generateBrief() {
 .brief-layout {
   display: grid;
   gap: var(--space-sm);
+  min-height: 0;
+  overflow: auto;
 }
 
 .brief-card {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: var(--space-base);
+  padding: 10px 12px;
   display: grid;
-  gap: var(--space-xs);
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .kicker {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-muted);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   font-weight: 700;
 }
 
 .summary {
   margin: 0;
-  line-height: 1.65;
+  line-height: 1.45;
+  font-size: 12px;
 }
 
 .list {
   margin: 0;
   padding-left: 18px;
   color: var(--color-body);
+  font-size: 12px;
 }
 </style>

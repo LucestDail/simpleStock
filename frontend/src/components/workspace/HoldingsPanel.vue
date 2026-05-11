@@ -217,13 +217,12 @@ function inspectHolding(target) {
 }
 
 .input {
-  height: 44px;
-  padding: 0 var(--space-base);
+  height: 36px;
+  padding: 0 10px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md);
-  background: var(--color-canvas);
+  background: rgba(255, 255, 255, 0.02);
   color: var(--color-ink);
-  font: inherit;
 }
 
 .input:focus {
@@ -239,11 +238,11 @@ function inspectHolding(target) {
 
 .btn-primary,
 .btn-secondary {
-  height: 44px;
+  height: 36px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 var(--space-md);
-  font: inherit;
+  padding: 0 14px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -266,23 +265,27 @@ function inspectHolding(target) {
 .empty-box {
   border: 1px dashed var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: var(--space-lg);
+  padding: 14px;
   color: var(--color-muted);
+  font-size: 12px;
 }
 
 .holding-list {
   display: grid;
   gap: var(--space-sm);
+  min-height: 0;
+  overflow: auto;
 }
 
 .holding-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: var(--space-base);
+  gap: var(--space-sm);
   align-items: center;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: var(--space-base);
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .holding-main {
@@ -301,7 +304,7 @@ function inspectHolding(target) {
 
 .holding-main span {
   color: var(--color-muted);
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .row-actions {
@@ -313,7 +316,7 @@ function inspectHolding(target) {
   border: none;
   background: transparent;
   color: var(--color-primary);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }

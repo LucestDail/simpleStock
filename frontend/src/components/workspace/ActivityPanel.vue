@@ -44,13 +44,16 @@ function formatTime(value) {
 .empty-box {
   border: 1px dashed var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: var(--space-lg);
+  padding: 12px;
   color: var(--color-muted);
+  font-size: 12px;
 }
 
 .activity-list {
   display: grid;
   gap: var(--space-sm);
+  min-height: 0;
+  overflow: auto;
 }
 
 .activity-row {
@@ -60,7 +63,8 @@ function formatTime(value) {
   align-items: start;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: var(--space-base);
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .dot {
@@ -91,12 +95,13 @@ function formatTime(value) {
 .activity-copy p {
   margin: 0;
   color: var(--color-body);
-  line-height: 1.55;
+  line-height: 1.4;
+  font-size: 12px;
 }
 
 .time {
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 @media (max-width: 720px) {

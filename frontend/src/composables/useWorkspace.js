@@ -2,10 +2,19 @@ import { computed, ref } from 'vue';
 
 const BASE_PANELS = [
   {
+    id: 'status',
+    title: '운영 상태',
+    column: 'left',
+    span: 'sm',
+    priority: 5,
+    visible: true,
+    detailType: 'system',
+  },
+  {
     id: 'overview',
     title: '포트폴리오 개요',
     column: 'left',
-    span: 'lg',
+    span: 'md',
     priority: 10,
     visible: true,
     detailType: 'assetDetail',
@@ -14,61 +23,70 @@ const BASE_PANELS = [
     id: 'holdings',
     title: '보유 자산',
     column: 'left',
-    span: 'xl',
+    span: 'full',
     priority: 20,
     visible: true,
     detailType: 'assetDetail',
   },
   {
-    id: 'snapshots',
-    title: '스냅샷',
-    column: 'center',
-    span: 'md',
-    priority: 10,
-    visible: true,
-    detailType: 'system',
-  },
-  {
     id: 'chat',
     title: '대화',
     column: 'center',
-    span: 'xl',
-    priority: 20,
+    span: 'full',
+    priority: 100,
     visible: true,
     detailType: 'threadDetail',
   },
   {
+    id: 'insights',
+    title: '라이브 인사이트',
+    column: 'right',
+    span: 'md',
+    priority: 5,
+    visible: true,
+    detailType: 'insight',
+  },
+  {
+    id: 'managerBrief',
+    title: 'Quant Manager',
+    column: 'right',
+    span: 'md',
+    priority: 10,
+    visible: true,
+    detailType: 'managerBrief',
+  },
+  {
+    id: 'snapshots',
+    title: '스냅샷',
+    column: 'right',
+    span: 'sm',
+    priority: 20,
+    visible: true,
+    detailType: 'system',
+  },
+  {
     id: 'activity',
     title: '실시간 활동',
-    column: 'center',
+    column: 'right',
     span: 'md',
     priority: 30,
     visible: true,
     detailType: 'threadDetail',
   },
   {
-    id: 'managerBrief',
-    title: 'Quant Manager',
-    column: 'right',
-    span: 'lg',
-    priority: 10,
-    visible: true,
-    detailType: 'managerBrief',
-  },
-  {
     id: 'profile',
     title: '프로필',
     column: 'right',
-    span: 'md',
-    priority: 20,
+    span: 'sm',
+    priority: 40,
     visible: true,
     detailType: 'profile',
   },
   {
     id: 'system',
     title: '시스템',
-    column: 'right',
-    span: 'md',
+    column: 'left',
+    span: 'sm',
     priority: 30,
     visible: true,
     detailType: 'system',
@@ -78,7 +96,7 @@ const BASE_PANELS = [
 const ALLOWED_COLUMNS = new Set(['left', 'center', 'right']);
 const ALLOWED_SPANS = new Set(['sm', 'md', 'lg', 'xl', 'full']);
 const PANEL_IDS = new Set(BASE_PANELS.map((panel) => panel.id));
-const HIDEABLE_PANELS = new Set(['activity', 'profile', 'system', 'snapshots']);
+const HIDEABLE_PANELS = new Set(['activity', 'profile', 'system', 'snapshots', 'insights']);
 
 const focusMode = ref('balanced');
 const layoutReason = ref('기본 워크스페이스 레이아웃');
@@ -87,6 +105,7 @@ const selectedThreadId = ref(null);
 const lastPatchSource = ref('system');
 const layoutUpdatedAt = ref(null);
 const activityFeed = ref([]);
+const generatedInsights = ref([]);
 const drawer = ref({
   open: false,
   type: null,
@@ -131,6 +150,7 @@ function normalizePatch(patch) {
   const next = {
     focusMode: typeof patch.focusMode === 'string' ? patch.focusMode : null,
     reason: typeof patch.reason === 'string' ? patch.reason : '',
+    hasGeneratedInsights: Array.isArray(patch.generatedInsights),
     highlightPanelIds: Array.isArray(patch.highlightPanelIds)
       ? patch.highlightPanelIds.filter((id) => PANEL_IDS.has(id))
       : [],
@@ -143,6 +163,38 @@ function normalizePatch(patch) {
             title: typeof patch.openDrawer.title === 'string' ? patch.openDrawer.title : '',
           }
         : null,
+    generatedInsights: Array.isArray(patch.generatedInsights)
+      ? patch.generatedInsights
+          .map((item, index) => ({
+            id:
+              typeof item?.id === 'string' && item.id.trim()
+                ? item.id.trim()
+                : `insight-${index + 1}`,
+            title: typeof item?.title === 'string' ? item.title.trim() : '',
+            summary: typeof item?.summary === 'string' ? item.summary.trim() : '',
+            tone:
+              item?.tone === 'primary' || item?.tone === 'positive' || item?.tone === 'warning'
+                ? item.tone
+                : 'default',
+            metrics: Array.isArray(item?.metrics)
+              ? item.metrics
+                  .map((metric) => ({
+                    label: typeof metric?.label === 'string' ? metric.label.trim() : '',
+                    value: typeof metric?.value === 'string' ? metric.value.trim() : '',
+                  }))
+                  .filter((metric) => metric.label && metric.value)
+                  .slice(0, 4)
+              : [],
+            bullets: Array.isArray(item?.bullets)
+              ? item.bullets
+                  .map((bullet) => (typeof bullet === 'string' ? bullet.trim() : ''))
+                  .filter(Boolean)
+                  .slice(0, 4)
+              : [],
+          }))
+          .filter((item) => item.title || item.summary || item.metrics.length || item.bullets.length)
+          .slice(0, 4)
+      : [],
     panelPatches: Array.isArray(patch.panelPatches)
       ? patch.panelPatches
           .filter((item) => item && PANEL_IDS.has(item.id))
@@ -180,16 +232,25 @@ function applyWorkspacePatch(patch, source = 'system') {
 
   for (const item of normalized.panelPatches) {
     const prev = next[item.id];
+    const isChatPanel = item.id === 'chat';
+    const nextColumn = isChatPanel
+      ? 'center'
+      : item.column === 'center'
+        ? prev.column
+        : (item.column || prev.column);
     next[item.id] = {
       ...prev,
-      column: item.column || prev.column,
-      span: item.span || prev.span,
-      priority: item.priority ?? prev.priority,
-      visible: item.visible ?? prev.visible,
+      column: nextColumn,
+      span: isChatPanel ? 'full' : (item.span || prev.span),
+      priority: isChatPanel ? 100 : (item.priority ?? prev.priority),
+      visible: isChatPanel ? true : (item.visible ?? prev.visible),
     };
   }
 
   panelState.value = next;
+  if (normalized.hasGeneratedInsights) {
+    generatedInsights.value = normalized.generatedInsights;
+  }
   if (normalized.focusMode) {
     focusMode.value = normalized.focusMode;
   }
@@ -310,6 +371,7 @@ export function useWorkspace() {
     panels,
     columns,
     activityFeed,
+    generatedInsights,
     applyWorkspacePatch,
     resetWorkspaceLayout,
     recordActivity,

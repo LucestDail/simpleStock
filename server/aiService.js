@@ -9,6 +9,42 @@ const AI_DAILY_CRON = process.env.AI_DAILY_CRON || '5 21 * * *';
 
 let googleGenAiCtorPromise = null;
 let conversationGraphPromise = null;
+const CATEGORY_LABELS = {
+  deposit: '예금',
+  installment: '적금',
+  stock: '주식',
+  fund: '펀드',
+  pension: '연금',
+};
+
+const GENERATED_INSIGHT_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    title: { type: 'string' },
+    summary: { type: 'string' },
+    tone: {
+      type: 'string',
+      enum: ['default', 'primary', 'positive', 'warning'],
+    },
+    metrics: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          value: { type: 'string' },
+        },
+        required: ['label', 'value'],
+      },
+    },
+    bullets: {
+      type: 'array',
+      items: { type: 'string' },
+    },
+  },
+  required: ['id', 'title', 'summary', 'tone', 'metrics', 'bullets'],
+};
 
 const WORKSPACE_PATCH_SCHEMA = {
   type: 'object',
@@ -22,16 +58,22 @@ const WORKSPACE_PATCH_SCHEMA = {
       items: {
         type: 'string',
         enum: [
+          'status',
           'overview',
           'holdings',
-          'snapshots',
           'chat',
-          'activity',
+          'insights',
           'managerBrief',
+          'snapshots',
+          'activity',
           'profile',
           'system',
         ],
       },
+    },
+    generatedInsights: {
+      type: 'array',
+      items: GENERATED_INSIGHT_SCHEMA,
     },
     panelPatches: {
       type: 'array',
@@ -41,12 +83,14 @@ const WORKSPACE_PATCH_SCHEMA = {
           id: {
             type: 'string',
             enum: [
+              'status',
               'overview',
               'holdings',
-              'snapshots',
               'chat',
-              'activity',
+              'insights',
               'managerBrief',
+              'snapshots',
+              'activity',
               'profile',
               'system',
             ],
@@ -74,7 +118,7 @@ const WORKSPACE_PATCH_SCHEMA = {
       properties: {
         type: {
           type: 'string',
-          enum: ['assetDetail', 'threadDetail', 'managerBrief', 'profile', 'system'],
+          enum: ['assetDetail', 'threadDetail', 'managerBrief', 'profile', 'system', 'insight'],
         },
         entityId: {
           type: 'string',
@@ -89,7 +133,7 @@ const WORKSPACE_PATCH_SCHEMA = {
       type: 'string',
     },
   },
-  required: ['focusMode', 'highlightPanelIds', 'panelPatches', 'openDrawer', 'reason'],
+  required: ['focusMode', 'highlightPanelIds', 'generatedInsights', 'panelPatches', 'openDrawer', 'reason'],
 };
 
 const SUPERVISOR_SCHEMA = {
@@ -228,6 +272,123 @@ function safeParseJson(value, fallback) {
   }
 }
 
+function formatCompactCurrency(amount) {
+  return new Intl.NumberFormat('ko-KR', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(Number(amount) || 0);
+}
+
+function buildFallbackInsights(userInput, context) {
+  const total = Number(context?.portfolio?.total || 0);
+  const shares = Array.isArray(context?.portfolio?.categoryShares)
+    ? [...context.portfolio.categoryShares]
+    : [];
+  const dominant = [...shares].sort((a, b) => b.amount - a.amount)[0] || null;
+  const latestSnapshot = context?.portfolio?.latestSnapshots?.[0] || null;
+  const previousSnapshot = context?.portfolio?.latestSnapshots?.[1] || null;
+  const delta =
+    latestSnapshot && previousSnapshot ? Number(latestSnapshot.total || 0) - Number(previousSnapshot.total || 0) : null;
+  const recentMessages = Array.isArray(context?.recentMessages) ? context.recentMessages.length : 0;
+  const memoryCount = Array.isArray(context?.memory?.recentLongTermMemories)
+    ? context.memory.recentLongTermMemories.length
+    : 0;
+  const managerCount = Array.isArray(context?.memory?.latestManagerReports)
+    ? context.memory.latestManagerReports.length
+    : 0;
+  const displayName = context?.profile?.userProfile?.displayName || '사용자';
+
+  return [
+    {
+      id: 'conversation-focus',
+      title: '현재 대화 포커스',
+      summary: `${displayName}님의 현재 질의 흐름과 응답 스타일에 맞춰 Quant Manager가 이번 턴의 우선순위를 재해석하고 있습니다.`,
+      tone: 'primary',
+      metrics: [
+        { label: '최근 메시지', value: `${recentMessages}개` },
+        { label: '기억 신호', value: `${memoryCount}개` },
+      ],
+      bullets: [
+        `핵심 요청: ${String(userInput || '').slice(0, 72) || '현재 대화 맥락 파악 중'}`,
+        managerCount ? `최근 브리핑 ${managerCount}건을 함께 참고합니다.` : '브리핑 히스토리가 적어 현재 대화 비중이 높습니다.',
+      ],
+    },
+    {
+      id: 'portfolio-pulse',
+      title: '포트폴리오 펄스',
+      summary: dominant
+        ? `${CATEGORY_LABELS[dominant.category] || dominant.category} 비중이 ${dominant.pct}%로 가장 큽니다. 자산 집중도와 최근 스냅샷 변화를 함께 봐야 합니다.`
+        : '아직 등록된 자산이 적어 포트폴리오 펄스를 만들기 전 단계입니다.',
+      tone: dominant && dominant.pct >= 55 ? 'warning' : 'positive',
+      metrics: [
+        { label: '총 자산', value: formatCompactCurrency(total) },
+        {
+          label: '우세 카테고리',
+          value: dominant
+            ? `${CATEGORY_LABELS[dominant.category] || dominant.category} ${dominant.pct}%`
+            : '데이터 없음',
+        },
+      ],
+      bullets: [
+        latestSnapshot ? `최근 스냅샷: ${latestSnapshot.date}` : '최근 스냅샷이 아직 없습니다.',
+        delta == null ? '스냅샷 비교 데이터가 부족합니다.' : `직전 대비 ${delta >= 0 ? '+' : ''}${formatCompactCurrency(delta)} 변동`,
+      ],
+    },
+    {
+      id: 'manager-signal',
+      title: '실시간 매니저 시그널',
+      summary: '대화, 자산, 브리핑, 프로필을 동시에 보면서 지금 당장 필요한 행동과 관찰 포인트를 압축합니다.',
+      tone: 'default',
+      metrics: [
+        { label: '활성 브리핑', value: managerCount ? `${managerCount}건` : '없음' },
+        { label: '프로필 요약', value: context?.profile?.aiProfile?.summary ? '반영됨' : '학습 중' },
+      ],
+      bullets: [
+        dominant
+          ? `${CATEGORY_LABELS[dominant.category] || dominant.category} 관련 질문이 나오면 보유 자산과 리스크 체크를 우선 노출합니다.`
+          : '자산 등록 이후 시계열 인사이트 품질이 더 높아집니다.',
+        '새 응답이 오면 이 카드와 보조 패널의 구성도 함께 갱신됩니다.',
+      ],
+    },
+  ];
+}
+
+function buildPrimaryChatWorkspacePatch({
+  userInput,
+  context,
+  focusMode = 'balanced',
+  highlightPanelIds = ['chat', 'insights'],
+  openDrawer = { type: 'threadDetail', entityId: '', title: '대화 상세' },
+  reason = 'Quant Manager 대화를 중심으로 워크스페이스를 유지합니다.',
+  panelOverrides = [],
+}) {
+  const basePanels = [
+    { id: 'status', column: 'left', span: 'sm', priority: 5, visible: true },
+    { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
+    { id: 'holdings', column: 'left', span: 'full', priority: 20, visible: true },
+    { id: 'system', column: 'left', span: 'sm', priority: 30, visible: true },
+    { id: 'chat', column: 'center', span: 'full', priority: 100, visible: true },
+    { id: 'insights', column: 'right', span: 'lg', priority: 5, visible: true },
+    { id: 'managerBrief', column: 'right', span: 'md', priority: 10, visible: true },
+    { id: 'snapshots', column: 'right', span: 'sm', priority: 20, visible: true },
+    { id: 'activity', column: 'right', span: 'md', priority: 30, visible: true },
+    { id: 'profile', column: 'right', span: 'sm', priority: 40, visible: true },
+  ];
+  const overrideMap = new Map((panelOverrides || []).map((item) => [item.id, item]));
+
+  return {
+    focusMode,
+    highlightPanelIds,
+    generatedInsights: buildFallbackInsights(userInput, context),
+    panelPatches: basePanels.map((panel) => ({
+      ...panel,
+      ...(overrideMap.get(panel.id) || {}),
+    })),
+    openDrawer,
+    reason,
+  };
+}
+
 function getGroundingSources(response) {
   const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
   return chunks
@@ -332,132 +493,113 @@ function buildFallbackPlan(userInput, context) {
     });
   }
 
-  let workspacePatch = {
+  let workspacePatch = buildPrimaryChatWorkspacePatch({
+    userInput,
+    context,
     focusMode: 'balanced',
-    highlightPanelIds: ['overview', 'chat'],
-    panelPatches: [
-      { id: 'overview', column: 'left', span: 'lg', priority: 10, visible: true },
-      { id: 'holdings', column: 'left', span: 'xl', priority: 20, visible: true },
-      { id: 'snapshots', column: 'center', span: 'md', priority: 10, visible: true },
-      { id: 'chat', column: 'center', span: 'xl', priority: 20, visible: true },
-      { id: 'activity', column: 'center', span: 'md', priority: 30, visible: true },
-      { id: 'managerBrief', column: 'right', span: 'lg', priority: 10, visible: true },
-      { id: 'profile', column: 'right', span: 'md', priority: 20, visible: true },
-      { id: 'system', column: 'right', span: 'md', priority: 30, visible: true },
-    ],
+    highlightPanelIds: ['chat', 'insights', 'overview'],
     openDrawer: {
       type: 'threadDetail',
       entityId: context.messages?.length ? String(context.messages.at(-1)?.id || '') : '',
       title: '대화 상세',
     },
-    reason: '기본 워크스페이스 레이아웃을 유지합니다.',
-  };
+    reason: 'Quant Manager 대화를 중심으로 현재 자산 상태와 인사이트를 함께 유지합니다.',
+  });
 
   if (/(리밸런싱|비중|분산|재배치|재조정)/.test(lowered)) {
-    workspacePatch = {
+    workspacePatch = buildPrimaryChatWorkspacePatch({
+      userInput,
+      context,
       focusMode: 'rebalance',
-      highlightPanelIds: ['chat', 'managerBrief', 'holdings', 'overview'],
-      panelPatches: [
-        { id: 'overview', column: 'left', span: 'lg', priority: 10, visible: true },
-        { id: 'holdings', column: 'left', span: 'xl', priority: 15, visible: true },
-        { id: 'snapshots', column: 'center', span: 'md', priority: 10, visible: true },
-        { id: 'chat', column: 'center', span: 'full', priority: 20, visible: true },
-        { id: 'activity', column: 'center', span: 'md', priority: 30, visible: true },
-        { id: 'managerBrief', column: 'right', span: 'xl', priority: 10, visible: true },
-        { id: 'profile', column: 'right', span: 'md', priority: 20, visible: false },
-        { id: 'system', column: 'right', span: 'md', priority: 30, visible: true },
-      ],
+      highlightPanelIds: ['chat', 'managerBrief', 'holdings', 'insights'],
       openDrawer: {
         type: 'managerBrief',
         entityId: '',
         title: '리밸런싱 컨텍스트',
       },
-      reason: '리밸런싱 요청이라 채팅과 매니저 브리핑, 자산 패널을 확장합니다.',
-    };
-  } else if (/(전략|관리|지시|매니저|오늘)/.test(lowered)) {
-    workspacePatch = {
-      focusMode: 'manager',
-      highlightPanelIds: ['managerBrief', 'chat', 'activity'],
-      panelPatches: [
-        { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
-        { id: 'holdings', column: 'left', span: 'lg', priority: 20, visible: true },
-        { id: 'snapshots', column: 'center', span: 'md', priority: 10, visible: true },
-        { id: 'chat', column: 'center', span: 'xl', priority: 20, visible: true },
-        { id: 'activity', column: 'center', span: 'lg', priority: 30, visible: true },
-        { id: 'managerBrief', column: 'right', span: 'full', priority: 10, visible: true },
-        { id: 'profile', column: 'right', span: 'md', priority: 20, visible: false },
-        { id: 'system', column: 'right', span: 'md', priority: 30, visible: true },
+      reason: '리밸런싱 요청이라 채팅을 중심으로 자산, 인사이트, 매니저 브리핑을 확장합니다.',
+      panelOverrides: [
+        { id: 'overview', span: 'sm', priority: 10 },
+        { id: 'holdings', span: 'full', priority: 20 },
+        { id: 'insights', span: 'xl', priority: 5, visible: true },
+        { id: 'managerBrief', span: 'lg', priority: 10, visible: true },
+        { id: 'profile', visible: false },
       ],
+    });
+  } else if (/(전략|관리|지시|매니저|오늘)/.test(lowered)) {
+    workspacePatch = buildPrimaryChatWorkspacePatch({
+      userInput,
+      context,
+      focusMode: 'manager',
+      highlightPanelIds: ['chat', 'managerBrief', 'activity', 'insights'],
       openDrawer: {
         type: 'managerBrief',
         entityId: '',
         title: '매니저 브리핑 상세',
       },
-      reason: '관리 지시 성격의 요청이라 매니저 브리핑과 활동 패널을 강조합니다.',
-    };
-  } else if (/(뉴스|시장|시황|검색|찾아|외부|web|search)/.test(lowered)) {
-    workspacePatch = {
-      focusMode: 'research',
-      highlightPanelIds: ['chat', 'activity', 'system'],
-      panelPatches: [
-        { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
-        { id: 'holdings', column: 'left', span: 'lg', priority: 20, visible: true },
-        { id: 'snapshots', column: 'center', span: 'sm', priority: 10, visible: true },
-        { id: 'chat', column: 'center', span: 'full', priority: 20, visible: true },
-        { id: 'activity', column: 'right', span: 'xl', priority: 10, visible: true },
-        { id: 'managerBrief', column: 'right', span: 'md', priority: 20, visible: true },
-        { id: 'profile', column: 'right', span: 'sm', priority: 30, visible: false },
-        { id: 'system', column: 'right', span: 'md', priority: 40, visible: true },
+      reason: '관리 지시 성격의 요청이라 채팅을 중심으로 브리핑, 활동, 인사이트를 크게 반영합니다.',
+      panelOverrides: [
+        { id: 'insights', span: 'lg', priority: 5, visible: true },
+        { id: 'managerBrief', span: 'xl', priority: 10, visible: true },
+        { id: 'activity', span: 'lg', priority: 20, visible: true },
+        { id: 'profile', visible: false },
       ],
+    });
+  } else if (/(뉴스|시장|시황|검색|찾아|외부|web|search)/.test(lowered)) {
+    workspacePatch = buildPrimaryChatWorkspacePatch({
+      userInput,
+      context,
+      focusMode: 'research',
+      highlightPanelIds: ['chat', 'insights', 'activity', 'system'],
       openDrawer: {
         type: 'system',
         entityId: '',
         title: '리서치 컨텍스트',
       },
-      reason: '외부 검색/리서치 요청이라 대화와 실시간 활동, 시스템 컨텍스트를 강조합니다.',
-    };
-  } else if (/(프로필|성향|선호|응답 스타일|메모리)/.test(lowered)) {
-    workspacePatch = {
-      focusMode: 'balanced',
-      highlightPanelIds: ['profile', 'chat', 'activity'],
-      panelPatches: [
-        { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
-        { id: 'holdings', column: 'left', span: 'lg', priority: 20, visible: true },
-        { id: 'snapshots', column: 'center', span: 'md', priority: 10, visible: true },
-        { id: 'chat', column: 'center', span: 'xl', priority: 20, visible: true },
-        { id: 'activity', column: 'center', span: 'md', priority: 30, visible: true },
-        { id: 'managerBrief', column: 'right', span: 'md', priority: 10, visible: true },
-        { id: 'profile', column: 'right', span: 'full', priority: 20, visible: true },
-        { id: 'system', column: 'right', span: 'sm', priority: 30, visible: true },
+      reason: '외부 검색/리서치 요청이라 채팅을 중심으로 인사이트, 활동, 시스템 컨텍스트를 강화합니다.',
+      panelOverrides: [
+        { id: 'insights', span: 'xl', priority: 5, visible: true },
+        { id: 'activity', span: 'lg', priority: 10, visible: true },
+        { id: 'managerBrief', span: 'sm', priority: 20, visible: true },
+        { id: 'profile', visible: false },
       ],
+    });
+  } else if (/(프로필|성향|선호|응답 스타일|메모리)/.test(lowered)) {
+    workspacePatch = buildPrimaryChatWorkspacePatch({
+      userInput,
+      context,
+      focusMode: 'balanced',
+      highlightPanelIds: ['chat', 'profile', 'insights'],
       openDrawer: {
         type: 'profile',
         entityId: '',
         title: '프로필 상세',
       },
-      reason: '프로필/성향 요청이라 프로필 패널을 확장합니다.',
-    };
-  } else if (/(대화|채팅|상담|질문)/.test(lowered)) {
-    workspacePatch = {
-      focusMode: 'chat',
-      highlightPanelIds: ['chat', 'activity'],
-      panelPatches: [
-        { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
-        { id: 'holdings', column: 'left', span: 'lg', priority: 20, visible: true },
-        { id: 'snapshots', column: 'center', span: 'sm', priority: 10, visible: true },
-        { id: 'chat', column: 'center', span: 'full', priority: 20, visible: true },
-        { id: 'activity', column: 'center', span: 'lg', priority: 30, visible: true },
-        { id: 'managerBrief', column: 'right', span: 'lg', priority: 10, visible: true },
-        { id: 'profile', column: 'right', span: 'md', priority: 20, visible: true },
-        { id: 'system', column: 'right', span: 'sm', priority: 30, visible: true },
+      reason: '프로필/성향 요청이라 채팅을 중심으로 프로필과 인사이트 패널을 확장합니다.',
+      panelOverrides: [
+        { id: 'insights', span: 'md', priority: 5, visible: true },
+        { id: 'profile', span: 'lg', priority: 20, visible: true },
+        { id: 'activity', span: 'sm', priority: 30, visible: true },
       ],
+    });
+  } else if (/(대화|채팅|상담|질문)/.test(lowered)) {
+    workspacePatch = buildPrimaryChatWorkspacePatch({
+      userInput,
+      context,
+      focusMode: 'chat',
+      highlightPanelIds: ['chat', 'insights', 'activity'],
       openDrawer: {
         type: 'threadDetail',
         entityId: '',
         title: '대화 상세',
       },
-      reason: '대화 중심 요청이라 채팅과 활동 패널을 확장합니다.',
-    };
+      reason: '대화 중심 요청이라 Quant Manager 대화를 primary로 두고 보조 패널을 실시간 재정렬합니다.',
+      panelOverrides: [
+        { id: 'insights', span: 'lg', priority: 5, visible: true },
+        { id: 'activity', span: 'lg', priority: 20, visible: true },
+        { id: 'managerBrief', span: 'md', priority: 30, visible: true },
+      ],
+    });
   }
 
   return {
@@ -492,7 +634,9 @@ async function buildSupervisorPlan(userInput, context) {
         '외부 조사가 필요한 경우 research task 를 포함하고 searchQuery 를 한국어 또는 영어 혼합으로 더 검색 친화적으로 재작성한다.',
         'task 는 portfolio, memory, manager, research 타입만 사용한다.',
         '추가로 workspacePatch 를 반환해 어떤 패널을 강조/확장/숨김/이동할지 제안한다.',
+        'workspacePatch 안에는 generatedInsights 배열도 포함해 지금 턴에 보여줄 실시간 카드/통계/집계 패널 내용을 만든다.',
         'workspacePatch 는 허용된 panel id 와 제한된 focusMode/column/span 값만 사용한다.',
+        'chat 패널은 primary 영역이므로 이를 전제로 나머지 패널을 재배치한다.',
         '반드시 JSON 으로만 답한다.',
       ].join('\n'),
       userPrompt: JSON.stringify(

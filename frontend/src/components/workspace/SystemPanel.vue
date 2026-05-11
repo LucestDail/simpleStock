@@ -22,8 +22,8 @@ const { openDrawer } = useWorkspace();
     :highlighted="panel.highlighted"
   >
     <template #actions>
-      <button type="button" class="btn-secondary" @click="openDrawer('system', null, '시스템 상세')">
-        상세
+      <button type="button" class="btn-secondary" @click="openDrawer('settings', null, '설정')">
+        설정
       </button>
     </template>
 
@@ -41,14 +41,13 @@ const { openDrawer } = useWorkspace();
 
 <style scoped>
 .btn-secondary {
-  height: 36px;
+  height: 32px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 var(--space-sm);
+  padding: 0 12px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -59,15 +58,17 @@ const { openDrawer } = useWorkspace();
   margin: 0;
   display: grid;
   gap: var(--space-xs);
+  min-height: 0;
 }
 
 .meta-list li {
   display: flex;
   justify-content: space-between;
-  gap: var(--space-base);
+  gap: var(--space-sm);
   border-bottom: 1px solid var(--color-hairline);
-  padding-bottom: var(--space-xs);
+  padding-bottom: 6px;
   color: var(--color-body);
+  font-size: 12px;
 }
 
 .meta-list strong {
@@ -76,7 +77,7 @@ const { openDrawer } = useWorkspace();
 
 .meta-list code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   background: var(--color-surface-soft);
   border-radius: var(--rounded-xs);
   padding: 2px 6px;
@@ -86,11 +87,13 @@ const { openDrawer } = useWorkspace();
   margin: 0;
   border-radius: var(--rounded-lg);
   background: var(--color-surface-soft);
-  padding: var(--space-base);
+  padding: 10px 12px;
   color: var(--color-body);
   font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.7;
+  font-size: 10px;
+  line-height: 1.45;
   white-space: pre-wrap;
+  min-height: 0;
+  overflow: auto;
 }
 </style>

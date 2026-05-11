@@ -6,6 +6,7 @@ import OverviewPanel from '../components/workspace/OverviewPanel.vue';
 import HoldingsPanel from '../components/workspace/HoldingsPanel.vue';
 import SnapshotsPanel from '../components/workspace/SnapshotsPanel.vue';
 import ChatPanel from '../components/workspace/ChatPanel.vue';
+import InsightsPanel from '../components/workspace/InsightsPanel.vue';
 import ActivityPanel from '../components/workspace/ActivityPanel.vue';
 import ManagerBriefPanel from '../components/workspace/ManagerBriefPanel.vue';
 import ProfilePanel from '../components/workspace/ProfilePanel.vue';
@@ -20,13 +21,15 @@ const { fetchPortfolio } = usePortfolio();
 const { fetchThreads } = useChat();
 const { fetchProfile } = useProfile();
 const { notify } = useUi();
-const { columns, focusMode, recordActivity } = useWorkspace();
+const { columns, focusMode, recordActivity, openDrawer } = useWorkspace();
 
 const panelComponents = {
+  status: markRaw(StatusStrip),
   overview: markRaw(OverviewPanel),
   holdings: markRaw(HoldingsPanel),
   snapshots: markRaw(SnapshotsPanel),
   chat: markRaw(ChatPanel),
+  insights: markRaw(InsightsPanel),
   activity: markRaw(ActivityPanel),
   managerBrief: markRaw(ManagerBriefPanel),
   profile: markRaw(ProfilePanel),
@@ -55,13 +58,14 @@ onMounted(async () => {
 <template>
   <div class="workspace">
     <header class="workspace-header">
-      <div>
+      <div class="workspace-header__copy">
         <p class="workspace-kicker">SimpleStock Workspace</p>
-        <h1 class="workspace-title">한 화면에서 자산, 대화, 브리핑, 프로필을 함께 운영합니다.</h1>
+        <h1 class="workspace-title">Quant Manager</h1>
       </div>
+      <button type="button" class="workspace-settings-button" @click="openDrawer('settings', null, '설정')">
+        설정
+      </button>
     </header>
-
-    <StatusStrip />
 
     <main class="workspace-main" :class="workspaceClass">
       <section class="workspace-column">
@@ -98,77 +102,99 @@ onMounted(async () => {
 
 <style scoped>
 .workspace {
-  min-height: 100vh;
-  padding: var(--space-lg);
+  height: 100dvh;
+  padding: var(--space-md);
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  gap: var(--space-lg);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--space-md);
+  overflow: hidden;
   background:
-    radial-gradient(circle at top left, rgba(0, 82, 255, 0.05), transparent 30%),
+    radial-gradient(circle at top left, rgba(0, 82, 255, 0.14), transparent 32%),
+    radial-gradient(circle at right top, rgba(35, 66, 120, 0.18), transparent 22%),
     var(--color-canvas);
 }
 
 .workspace-header {
   display: flex;
   justify-content: space-between;
-  gap: var(--space-lg);
-  align-items: flex-end;
+  gap: var(--space-md);
+  align-items: center;
+  min-height: 0;
+}
+
+.workspace-header__copy {
+  min-width: 0;
 }
 
 .workspace-kicker {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   color: var(--color-primary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .workspace-title {
   margin: 0;
   color: var(--color-ink);
-  font-size: clamp(24px, 3.4vw, 36px);
-  font-weight: 500;
-  letter-spacing: -0.03em;
-  max-width: 26ch;
+  font-size: clamp(18px, 1.9vw, 24px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+}
+
+.workspace-settings-button {
+  flex: 0 0 auto;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-pill);
+  background: var(--color-surface-strong);
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .workspace-main {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.28fr) minmax(280px, 1fr);
-  gap: var(--space-lg);
-  align-items: start;
+  grid-template-columns: minmax(280px, 0.86fr) minmax(420px, 1.55fr) minmax(300px, 1fr);
+  gap: var(--space-md);
+  align-items: stretch;
+  overflow: hidden;
   transition: grid-template-columns 0.22s ease;
 }
 
 .workspace-main--balanced {
-  grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.28fr) minmax(280px, 1fr);
+  grid-template-columns: minmax(280px, 0.86fr) minmax(420px, 1.55fr) minmax(300px, 1fr);
 }
 
 .workspace-main--rebalance,
 .workspace-main--manager {
-  grid-template-columns: minmax(260px, 0.95fr) minmax(420px, 1.5fr) minmax(280px, 1.05fr);
+  grid-template-columns: minmax(270px, 0.82fr) minmax(440px, 1.68fr) minmax(320px, 1.04fr);
 }
 
 .workspace-main--research {
-  grid-template-columns: minmax(240px, 0.9fr) minmax(420px, 1.35fr) minmax(320px, 1.2fr);
+  grid-template-columns: minmax(260px, 0.8fr) minmax(440px, 1.62fr) minmax(330px, 1.08fr);
 }
 
 .workspace-main--chat {
-  grid-template-columns: minmax(240px, 0.85fr) minmax(460px, 1.7fr) minmax(260px, 0.95fr);
+  grid-template-columns: minmax(260px, 0.78fr) minmax(460px, 1.78fr) minmax(320px, 0.98fr);
 }
 
 .workspace-column {
   min-height: 0;
-  display: grid;
-  gap: var(--space-lg);
-  align-content: start;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  overflow: hidden;
 }
 
 @media (max-width: 1200px) {
   .workspace {
-    padding: var(--space-base);
+    padding: var(--space-sm);
   }
 
   .workspace-main,
@@ -177,7 +203,7 @@ onMounted(async () => {
   .workspace-main--manager,
   .workspace-main--research,
   .workspace-main--chat {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(220px, 0.8fr) minmax(340px, 1.5fr) minmax(240px, 0.9fr);
   }
 }
 </style>

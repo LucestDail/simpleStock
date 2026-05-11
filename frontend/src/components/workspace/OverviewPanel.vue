@@ -84,40 +84,42 @@ function inspectCategory(categoryId) {
 }
 
 .summary-card {
-  padding: var(--space-base);
+  padding: 10px 12px;
   border-radius: var(--rounded-lg);
   background: var(--color-surface-soft);
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .summary-label {
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .summary-value {
   color: var(--color-ink);
-  font-size: 18px;
+  font-size: 15px;
 }
 
 .share-list {
   display: grid;
   gap: var(--space-sm);
+  min-height: 0;
+  overflow: auto;
 }
 
 .share-item {
   border: 1px solid var(--color-hairline);
-  background: var(--color-canvas);
+  background: rgba(255, 255, 255, 0.02);
   border-radius: var(--rounded-lg);
-  padding: var(--space-base);
+  padding: 10px 12px;
   text-align: left;
   cursor: pointer;
   display: grid;
-  gap: var(--space-xs);
+  gap: 4px;
 }
 
 .share-item:hover {
@@ -134,7 +136,7 @@ function inspectCategory(categoryId) {
 
 .share-amount {
   color: var(--color-body);
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .share-bar {

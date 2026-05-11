@@ -55,11 +55,13 @@ const { dialog, toast, confirmDialog, cancelDialog, dismissToast } = useUi();
 
 <style scoped>
 .app-root {
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
 }
 
 .main {
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
 }
 
 .dialog-backdrop {

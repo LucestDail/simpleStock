@@ -155,6 +155,7 @@ function onComposerKeydown(event) {
     :span="panel.span"
     :highlighted="panel.highlighted"
     :loading="loading || sending"
+    tone="dark"
   >
     <template #actions>
       <button type="button" class="btn-secondary" @click="openDrawer('threadDetail', activeThread?.id || null, activeThread?.title || '대화 상세')">
@@ -165,7 +166,7 @@ function onComposerKeydown(event) {
 
     <div class="thread-strip">
       <button
-        v-for="thread in threads.slice(0, 6)"
+        v-for="thread in threads.slice(0, 4)"
         :key="thread.id"
         type="button"
         class="thread-chip"
@@ -183,11 +184,11 @@ function onComposerKeydown(event) {
 
     <div class="messages">
       <div v-if="!messages.length" class="empty-box">
-        자산 관리 요청을 입력하면 대화, 브리핑, 패널 크기와 강조 상태가 함께 바뀝니다.
+        이 패널이 워크스페이스의 primary 영역입니다. 질문을 보내면 나머지 패널과 카드가 현재 대화 흐름에 맞춰 즉시 재배치됩니다.
       </div>
 
       <article
-        v-for="message in messages.slice(-12)"
+        v-for="message in messages.slice(-8)"
         :key="message.id"
         class="message"
         :class="message.role"
@@ -204,7 +205,7 @@ function onComposerKeydown(event) {
       <textarea
         v-model="draft"
         class="composer-input"
-        rows="4"
+        rows="3"
         placeholder="Enter 전송, Shift+Enter 줄바꿈"
         :disabled="sending || !system.aiConfigured"
         @keydown="onComposerKeydown"
@@ -229,12 +230,11 @@ function onComposerKeydown(event) {
 <style scoped>
 .btn-primary,
 .btn-secondary {
-  height: 36px;
+  height: 32px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 var(--space-sm);
-  font: inherit;
-  font-size: 13px;
+  padding: 0 12px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -253,30 +253,40 @@ function onComposerKeydown(event) {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-xs);
+  overflow: hidden;
 }
 
 .thread-chip {
   border: 1px solid var(--color-hairline);
-  background: var(--color-canvas);
+  background: rgba(255, 255, 255, 0.02);
   border-radius: var(--rounded-pill);
-  padding: 8px 12px;
-  font: inherit;
-  font-size: 13px;
+  padding: 6px 10px;
+  font-size: 12px;
   color: var(--color-body);
   cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .thread-chip.active {
   border-color: rgba(0, 82, 255, 0.4);
-  background: rgba(0, 82, 255, 0.06);
+  background: rgba(0, 82, 255, 0.12);
   color: var(--color-primary);
+}
+
+.thread-chip span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .disabled-box,
 .empty-box {
   border-radius: var(--rounded-lg);
-  padding: var(--space-base);
+  padding: 10px 12px;
   background: var(--color-surface-soft);
+  font-size: 12px;
 }
 
 .disabled-box strong {
@@ -299,13 +309,14 @@ function onComposerKeydown(event) {
 .message {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: var(--space-base);
+  padding: 10px 12px;
   display: grid;
-  gap: var(--space-xs);
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .message.user {
-  background: rgba(0, 82, 255, 0.04);
+  background: rgba(0, 82, 255, 0.08);
 }
 
 .message-top {
@@ -321,14 +332,15 @@ function onComposerKeydown(event) {
 
 .message-top span {
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .message-text {
   margin: 0;
   white-space: pre-wrap;
   color: var(--color-body);
-  line-height: 1.7;
+  line-height: 1.5;
+  font-size: 12px;
 }
 
 .composer {
@@ -341,10 +353,9 @@ function onComposerKeydown(event) {
   resize: none;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: var(--space-base);
-  font: inherit;
+  padding: 10px 12px;
   color: var(--color-ink);
-  background: var(--color-canvas);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .composer-input:focus {
@@ -364,7 +375,7 @@ function onComposerKeydown(event) {
   border: none;
   background: transparent;
   color: var(--color-primary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }

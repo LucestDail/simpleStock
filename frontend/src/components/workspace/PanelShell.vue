@@ -56,24 +56,25 @@ const props = defineProps({
   min-height: 0;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-xl);
-  background: var(--color-canvas);
+  background: rgba(15, 23, 36, 0.9);
   box-shadow: var(--shadow-soft);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   transition:
     transform 0.22s ease,
     box-shadow 0.22s ease,
     border-color 0.22s ease,
-    min-height 0.22s ease,
+    flex 0.22s ease,
     opacity 0.22s ease;
 }
 
 .panel-shell--highlighted {
   border-color: rgba(0, 82, 255, 0.4);
   box-shadow:
-    0 18px 34px rgba(0, 82, 255, 0.08),
+    0 16px 30px rgba(0, 82, 255, 0.14),
     var(--shadow-soft);
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 .panel-shell--tone-dark {
@@ -82,48 +83,49 @@ const props = defineProps({
 }
 
 .panel-shell--sm {
-  min-height: 180px;
+  flex: 0.72 1 0;
 }
 
 .panel-shell--md {
-  min-height: 260px;
+  flex: 0.95 1 0;
 }
 
 .panel-shell--lg {
-  min-height: 340px;
+  flex: 1.15 1 0;
 }
 
 .panel-shell--xl {
-  min-height: 460px;
+  flex: 1.45 1 0;
 }
 
 .panel-shell--full {
-  min-height: 560px;
+  flex: 1.8 1 0;
 }
 
 .panel-shell__head {
-  padding: var(--space-lg) var(--space-lg) var(--space-base);
+  padding: var(--space-base) var(--space-base) var(--space-sm);
   display: flex;
   justify-content: space-between;
-  gap: var(--space-base);
+  gap: var(--space-sm);
   align-items: flex-start;
 }
 
 .panel-shell__subtitle {
   margin: 0 0 4px;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--color-muted);
 }
 
 .panel-shell__title {
   margin: 0;
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--color-ink);
   letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 
 .panel-shell--tone-dark .panel-shell__subtitle {
@@ -144,10 +146,11 @@ const props = defineProps({
 .panel-shell__body {
   flex: 1;
   min-height: 0;
-  padding: 0 var(--space-lg) var(--space-lg);
+  padding: 0 var(--space-base) var(--space-base);
   display: flex;
   flex-direction: column;
-  gap: var(--space-base);
+  gap: var(--space-sm);
+  overflow: hidden;
 }
 
 .panel-shell__body--loading {

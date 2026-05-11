@@ -5,26 +5,26 @@
 :root {
   --color-primary: #0052ff;
   --color-primary-active: #003ecc;
-  --color-primary-disabled: #a8b8cc;
+  --color-primary-disabled: #3d537d;
   --color-accent-yellow: #f4b000;
 
-  --color-canvas: #ffffff;
-  --color-surface-soft: #f7f7f7;
-  --color-surface-strong: #eef0f3;
-  --color-surface-dark: #0a0b0d;
-  --color-surface-dark-elevated: #16181c;
+  --color-canvas: #0b1018;
+  --color-surface-soft: #111927;
+  --color-surface-strong: #162133;
+  --color-surface-dark: #05080d;
+  --color-surface-dark-elevated: #0f1724;
 
-  --color-hairline: #dee1e6;
-  --color-hairline-soft: #eef0f3;
+  --color-hairline: rgba(255, 255, 255, 0.08);
+  --color-hairline-soft: rgba(255, 255, 255, 0.05);
 
-  --color-ink: #0a0b0d;
-  --color-body: #5b616e;
-  --color-body-strong: #0a0b0d;
-  --color-muted: #7c828a;
-  --color-muted-soft: #a8acb3;
+  --color-ink: #f5f7fb;
+  --color-body: #c0cad8;
+  --color-body-strong: #f5f7fb;
+  --color-muted: #8e9cb1;
+  --color-muted-soft: #637187;
   --color-on-primary: #ffffff;
   --color-on-dark: #ffffff;
-  --color-on-dark-soft: #a8acb3;
+  --color-on-dark-soft: #8e9cb1;
 
   --color-semantic-up: #05b169;
   --color-semantic-down: #cf202f;
@@ -35,26 +35,33 @@
 
   --rounded-xs: 4px;
   --rounded-sm: 8px;
-  --rounded-md: 12px;
-  --rounded-lg: 16px;
-  --rounded-xl: 24px;
+  --rounded-md: 10px;
+  --rounded-lg: 14px;
+  --rounded-xl: 18px;
   --rounded-pill: 100px;
   --rounded-full: 9999px;
 
-  --shadow-soft: 0 4px 12px rgba(0, 0, 0, 0.04);
+  --shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.18);
 
-  --space-xxs: 4px;
-  --space-xs: 8px;
-  --space-sm: 12px;
-  --space-base: 16px;
-  --space-md: 20px;
-  --space-lg: 24px;
-  --space-xl: 32px;
-  --space-xxl: 48px;
-  --space-section: 96px;
+  --space-xxs: 3px;
+  --space-xs: 6px;
+  --space-sm: 10px;
+  --space-base: 12px;
+  --space-md: 16px;
+  --space-lg: 18px;
+  --space-xl: 22px;
+  --space-xxl: 30px;
+  --space-section: 56px;
 
   --nav-height: 64px;
   --content-max: 1200px;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
 }
 
 *,
@@ -66,12 +73,23 @@
 body {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 400;
   line-height: 1.5;
   color: var(--color-body);
   background: var(--color-canvas);
   -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
 }
 
 .mono-num {

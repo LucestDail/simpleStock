@@ -163,13 +163,12 @@ async function removeSnapshot(date) {
 
 .date-input {
   flex: 1;
-  height: 44px;
-  padding: 0 var(--space-base);
+  height: 34px;
+  padding: 0 10px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md);
-  background: var(--color-canvas);
+  background: rgba(255, 255, 255, 0.02);
   color: var(--color-ink);
-  font: inherit;
 }
 
 .date-input:focus {
@@ -179,13 +178,13 @@ async function removeSnapshot(date) {
 }
 
 .btn-primary {
-  height: 44px;
+  height: 34px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 var(--space-md);
+  padding: 0 12px;
   background: var(--color-primary);
   color: var(--color-on-primary);
-  font: inherit;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -198,23 +197,27 @@ async function removeSnapshot(date) {
 .empty-box {
   border: 1px dashed var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: var(--space-lg);
+  padding: 12px;
   color: var(--color-muted);
+  font-size: 12px;
 }
 
 .snapshot-list {
   display: grid;
   gap: var(--space-sm);
+  min-height: 0;
+  overflow: auto;
 }
 
 .snapshot-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: var(--space-base);
+  gap: var(--space-sm);
   align-items: center;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: var(--space-base);
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .snapshot-main {
@@ -228,8 +231,8 @@ async function removeSnapshot(date) {
 
 .snapshot-main span {
   color: var(--color-muted);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .snapshot-metrics {
@@ -254,7 +257,7 @@ async function removeSnapshot(date) {
   border: none;
   background: transparent;
   color: var(--color-primary);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
