@@ -104,7 +104,8 @@ const props = defineProps({
 }
 
 .panel-shell--full {
-  min-height: 440px;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .panel-shell__head {

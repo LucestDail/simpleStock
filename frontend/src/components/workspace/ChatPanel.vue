@@ -306,12 +306,14 @@ function onComposerKeydown(event) {
   display: grid;
   grid-template-columns: minmax(150px, 176px) minmax(0, 1fr);
   gap: 8px;
+  height: 100%;
   min-height: 0;
   flex: 1;
 }
 
 .thread-panel,
 .chat-main {
+  height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -423,6 +425,7 @@ function onComposerKeydown(event) {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  overflow: hidden;
 }
 
 .conversation-head {
@@ -592,6 +595,7 @@ function onComposerKeydown(event) {
 
 .composer {
   display: grid;
+  flex: 0 0 auto;
   gap: 5px;
   margin-top: 4px;
 }
