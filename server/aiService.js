@@ -10,12 +10,95 @@ const AI_DAILY_CRON = process.env.AI_DAILY_CRON || '5 21 * * *';
 let googleGenAiCtorPromise = null;
 let conversationGraphPromise = null;
 
+const WORKSPACE_PATCH_SCHEMA = {
+  type: 'object',
+  properties: {
+    focusMode: {
+      type: 'string',
+      enum: ['balanced', 'chat', 'rebalance', 'manager', 'research'],
+    },
+    highlightPanelIds: {
+      type: 'array',
+      items: {
+        type: 'string',
+        enum: [
+          'overview',
+          'holdings',
+          'snapshots',
+          'chat',
+          'activity',
+          'managerBrief',
+          'profile',
+          'system',
+        ],
+      },
+    },
+    panelPatches: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            enum: [
+              'overview',
+              'holdings',
+              'snapshots',
+              'chat',
+              'activity',
+              'managerBrief',
+              'profile',
+              'system',
+            ],
+          },
+          column: {
+            type: 'string',
+            enum: ['left', 'center', 'right'],
+          },
+          span: {
+            type: 'string',
+            enum: ['sm', 'md', 'lg', 'xl', 'full'],
+          },
+          priority: {
+            type: 'number',
+          },
+          visible: {
+            type: 'boolean',
+          },
+        },
+        required: ['id', 'column', 'span', 'priority', 'visible'],
+      },
+    },
+    openDrawer: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['assetDetail', 'threadDetail', 'managerBrief', 'profile', 'system'],
+        },
+        entityId: {
+          type: 'string',
+        },
+        title: {
+          type: 'string',
+        },
+      },
+      required: ['type', 'entityId', 'title'],
+    },
+    reason: {
+      type: 'string',
+    },
+  },
+  required: ['focusMode', 'highlightPanelIds', 'panelPatches', 'openDrawer', 'reason'],
+};
+
 const SUPERVISOR_SCHEMA = {
   type: 'object',
   properties: {
     personaLabel: { type: 'string' },
     personaSystemPrompt: { type: 'string' },
     synthesisInstructions: { type: 'string' },
+    workspacePatch: WORKSPACE_PATCH_SCHEMA,
     tasks: {
       type: 'array',
       items: {
@@ -36,7 +119,7 @@ const SUPERVISOR_SCHEMA = {
       },
     },
   },
-  required: ['personaLabel', 'personaSystemPrompt', 'synthesisInstructions', 'tasks'],
+  required: ['personaLabel', 'personaSystemPrompt', 'synthesisInstructions', 'workspacePatch', 'tasks'],
 };
 
 const THREAD_SUMMARY_SCHEMA = {
@@ -249,6 +332,134 @@ function buildFallbackPlan(userInput, context) {
     });
   }
 
+  let workspacePatch = {
+    focusMode: 'balanced',
+    highlightPanelIds: ['overview', 'chat'],
+    panelPatches: [
+      { id: 'overview', column: 'left', span: 'lg', priority: 10, visible: true },
+      { id: 'holdings', column: 'left', span: 'xl', priority: 20, visible: true },
+      { id: 'snapshots', column: 'center', span: 'md', priority: 10, visible: true },
+      { id: 'chat', column: 'center', span: 'xl', priority: 20, visible: true },
+      { id: 'activity', column: 'center', span: 'md', priority: 30, visible: true },
+      { id: 'managerBrief', column: 'right', span: 'lg', priority: 10, visible: true },
+      { id: 'profile', column: 'right', span: 'md', priority: 20, visible: true },
+      { id: 'system', column: 'right', span: 'md', priority: 30, visible: true },
+    ],
+    openDrawer: {
+      type: 'threadDetail',
+      entityId: context.messages?.length ? String(context.messages.at(-1)?.id || '') : '',
+      title: '대화 상세',
+    },
+    reason: '기본 워크스페이스 레이아웃을 유지합니다.',
+  };
+
+  if (/(리밸런싱|비중|분산|재배치|재조정)/.test(lowered)) {
+    workspacePatch = {
+      focusMode: 'rebalance',
+      highlightPanelIds: ['chat', 'managerBrief', 'holdings', 'overview'],
+      panelPatches: [
+        { id: 'overview', column: 'left', span: 'lg', priority: 10, visible: true },
+        { id: 'holdings', column: 'left', span: 'xl', priority: 15, visible: true },
+        { id: 'snapshots', column: 'center', span: 'md', priority: 10, visible: true },
+        { id: 'chat', column: 'center', span: 'full', priority: 20, visible: true },
+        { id: 'activity', column: 'center', span: 'md', priority: 30, visible: true },
+        { id: 'managerBrief', column: 'right', span: 'xl', priority: 10, visible: true },
+        { id: 'profile', column: 'right', span: 'md', priority: 20, visible: false },
+        { id: 'system', column: 'right', span: 'md', priority: 30, visible: true },
+      ],
+      openDrawer: {
+        type: 'managerBrief',
+        entityId: '',
+        title: '리밸런싱 컨텍스트',
+      },
+      reason: '리밸런싱 요청이라 채팅과 매니저 브리핑, 자산 패널을 확장합니다.',
+    };
+  } else if (/(전략|관리|지시|매니저|오늘)/.test(lowered)) {
+    workspacePatch = {
+      focusMode: 'manager',
+      highlightPanelIds: ['managerBrief', 'chat', 'activity'],
+      panelPatches: [
+        { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
+        { id: 'holdings', column: 'left', span: 'lg', priority: 20, visible: true },
+        { id: 'snapshots', column: 'center', span: 'md', priority: 10, visible: true },
+        { id: 'chat', column: 'center', span: 'xl', priority: 20, visible: true },
+        { id: 'activity', column: 'center', span: 'lg', priority: 30, visible: true },
+        { id: 'managerBrief', column: 'right', span: 'full', priority: 10, visible: true },
+        { id: 'profile', column: 'right', span: 'md', priority: 20, visible: false },
+        { id: 'system', column: 'right', span: 'md', priority: 30, visible: true },
+      ],
+      openDrawer: {
+        type: 'managerBrief',
+        entityId: '',
+        title: '매니저 브리핑 상세',
+      },
+      reason: '관리 지시 성격의 요청이라 매니저 브리핑과 활동 패널을 강조합니다.',
+    };
+  } else if (/(뉴스|시장|시황|검색|찾아|외부|web|search)/.test(lowered)) {
+    workspacePatch = {
+      focusMode: 'research',
+      highlightPanelIds: ['chat', 'activity', 'system'],
+      panelPatches: [
+        { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
+        { id: 'holdings', column: 'left', span: 'lg', priority: 20, visible: true },
+        { id: 'snapshots', column: 'center', span: 'sm', priority: 10, visible: true },
+        { id: 'chat', column: 'center', span: 'full', priority: 20, visible: true },
+        { id: 'activity', column: 'right', span: 'xl', priority: 10, visible: true },
+        { id: 'managerBrief', column: 'right', span: 'md', priority: 20, visible: true },
+        { id: 'profile', column: 'right', span: 'sm', priority: 30, visible: false },
+        { id: 'system', column: 'right', span: 'md', priority: 40, visible: true },
+      ],
+      openDrawer: {
+        type: 'system',
+        entityId: '',
+        title: '리서치 컨텍스트',
+      },
+      reason: '외부 검색/리서치 요청이라 대화와 실시간 활동, 시스템 컨텍스트를 강조합니다.',
+    };
+  } else if (/(프로필|성향|선호|응답 스타일|메모리)/.test(lowered)) {
+    workspacePatch = {
+      focusMode: 'balanced',
+      highlightPanelIds: ['profile', 'chat', 'activity'],
+      panelPatches: [
+        { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
+        { id: 'holdings', column: 'left', span: 'lg', priority: 20, visible: true },
+        { id: 'snapshots', column: 'center', span: 'md', priority: 10, visible: true },
+        { id: 'chat', column: 'center', span: 'xl', priority: 20, visible: true },
+        { id: 'activity', column: 'center', span: 'md', priority: 30, visible: true },
+        { id: 'managerBrief', column: 'right', span: 'md', priority: 10, visible: true },
+        { id: 'profile', column: 'right', span: 'full', priority: 20, visible: true },
+        { id: 'system', column: 'right', span: 'sm', priority: 30, visible: true },
+      ],
+      openDrawer: {
+        type: 'profile',
+        entityId: '',
+        title: '프로필 상세',
+      },
+      reason: '프로필/성향 요청이라 프로필 패널을 확장합니다.',
+    };
+  } else if (/(대화|채팅|상담|질문)/.test(lowered)) {
+    workspacePatch = {
+      focusMode: 'chat',
+      highlightPanelIds: ['chat', 'activity'],
+      panelPatches: [
+        { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
+        { id: 'holdings', column: 'left', span: 'lg', priority: 20, visible: true },
+        { id: 'snapshots', column: 'center', span: 'sm', priority: 10, visible: true },
+        { id: 'chat', column: 'center', span: 'full', priority: 20, visible: true },
+        { id: 'activity', column: 'center', span: 'lg', priority: 30, visible: true },
+        { id: 'managerBrief', column: 'right', span: 'lg', priority: 10, visible: true },
+        { id: 'profile', column: 'right', span: 'md', priority: 20, visible: true },
+        { id: 'system', column: 'right', span: 'sm', priority: 30, visible: true },
+      ],
+      openDrawer: {
+        type: 'threadDetail',
+        entityId: '',
+        title: '대화 상세',
+      },
+      reason: '대화 중심 요청이라 채팅과 활동 패널을 확장합니다.',
+    };
+  }
+
   return {
     personaLabel: 'Quant Manager',
     personaSystemPrompt: [
@@ -262,6 +473,7 @@ function buildFallbackPlan(userInput, context) {
     synthesisInstructions:
       '전문가 출력들을 종합해서 하나의 최종 답변으로 정리하되, 필요한 경우 오늘 할 일과 주의사항을 분리한다.',
     tasks,
+    workspacePatch,
   };
 }
 
@@ -279,6 +491,8 @@ async function buildSupervisorPlan(userInput, context) {
         '전문화된 agent 는 고정된 집합이 아니라 이번 질의에 맞게 동적으로 구성한다.',
         '외부 조사가 필요한 경우 research task 를 포함하고 searchQuery 를 한국어 또는 영어 혼합으로 더 검색 친화적으로 재작성한다.',
         'task 는 portfolio, memory, manager, research 타입만 사용한다.',
+        '추가로 workspacePatch 를 반환해 어떤 패널을 강조/확장/숨김/이동할지 제안한다.',
+        'workspacePatch 는 허용된 panel id 와 제한된 focusMode/column/span 값만 사용한다.',
         '반드시 JSON 으로만 답한다.',
       ].join('\n'),
       userPrompt: JSON.stringify(
@@ -473,6 +687,7 @@ async function runConversationGraph({ userInput, threadId, context }) {
     supervisorPlan: result.supervisorPlan,
     specialistOutputs: result.specialistOutputs,
     citations: result.citations || [],
+    workspacePatch: result.supervisorPlan?.workspacePatch || null,
   };
 }
 

@@ -28,7 +28,14 @@ const system = ref({
   orchestrationNotes: '',
   dataFiles: {},
 });
-const loading = ref(false);
+const busyState = ref({
+  fetchPortfolio: false,
+  saveHoldings: false,
+  addSnapshot: false,
+  deleteSnapshot: false,
+  managerReview: false,
+});
+const loading = computed(() => Object.values(busyState.value).some(Boolean));
 const error = ref(null);
 
 function applyPayload(data) {
@@ -70,7 +77,7 @@ export function usePortfolio() {
   });
 
   async function fetchPortfolio() {
-    loading.value = true;
+    busyState.value.fetchPortfolio = true;
     error.value = null;
     try {
       const res = await fetch('/api/portfolio');
@@ -79,12 +86,12 @@ export function usePortfolio() {
     } catch (e) {
       error.value = e.message || '오류';
     } finally {
-      loading.value = false;
+      busyState.value.fetchPortfolio = false;
     }
   }
 
   async function saveHoldings(list) {
-    loading.value = true;
+    busyState.value.saveHoldings = true;
     error.value = null;
     try {
       const res = await fetch('/api/portfolio', {
@@ -98,41 +105,56 @@ export function usePortfolio() {
       error.value = e.message || '오류';
       throw e;
     } finally {
-      loading.value = false;
+      busyState.value.saveHoldings = false;
     }
   }
 
   async function addSnapshot(date) {
-    const res = await fetch('/api/snapshots', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(date ? { date } : {}),
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      throw new Error(j.error || '스냅샷 저장 실패');
+    busyState.value.addSnapshot = true;
+    try {
+      const res = await fetch('/api/snapshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(date ? { date } : {}),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || '스냅샷 저장 실패');
+      }
+      applyPayload(await res.json());
+    } finally {
+      busyState.value.addSnapshot = false;
     }
-    applyPayload(await res.json());
   }
 
   async function deleteSnapshot(date) {
-    const res = await fetch(`/api/snapshots/${encodeURIComponent(date)}`, {
-      method: 'DELETE',
-    });
-    if (!res.ok) throw new Error('삭제 실패');
-    applyPayload(await res.json());
+    busyState.value.deleteSnapshot = true;
+    try {
+      const res = await fetch(`/api/snapshots/${encodeURIComponent(date)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('삭제 실패');
+      applyPayload(await res.json());
+    } finally {
+      busyState.value.deleteSnapshot = false;
+    }
   }
 
   async function runManagerReview() {
-    const res = await fetch('/api/manager/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      throw new Error(j.error || '매니저 브리핑 생성 실패');
+    busyState.value.managerReview = true;
+    try {
+      const res = await fetch('/api/manager/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || '매니저 브리핑 생성 실패');
+      }
+      applyPayload(await res.json());
+    } finally {
+      busyState.value.managerReview = false;
     }
-    applyPayload(await res.json());
   }
 
   const sortedSnapshots = computed(() =>
@@ -164,6 +186,7 @@ export function usePortfolio() {
     system,
     sortedSnapshots,
     loading,
+    busyState,
     error,
     total,
     byCategory,

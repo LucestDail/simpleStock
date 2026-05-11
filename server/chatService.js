@@ -245,6 +245,11 @@ async function sendMessage(threadId, content) {
       citations: aiResult.citations || [],
       supervisorPlan: aiResult.supervisorPlan || null,
       specialistOutputs: aiResult.specialistOutputs || [],
+      workspacePatch: aiResult.workspacePatch || null,
+      focusEntities: aiResult.workspacePatch?.openDrawer?.entityId
+        ? [aiResult.workspacePatch.openDrawer.entityId]
+        : [],
+      reason: aiResult.workspacePatch?.reason || '',
     },
   };
 
