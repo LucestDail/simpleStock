@@ -9,9 +9,9 @@ const {
   categoryShares,
   lastSnapshot,
   dayOverDay,
-  ai,
+  manager,
   system,
-  runAiReview,
+  runManagerReview,
   loading,
   error,
 } = usePortfolio();
@@ -37,20 +37,20 @@ const donutGradient = computed(() => {
   return `conic-gradient(${segs.join(', ')})`;
 });
 
-const latestAiReport = computed(() => ai.value?.latestReport || null);
+const latestManagerReport = computed(() => manager.value?.latestReport || null);
 
-async function generateAiBrief() {
+async function generateManagerBrief() {
   aiBusy.value = true;
   try {
-    await runAiReview();
+    await runManagerReview();
     notify({
       tone: 'success',
-      message: 'AI 일일 브리핑을 생성했습니다.',
+      message: 'Quant Manager 브리핑을 생성했습니다.',
     });
   } catch (e) {
     notify({
       tone: 'error',
-      message: e.message || 'AI 브리핑 생성에 실패했습니다.',
+      message: e.message || '매니저 브리핑 생성에 실패했습니다.',
     });
   } finally {
     aiBusy.value = false;
@@ -109,16 +109,16 @@ async function generateAiBrief() {
       <div class="container">
         <div class="ai-head">
           <div>
-            <h2 class="section-title">AI 일일 브리핑</h2>
+            <h2 class="section-title">Quant Manager 브리핑</h2>
             <p class="section-lead">
-              Quant Manager 시스템 프롬프트를 바탕으로 오늘의 자산 관리 지시를 생성합니다.
+              자산, 장기 기억, 사용자 성향을 합쳐 오늘의 관리 지시와 점검 항목을 생성합니다.
             </p>
           </div>
           <button
             type="button"
             class="ai-button"
             :disabled="aiBusy || !system.aiConfigured"
-            @click="generateAiBrief"
+            @click="generateManagerBrief"
           >
             {{ aiBusy ? '생성 중…' : '지금 생성' }}
           </button>
@@ -127,26 +127,27 @@ async function generateAiBrief() {
         <div v-if="!system.aiConfigured" class="ai-disabled">
           <p class="ai-disabled-title">Gemini 키가 아직 설정되지 않았습니다.</p>
           <p class="ai-disabled-body">
-            `.env`에 `GEMINI_API_KEY`를 넣으면 KST 기준 일 1회 자동 실행되고, 수동 생성도 활성화됩니다.
+            `.env`에 `GEMINI_API_KEY`를 넣으면 LangGraph supervisor, memory, manager, research 흐름과
+            KST 기준 일 1회 자동 브리핑이 활성화됩니다.
           </p>
         </div>
 
-        <div v-else-if="latestAiReport" class="ai-grid">
+        <div v-else-if="latestManagerReport" class="ai-grid">
           <article class="feature-card ai-card">
             <p class="card-kicker">요약</p>
             <h3 class="title-md">오늘의 브리핑</h3>
-            <p class="ai-summary">{{ latestAiReport.summary }}</p>
+            <p class="ai-summary">{{ latestManagerReport.summary }}</p>
             <p class="ai-meta mono-num">
-              {{ latestAiReport.targetDate }} · {{ latestAiReport.model }}
+              {{ latestManagerReport.targetDate }} · {{ latestManagerReport.model }}
             </p>
           </article>
 
           <article class="feature-card ai-card">
             <p class="card-kicker">오늘의 목표</p>
             <h3 class="title-md">핵심 액션</h3>
-            <p class="ai-summary">{{ latestAiReport.dailyObjective }}</p>
+            <p class="ai-summary">{{ latestManagerReport.dailyObjective }}</p>
             <ul class="ai-list">
-              <li v-for="item in latestAiReport.actionItems" :key="item">{{ item }}</li>
+              <li v-for="item in latestManagerReport.actionItems" :key="item">{{ item }}</li>
             </ul>
           </article>
 
@@ -154,16 +155,16 @@ async function generateAiBrief() {
             <p class="card-kicker">리스크 체크</p>
             <h3 class="title-md">주의 포인트</h3>
             <ul class="ai-list">
-              <li v-for="item in latestAiReport.riskChecks" :key="item">{{ item }}</li>
+              <li v-for="item in latestManagerReport.riskChecks" :key="item">{{ item }}</li>
             </ul>
             <p class="card-kicker card-kicker-gap">비중 코멘트</p>
             <ul class="ai-list">
-              <li v-for="item in latestAiReport.allocationNotes" :key="item">{{ item }}</li>
+              <li v-for="item in latestManagerReport.allocationNotes" :key="item">{{ item }}</li>
             </ul>
           </article>
         </div>
 
-        <div v-else class="muted">아직 생성된 AI 브리핑이 없습니다.</div>
+        <div v-else class="muted">아직 생성된 매니저 브리핑이 없습니다.</div>
       </div>
     </section>
 

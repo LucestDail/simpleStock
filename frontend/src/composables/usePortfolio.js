@@ -10,12 +10,9 @@ export const CATEGORIES = [
 
 const holdings = ref([]);
 const snapshots = ref([]);
-const ai = ref({
+const manager = ref({
   latestReport: null,
   history: [],
-  lastRunAt: null,
-  lastError: null,
-  lastRunSource: null,
 });
 const system = ref({
   timezone: 'Asia/Seoul',
@@ -23,15 +20,23 @@ const system = ref({
   serverTimeLocal: null,
   todayLocalDate: null,
   aiConfigured: false,
-  aiCronExpression: '',
-  aiCronValid: false,
-  aiCronMode: 'node-cron',
-  geminiModel: '',
-  geminiThinkingLevel: '',
-  quantManagerSystemPrompt: '',
+  ai: {
+    model: '',
+    thinkingLevel: '',
+    dailyCron: '',
+  },
+  orchestrationNotes: '',
+  dataFiles: {},
 });
 const loading = ref(false);
 const error = ref(null);
+
+function applyPayload(data) {
+  holdings.value = data.holdings || [];
+  snapshots.value = data.snapshots || [];
+  manager.value = data.manager || manager.value;
+  system.value = data.system || system.value;
+}
 
 export function formatKRW(n) {
   return new Intl.NumberFormat('ko-KR', {
@@ -70,11 +75,7 @@ export function usePortfolio() {
     try {
       const res = await fetch('/api/portfolio');
       if (!res.ok) throw new Error('불러오기 실패');
-      const data = await res.json();
-      holdings.value = data.holdings || [];
-      snapshots.value = data.snapshots || [];
-      ai.value = data.ai || ai.value;
-      system.value = data.system || system.value;
+      applyPayload(await res.json());
     } catch (e) {
       error.value = e.message || '오류';
     } finally {
@@ -92,11 +93,7 @@ export function usePortfolio() {
         body: JSON.stringify({ holdings: list }),
       });
       if (!res.ok) throw new Error('저장 실패');
-      const data = await res.json();
-      holdings.value = data.holdings || [];
-      snapshots.value = data.snapshots || [];
-      ai.value = data.ai || ai.value;
-      system.value = data.system || system.value;
+      applyPayload(await res.json());
     } catch (e) {
       error.value = e.message || '오류';
       throw e;
@@ -115,11 +112,7 @@ export function usePortfolio() {
       const j = await res.json().catch(() => ({}));
       throw new Error(j.error || '스냅샷 저장 실패');
     }
-    const data = await res.json();
-    holdings.value = data.holdings || [];
-    snapshots.value = data.snapshots || [];
-    ai.value = data.ai || ai.value;
-    system.value = data.system || system.value;
+    applyPayload(await res.json());
   }
 
   async function deleteSnapshot(date) {
@@ -127,27 +120,19 @@ export function usePortfolio() {
       method: 'DELETE',
     });
     if (!res.ok) throw new Error('삭제 실패');
-    const data = await res.json();
-    holdings.value = data.holdings || [];
-    snapshots.value = data.snapshots || [];
-    ai.value = data.ai || ai.value;
-    system.value = data.system || system.value;
+    applyPayload(await res.json());
   }
 
-  async function runAiReview() {
-    const res = await fetch('/api/ai/run', {
+  async function runManagerReview() {
+    const res = await fetch('/api/manager/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      throw new Error(j.error || 'AI 브리핑 생성 실패');
+      throw new Error(j.error || '매니저 브리핑 생성 실패');
     }
-    const data = await res.json();
-    holdings.value = data.holdings || [];
-    snapshots.value = data.snapshots || [];
-    ai.value = data.ai || ai.value;
-    system.value = data.system || system.value;
+    applyPayload(await res.json());
   }
 
   const sortedSnapshots = computed(() =>
@@ -175,7 +160,7 @@ export function usePortfolio() {
   return {
     holdings,
     snapshots,
-    ai,
+    manager,
     system,
     sortedSnapshots,
     loading,
@@ -189,6 +174,6 @@ export function usePortfolio() {
     saveHoldings,
     addSnapshot,
     deleteSnapshot,
-    runAiReview,
+    runManagerReview,
   };
 }

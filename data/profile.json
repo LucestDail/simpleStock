@@ -1,0 +1,25 @@
+{
+  "userProfile": {
+    "displayName": "",
+    "investorType": "",
+    "investmentGoal": "",
+    "riskTolerance": "",
+    "timeHorizon": "",
+    "liquidityNeeds": "",
+    "responseStyle": "",
+    "focusAreas": "",
+    "notes": ""
+  },
+  "aiProfile": {
+    "summary": "",
+    "inferredTraits": [],
+    "preferences": [],
+    "concerns": [],
+    "updatedAt": null,
+    "sourceMemoryIds": []
+  },
+  "metadata": {
+    "lastManualUpdateAt": null,
+    "lastAiRefreshAt": null
+  }
+}

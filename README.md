@@ -9,10 +9,17 @@
 - **자산 입력** — 분류별(예금 / 적금 / 주식 / 펀드 / 연금) 항목·평가금액(원) 등록·수정·삭제
 - **대시보드** — 총 자산, 카테고리별 비중(도넛·카드·표), 최근 스냅샷 대비 증감 표시
 - **일별 기록** — 선택한 날짜 기준으로 당시 보유 합계를 스냅샷으로 저장·삭제
-- **AI 브리핑** — Gemini 기반 일일 자산 관리 브리핑, 수동 실행 + KST 기준 일 1회 스케줄
-- **설정** — 데이터 경로, 시간대, AI 상태, Quant Manager 시스템 프롬프트 안내
+- **멀티스레드 채팅** — Enter 전송 / Shift+Enter 줄바꿈, 스레드별 대화 기록과 요약 저장
+- **장기 기억 / 프로필** — 대화 요약, 장기 기억, 사용자 성향 프로필을 JSON 파일로 유지
+- **Quant Manager 브리핑** — Gemini + LangGraph 기반 일일 브리핑, 수동 실행 + KST 기준 일 1회 스케줄
+- **설정** — 데이터 파일 경로, 시간대, AI 오케스트레이션 상태, 사용자 성향 프로필 편집
 
-DB 없이 **`data/portfolio.json`** 한 파일에 보유 목록(`holdings`), 일별 스냅샷(`snapshots`), AI 브리핑 결과(`ai`)를 저장합니다.
+DB 없이 서버 파일 시스템의 JSON 파일로 저장합니다.
+
+- `data/portfolio.json` — 보유 자산 / 스냅샷
+- `data/chat.json` — 스레드 / 메시지
+- `data/memory.json` — 대화 요약 / 장기 기억 / 매니저 브리핑
+- `data/profile.json` — 사용자 입력 프로필 / AI 추론 프로필
 
 ## 디자인
 
@@ -30,10 +37,10 @@ Coinbase 공개 마케팅 서피스 톤을 준용합니다.
 
 | 구분 | 기술 |
 |------|------|
-| 백엔드 | Node.js, Express, node-cron, Gemini SDK |
+| 백엔드 | Node.js, Express, node-cron, Gemini SDK, LangGraph |
 | 프론트엔드 | Vue 3, Vue Router 4, Vite 5 |
 | 스타일 | 순수 CSS + 디자인 토큰 (Coinbase 톤 준용) |
-| 저장소 | 파일 (`data/portfolio.json`) |
+| 저장소 | JSON 파일 (`portfolio`, `chat`, `memory`, `profile`) |
 | 컨테이너 | Docker (Node 20 Alpine) |
 
 ## 프로젝트 구조
@@ -42,8 +49,19 @@ Coinbase 공개 마케팅 서피스 톤을 준용합니다.
 simpleStock/
 ├── package.json
 ├── server.js              # Express API + 정적 dist
+├── server/
+│   ├── aiService.js
+│   ├── chatService.js
+│   ├── contextBuilder.js
+│   ├── dataStore.js
+│   ├── managerService.js
+│   ├── profileService.js
+│   └── time.js
 ├── data/
-│   └── portfolio.json     # holdings + snapshots + ai (런타임)
+│   ├── portfolio.json
+│   ├── chat.json
+│   ├── memory.json
+│   └── profile.json
 ├── dist/                  # 프론트 빌드 산출물
 ├── frontend/
 │   ├── index.html
@@ -52,8 +70,12 @@ simpleStock/
 │       ├── App.vue
 │       ├── router/
 │       ├── styles/tokens.css
-│       ├── composables/usePortfolio.js
-│       └── views/         # Dashboard, Holdings, History, Settings
+│       ├── composables/
+│       │   ├── usePortfolio.js
+│       │   ├── useChat.js
+│       │   ├── useProfile.js
+│       │   └── useUi.js
+│       └── views/         # Dashboard, Holdings, History, Chat, Settings
 ├── Dockerfile
 └── docker-compose.yml
 ```
@@ -62,7 +84,7 @@ simpleStock/
 
 ### 요구 사항
 
-- Node.js ≥ 18
+- Node.js ≥ 20
 
 ### 설치 및 로컬 실행
 
@@ -94,16 +116,16 @@ docker compose up -d --build
 
 ```bash
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-3.1-flash-lite
-GEMINI_THINKING_LEVEL=medium
+GEMINI_MODEL=gemini-3.1-pro-preview
+GEMINI_THINKING_LEVEL=high
 APP_TIMEZONE=Asia/Seoul
 AI_DAILY_CRON=5 21 * * *
 TZ=Asia/Seoul
 ```
 
 - `APP_TIMEZONE`: 앱 기준 날짜/시각 계산용. 기본값 `Asia/Seoul`
-- `AI_DAILY_CRON`: 일일 AI 브리핑 스케줄. 기본값은 **매일 21:05 KST**
-- `GEMINI_API_KEY`가 없으면 앱은 정상 동작하지만 AI 브리핑만 비활성화됩니다.
+- `AI_DAILY_CRON`: 일일 Quant Manager 브리핑 스케줄. 기본값은 **매일 21:05 KST**
+- `GEMINI_API_KEY`가 없으면 자산/히스토리/설정 화면은 정상 동작하고, 채팅/매니저 브리핑만 비활성화됩니다.
 
 ## API 요약
 
@@ -113,7 +135,16 @@ TZ=Asia/Seoul
 | PUT | `/api/portfolio` | `{ "holdings": [...] }` 로 목록 전체 교체 |
 | POST | `/api/snapshots` | 본문 `{ "date": "YYYY-MM-DD" }` 선택, 생략 시 오늘 — 현재 holdings 합계로 스냅샷 저장 |
 | DELETE | `/api/snapshots/:date` | 해당 날짜 스냅샷 삭제 |
-| POST | `/api/ai/run` | 오늘 기준 스냅샷을 반영한 뒤 Gemini AI 브리핑 생성 |
+| GET | `/api/profile` | 사용자 프로필 / AI 추론 프로필 조회 |
+| PUT | `/api/profile` | 사용자 성향 프로필 저장 |
+| GET | `/api/chat/threads` | 대화 스레드 목록 조회 |
+| POST | `/api/chat/threads` | 새 대화 스레드 생성 |
+| GET | `/api/chat/threads/:threadId` | 특정 스레드의 메시지 조회 |
+| POST | `/api/chat/threads/:threadId/messages` | LangGraph supervisor 기반 답변 생성 |
+| DELETE | `/api/chat/threads/:threadId` | 스레드 및 관련 기억 삭제 |
+| POST | `/api/chat/threads/:threadId/summarize` | 스레드 요약 수동 갱신 |
+| POST | `/api/manager/run` | Quant Manager 브리핑 수동 생성 |
+| POST | `/api/ai/run` | `/api/manager/run` 별칭 |
 | GET | `/api/system/status` | 앱 시간대, 현재 서버 시각, AI 설정 상태 조회 |
 
 ## 라이선스

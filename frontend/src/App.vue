@@ -10,6 +10,7 @@ const links = [
   { to: '/', label: '대시보드' },
   { to: '/holdings', label: '자산 입력' },
   { to: '/history', label: '일별 기록' },
+  { to: '/chat', label: '대화' },
   { to: '/settings', label: '설정' },
 ];
 </script>
