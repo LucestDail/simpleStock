@@ -282,8 +282,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  overflow: auto;
-  padding-right: 2px;
+  overflow: hidden;
 }
 
 .workspace--stacked {
