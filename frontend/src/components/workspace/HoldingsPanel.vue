@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import PanelShell from './PanelShell.vue';
-import { CATEGORIES, formatKRW, usePortfolio } from '../../composables/usePortfolio';
+import { CATEGORIES, formatKRW, formatUSD, usePortfolio } from '../../composables/usePortfolio';
 import { useUi } from '../../composables/useUi';
 import { useWorkspace } from '../../composables/useWorkspace';
 
@@ -12,7 +12,7 @@ const props = defineProps({
   },
 });
 
-const { holdings, saveHoldings, busyState } = usePortfolio();
+const { holdings, saveHoldings, busyState, total, categoryShares, currentUsdKrwRate } = usePortfolio();
 const { confirmAction, notify } = useUi();
 const {
   applyWorkspacePatch,
@@ -38,6 +38,7 @@ const filteredHoldings = computed(() =>
 const selectedCategoryLabel = computed(
   () => CATEGORIES.find((item) => item.id === selectedCategoryId.value)?.label || '전체 자산'
 );
+const topCategoryShares = computed(() => categoryShares.value.filter((item) => item.amount > 0).slice(0, 5));
 
 function formatHoldingMeta(holding) {
   const details = holding.details || {};
@@ -52,6 +53,34 @@ function formatHoldingMeta(holding) {
       .join(' · ') ||
     CATEGORIES.find((item) => item.id === holding.category)?.label
   );
+}
+
+function isUsdHolding(holding) {
+  return String(holding?.details?.currency || '').toUpperCase() === 'USD';
+}
+
+function getConvertedKrwAmount(holding) {
+  const details = holding.details || {};
+  const nativeAmount = Number(details.nativeAmount);
+  const rate = Number(currentUsdKrwRate.value);
+  if (isUsdHolding(holding) && Number.isFinite(nativeAmount) && Number.isFinite(rate) && rate > 0) {
+    return Math.round(nativeAmount * rate);
+  }
+  return holding.amount;
+}
+
+function getDisplayAmount(holding) {
+  const details = holding.details || {};
+  const nativeAmount = Number(details.nativeAmount);
+  if (isUsdHolding(holding) && Number.isFinite(nativeAmount)) {
+    return formatUSD(nativeAmount);
+  }
+  return formatKRW(holding.amount);
+}
+
+function getDisplayAmountSecondary(holding) {
+  if (!isUsdHolding(holding)) return '';
+  return `환산 ${formatKRW(getConvertedKrwAmount(holding))}`;
 }
 
 function formatQuotePrice(holding) {
@@ -241,6 +270,21 @@ function inspectHolding(target) {
     :highlighted="panel.highlighted"
     :loading="busyState.fetchPortfolio || busyState.saveHoldings"
   >
+    <div class="portfolio-topline">
+      <article class="topline-card topline-card--primary">
+        <span>현재 총 자산</span>
+        <strong class="mono-num">{{ formatKRW(total) }}</strong>
+        <p>
+          {{ currentUsdKrwRate ? `USD/KRW ${Number(currentUsdKrwRate).toLocaleString('ko-KR', { maximumFractionDigits: 2 })} 기준 원화 환산` : '원화 자산 기준 합산' }}
+        </p>
+      </article>
+      <div class="ratio-strip">
+        <span v-for="item in topCategoryShares" :key="item.id" class="ratio-chip">
+          {{ item.label }} {{ item.pct }}%
+        </span>
+      </div>
+    </div>
+
     <div class="category-strip">
       <button
         type="button"
@@ -302,7 +346,8 @@ function inspectHolding(target) {
           <span>{{ formatHoldingMeta(holding) }}</span>
         </button>
         <div class="holding-value">
-          <strong class="mono-num">{{ formatKRW(holding.amount) }}</strong>
+          <strong class="mono-num">{{ getDisplayAmount(holding) }}</strong>
+          <span v-if="getDisplayAmountSecondary(holding)" class="holding-secondary mono-num">{{ getDisplayAmountSecondary(holding) }}</span>
           <span v-if="formatQuotePrice(holding)" class="quote-line">
             <em class="mono-num">{{ formatQuotePrice(holding) }}</em>
             <em v-if="formatQuoteChange(holding)" class="quote-chip" :class="quoteTone(holding)">
@@ -321,6 +366,61 @@ function inspectHolding(target) {
 </template>
 
 <style scoped>
+.portfolio-topline {
+  display: grid;
+  gap: 6px;
+}
+
+.topline-card {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  display: grid;
+  gap: 3px;
+}
+
+.topline-card--primary {
+  background: rgba(110, 123, 255, 0.08);
+  border-color: rgba(110, 123, 255, 0.18);
+}
+
+.topline-card span {
+  color: var(--color-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.topline-card strong {
+  color: var(--color-ink);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.topline-card p {
+  margin: 0;
+  color: var(--color-body);
+  font-size: 9px;
+  line-height: 1.25;
+}
+
+.ratio-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ratio-chip {
+  padding: 4px 8px;
+  border-radius: var(--rounded-pill);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-body-strong);
+  font-size: 9px;
+  font-weight: 700;
+}
+
 .category-strip {
   display: flex;
   flex-wrap: wrap;
@@ -480,6 +580,12 @@ function inspectHolding(target) {
 
 .holding-value strong {
   font-size: 10px;
+  line-height: 1.2;
+}
+
+.holding-secondary {
+  color: var(--color-muted);
+  font-size: 8px;
   line-height: 1.2;
 }
 

@@ -134,15 +134,47 @@ export function formatKRW(n) {
   }).format(n || 0);
 }
 
+export function formatUSD(n) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n || 0);
+}
+
+function getCurrentUsdKrwRate(systemState) {
+  const liveRate = Number(systemState?.market?.fx?.USDKRW?.rate);
+  if (Number.isFinite(liveRate) && liveRate > 0) return liveRate;
+  return null;
+}
+
+function getHoldingAmountKrw(holding, usdKrwRate) {
+  const details = holding?.details || {};
+  const storedAmount = Number(holding?.amount) || 0;
+  const currency = String(details.currency || '').toUpperCase();
+  const nativeAmount = Number(details.nativeAmount);
+  if (currency === 'USD' && Number.isFinite(nativeAmount) && nativeAmount > 0) {
+    const rate = Number.isFinite(Number(usdKrwRate)) ? Number(usdKrwRate) : Number(details.fxRate);
+    if (Number.isFinite(rate) && rate > 0) {
+      return Math.round(nativeAmount * rate);
+    }
+  }
+  return storedAmount;
+}
+
 export function usePortfolio() {
+  const currentUsdKrwRate = computed(() => getCurrentUsdKrwRate(system.value));
   const total = computed(() =>
-    holdings.value.reduce((s, h) => s + (Number(h.amount) || 0), 0)
+    holdings.value.reduce((sum, holding) => sum + getHoldingAmountKrw(holding, currentUsdKrwRate.value), 0)
   );
 
   const byCategory = computed(() => {
     const m = Object.fromEntries(CATEGORIES.map((c) => [c.id, 0]));
     for (const h of holdings.value) {
-      if (m[h.category] != null) m[h.category] += Number(h.amount) || 0;
+      if (m[h.category] != null) {
+        m[h.category] += getHoldingAmountKrw(h, currentUsdKrwRate.value);
+      }
     }
     return m;
   });
@@ -294,6 +326,7 @@ export function usePortfolio() {
     total,
     byCategory,
     categoryShares,
+    currentUsdKrwRate,
     lastSnapshot,
     dayOverDay,
     applyPortfolioPayload,

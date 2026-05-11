@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive, watch } from 'vue';
-import { CATEGORIES, formatKRW, usePortfolio } from '../../composables/usePortfolio';
+import { CATEGORIES, formatKRW, formatUSD, usePortfolio } from '../../composables/usePortfolio';
 import { useChat } from '../../composables/useChat';
 import { useProfile } from '../../composables/useProfile';
 import { useWorkspace } from '../../composables/useWorkspace';
@@ -40,6 +40,26 @@ const activeThreadDetail = computed(() => {
 
 const latestManagerReport = computed(() => manager.value?.latestReport || null);
 const insightDetail = computed(() => generatedInsights.value);
+const drawerClass = computed(() => ({
+  'drawer--asset': drawer.value.type === 'assetDetail',
+  'drawer--thread': drawer.value.type === 'threadDetail',
+}));
+const activeHoldingDetailCards = computed(() => {
+  if (!activeHolding.value?.details) return [];
+  const details = activeHolding.value.details;
+  const cards = [
+    details.account ? ['계좌', details.account] : null,
+    details.market ? ['시장', details.market] : null,
+    details.ticker ? ['티커', details.ticker] : null,
+    details.quantity != null ? ['수량', `${details.quantity}주`] : null,
+    details.currentPrice != null ? ['현재가', formatPrice(details)] : null,
+    details.priceChangePct != null ? ['등락', formatQuoteChange(details)] : null,
+    details.fxRate != null ? ['환율', Number(details.fxRate).toLocaleString('ko-KR', { maximumFractionDigits: 2 })] : null,
+    details.lastQuoteAt ? ['시세 시각', formatTime(details.lastQuoteAt)] : null,
+    details.quoteSource ? ['출처', details.quoteSource] : null,
+  ].filter(Boolean);
+  return cards;
+});
 
 const settingsForm = reactive({
   displayName: '',
@@ -98,6 +118,27 @@ function formatQuoteChange(details) {
   return `${amount} · ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
 }
 
+function formatHoldingPrimaryAmount(holding) {
+  const details = holding?.details || {};
+  if (String(details.currency || '').toUpperCase() === 'USD' && Number.isFinite(Number(details.nativeAmount))) {
+    return formatUSD(details.nativeAmount);
+  }
+  return formatKRW(holding?.amount);
+}
+
+function formatHoldingSecondaryAmount(holding) {
+  const details = holding?.details || {};
+  const liveFxRate = Number(system.value?.market?.fx?.USDKRW?.rate);
+  if (String(details.currency || '').toUpperCase() === 'USD' && Number.isFinite(Number(details.nativeAmount))) {
+    const converted =
+      Number.isFinite(liveFxRate) && liveFxRate > 0
+        ? Math.round(Number(details.nativeAmount) * liveFxRate)
+        : holding.amount;
+    return `원화 환산 ${formatKRW(converted)}`;
+  }
+  return details.summary || '';
+}
+
 function formatTime(value) {
   if (!value) return '-';
   return new Intl.DateTimeFormat('ko-KR', {
@@ -110,7 +151,7 @@ function formatTime(value) {
 <template>
   <transition name="drawer-fade">
     <aside v-if="drawer.open" class="drawer-backdrop" @click="closeDrawer">
-      <section class="drawer" @click.stop>
+      <section class="drawer" :class="drawerClass" @click.stop>
         <header class="drawer-head">
           <div>
             <p class="drawer-kicker">detail</p>
@@ -189,45 +230,23 @@ function formatTime(value) {
 
           <template v-else-if="drawer.type === 'assetDetail'">
             <div v-if="activeHolding" class="detail-block">
-              <strong>{{ activeHolding.name }}</strong>
-              <p>분류: {{ CATEGORIES.find((item) => item.id === activeHolding.category)?.label }}</p>
-              <p class="mono-num">{{ formatKRW(activeHolding.amount) }}</p>
-              <div v-if="activeHolding.details" class="detail-grid">
-                <div v-if="activeHolding.details.account" class="detail-card">
-                  <span>계좌</span>
-                  <strong>{{ activeHolding.details.account }}</strong>
+              <div class="asset-summary-card">
+                <div class="asset-summary-card__head">
+                  <strong>{{ activeHolding.name }}</strong>
+                  <span>{{ CATEGORIES.find((item) => item.id === activeHolding.category)?.label }}</span>
                 </div>
-                <div v-if="activeHolding.details.market" class="detail-card">
-                  <span>시장</span>
-                  <strong>{{ activeHolding.details.market }}</strong>
+                <div class="asset-summary-card__amounts">
+                  <strong class="mono-num">{{ formatHoldingPrimaryAmount(activeHolding) }}</strong>
+                  <span class="mono-num">{{ formatHoldingSecondaryAmount(activeHolding) }}</span>
                 </div>
-                <div v-if="activeHolding.details.ticker" class="detail-card">
-                  <span>티커</span>
-                  <strong>{{ activeHolding.details.ticker }}</strong>
-                </div>
-                <div v-if="activeHolding.details.quantity != null" class="detail-card">
-                  <span>수량</span>
-                  <strong>{{ activeHolding.details.quantity }}주</strong>
-                </div>
-                <div v-if="activeHolding.details.currentPrice != null" class="detail-card">
-                  <span>현재가</span>
-                  <strong>{{ formatPrice(activeHolding.details) }}</strong>
-                </div>
-                <div v-if="activeHolding.details.priceChangePct != null" class="detail-card">
-                  <span>등락</span>
-                  <strong>{{ formatQuoteChange(activeHolding.details) }}</strong>
-                </div>
-                <div v-if="activeHolding.details.fxRate != null" class="detail-card">
-                  <span>환율</span>
-                  <strong>{{ Number(activeHolding.details.fxRate).toLocaleString('ko-KR', { maximumFractionDigits: 2 }) }}</strong>
-                </div>
-                <div v-if="activeHolding.details.lastQuoteAt" class="detail-card">
-                  <span>시세 시각</span>
-                  <strong>{{ formatTime(activeHolding.details.lastQuoteAt) }}</strong>
-                </div>
-                <div v-if="activeHolding.details.quoteSource" class="detail-card">
-                  <span>출처</span>
-                  <strong>{{ activeHolding.details.quoteSource }}</strong>
+                <p class="asset-summary-card__brief">
+                  {{ activeHolding.details?.summary || '보유 자산의 현재 시세와 계좌 정보를 기준으로 정리한 상세 정보입니다.' }}
+                </p>
+              </div>
+              <div v-if="activeHoldingDetailCards.length" class="detail-grid detail-grid--asset">
+                <div v-for="[label, value] in activeHoldingDetailCards" :key="label" class="detail-card">
+                  <span>{{ label }}</span>
+                  <strong>{{ value }}</strong>
                 </div>
               </div>
               <ul v-if="activeHolding.details?.orders?.length" class="simple-list">
@@ -312,16 +331,25 @@ function formatTime(value) {
 
 .drawer {
   position: absolute;
-  top: var(--space-sm);
-  right: var(--space-sm);
-  bottom: var(--space-sm);
-  width: min(420px, calc(100vw - 20px));
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
   border-radius: var(--rounded-xl);
   background: rgba(11, 16, 24, 0.98);
   border: 1px solid var(--color-hairline);
   box-shadow: 0 22px 60px rgba(0, 0, 0, 0.38);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+}
+
+.drawer--thread {
+  width: min(980px, calc(100vw - 24px));
+}
+
+.drawer--asset {
+  width: min(780px, calc(100vw - 24px));
 }
 
 .drawer-head {
@@ -378,6 +406,50 @@ function formatTime(value) {
   font-size: 16px;
 }
 
+.asset-summary-card {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.asset-summary-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.asset-summary-card__head span {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.asset-summary-card__amounts {
+  display: grid;
+  gap: 2px;
+}
+
+.asset-summary-card__amounts strong {
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.asset-summary-card__amounts span {
+  color: var(--color-body);
+  font-size: 12px;
+}
+
+.asset-summary-card__brief {
+  margin: 0;
+  color: var(--color-body);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .settings-section {
   display: grid;
   gap: var(--space-sm);
@@ -399,6 +471,10 @@ function formatTime(value) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-sm);
+}
+
+.detail-grid--asset {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
 .settings-input,
@@ -510,6 +586,25 @@ function formatTime(value) {
 .empty-text {
   margin: 0;
   color: var(--color-muted);
+}
+
+@media (max-width: 720px) {
+  .drawer {
+    top: 10px;
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .detail-grid,
+  .detail-grid--asset,
+  .settings-form {
+    grid-template-columns: 1fr;
+  }
+
+  .asset-summary-card__head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 .drawer-fade-enter-active,

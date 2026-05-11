@@ -24,6 +24,7 @@ const {
   error: chatError,
   createThread,
   selectThread,
+  removeThread,
   sendMessageContent,
 } = useChat();
 const { total, system: portfolioSystem } = usePortfolio();
@@ -121,6 +122,25 @@ async function activateThread(thread) {
   );
 }
 
+async function handleRemoveThread(thread, event) {
+  event.stopPropagation();
+  try {
+    await removeThread(thread.id);
+    recordActivity({
+      type: 'chat',
+      title: '대화 삭제',
+      description: thread.title,
+      entityId: thread.id,
+      tone: 'warning',
+    });
+  } catch (error) {
+    notify({
+      tone: 'error',
+      message: error.message || '대화 삭제 실패',
+    });
+  }
+}
+
 async function submit() {
   if (!canSend.value) return;
   const content = draft.value;
@@ -176,18 +196,23 @@ function onComposerKeydown(event) {
           <span>{{ chatStatusItems.join(' · ') }}</span>
         </div>
         <div class="thread-list">
-          <button
+          <article
             v-for="thread in visibleThreads"
             :key="thread.id"
-            type="button"
             class="thread-item"
             :class="{ active: activeThread?.id === thread.id }"
-            @click="activateThread(thread)"
           >
-            <strong>{{ thread.title }}</strong>
-            <span>{{ formatTimestamp(thread.updatedAt || thread.createdAt) }}</span>
-            <em>{{ thread.messageCount || 0 }}개</em>
-          </button>
+            <button
+              type="button"
+              class="thread-item__main"
+              @click="activateThread(thread)"
+            >
+              <strong>{{ thread.title }}</strong>
+              <span>{{ formatTimestamp(thread.updatedAt || thread.createdAt) }}</span>
+              <em>{{ thread.messageCount || 0 }}개</em>
+            </button>
+            <button type="button" class="thread-item__delete" @click="handleRemoveThread(thread, $event)">삭제</button>
+          </article>
         </div>
       </aside>
 
@@ -322,29 +347,40 @@ function onComposerKeydown(event) {
   min-height: 0;
   overflow: auto;
   display: grid;
-  gap: 1px;
+  gap: 4px;
   padding: 4px;
 }
 
 .thread-item {
-  border: 1px solid transparent;
+  border: 1px solid var(--color-hairline-soft);
   border-radius: var(--rounded-md);
-  background: transparent;
+  background: rgba(255, 255, 255, 0.015);
   color: var(--color-body);
-  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px;
+  align-items: start;
+  padding: 5px 6px;
+}
+
+.thread-item__main {
+  border: none;
+  background: transparent;
+  padding: 0;
   text-align: left;
   display: grid;
   gap: 2px;
-  padding: 6px 7px;
+  cursor: pointer;
 }
 
 .thread-item strong {
   color: inherit;
   font-size: 10px;
   line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .thread-item span,
@@ -359,6 +395,17 @@ function onComposerKeydown(event) {
   border-color: rgba(0, 82, 255, 0.28);
   background: rgba(0, 82, 255, 0.12);
   color: var(--color-ink);
+}
+
+.thread-item__delete {
+  border: none;
+  background: transparent;
+  color: var(--color-semantic-down);
+  font-size: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 1px 0 0;
+  white-space: nowrap;
 }
 
 .conversation {
