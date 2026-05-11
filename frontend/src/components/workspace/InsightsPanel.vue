@@ -119,7 +119,7 @@ const cards = computed(() =>
   padding: 0 8px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -163,13 +163,13 @@ const cards = computed(() =>
 
 .insight-head strong {
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
 .insight-head span {
   color: var(--color-muted);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -178,7 +178,7 @@ const cards = computed(() =>
 .insight-summary {
   margin: 0;
   color: var(--color-body);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.2;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -202,12 +202,12 @@ const cards = computed(() =>
 
 .metric-card span {
   color: var(--color-muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .metric-card strong {
   color: var(--color-ink);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
@@ -216,7 +216,7 @@ const cards = computed(() =>
   margin: 0;
   padding-left: 14px;
   color: var(--color-body);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.2;
 }
 

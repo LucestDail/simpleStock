@@ -287,7 +287,7 @@ function onComposerKeydown(event) {
   border: none;
   border-radius: var(--rounded-pill);
   padding: 0 8px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -335,12 +335,12 @@ function onComposerKeydown(event) {
 
 .thread-panel__head strong {
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .thread-panel__head span {
   color: var(--color-muted);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.2;
 }
 
@@ -380,7 +380,7 @@ function onComposerKeydown(event) {
 
 .thread-item strong {
   color: inherit;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.2;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -391,7 +391,7 @@ function onComposerKeydown(event) {
 .thread-item span,
 .thread-item em {
   color: var(--color-muted);
-  font-size: 8px;
+  font-size: 10px;
   font-style: normal;
   line-height: 1.2;
 }
@@ -411,7 +411,7 @@ function onComposerKeydown(event) {
   border: none;
   background: transparent;
   color: var(--color-semantic-down);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
   cursor: pointer;
   padding: 1px 0 0;
@@ -435,13 +435,13 @@ function onComposerKeydown(event) {
 
 .conversation-head strong {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.2;
 }
 
 .conversation-head span {
   color: var(--color-muted);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.2;
 }
 
@@ -450,14 +450,14 @@ function onComposerKeydown(event) {
   border-radius: var(--rounded-lg);
   padding: 7px 8px;
   background: var(--color-surface-soft);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .empty-box strong {
   display: block;
   color: var(--color-ink);
   margin-bottom: 4px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .empty-box p,
@@ -465,7 +465,7 @@ function onComposerKeydown(event) {
   margin: 0;
   color: var(--color-body);
   line-height: 1.3;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .disabled-box strong {
@@ -510,12 +510,12 @@ function onComposerKeydown(event) {
 
 .message-meta strong {
   color: var(--color-ink);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .message-meta span {
   color: var(--color-muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .message-text {
@@ -524,12 +524,12 @@ function onComposerKeydown(event) {
   overflow-wrap: anywhere;
   color: var(--color-body-strong);
   line-height: 1.4;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .message-markdown {
   color: var(--color-body-strong);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -556,7 +556,7 @@ function onComposerKeydown(event) {
 .message-markdown :deep(h4) {
   margin: 0 0 6px;
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.3;
 }
 
@@ -571,7 +571,7 @@ function onComposerKeydown(event) {
 
 .message-markdown :deep(code) {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 11px;
   background: rgba(255, 255, 255, 0.06);
   padding: 1px 3px;
   border-radius: var(--rounded-xs);
@@ -606,7 +606,7 @@ function onComposerKeydown(event) {
   border: 1px solid var(--color-hairline);
   display: grid;
   gap: 3px;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .chat-notice.info {
@@ -621,7 +621,7 @@ function onComposerKeydown(event) {
 
 .chat-notice strong {
   color: var(--color-ink);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .chat-notice p {
@@ -640,7 +640,7 @@ function onComposerKeydown(event) {
   color: var(--color-ink);
   background: rgba(255, 255, 255, 0.02);
   min-height: 72px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .composer-input:focus {

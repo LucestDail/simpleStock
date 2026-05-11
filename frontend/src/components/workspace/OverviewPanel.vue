@@ -236,7 +236,7 @@ function inspectHolding(holding) {
 
 .summary-label {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -247,7 +247,7 @@ function inspectHolding(holding) {
 
 .summary-value {
   color: var(--color-ink);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -256,7 +256,7 @@ function inspectHolding(holding) {
 
 .summary-note {
   color: var(--color-body);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -273,7 +273,7 @@ function inspectHolding(holding) {
   border-radius: var(--rounded-lg);
   padding: 8px;
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .share-item {
@@ -302,7 +302,7 @@ function inspectHolding(holding) {
   gap: 6px;
   align-items: center;
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
   min-width: 0;
 }
 
@@ -316,7 +316,7 @@ function inspectHolding(holding) {
 
 .share-amount {
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -341,7 +341,7 @@ function inspectHolding(holding) {
 
 .section-head strong {
   color: var(--color-ink);
-  font-size: 13px;
+  font-size: 15px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -349,7 +349,7 @@ function inspectHolding(holding) {
 
 .section-head span {
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -384,7 +384,7 @@ function inspectHolding(holding) {
 
 .holding-main strong {
   color: var(--color-ink);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -393,7 +393,7 @@ function inspectHolding(holding) {
 
 .holding-main span {
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -408,7 +408,7 @@ function inspectHolding(holding) {
 }
 
 .holding-value strong {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -417,7 +417,7 @@ function inspectHolding(holding) {
 
 .holding-secondary {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -430,7 +430,7 @@ function inspectHolding(holding) {
   justify-content: flex-end;
   gap: 3px;
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 12px;
   text-align: right;
   min-width: 0;
 }

@@ -106,7 +106,7 @@ async function generateBrief() {
   border: none;
   border-radius: var(--rounded-pill);
   padding: 0 8px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -131,7 +131,7 @@ async function generateBrief() {
   border-radius: var(--rounded-lg);
   padding: 6px 8px;
   background: var(--color-surface-soft);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .disabled-box strong,
@@ -161,7 +161,7 @@ async function generateBrief() {
 }
 
 .kicker {
-  font-size: 8px;
+  font-size: 10px;
   color: var(--color-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -171,14 +171,14 @@ async function generateBrief() {
 .summary {
   margin: 0;
   line-height: 1.2;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .list {
   margin: 0;
   padding-left: 14px;
   color: var(--color-body);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.2;
 }
 </style>
