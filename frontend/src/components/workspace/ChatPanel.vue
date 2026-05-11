@@ -50,7 +50,6 @@ const headerStats = computed(() => [
     value: profile.value.userProfile?.displayName || '미입력',
   },
 ]);
-
 function formatTimestamp(value) {
   if (!value) return '';
   return new Intl.DateTimeFormat('ko-KR', {
@@ -169,6 +168,7 @@ function onComposerKeydown(event) {
         @click="activateThread(thread)"
       >
         <span>{{ thread.title }}</span>
+        <em class="thread-count">{{ thread.messageCount || 0 }}</em>
       </button>
     </div>
 
@@ -179,7 +179,10 @@ function onComposerKeydown(event) {
 
     <div class="messages">
       <div v-if="!messages.length" class="empty-box">
-        자산 입력, 설정 변경, 반복 브리핑 등록도 자연어로 요청할 수 있습니다.
+        <strong>{{ activeThread?.title || '새 대화' }}</strong>
+        <p>
+          {{ activeThread ? '이 스레드에는 아직 저장된 대화 이력이 없습니다. 바로 새 메시지를 보내 이어서 사용할 수 있습니다.' : '자산 입력, 설정 변경, 반복 브리핑 등록도 자연어로 요청할 수 있습니다.' }}
+        </p>
       </div>
 
       <article
@@ -217,11 +220,11 @@ function onComposerKeydown(event) {
 <style scoped>
 .btn-primary,
 .btn-secondary {
-  height: 30px;
+  height: 28px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 12px;
-  font-size: 12px;
+  padding: 0 10px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -273,12 +276,15 @@ function onComposerKeydown(event) {
   border: 1px solid var(--color-hairline);
   background: rgba(255, 255, 255, 0.02);
   border-radius: var(--rounded-pill);
-  padding: 6px 10px;
-  font-size: 12px;
+  padding: 5px 9px;
+  font-size: 11px;
   color: var(--color-body);
   cursor: pointer;
   max-width: 100%;
   overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .thread-chip.active {
@@ -294,12 +300,30 @@ function onComposerKeydown(event) {
   white-space: nowrap;
 }
 
+.thread-count {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--color-muted);
+}
+
 .disabled-box,
 .empty-box {
   border-radius: var(--rounded-lg);
   padding: 8px 10px;
   background: var(--color-surface-soft);
   font-size: 11px;
+}
+
+.empty-box strong {
+  display: block;
+  color: var(--color-ink);
+  margin-bottom: 4px;
+}
+
+.empty-box p {
+  margin: 0;
+  color: var(--color-body);
+  line-height: 1.4;
 }
 
 .disabled-box strong {

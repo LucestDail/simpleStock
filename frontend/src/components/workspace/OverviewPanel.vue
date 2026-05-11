@@ -12,7 +12,7 @@ const props = defineProps({
 });
 
 const { total, categoryShares, dayOverDay, lastSnapshot, busyState } = usePortfolio();
-const { selectHolding, openDrawer } = useWorkspace();
+const { selectCategory, openDrawer } = useWorkspace();
 
 const summaryCards = computed(() => [
   {
@@ -35,7 +35,7 @@ const summaryCards = computed(() => [
 ]);
 
 function inspectCategory(categoryId) {
-  selectHolding(categoryId);
+  selectCategory(categoryId);
   openDrawer('assetDetail', categoryId, '카테고리 상세');
 }
 </script>

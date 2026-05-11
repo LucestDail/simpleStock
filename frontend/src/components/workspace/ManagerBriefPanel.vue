@@ -101,11 +101,11 @@ async function generateBrief() {
 <style scoped>
 .btn-primary,
 .btn-secondary {
-  height: 32px;
+  height: 28px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 12px;
-  font-size: 12px;
+  padding: 0 10px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -128,9 +128,9 @@ async function generateBrief() {
 .disabled-box,
 .empty-box {
   border-radius: var(--rounded-lg);
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: var(--color-surface-soft);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .disabled-box strong,
@@ -153,7 +153,7 @@ async function generateBrief() {
 .brief-card {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 10px 12px;
+  padding: 8px 10px;
   display: grid;
   gap: 4px;
   background: rgba(255, 255, 255, 0.02);
@@ -169,14 +169,14 @@ async function generateBrief() {
 
 .summary {
   margin: 0;
-  line-height: 1.45;
-  font-size: 12px;
+  line-height: 1.35;
+  font-size: 11px;
 }
 
 .list {
   margin: 0;
-  padding-left: 18px;
+  padding-left: 16px;
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 11px;
 }
 </style>

@@ -12,7 +12,7 @@ const props = defineProps({
   },
 });
 
-const { system, manager, holdings, snapshots } = usePortfolio();
+const { system, manager, holdings } = usePortfolio();
 const { activeThread } = useChat();
 const { focusMode, layoutReason, openDrawer } = useWorkspace();
 
@@ -22,7 +22,7 @@ const cards = computed(() => [
   { label: '포커스', value: focusMode.value || 'balanced' },
   { label: '활성 스레드', value: activeThread.value?.title || '없음' },
   { label: '보유 자산', value: `${holdings.value.length}개` },
-  { label: '스냅샷', value: `${snapshots.value.length}건` },
+  { label: '예정 작업', value: `${(system.value.scheduledTasks || []).length}건` },
   { label: '최근 브리핑', value: formatTime(latestReportTime.value) },
   { label: '레이아웃 사유', value: layoutReason.value || '기본 레이아웃', wide: true },
 ]);
@@ -65,13 +65,13 @@ function formatTime(value) {
 
 <style scoped>
 .btn-secondary {
-  height: 32px;
+  height: 28px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 12px;
+  padding: 0 10px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -84,11 +84,11 @@ function formatTime(value) {
 }
 
 .status-item {
-  min-height: 50px;
+  min-height: 44px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
   background: rgba(255, 255, 255, 0.02);
-  padding: 8px 10px;
+  padding: 7px 9px;
   display: grid;
   gap: 4px;
   overflow: hidden;

@@ -1,6 +1,7 @@
 const { randomUUID } = require('crypto');
 const { z } = require('zod');
 const { APP_TIMEZONE, getDateInTimezone } = require('./time');
+const { logInfo, logError, logWarn } = require('./logger');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-pro-preview';
@@ -342,6 +343,9 @@ function safeParseJson(value, fallback) {
   try {
     return JSON.parse(stripFence(value));
   } catch {
+    logWarn('ai.json_parse_fallback', {
+      preview: String(value || '').slice(0, 240),
+    });
     return fallback;
   }
 }
@@ -480,6 +484,7 @@ async function generateContent({
   userPrompt,
   schema = null,
   useGoogleSearch = false,
+  logLabel = 'generate_content',
 }) {
   if (!isAiConfigured()) {
     throw new Error('GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
@@ -487,32 +492,64 @@ async function generateContent({
 
   const GoogleGenAI = await getGoogleGenAI();
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  const response = await ai.models.generateContent({
+  const startedAt = Date.now();
+
+  logInfo('ai.generate.start', {
+    logLabel,
     model: GEMINI_MODEL,
-    contents: buildEnvelope(systemPrompt, userPrompt),
-    config: {
-      thinkingConfig: {
-        thinkingLevel: GEMINI_THINKING_LEVEL,
-      },
-      ...(schema
-        ? {
-            responseFormat: {
-              text: {
-                mimeType: 'application/json',
-                schema,
-              },
-            },
-          }
-        : {}),
-      ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
-    },
+    thinkingLevel: GEMINI_THINKING_LEVEL,
+    useGoogleSearch,
+    hasSchema: Boolean(schema),
+    systemPromptPreview: String(systemPrompt || '').slice(0, 160),
+    userPromptPreview: String(userPrompt || '').slice(0, 200),
   });
 
-  return response;
+  try {
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: buildEnvelope(systemPrompt, userPrompt),
+      config: {
+        thinkingConfig: {
+          thinkingLevel: GEMINI_THINKING_LEVEL,
+        },
+        ...(schema
+          ? {
+              responseFormat: {
+                text: {
+                  mimeType: 'application/json',
+                  schema,
+                },
+              },
+            }
+          : {}),
+        ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
+      },
+    });
+
+    logInfo('ai.generate.finish', {
+      logLabel,
+      durationMs: Date.now() - startedAt,
+      outputPreview: extractTextFromResponse(response).slice(0, 200),
+      groundingSourceCount: getGroundingSources(response).length,
+    });
+
+    return response;
+  } catch (error) {
+    logError('ai.generate.failed', error, {
+      logLabel,
+      durationMs: Date.now() - startedAt,
+      useGoogleSearch,
+      hasSchema: Boolean(schema),
+    });
+    throw error;
+  }
 }
 
 async function generateStructuredOutput(options, fallback) {
-  const response = await generateContent(options);
+  const response = await generateContent({
+    ...options,
+    logLabel: options.logLabel || 'structured_output',
+  });
   return safeParseJson(extractTextFromResponse(response), fallback);
 }
 
@@ -727,9 +764,19 @@ async function buildSupervisorPlan(userInput, context) {
         2
       ),
       schema: SUPERVISOR_SCHEMA,
+      logLabel: 'supervisor_plan',
     },
     fallback
-  );
+  ).then((plan) => {
+    logInfo('ai.supervisor.plan', {
+      personaLabel: plan.personaLabel,
+      taskCount: Array.isArray(plan.tasks) ? plan.tasks.length : 0,
+      actionCount: Array.isArray(plan.actions) ? plan.actions.length : 0,
+      focusMode: plan.workspacePatch?.focusMode || '',
+      highlightPanelIds: plan.workspacePatch?.highlightPanelIds || [],
+    });
+    return plan;
+  });
 }
 
 async function runTaskPrompt(task, taskContext, useGoogleSearch = false) {
@@ -737,6 +784,7 @@ async function runTaskPrompt(task, taskContext, useGoogleSearch = false) {
     systemPrompt: task.systemPrompt,
     userPrompt: taskContext,
     useGoogleSearch,
+    logLabel: `specialist_${task.agentType}`,
   });
 
   return {
@@ -748,6 +796,13 @@ async function runTaskPrompt(task, taskContext, useGoogleSearch = false) {
 async function executeSpecialistTasks(plan, context, userInput) {
   const outputs = await Promise.all(
     (plan.tasks || []).map(async (task) => {
+      const startedAt = Date.now();
+      logInfo('ai.specialist.start', {
+        taskId: task.id,
+        agentType: task.agentType,
+        title: task.title,
+        needsSearch: task.needsSearch,
+      });
       let taskContext = '';
       if (task.agentType === 'portfolio') {
         taskContext = JSON.stringify(
@@ -798,6 +853,14 @@ async function executeSpecialistTasks(plan, context, userInput) {
       }
 
       const result = await runTaskPrompt(task, taskContext, task.needsSearch);
+      logInfo('ai.specialist.finish', {
+        taskId: task.id,
+        agentType: task.agentType,
+        title: task.title,
+        durationMs: Date.now() - startedAt,
+        citationCount: (result.citations || []).length,
+        outputPreview: result.text.slice(0, 200),
+      });
       return {
         id: task.id,
         agentType: task.agentType,
@@ -836,6 +899,7 @@ async function synthesizeFinalAnswer({ userInput, context, plan, specialistOutpu
       null,
       2
     ),
+    logLabel: 'synthesizer',
   });
 
   return {
@@ -901,11 +965,36 @@ async function runConversationGraph({ userInput, threadId, context }) {
   }
 
   const graph = await buildConversationGraph();
-  const result = await graph.invoke({
-    userInput,
+  const startedAt = Date.now();
+  logInfo('ai.graph.start', {
     threadId,
-    context,
+    userInputPreview: String(userInput || '').slice(0, 160),
+    recentMessageCount: Array.isArray(context?.recentMessages) ? context.recentMessages.length : 0,
   });
+
+  let result;
+  try {
+    result = await graph.invoke({
+      userInput,
+      threadId,
+      context,
+    });
+
+    logInfo('ai.graph.finish', {
+      threadId,
+      durationMs: Date.now() - startedAt,
+      actionCount: Array.isArray(result.supervisorPlan?.actions) ? result.supervisorPlan.actions.length : 0,
+      taskCount: Array.isArray(result.specialistOutputs) ? result.specialistOutputs.length : 0,
+      answerPreview: String(result.answer || '').slice(0, 200),
+    });
+  } catch (error) {
+    logError('ai.graph.failed', error, {
+      threadId,
+      durationMs: Date.now() - startedAt,
+      userInputPreview: String(userInput || '').slice(0, 160),
+    });
+    throw error;
+  }
 
   return {
     answer: result.answer,

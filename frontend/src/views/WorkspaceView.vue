@@ -103,13 +103,13 @@ onMounted(async () => {
 <style scoped>
 .workspace {
   height: 100dvh;
-  padding: var(--space-sm);
+  padding: 8px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: var(--space-sm);
+  gap: 8px;
   overflow: hidden;
   background:
-    radial-gradient(circle at top left, rgba(77, 116, 255, 0.08), transparent 24%),
+    radial-gradient(circle at top left, rgba(110, 123, 255, 0.04), transparent 24%),
     radial-gradient(circle at right top, rgba(255, 255, 255, 0.02), transparent 18%),
     var(--color-canvas);
 }
@@ -129,7 +129,7 @@ onMounted(async () => {
 .workspace-kicker {
   margin: 0 0 4px;
   color: var(--color-primary);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -138,7 +138,7 @@ onMounted(async () => {
 .workspace-title {
   margin: 0;
   color: var(--color-ink);
-  font-size: clamp(16px, 1.4vw, 20px);
+  font-size: clamp(15px, 1.25vw, 18px);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.12;
@@ -146,13 +146,13 @@ onMounted(async () => {
 
 .workspace-settings-button {
   flex: 0 0 auto;
-  height: 32px;
-  padding: 0 12px;
+  height: 28px;
+  padding: 0 10px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-pill);
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -161,7 +161,7 @@ onMounted(async () => {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(240px, 3fr) minmax(320px, 4fr) minmax(240px, 3fr);
-  gap: var(--space-sm);
+  gap: 8px;
   align-items: stretch;
   overflow: hidden;
   transition: grid-template-columns 0.22s ease;
@@ -188,7 +188,7 @@ onMounted(async () => {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: 8px;
   overflow: hidden;
 }
 

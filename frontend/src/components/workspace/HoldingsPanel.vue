@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import PanelShell from './PanelShell.vue';
 import { CATEGORIES, formatKRW, usePortfolio } from '../../composables/usePortfolio';
 import { useUi } from '../../composables/useUi';
@@ -14,7 +14,15 @@ const props = defineProps({
 
 const { holdings, saveHoldings, busyState } = usePortfolio();
 const { confirmAction, notify } = useUi();
-const { applyWorkspacePatch, recordActivity, selectHolding, openDrawer } = useWorkspace();
+const {
+  applyWorkspacePatch,
+  recordActivity,
+  selectHolding,
+  selectedCategoryId,
+  selectCategory,
+  clearCategory,
+  openDrawer,
+} = useWorkspace();
 
 const form = ref({
   name: '',
@@ -22,11 +30,29 @@ const form = ref({
   amount: '',
 });
 const editingId = ref(null);
+const filteredHoldings = computed(() =>
+  selectedCategoryId.value
+    ? holdings.value.filter((item) => item.category === selectedCategoryId.value)
+    : holdings.value
+);
+const selectedCategoryLabel = computed(
+  () => CATEGORIES.find((item) => item.id === selectedCategoryId.value)?.label || '전체 자산'
+);
+
+watch(
+  selectedCategoryId,
+  (categoryId) => {
+    if (!editingId.value && categoryId) {
+      form.value.category = categoryId;
+    }
+  },
+  { immediate: true }
+);
 
 function resetForm() {
   form.value = {
     name: '',
-    category: 'deposit',
+    category: selectedCategoryId.value || 'deposit',
     amount: '',
   };
   editingId.value = null;
@@ -34,6 +60,7 @@ function resetForm() {
 
 function editHolding(holding) {
   editingId.value = holding.id;
+  selectCategory(holding.category);
   form.value = {
     name: holding.name,
     category: holding.category,
@@ -147,6 +174,7 @@ async function removeHolding(target) {
 
 function inspectHolding(target) {
   selectHolding(target.id);
+  selectCategory(target.category);
   openDrawer('assetDetail', target.id, target.name);
   applyWorkspacePatch(
     {
@@ -163,12 +191,40 @@ function inspectHolding(target) {
 
 <template>
   <PanelShell
-    title="보유 자산"
+    title="자산 현황 / 입력"
     subtitle="holdings"
     :span="panel.span"
     :highlighted="panel.highlighted"
     :loading="busyState.fetchPortfolio || busyState.saveHoldings"
   >
+    <div class="category-strip">
+      <button
+        type="button"
+        class="chip"
+        :class="{ active: !selectedCategoryId }"
+        @click="clearCategory()"
+      >
+        전체
+      </button>
+      <button
+        v-for="category in CATEGORIES"
+        :key="category.id"
+        type="button"
+        class="chip"
+        :class="{ active: selectedCategoryId === category.id }"
+        @click="selectCategory(category.id)"
+      >
+        {{ category.label }}
+      </button>
+    </div>
+
+    <div class="section-head">
+      <strong>{{ selectedCategoryLabel }}</strong>
+      <span>
+        {{ selectedCategoryId ? '포트폴리오 개요에서 선택한 카테고리 기준으로 입력과 목록을 보여줍니다.' : '카테고리를 선택하면 해당 자산만 집중해서 볼 수 있습니다.' }}
+      </span>
+    </div>
+
     <form class="form-grid" @submit.prevent="submit">
       <input v-model="form.name" class="input" type="text" maxlength="200" placeholder="자산 이름" />
       <select v-model="form.category" class="input">
@@ -192,9 +248,11 @@ function inspectHolding(target) {
       </div>
     </form>
 
-    <div v-if="!holdings.length" class="empty-box">등록된 자산이 없습니다.</div>
+    <div v-if="!filteredHoldings.length" class="empty-box">
+      {{ selectedCategoryId ? '선택한 카테고리에 등록된 자산이 없습니다.' : '등록된 자산이 없습니다.' }}
+    </div>
     <div v-else class="holding-list">
-      <article v-for="holding in holdings" :key="holding.id" class="holding-row">
+      <article v-for="holding in filteredHoldings" :key="holding.id" class="holding-row">
         <button type="button" class="holding-main" @click="inspectHolding(holding)">
           <strong>{{ holding.name }}</strong>
           <span>{{ CATEGORIES.find((item) => item.id === holding.category)?.label }}</span>
@@ -210,6 +268,46 @@ function inspectHolding(target) {
 </template>
 
 <style scoped>
+.category-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  height: 26px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-pill);
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chip.active {
+  border-color: rgba(110, 123, 255, 0.32);
+  background: rgba(110, 123, 255, 0.1);
+  color: var(--color-ink);
+}
+
+.section-head {
+  display: grid;
+  gap: 3px;
+}
+
+.section-head strong {
+  color: var(--color-ink);
+  font-size: 12px;
+}
+
+.section-head span {
+  color: var(--color-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: 1.3fr 0.9fr 1fr auto;
@@ -217,12 +315,13 @@ function inspectHolding(target) {
 }
 
 .input {
-  height: 36px;
-  padding: 0 10px;
+  height: 32px;
+  padding: 0 9px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md);
   background: rgba(255, 255, 255, 0.02);
   color: var(--color-ink);
+  font-size: 11px;
 }
 
 .input:focus {
@@ -238,11 +337,11 @@ function inspectHolding(target) {
 
 .btn-primary,
 .btn-secondary {
-  height: 36px;
+  height: 32px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 14px;
-  font-size: 12px;
+  padding: 0 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -265,9 +364,9 @@ function inspectHolding(target) {
 .empty-box {
   border: 1px dashed var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 14px;
+  padding: 12px;
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .holding-list {
@@ -284,7 +383,7 @@ function inspectHolding(target) {
   align-items: center;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: rgba(255, 255, 255, 0.02);
 }
 
@@ -300,11 +399,12 @@ function inspectHolding(target) {
 
 .holding-main strong {
   color: var(--color-ink);
+  font-size: 12px;
 }
 
 .holding-main span {
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .row-actions {
@@ -316,7 +416,7 @@ function inspectHolding(target) {
   border: none;
   background: transparent;
   color: var(--color-primary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }

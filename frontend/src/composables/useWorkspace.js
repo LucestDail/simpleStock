@@ -14,7 +14,7 @@ const BASE_PANELS = [
     id: 'overview',
     title: '포트폴리오 개요',
     column: 'left',
-    span: 'md',
+    span: 'sm',
     priority: 10,
     visible: true,
     detailType: 'assetDetail',
@@ -23,7 +23,7 @@ const BASE_PANELS = [
     id: 'holdings',
     title: '보유 자산',
     column: 'left',
-    span: 'full',
+    span: 'lg',
     priority: 20,
     visible: true,
     detailType: 'assetDetail',
@@ -41,7 +41,7 @@ const BASE_PANELS = [
     id: 'insights',
     title: '라이브 인사이트',
     column: 'right',
-    span: 'md',
+    span: 'sm',
     priority: 5,
     visible: true,
     detailType: 'insight',
@@ -50,7 +50,7 @@ const BASE_PANELS = [
     id: 'managerBrief',
     title: 'Quant Manager',
     column: 'right',
-    span: 'md',
+    span: 'sm',
     priority: 10,
     visible: true,
     detailType: 'managerBrief',
@@ -68,7 +68,7 @@ const BASE_PANELS = [
     id: 'activity',
     title: '실시간 활동',
     column: 'right',
-    span: 'md',
+    span: 'sm',
     priority: 30,
     visible: true,
     detailType: 'threadDetail',
@@ -101,6 +101,7 @@ const HIDEABLE_PANELS = new Set(['activity', 'profile', 'system', 'snapshots', '
 const focusMode = ref('balanced');
 const layoutReason = ref('기본 워크스페이스 레이아웃');
 const selectedHoldingId = ref(null);
+const selectedCategoryId = ref(null);
 const selectedThreadId = ref(null);
 const lastPatchSource = ref('system');
 const layoutUpdatedAt = ref(null);
@@ -320,6 +321,14 @@ function selectHolding(holdingId) {
   selectedHoldingId.value = holdingId;
 }
 
+function selectCategory(categoryId) {
+  selectedCategoryId.value = categoryId;
+}
+
+function clearCategory() {
+  selectedCategoryId.value = null;
+}
+
 function selectThread(threadId) {
   selectedThreadId.value = threadId;
 }
@@ -376,6 +385,7 @@ export function useWorkspace() {
     layoutUpdatedAt,
     lastPatchSource,
     selectedHoldingId,
+    selectedCategoryId,
     selectedThreadId,
     drawer,
     panels,
@@ -388,6 +398,8 @@ export function useWorkspace() {
     openDrawer,
     closeDrawer,
     selectHolding,
+    selectCategory,
+    clearCategory,
     selectThread,
     handleAssistantMetadata,
   };

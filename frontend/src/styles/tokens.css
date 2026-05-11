@@ -3,14 +3,14 @@
  * 폰트: CoinbaseDisplay/Sans → Inter, CoinbaseMono → JetBrains Mono (가이드 대체안)
  */
 :root {
-  --color-primary: #4d74ff;
-  --color-primary-active: #3459d8;
-  --color-primary-disabled: #273555;
+  --color-primary: #6674d8;
+  --color-primary-active: #5663b8;
+  --color-primary-disabled: #252c43;
   --color-accent-yellow: #f4b000;
 
   --color-canvas: #030405;
-  --color-surface-soft: #07090d;
-  --color-surface-strong: #0d1118;
+  --color-surface-soft: #05070a;
+  --color-surface-strong: #0a0d13;
   --color-surface-dark: #010203;
   --color-surface-dark-elevated: #0a0d12;
 
@@ -18,7 +18,7 @@
   --color-hairline-soft: rgba(255, 255, 255, 0.05);
 
   --color-ink: #eef2f8;
-  --color-body: #aeb8c7;
+  --color-body: #a7b0bf;
   --color-body-strong: #f5f7fb;
   --color-muted: #79869a;
   --color-muted-soft: #4e5868;
@@ -41,7 +41,7 @@
   --rounded-pill: 100px;
   --rounded-full: 9999px;
 
-  --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --shadow-soft: 0 8px 22px rgba(0, 0, 0, 0.34);
 
   --space-xxs: 3px;
   --space-xs: 6px;

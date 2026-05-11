@@ -70,9 +70,9 @@ const props = defineProps({
 }
 
 .panel-shell--highlighted {
-  border-color: rgba(77, 116, 255, 0.32);
+  border-color: rgba(110, 123, 255, 0.24);
   box-shadow:
-    0 14px 26px rgba(77, 116, 255, 0.12),
+    0 12px 22px rgba(110, 123, 255, 0.08),
     var(--shadow-soft);
   transform: translateY(-1px);
 }
@@ -83,23 +83,23 @@ const props = defineProps({
 }
 
 .panel-shell--sm {
-  flex: 0.64 1 0;
+  flex: 0.56 1 0;
 }
 
 .panel-shell--md {
-  flex: 0.84 1 0;
+  flex: 0.74 1 0;
 }
 
 .panel-shell--lg {
-  flex: 1.02 1 0;
+  flex: 0.9 1 0;
 }
 
 .panel-shell--xl {
-  flex: 1.2 1 0;
+  flex: 1.06 1 0;
 }
 
 .panel-shell--full {
-  flex: 1.42 1 0;
+  flex: 1.2 1 0;
 }
 
 .panel-shell__head {
@@ -112,7 +112,7 @@ const props = defineProps({
 
 .panel-shell__subtitle {
   margin: 0 0 4px;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -121,7 +121,7 @@ const props = defineProps({
 
 .panel-shell__title {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-ink);
   letter-spacing: -0.02em;

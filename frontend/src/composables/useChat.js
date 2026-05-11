@@ -31,11 +31,18 @@ export function useChat() {
       threads.value = data.threads || [];
       system.value = data.system || system.value;
 
+      const activeExists = activeThread.value
+        ? threads.value.some((thread) => thread.id === activeThread.value.id)
+        : false;
+
       if (threads.value.length === 0 && autoCreate) {
         const thread = await createThread();
         await selectThread(thread.id);
-      } else if (!activeThread.value && threads.value.length) {
+      } else if ((!activeThread.value || !activeExists) && threads.value.length) {
         await selectThread(threads.value[0].id);
+      } else if (!threads.value.length) {
+        activeThread.value = null;
+        messages.value = [];
       }
     } catch (e) {
       error.value = e.message || '오류';
@@ -62,14 +69,26 @@ export function useChat() {
   }
 
   async function selectThread(threadId) {
-    const res = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || '대화 내용을 불러오지 못했습니다.');
+    loading.value = true;
+    error.value = null;
+    try {
+      const res = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || '대화 내용을 불러오지 못했습니다.');
+      }
+      activeThread.value = data.thread;
+      messages.value = data.messages || [];
+      upsertThread({
+        ...data.thread,
+        messageCount: Array.isArray(data.messages) ? data.messages.length : data.thread?.messageCount,
+      });
+    } catch (e) {
+      error.value = e.message || '오류';
+      throw e;
+    } finally {
+      loading.value = false;
     }
-    activeThread.value = data.thread;
-    messages.value = data.messages || [];
-    upsertThread(data.thread);
   }
 
   async function removeThread(threadId) {
@@ -113,7 +132,10 @@ export function useChat() {
 
       activeThread.value = data.thread;
       messages.value = data.messages || messages.value;
-      upsertThread(data.thread);
+      upsertThread({
+        ...data.thread,
+        messageCount: Array.isArray(data.messages) ? data.messages.length : data.thread?.messageCount,
+      });
       return data.assistantMessage;
     } catch (e) {
       error.value = e.message || '오류';

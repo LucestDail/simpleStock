@@ -16,6 +16,7 @@ const { getCategoryShares } = require('./server/contextBuilder');
 const { APP_TIMEZONE, getDateInTimezone, getDateTimeInTimezone } = require('./server/time');
 const { AI_DAILY_CRON, getAiSettings, isAiConfigured } = require('./server/aiService');
 const { syncScheduledTasks } = require('./server/taskService');
+const { logInfo, logError } = require('./server/logger');
 const {
   listThreads,
   createThread,
@@ -38,6 +39,54 @@ const ORCHESTRATION_NOTES = [
 ].join('\n');
 
 app.use(express.json({ limit: '2mb' }));
+
+function summarizeBody(req) {
+  if (!req.body || typeof req.body !== 'object') return undefined;
+  if (req.path.includes('/messages')) {
+    return {
+      contentPreview: String(req.body.content || '').slice(0, 120),
+    };
+  }
+  if (req.path === '/api/portfolio') {
+    return {
+      holdingsCount: Array.isArray(req.body.holdings) ? req.body.holdings.length : null,
+    };
+  }
+  if (req.path === '/api/profile') {
+    return {
+      profileKeys: Object.keys(req.body || {}),
+    };
+  }
+  return {
+    keys: Object.keys(req.body || {}),
+  };
+}
+
+app.use((req, res, next) => {
+  const requestId = crypto.randomUUID();
+  const startedAt = Date.now();
+  req.requestId = requestId;
+
+  logInfo('http.request.start', {
+    requestId,
+    method: req.method,
+    path: req.path,
+    query: req.query || {},
+    bodySummary: summarizeBody(req),
+  });
+
+  res.on('finish', () => {
+    logInfo('http.request.finish', {
+      requestId,
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    });
+  });
+
+  next();
+});
 
 function sanitizeHoldings(holdings) {
   const seen = new Set();
@@ -96,6 +145,7 @@ app.put('/api/portfolio', async (req, res) => {
     });
     res.json(buildPortfolioPayload());
   } catch (error) {
+    logError('portfolio.save.failed', error, { requestId: req.requestId });
     res.status(500).json({ error: error.message || '자산 저장 실패' });
   }
 });
@@ -115,6 +165,7 @@ app.post('/api/snapshots', async (req, res) => {
     });
     res.json(buildPortfolioPayload());
   } catch (error) {
+    logError('snapshot.save.failed', error, { requestId: req.requestId, date });
     res.status(500).json({ error: error.message || '스냅샷 저장 실패' });
   }
 });
@@ -133,6 +184,7 @@ app.delete('/api/snapshots/:date', async (req, res) => {
     }
     res.json(buildPortfolioPayload());
   } catch (error) {
+    logError('snapshot.delete.failed', error, { requestId: req.requestId, date });
     res.status(500).json({ error: error.message || '스냅샷 삭제 실패' });
   }
 });
@@ -146,6 +198,7 @@ app.put('/api/profile', async (req, res) => {
     const profile = await updateUserProfile(req.body || {});
     res.json(profile);
   } catch (error) {
+    logError('profile.update.failed', error, { requestId: req.requestId });
     res.status(500).json({ error: error.message || '프로필 저장 실패' });
   }
 });
@@ -162,6 +215,7 @@ app.post('/api/chat/threads', async (req, res) => {
     const thread = await createThread(req.body?.title || '새 대화');
     res.status(201).json({ thread });
   } catch (error) {
+    logError('chat.thread.create.failed', error, { requestId: req.requestId });
     res.status(500).json({ error: error.message || '스레드 생성 실패' });
   }
 });
@@ -179,6 +233,11 @@ app.post('/api/chat/threads/:threadId/messages', async (req, res) => {
     const result = await sendMessage(req.params.threadId, req.body?.content || '');
     res.json(result);
   } catch (error) {
+    logError('chat.message.failed', error, {
+      requestId: req.requestId,
+      threadId: req.params.threadId,
+      contentPreview: String(req.body?.content || '').slice(0, 120),
+    });
     const status = /비활성화/.test(error.message || '')
       ? 503
       : /찾을 수 없습니다|입력/.test(error.message || '')
@@ -196,6 +255,10 @@ app.delete('/api/chat/threads/:threadId', async (req, res) => {
     }
     res.json({ ok: true });
   } catch (error) {
+    logError('chat.thread.delete.failed', error, {
+      requestId: req.requestId,
+      threadId: req.params.threadId,
+    });
     res.status(500).json({ error: error.message || '스레드 삭제 실패' });
   }
 });
@@ -205,6 +268,10 @@ app.post('/api/chat/threads/:threadId/summarize', async (req, res) => {
     const summary = await refreshThreadMemory(req.params.threadId);
     res.json({ summary });
   } catch (error) {
+    logError('chat.thread.summarize.failed', error, {
+      requestId: req.requestId,
+      threadId: req.params.threadId,
+    });
     res.status(500).json({ error: error.message || '대화 요약 실패' });
   }
 });
@@ -217,6 +284,7 @@ app.post('/api/manager/run', async (req, res) => {
       ...buildPortfolioPayload(),
     });
   } catch (error) {
+    logError('manager.run.failed', error, { requestId: req.requestId, trigger: 'manual' });
     const status =
       /비활성화/.test(error.message || '') ? 503 : /등록된 자산/.test(error.message || '') ? 400 : 500;
     res.status(status).json({ error: error.message || '매니저 브리핑 생성 실패' });
@@ -231,6 +299,7 @@ app.post('/api/ai/run', async (req, res) => {
       ...buildPortfolioPayload(),
     });
   } catch (error) {
+    logError('ai.run.failed', error, { requestId: req.requestId, trigger: 'manual' });
     const status =
       /비활성화/.test(error.message || '') ? 503 : /등록된 자산/.test(error.message || '') ? 400 : 500;
     res.status(status).json({ error: error.message || 'AI 브리핑 생성 실패' });
@@ -262,12 +331,17 @@ function startAiSchedule() {
   syncScheduledTasks();
 
   if (!isAiConfigured()) {
-    console.log('[AI] GEMINI_API_KEY 없음 - 스케줄 비활성화');
+    logInfo('schedule.disabled', {
+      reason: 'missing_gemini_api_key',
+      timezone: APP_TIMEZONE,
+    });
     return;
   }
 
   if (!cron.validate(AI_DAILY_CRON)) {
-    console.log(`[AI] 잘못된 cron 표현식: ${AI_DAILY_CRON}`);
+    logInfo('schedule.invalid_cron', {
+      cronExpression: AI_DAILY_CRON,
+    });
     return;
   }
 
@@ -276,15 +350,24 @@ function startAiSchedule() {
     async () => {
       try {
         await runManagerReview('schedule');
-        console.log(`[AI] 일일 매니저 브리핑 생성 완료 (${getDateInTimezone(new Date(), APP_TIMEZONE)})`);
+        logInfo('schedule.manager_brief.success', {
+          targetDate: getDateInTimezone(new Date(), APP_TIMEZONE),
+          timezone: APP_TIMEZONE,
+        });
       } catch (error) {
-        console.error('[AI] 일일 매니저 브리핑 생성 실패:', error.message);
+        logError('schedule.manager_brief.failed', error, {
+          timezone: APP_TIMEZONE,
+          cronExpression: AI_DAILY_CRON,
+        });
       }
     },
     { timezone: APP_TIMEZONE }
   );
 
-  console.log(`[AI] node-cron 등록 완료 (${APP_TIMEZONE} / ${AI_DAILY_CRON})`);
+  logInfo('schedule.registered', {
+    timezone: APP_TIMEZONE,
+    cronExpression: AI_DAILY_CRON,
+  });
 }
 
 app.listen(PORT, '0.0.0.0', () => {
@@ -292,7 +375,18 @@ app.listen(PORT, '0.0.0.0', () => {
     Object.values(os.networkInterfaces())
       .flat()
       .find((item) => item && item.family === 'IPv4' && !item.internal)?.address || '127.0.0.1';
-  console.log(`SimpleStock running at http://${ip}:${PORT}`);
-  console.log(`[Time] ${APP_TIMEZONE} / ${getDateTimeInTimezone(new Date(), APP_TIMEZONE)}`);
+  logInfo('server.started', {
+    url: `http://${ip}:${PORT}`,
+    timezone: APP_TIMEZONE,
+    localTime: getDateTimeInTimezone(new Date(), APP_TIMEZONE),
+  });
   startAiSchedule();
+});
+
+process.on('unhandledRejection', (error) => {
+  logError('process.unhandled_rejection', error);
+});
+
+process.on('uncaughtException', (error) => {
+  logError('process.uncaught_exception', error);
 });

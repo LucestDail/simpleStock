@@ -11,15 +11,124 @@ const props = defineProps({
   },
 });
 
-const { system, snapshots } = usePortfolio();
+const { system } = usePortfolio();
 const { openDrawer } = useWorkspace();
 const scheduledTasks = computed(() => system.value.scheduledTasks || []);
+
+function getTimeParts(date, timezone = 'Asia/Seoul') {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const map = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return {
+    minute: Number(map.minute),
+    hour: Number(map.hour),
+    dayOfMonth: Number(map.day),
+    month: Number(map.month),
+    dayOfWeek: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(map.weekday),
+  };
+}
+
+function matchCronField(field, value, min, max) {
+  if (!field || field === '*') return true;
+  return field.split(',').some((token) => {
+    const [rangePart, stepPart] = token.split('/');
+    const step = stepPart ? Number(stepPart) : 1;
+    if (!Number.isFinite(step) || step <= 0) return false;
+
+    let start = min;
+    let end = max;
+    if (rangePart && rangePart !== '*') {
+      if (rangePart.includes('-')) {
+        const [rawStart, rawEnd] = rangePart.split('-').map(Number);
+        start = rawStart;
+        end = rawEnd;
+      } else {
+        start = Number(rangePart);
+        end = Number(rangePart);
+      }
+    }
+    if (![start, end].every(Number.isFinite)) return false;
+    if (value < start || value > end) return false;
+    return (value - start) % step === 0;
+  });
+}
+
+function matchesCronExpression(expression, date, timezone = 'Asia/Seoul') {
+  const parts = String(expression || '').trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+  const [minuteField, hourField, domField, monthField, dowField] = parts;
+  const zoned = getTimeParts(date, timezone);
+  const minuteMatch = matchCronField(minuteField, zoned.minute, 0, 59);
+  const hourMatch = matchCronField(hourField, zoned.hour, 0, 23);
+  const monthMatch = matchCronField(monthField, zoned.month, 1, 12);
+  const domMatch = matchCronField(domField, zoned.dayOfMonth, 1, 31);
+  const normalizedDow = zoned.dayOfWeek === 0 ? 0 : zoned.dayOfWeek;
+  const dowMatch =
+    matchCronField(dowField, normalizedDow, 0, 7) ||
+    (normalizedDow === 0 && matchCronField(dowField, 7, 0, 7));
+  const domWildcard = domField === '*';
+  const dowWildcard = dowField === '*';
+  const dayMatch = domWildcard && dowWildcard ? true : domWildcard ? dowMatch : dowWildcard ? domMatch : domMatch || dowMatch;
+  return minuteMatch && hourMatch && monthMatch && dayMatch;
+}
+
+function getNextRunDate(expression, timezone = 'Asia/Seoul') {
+  const now = new Date();
+  const cursor = new Date(now);
+  cursor.setSeconds(0, 0);
+  cursor.setMinutes(cursor.getMinutes() + 1);
+  for (let i = 0; i < 60 * 24 * 370; i += 1) {
+    if (matchesCronExpression(expression, cursor, timezone)) {
+      return new Date(cursor);
+    }
+    cursor.setMinutes(cursor.getMinutes() + 1);
+  }
+  return null;
+}
+
+function formatRunLabel(date, timezone = 'Asia/Seoul') {
+  if (!date) return '일정 계산 중';
+  const dateLabel = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: timezone,
+    month: 'long',
+    day: 'numeric',
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+  return `다음 실행 ${dateLabel}`;
+}
+
+function resolveTaskRunLabel(task) {
+  if (!task?.enabled) return '비활성';
+  if (task?.cronExpression) {
+    const nextRun = getNextRunDate(task.cronExpression, system.value.timezone || 'Asia/Seoul');
+    return formatRunLabel(nextRun, system.value.timezone || 'Asia/Seoul');
+  }
+  return task?.nextRunLabel || '대기';
+}
+
+const displayTasks = computed(() =>
+  (scheduledTasks.value.length ? scheduledTasks.value : [fallbackTask.value]).slice(0, 6).map((task) => ({
+    ...task,
+    displayRunLabel: resolveTaskRunLabel(task),
+  }))
+);
+
 const fallbackTask = computed(() => ({
   id: 'default-manager-brief',
   title: '기본 Quant Manager 브리핑',
   description: '시스템 기본 브리핑 스케줄입니다.',
   cronExpression: system.value.ai?.dailyCron || '-',
-  nextRunLabel: system.value.ai?.dailyCron ? `cron ${system.value.ai.dailyCron}` : '미설정',
+  nextRunLabel: system.value.ai?.dailyCron ? resolveTaskRunLabel({ enabled: true, cronExpression: system.value.ai.dailyCron }) : '미설정',
   taskType: 'managerBrief',
   enabled: Boolean(system.value.ai?.dailyCron),
 }));
@@ -38,7 +147,7 @@ const fallbackTask = computed(() => ({
 
     <div class="snapshot-list">
       <article
-        v-for="task in (scheduledTasks.length ? scheduledTasks : [fallbackTask]).slice(0, 6)"
+        v-for="task in displayTasks"
         :key="task.id"
         class="snapshot-row"
       >
@@ -47,17 +156,12 @@ const fallbackTask = computed(() => ({
           <span>{{ task.description || '자연어 대화로 반복 작업을 등록할 수 있습니다.' }}</span>
         </div>
         <div class="snapshot-metrics">
-          <strong>{{ task.nextRunLabel || task.cronExpression || '대기' }}</strong>
+          <strong>{{ task.displayRunLabel }}</strong>
           <span class="mono-num delta" :class="task.enabled ? 'up' : 'down'">
             {{ task.enabled ? '활성' : '비활성' }}
           </span>
         </div>
       </article>
-    </div>
-
-    <div class="snapshot-note">
-      스냅샷은 내부적으로 일별 자산 변동 기준선을 보존하기 위한 기록이며, 메인 화면에서는 예정 작업 중심으로 노출합니다.
-      현재 저장된 스냅샷 {{ snapshots.length }}건
     </div>
   </PanelShell>
 </template>
@@ -118,6 +222,9 @@ const fallbackTask = computed(() => ({
 .snapshot-metrics strong {
   color: var(--color-ink);
   font-size: 11px;
+  max-width: 180px;
+  text-align: right;
+  line-height: 1.35;
 }
 
 .delta.up {
@@ -126,15 +233,6 @@ const fallbackTask = computed(() => ({
 
 .delta.down {
   color: var(--color-semantic-down);
-}
-
-.snapshot-note {
-  padding: 8px 10px;
-  border-radius: var(--rounded-lg);
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--color-muted);
-  font-size: 10px;
-  line-height: 1.4;
 }
 
 @media (max-width: 720px) {

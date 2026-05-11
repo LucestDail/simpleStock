@@ -3,6 +3,7 @@ const cron = require('node-cron');
 const { CATEGORIES, mutateStore } = require('./dataStore');
 const { APP_TIMEZONE } = require('./time');
 const { syncScheduledTasks } = require('./taskService');
+const { logInfo, logWarn, logError } = require('./logger');
 
 const PROFILE_FIELDS = new Set([
   'displayName',
@@ -33,8 +34,17 @@ function findHoldingIndex(holdings, name, category) {
 async function applyConversationActions(actions = []) {
   const safeActions = Array.isArray(actions) ? actions.slice(0, 12) : [];
   let needsScheduleSync = false;
+  logInfo('action.batch.start', {
+    actionCount: safeActions.length,
+    actions: safeActions.map((action) => ({
+      type: action?.type || '',
+      rationale: normalizeText(action?.rationale).slice(0, 160),
+    })),
+  });
 
-  const result = await mutateStore((store) => {
+  let result;
+  try {
+    result = await mutateStore((store) => {
     const actionResults = [];
     let changedPortfolio = false;
     let changedProfile = false;
@@ -217,9 +227,29 @@ async function applyConversationActions(actions = []) {
       changedSchedules,
     };
   });
+  } catch (error) {
+    logError('action.batch.failed', error, {
+      actionCount: safeActions.length,
+    });
+    throw error;
+  }
 
   if (needsScheduleSync) {
     syncScheduledTasks();
+  }
+
+  logInfo('action.batch.finish', {
+    actionCount: safeActions.length,
+    changedPortfolio: result.changedPortfolio,
+    changedProfile: result.changedProfile,
+    changedSchedules: result.changedSchedules,
+    actionResults: result.actionResults,
+  });
+
+  if (result.actionResults.some((item) => item.status !== 'applied')) {
+    logWarn('action.batch.partial', {
+      actionResults: result.actionResults.filter((item) => item.status !== 'applied'),
+    });
   }
 
   return result;

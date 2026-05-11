@@ -61,7 +61,15 @@ const fallbackCards = computed(() => {
   ];
 });
 
-const cards = computed(() => (generatedInsights.value.length ? generatedInsights.value : fallbackCards.value));
+const cards = computed(() =>
+  (generatedInsights.value.length ? generatedInsights.value : fallbackCards.value)
+    .map((card) => ({
+      ...card,
+      metrics: (card.metrics || []).slice(0, 2),
+      bullets: (card.bullets || []).slice(0, 2),
+    }))
+    .slice(0, 2)
+);
 </script>
 
 <template>
@@ -105,13 +113,13 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 
 <style scoped>
 .btn-secondary {
-  height: 30px;
+  height: 28px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 12px;
+  padding: 0 10px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -125,16 +133,16 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 
 .insight-card {
   display: grid;
-  gap: var(--space-sm);
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 7px 9px;
   border-radius: var(--rounded-lg);
   border: 1px solid var(--color-hairline);
   background: rgba(255, 255, 255, 0.02);
 }
 
 .insight-card--primary {
-  border-color: rgba(0, 82, 255, 0.3);
-  background: rgba(0, 82, 255, 0.08);
+  border-color: rgba(110, 123, 255, 0.18);
+  background: rgba(110, 123, 255, 0.06);
 }
 
 .insight-card--positive {
@@ -155,7 +163,7 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 
 .insight-head strong {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .insight-head span {
@@ -169,8 +177,12 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 .insight-summary {
   margin: 0;
   color: var(--color-body);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 10px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .metric-grid {
@@ -182,7 +194,7 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 .metric-card {
   display: grid;
   gap: 4px;
-  padding: 6px 8px;
+  padding: 5px 7px;
   border-radius: var(--rounded-md);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -194,15 +206,15 @@ const cards = computed(() => (generatedInsights.value.length ? generatedInsights
 
 .metric-card strong {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.35;
 }
 
 .bullet-list {
   margin: 0;
-  padding-left: 18px;
+  padding-left: 16px;
   color: var(--color-body);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 10px;
+  line-height: 1.35;
 }
 </style>

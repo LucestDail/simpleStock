@@ -32,22 +32,23 @@ const { openDrawer } = useWorkspace();
       <li><span>Gemini</span><strong>{{ system.aiConfigured ? '활성' : '비활성' }}</strong></li>
       <li><span>모델</span><code>{{ system.ai?.model || '-' }}</code></li>
       <li><span>Thinking</span><code>{{ system.ai?.thinkingLevel || '-' }}</code></li>
-      <li><span>Cron</span><code>{{ system.ai?.dailyCron || '-' }}</code></li>
+      <li><span>브리핑</span><code>{{ system.ai?.dailyCron ? '예약됨' : '미설정' }}</code></li>
     </ul>
-
-    <pre class="prompt-box">{{ system.orchestrationNotes }}</pre>
+    <p class="system-note">
+      {{ system.orchestrationNotes || '상세 오케스트레이션 정보는 설정 패널에서 확인할 수 있습니다.' }}
+    </p>
   </PanelShell>
 </template>
 
 <style scoped>
 .btn-secondary {
-  height: 32px;
+  height: 28px;
   border: none;
   border-radius: var(--rounded-pill);
-  padding: 0 12px;
+  padding: 0 10px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -66,9 +67,9 @@ const { openDrawer } = useWorkspace();
   justify-content: space-between;
   gap: var(--space-sm);
   border-bottom: 1px solid var(--color-hairline);
-  padding-bottom: 6px;
+  padding-bottom: 4px;
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .meta-list strong {
@@ -77,23 +78,23 @@ const { openDrawer } = useWorkspace();
 
 .meta-list code {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
   background: var(--color-surface-soft);
   border-radius: var(--rounded-xs);
-  padding: 2px 6px;
+  padding: 1px 5px;
 }
 
-.prompt-box {
+.system-note {
   margin: 0;
   border-radius: var(--rounded-lg);
   background: var(--color-surface-soft);
-  padding: 10px 12px;
+  padding: 8px 10px;
   color: var(--color-body);
-  font-family: var(--font-mono);
   font-size: 10px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  min-height: 0;
-  overflow: auto;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 </style>

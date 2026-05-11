@@ -3,6 +3,7 @@ const { loadStore, mutateStore } = require('./dataStore');
 const { buildConversationContext, formatMessagesForPrompt, getThreadMessages } = require('./contextBuilder');
 const { isAiConfigured, runConversationGraph, summarizeThread, inferAiProfile } = require('./aiService');
 const { applyConversationActions } = require('./actionService');
+const { logInfo, logError } = require('./logger');
 
 function sanitizeMessage(content) {
   return String(content || '').replace(/\r\n/g, '\n').trim();
@@ -43,6 +44,10 @@ async function createThread(title = '새 대화') {
     store.chat.messagesByThread[thread.id] = [];
   });
 
+  logInfo('chat.thread.created', {
+    threadId: thread.id,
+    title: thread.title,
+  });
   return thread;
 }
 
@@ -57,7 +62,7 @@ function getThread(threadId) {
 }
 
 async function deleteThread(threadId) {
-  return mutateStore((store) => {
+  const removed = await mutateStore((store) => {
     const index = getThreadIndex(store.chat.threads, threadId);
     if (index < 0) return false;
     store.chat.threads.splice(index, 1);
@@ -68,6 +73,11 @@ async function deleteThread(threadId) {
     );
     return true;
   });
+  logInfo('chat.thread.deleted', {
+    threadId,
+    removed,
+  });
+  return removed;
 }
 
 function upsertThreadSummary(store, summary) {
@@ -143,6 +153,11 @@ async function refreshThreadMemory(threadId) {
     upsertLongTermMemories(draft, summary);
   });
 
+  logInfo('chat.memory.summary_refreshed', {
+    threadId,
+    tagCount: summary.tags.length,
+    factCount: summary.importantFacts.length,
+  });
   return summary;
 }
 
@@ -166,6 +181,10 @@ async function refreshAiProfileSummary() {
     draft.profile.metadata.lastAiRefreshAt = new Date().toISOString();
   });
 
+  logInfo('chat.profile.ai_refreshed', {
+    inferredTraitCount: nextProfile.inferredTraits.length,
+    preferenceCount: nextProfile.preferences.length,
+  });
   return nextProfile;
 }
 
@@ -177,7 +196,9 @@ function queueConversationMaintenance(threadId) {
       await refreshThreadMemory(threadId);
       await refreshAiProfileSummary();
     } catch (error) {
-      console.error('[CHAT] 대화 메모리 갱신 실패:', error.message);
+      logError('chat.maintenance.failed', error, {
+        threadId,
+      });
     }
   }, 0);
 }
@@ -230,6 +251,13 @@ async function sendMessage(threadId, content) {
     threadId,
   });
 
+  logInfo('chat.message.start', {
+    threadId,
+    userMessageId: userMessage.id,
+    contentPreview: cleanContent.slice(0, 160),
+    existingMessageCount: context.messages.length,
+  });
+
   const aiResult = await runConversationGraph({
     userInput: cleanContent,
     threadId,
@@ -237,9 +265,18 @@ async function sendMessage(threadId, content) {
   });
 
   const actionState = await applyConversationActions(aiResult.actions || []);
+  logInfo('chat.actions.applied', {
+    threadId,
+    actionCount: Array.isArray(aiResult.actions) ? aiResult.actions.length : 0,
+    appliedCount: actionState.actionResults.filter((item) => item.status === 'applied').length,
+    ignoredCount: actionState.actionResults.filter((item) => item.status !== 'applied').length,
+    results: actionState.actionResults,
+  });
   if (actionState.changedProfile) {
     refreshAiProfileSummary().catch((error) => {
-      console.error('[CHAT] 프로필 액션 후 AI 프로필 갱신 실패:', error.message);
+      logError('chat.profile_refresh_after_action.failed', error, {
+        threadId,
+      });
     });
   }
 
@@ -278,6 +315,13 @@ async function sendMessage(threadId, content) {
     };
   });
 
+  logInfo('chat.message.finish', {
+    threadId,
+    assistantMessageId: assistantMessage.id,
+    answerPreview: assistantMessage.content.slice(0, 180),
+    focusMode: assistantMessage.metadata.workspacePatch?.focusMode || '',
+    messageCount: response.messages.length,
+  });
   queueConversationMaintenance(threadId);
   return response;
 }
