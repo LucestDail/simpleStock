@@ -171,16 +171,15 @@ function buildProfileAction(content) {
 function buildWorkspacePatch() {
   return {
     focusMode: 'balanced',
-    highlightPanelIds: ['overview', 'holdings', 'profile', 'activity'],
+    highlightPanelIds: ['overview', 'profile', 'activity'],
     openDrawer: {
       type: 'assetDetail',
       entityId: '',
       title: '가져온 자산 요약',
     },
-    reason: '구조화된 자산 입력을 반영해 포트폴리오, 보유 자산, 프로필 패널을 갱신했습니다.',
+    reason: '구조화된 자산 입력을 반영해 포트폴리오 개요, 프로필, 활동 패널을 갱신했습니다.',
     panelPatches: [
-      { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
-      { id: 'holdings', column: 'left', span: 'xl', priority: 20, visible: true },
+      { id: 'overview', column: 'left', span: 'xl', priority: 10, visible: true },
       { id: 'profile', column: 'right', span: 'md', priority: 40, visible: true },
       { id: 'managerBrief', column: 'right', span: 'xs', priority: 10, visible: false },
       { id: 'snapshots', column: 'right', span: 'xs', priority: 20, visible: false },

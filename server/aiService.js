@@ -134,7 +134,6 @@ const WORKSPACE_PATCH_SCHEMA = {
         enum: [
           'status',
           'overview',
-          'holdings',
           'chat',
           'insights',
           'managerBrief',
@@ -159,7 +158,6 @@ const WORKSPACE_PATCH_SCHEMA = {
             enum: [
               'status',
               'overview',
-              'holdings',
               'chat',
               'insights',
               'managerBrief',
@@ -445,8 +443,7 @@ function buildPrimaryChatWorkspacePatch({
 }) {
   const basePanels = [
     { id: 'status', column: 'left', span: 'sm', priority: 5, visible: true },
-    { id: 'overview', column: 'left', span: 'md', priority: 10, visible: true },
-    { id: 'holdings', column: 'left', span: 'full', priority: 20, visible: true },
+    { id: 'overview', column: 'left', span: 'xl', priority: 10, visible: true },
     { id: 'system', column: 'left', span: 'sm', priority: 30, visible: true },
     { id: 'chat', column: 'center', span: 'full', priority: 100, visible: true },
     { id: 'insights', column: 'right', span: 'lg', priority: 5, visible: true },
@@ -738,7 +735,7 @@ function buildFallbackPlan(userInput, context) {
       userInput,
       context,
       focusMode: 'rebalance',
-      highlightPanelIds: ['chat', 'managerBrief', 'holdings', 'insights'],
+      highlightPanelIds: ['chat', 'managerBrief', 'overview', 'insights'],
       openDrawer: {
         type: 'managerBrief',
         entityId: '',
@@ -746,8 +743,7 @@ function buildFallbackPlan(userInput, context) {
       },
       reason: '리밸런싱 요청이라 채팅을 중심으로 자산, 인사이트, 매니저 브리핑을 확장합니다.',
       panelOverrides: [
-        { id: 'overview', span: 'sm', priority: 10 },
-        { id: 'holdings', span: 'full', priority: 20 },
+        { id: 'overview', span: 'xl', priority: 10 },
         { id: 'insights', span: 'xl', priority: 5, visible: true },
         { id: 'managerBrief', span: 'lg', priority: 10, visible: true },
         { id: 'profile', visible: false },

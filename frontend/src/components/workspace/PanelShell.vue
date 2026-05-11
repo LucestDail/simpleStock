@@ -54,19 +54,20 @@ const props = defineProps({
 <style scoped>
 .panel-shell {
   min-height: 0;
+  max-height: 100%;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-xl);
   background: rgba(6, 8, 12, 0.94);
   box-shadow: var(--shadow-soft);
   display: flex;
   flex-direction: column;
-  flex: none;
+  flex: 1 1 0;
   overflow: hidden;
   transition:
     transform 0.22s ease,
     box-shadow 0.22s ease,
     border-color 0.22s ease,
-    min-height 0.22s ease,
+    flex 0.22s ease,
     opacity 0.22s ease;
 }
 
@@ -84,27 +85,26 @@ const props = defineProps({
 }
 
 .panel-shell--sm {
-  min-height: 130px;
+  flex: 0.8 1 0;
 }
 
 .panel-shell--xs {
-  min-height: 110px;
+  flex: 0.62 1 0;
 }
 
 .panel-shell--md {
-  min-height: 180px;
+  flex: 1 1 0;
 }
 
 .panel-shell--lg {
-  min-height: 250px;
+  flex: 1.28 1 0;
 }
 
 .panel-shell--xl {
-  min-height: 320px;
+  flex: 1.7 1 0;
 }
 
 .panel-shell--full {
-  min-height: 0;
   flex: 1 1 auto;
 }
 
@@ -156,6 +156,10 @@ const props = defineProps({
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
+  overflow: auto;
+}
+
+.panel-shell--full .panel-shell__body {
   overflow: hidden;
 }
 

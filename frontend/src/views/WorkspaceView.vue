@@ -3,7 +3,6 @@ import { computed, markRaw, onMounted, onUnmounted, ref } from 'vue';
 import StatusStrip from '../components/workspace/StatusStrip.vue';
 import DetailDrawer from '../components/workspace/DetailDrawer.vue';
 import OverviewPanel from '../components/workspace/OverviewPanel.vue';
-import HoldingsPanel from '../components/workspace/HoldingsPanel.vue';
 import SnapshotsPanel from '../components/workspace/SnapshotsPanel.vue';
 import ChatPanel from '../components/workspace/ChatPanel.vue';
 import InsightsPanel from '../components/workspace/InsightsPanel.vue';
@@ -29,7 +28,6 @@ const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWid
 const panelComponents = {
   status: markRaw(StatusStrip),
   overview: markRaw(OverviewPanel),
-  holdings: markRaw(HoldingsPanel),
   snapshots: markRaw(SnapshotsPanel),
   chat: markRaw(ChatPanel),
   insights: markRaw(InsightsPanel),
@@ -62,10 +60,10 @@ const renderedColumns = computed(() => {
   const leftPanels = columns.value.left
     .map((panel) => {
       if (panel.id === 'status') {
-        return { ...panel, span: columns.value.left.length <= 3 ? 'sm' : 'xs' };
+        return { ...panel, span: 'sm' };
       }
       if (panel.id === 'overview') {
-        return { ...panel, span: 'sm' };
+        return { ...panel, span: 'xl' };
       }
       if (panel.id === 'system') {
         return { ...panel, span: hasManagerBrief.value || hasScheduledTasks.value ? 'xs' : 'sm' };
