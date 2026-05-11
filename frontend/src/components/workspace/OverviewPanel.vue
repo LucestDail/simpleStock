@@ -11,7 +11,7 @@ const props = defineProps({
   },
 });
 
-const { total, categoryShares, dayOverDay, lastSnapshot, busyState } = usePortfolio();
+const { total, categoryShares, dayOverDay, lastSnapshot, busyState, currentUsdKrwRate } = usePortfolio();
 const { selectCategory, openDrawer } = useWorkspace();
 
 const summaryCards = computed(() => [
@@ -19,12 +19,16 @@ const summaryCards = computed(() => [
     id: 'total',
     label: '총 자산',
     value: formatKRW(total.value),
+    note: currentUsdKrwRate.value
+      ? `USD/KRW ${Number(currentUsdKrwRate.value).toLocaleString('ko-KR', { maximumFractionDigits: 2 })} 기준 원화 환산`
+      : '원화 자산 기준 합산',
     visible: true,
   },
   {
     id: 'lastSnapshot',
     label: '최근 스냅샷',
     value: lastSnapshot.value ? formatKRW(lastSnapshot.value.total) : '없음',
+    note: '',
     visible: Boolean(lastSnapshot.value),
   },
   {
@@ -33,6 +37,7 @@ const summaryCards = computed(() => [
     value: dayOverDay.value
       ? `${dayOverDay.value.delta >= 0 ? '+' : ''}${formatKRW(dayOverDay.value.delta)}`
       : '—',
+    note: '',
     visible: Boolean(dayOverDay.value),
   },
 ]);
@@ -57,6 +62,7 @@ function inspectCategory(categoryId) {
       <article v-for="item in visibleSummaryCards" :key="item.id" class="summary-card">
         <span class="summary-label">{{ item.label }}</span>
         <strong class="summary-value mono-num">{{ item.value }}</strong>
+        <small v-if="item.note" class="summary-note">{{ item.note }}</small>
       </article>
     </div>
 
@@ -110,6 +116,12 @@ function inspectCategory(categoryId) {
   font-size: 11px;
   line-height: 1.2;
   overflow-wrap: anywhere;
+}
+
+.summary-note {
+  color: var(--color-body);
+  font-size: 8px;
+  line-height: 1.25;
 }
 
 .share-list {

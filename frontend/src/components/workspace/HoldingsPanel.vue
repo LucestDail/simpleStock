@@ -12,7 +12,7 @@ const props = defineProps({
   },
 });
 
-const { holdings, saveHoldings, busyState, total, categoryShares, currentUsdKrwRate } = usePortfolio();
+const { holdings, saveHoldings, busyState, currentUsdKrwRate } = usePortfolio();
 const { confirmAction, notify } = useUi();
 const {
   applyWorkspacePatch,
@@ -38,7 +38,6 @@ const filteredHoldings = computed(() =>
 const selectedCategoryLabel = computed(
   () => CATEGORIES.find((item) => item.id === selectedCategoryId.value)?.label || '전체 자산'
 );
-const topCategoryShares = computed(() => categoryShares.value.filter((item) => item.amount > 0).slice(0, 5));
 
 function formatHoldingMeta(holding) {
   const details = holding.details || {};
@@ -270,21 +269,6 @@ function inspectHolding(target) {
     :highlighted="panel.highlighted"
     :loading="busyState.fetchPortfolio || busyState.saveHoldings"
   >
-    <div class="portfolio-topline">
-      <article class="topline-card topline-card--primary">
-        <span>현재 총 자산</span>
-        <strong class="mono-num">{{ formatKRW(total) }}</strong>
-        <p>
-          {{ currentUsdKrwRate ? `USD/KRW ${Number(currentUsdKrwRate).toLocaleString('ko-KR', { maximumFractionDigits: 2 })} 기준 원화 환산` : '원화 자산 기준 합산' }}
-        </p>
-      </article>
-      <div class="ratio-strip">
-        <span v-for="item in topCategoryShares" :key="item.id" class="ratio-chip">
-          {{ item.label }} {{ item.pct }}%
-        </span>
-      </div>
-    </div>
-
     <div class="category-strip">
       <button
         type="button"
@@ -366,61 +350,6 @@ function inspectHolding(target) {
 </template>
 
 <style scoped>
-.portfolio-topline {
-  display: grid;
-  gap: 6px;
-}
-
-.topline-card {
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--rounded-lg);
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  display: grid;
-  gap: 3px;
-}
-
-.topline-card--primary {
-  background: rgba(110, 123, 255, 0.08);
-  border-color: rgba(110, 123, 255, 0.18);
-}
-
-.topline-card span {
-  color: var(--color-muted);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.topline-card strong {
-  color: var(--color-ink);
-  font-size: 14px;
-  line-height: 1.2;
-}
-
-.topline-card p {
-  margin: 0;
-  color: var(--color-body);
-  font-size: 9px;
-  line-height: 1.25;
-}
-
-.ratio-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.ratio-chip {
-  padding: 4px 8px;
-  border-radius: var(--rounded-pill);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--color-body-strong);
-  font-size: 9px;
-  font-weight: 700;
-}
-
 .category-strip {
   display: flex;
   flex-wrap: wrap;
@@ -530,6 +459,7 @@ function inspectHolding(target) {
 }
 
 .holding-list {
+  flex: 1;
   display: grid;
   gap: 5px;
   min-height: 0;
