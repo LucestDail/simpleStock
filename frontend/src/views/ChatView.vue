@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import MarkdownIt from 'markdown-it';
 import { useChat } from '../composables/useChat';
 import { useUi } from '../composables/useUi';
 
@@ -10,6 +11,7 @@ const {
   system,
   loading,
   sending,
+  streamStatus,
   error,
   fetchThreads,
   createThread,
@@ -20,6 +22,16 @@ const {
 const { confirmAction, notify } = useUi();
 
 const draft = ref('');
+
+const markdown = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true,
+});
+
+function renderAssistantMessage(content) {
+  return markdown.render(String(content || ''));
+}
 
 onMounted(async () => {
   try {
@@ -145,7 +157,7 @@ function onComposerKeydown(event) {
               {{ system.timezone }} 기준 · {{ system.serverTimeLocal || '시간 확인 중' }}
             </p>
           </div>
-          <span class="status-pill">{{ sending ? '답변 생성 중' : '준비됨' }}</span>
+          <span class="status-pill">{{ sending ? (streamStatus || '답변 생성 중') : '준비됨' }}</span>
         </header>
 
         <div class="messages">
@@ -166,7 +178,19 @@ function onComposerKeydown(event) {
               {{ message.role === 'assistant' ? 'Quant Manager' : '나' }}
             </div>
             <div class="message-bubble">
-              <p class="message-text">{{ message.content }}</p>
+              <template v-if="message.role === 'assistant'">
+                <div
+                  v-if="message.metadata?.streaming || message.metadata?.thinkingText"
+                  class="stream-activity"
+                >
+                  <p v-if="message.metadata?.streamPhase" class="stream-phase">
+                    {{ message.metadata.streamPhaseKey ? `[${message.metadata.streamPhaseKey}] ` : '' }}{{ message.metadata.streamPhase }}
+                  </p>
+                  <pre v-if="message.metadata?.thinkingText" class="stream-thinking">{{ message.metadata.thinkingText }}</pre>
+                </div>
+                <div class="message-md" v-html="renderAssistantMessage(message.content)" />
+              </template>
+              <p v-else class="message-text">{{ message.content }}</p>
               <ul
                 v-if="message.role === 'assistant' && message.metadata?.citations?.length"
                 class="citation-list"
@@ -190,6 +214,7 @@ function onComposerKeydown(event) {
             @keydown="onComposerKeydown"
           />
           <div class="composer-foot">
+            <p v-if="sending && streamStatus" class="composer-stream">{{ streamStatus }}</p>
             <p class="composer-hint">
               현재 supervisor는 질문에 따라 portfolio, memory, manager, research agent를 동적으로 구성합니다.
             </p>
@@ -482,6 +507,58 @@ function onComposerKeydown(event) {
   white-space: pre-wrap;
   line-height: 1.7;
   color: var(--color-body);
+}
+
+.composer-stream {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--color-primary);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.stream-activity {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 82, 255, 0.06);
+  border: 1px solid rgba(0, 82, 255, 0.12);
+}
+
+.stream-phase {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.stream-thinking {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--color-muted);
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+.message-md {
+  color: var(--color-body);
+  line-height: 1.7;
+  font-size: 14px;
+}
+
+.message-md :deep(p) {
+  margin: 0 0 8px;
+}
+
+.message-md :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.message-md :deep(code) {
+  font-size: 0.9em;
 }
 
 .citation-list {

@@ -39,6 +39,9 @@ function normalizeActionKey(action = {}) {
   if (action?.scheduleTask?.title) {
     return `schedule:${String(action.scheduleTask.title).trim().toLowerCase()}:${String(action.scheduleTask.taskType || '').trim()}`;
   }
+  if (action?.cancelTarget?.taskId) {
+    return `cancel:id:${String(action.cancelTarget.taskId).trim()}`;
+  }
   if (action?.cancelTarget?.title) {
     return `cancel:${String(action.cancelTarget.title).trim().toLowerCase()}:${String(action.cancelTarget.taskType || '').trim()}`;
   }
@@ -390,6 +393,7 @@ async function resolveAssistantTurn({
   assistantCreatedAt = new Date().toISOString(),
   onAnswerChunk = null,
   onStage = null,
+  onThinkingChunk = null,
 }) {
   let aiResult = null;
   let actionState = null;
@@ -404,6 +408,7 @@ async function resolveAssistantTurn({
       context,
       onAnswerChunk,
       onStage,
+      onThinkingChunk,
     });
 
     if (structuredImportPlan?.actions?.length) {
@@ -549,6 +554,7 @@ async function sendMessageStream(threadId, content, emit = () => {}) {
 
   emit({
     type: 'start',
+    threadId: userState.thread?.id,
     thread: userState.thread,
     assistantMessageId,
     assistantCreatedAt,
@@ -564,7 +570,25 @@ async function sendMessageStream(threadId, content, emit = () => {}) {
     onStage: async (stage) => {
       emit({
         type: 'stage',
+        threadId,
+        assistantMessageId,
         ...stage,
+      });
+      emit({
+        type: 'thinking_delta',
+        threadId,
+        assistantMessageId,
+        source: 'orchestration',
+        delta: `[${stage.phase || stage.key}] ${stage.message || ''}\n`,
+      });
+    },
+    onThinkingChunk: async (delta) => {
+      emit({
+        type: 'thinking_delta',
+        threadId,
+        assistantMessageId,
+        source: 'model',
+        delta,
       });
     },
     onAnswerChunk: async (delta) => {
@@ -591,6 +615,9 @@ async function sendMessageStream(threadId, content, emit = () => {}) {
     type: 'done',
     thread: response.thread,
     assistantMessage,
+    streamSummary: {
+      actionResults: assistantMessage?.metadata?.actionResults || [],
+    },
   });
   return response;
 }

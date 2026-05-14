@@ -183,11 +183,15 @@ async function applyConversationActions(actions = []) {
           continue;
         }
 
-        const index = store.portfolio.holdings.findIndex(
-          (item) => normalizeText(item.name).toLowerCase() === name.toLowerCase()
-        );
+        const category = CATEGORIES.includes(payload.category) ? payload.category : '';
+        const index = findHoldingIndex(store.portfolio.holdings, name, category);
         if (index < 0) {
-          actionResults.push({ type, status: 'ignored', message: `${name} 자산을 찾지 못했습니다.` });
+          const hint = category ? ` (${category})` : '';
+          actionResults.push({
+            type,
+            status: 'ignored',
+            message: `${name}${hint} 자산을 찾지 못했습니다. 동일 이름이 여러 종류에 있으면 category를 지정하세요.`,
+          });
           continue;
         }
 
@@ -277,13 +281,20 @@ async function applyConversationActions(actions = []) {
 
       if (type === 'cancelScheduledTask') {
         const payload = action.cancelTarget || {};
+        const taskId = normalizeText(payload.taskId);
         const title = normalizeText(payload.title);
         const taskType = normalizeText(payload.taskType);
-        const target = store.memory.scheduledTasks.find((item) => {
-          const sameTitle = title ? item.title === title : true;
-          const sameType = taskType ? item.taskType === taskType : true;
-          return sameTitle && sameType;
-        });
+        let target = null;
+        if (taskId) {
+          target = store.memory.scheduledTasks.find((item) => item.id === taskId);
+        }
+        if (!target) {
+          target = store.memory.scheduledTasks.find((item) => {
+            const sameTitle = title ? item.title === title : true;
+            const sameType = taskType ? item.taskType === taskType : true;
+            return sameTitle && sameType;
+          });
+        }
 
         if (!target) {
           actionResults.push({ type, status: 'ignored', message: '취소할 예약 작업을 찾지 못했습니다.' });
@@ -358,4 +369,5 @@ async function applyConversationActions(actions = []) {
 
 module.exports = {
   applyConversationActions,
+  findHoldingIndex,
 };

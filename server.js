@@ -327,6 +327,9 @@ app.post('/api/chat/threads/:threadId/messages/stream', async (req, res) => {
 
   const writeEvent = (event) => {
     res.write(`${JSON.stringify(event)}\n`);
+    if (typeof res.flush === 'function') {
+      res.flush();
+    }
   };
 
   try {

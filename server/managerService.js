@@ -8,7 +8,7 @@ function getLatestManagerReport() {
   return store.memory.managerReports[0] || null;
 }
 
-async function runManagerReview(trigger = 'manual') {
+async function runManagerReview(trigger = 'manual', options = {}) {
   if (!isAiConfigured()) {
     throw new Error('GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
   }
@@ -18,11 +18,19 @@ async function runManagerReview(trigger = 'manual') {
     throw new Error('등록된 자산이 없어 AI 브리핑을 생성할 수 없습니다.');
   }
 
+  const extraContext =
+    typeof options.extraContext === 'string'
+      ? options.extraContext
+      : typeof options.scheduledTaskPrompt === 'string'
+        ? options.scheduledTaskPrompt
+        : '';
+
   const report = await buildManagerReport({
     portfolio: store.portfolio,
     profile: store.profile,
     memory: store.memory,
     trigger,
+    extraContext,
   });
 
   await mutateStore((draft) => {

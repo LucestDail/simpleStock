@@ -326,11 +326,81 @@ export function useChat() {
             activeThread.value = event.thread;
             upsertThread(event.thread);
           }
+          const tid = event.threadId || event.thread?.id || threadId;
+          if (tid && event.assistantMessageId) {
+            upsertMessage({
+              threadId: tid,
+              thread: event.thread,
+              message: {
+                id: event.assistantMessageId,
+                role: 'assistant',
+                content: '',
+                createdAt: event.assistantCreatedAt,
+                model: 'gemini',
+                metadata: {
+                  streaming: true,
+                  streamPhase: event.message,
+                  thinkingText: '',
+                },
+              },
+            });
+          }
           return;
         }
 
         if (event.type === 'stage') {
-          streamStatus.value = event.message || '응답 생성 중';
+          const tid = event.threadId || threadId;
+          const mid = event.assistantMessageId;
+          const phase = event.phase ? String(event.phase) : '';
+          const msg = event.message || '응답 생성 중';
+          streamStatus.value = phase ? `${phase} · ${msg}` : msg;
+          if (tid && mid) {
+            const existing = messages.value.find((m) => m.id === mid);
+            upsertMessage({
+              threadId: tid,
+              message: {
+                id: mid,
+                role: 'assistant',
+                content: existing?.content || '',
+                createdAt: existing?.createdAt,
+                model: 'gemini',
+                metadata: {
+                  ...(existing?.metadata || {}),
+                  streaming: true,
+                  streamPhase: msg,
+                  streamPhaseKey: phase,
+                },
+              },
+            });
+          }
+          return;
+        }
+
+        if (event.type === 'thinking_delta') {
+          const tid = event.threadId || threadId;
+          const mid = event.assistantMessageId;
+          const delta = String(event.delta || '');
+          if (!tid || !mid || !delta) return;
+          const existing = messages.value.find((m) => m.id === mid);
+          const nextThinking = `${String(existing?.metadata?.thinkingText || '')}${delta}`.slice(0, 12000);
+          if (event.source === 'model') {
+            streamStatus.value = '모델 추론 중…';
+          }
+          upsertMessage({
+            threadId: tid,
+            message: {
+              id: mid,
+              role: 'assistant',
+              content: existing?.content || '',
+              createdAt: existing?.createdAt,
+              model: 'gemini',
+              metadata: {
+                ...(existing?.metadata || {}),
+                streaming: true,
+                thinkingText: nextThinking,
+              },
+            },
+          });
           return;
         }
 
@@ -356,7 +426,13 @@ export function useChat() {
             upsertMessage({
               threadId,
               thread: event.thread,
-              message: event.assistantMessage,
+              message: {
+                ...event.assistantMessage,
+                metadata: {
+                  ...(event.assistantMessage.metadata || {}),
+                  streaming: false,
+                },
+              },
             });
             assistantMessage = event.assistantMessage;
           }

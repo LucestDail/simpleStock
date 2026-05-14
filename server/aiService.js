@@ -1,18 +1,25 @@
 const { randomUUID } = require('crypto');
-const { z } = require('zod');
 const { APP_TIMEZONE, getDateInTimezone } = require('./time');
 const { logInfo, logError, logWarn } = require('./logger');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-pro-preview';
-const GEMINI_THINKING_LEVEL = process.env.GEMINI_THINKING_LEVEL || 'high';
+/** @see https://ai.google.dev/gemini-api/docs/models — 기본 Stable: Gemini 3.1 Flash-Lite */
+const GEMINI_MODEL =
+  String(process.env.GEMINI_MODEL ?? '')
+    .trim()
+    .replace(/^['"]|['"]$/g, '') || 'gemini-3.1-flash-lite';
+const GEMINI_INCLUDE_THOUGHTS =
+  String(process.env.GEMINI_INCLUDE_THOUGHTS ?? 'true').trim().toLowerCase() !== 'false';
+const GEMINI_THINKING_BUDGET = Math.min(
+  8192,
+  Math.max(0, Number.parseInt(String(process.env.GEMINI_THINKING_BUDGET || '2048'), 10) || 2048)
+);
 const GEMINI_TIMEOUT_MS = Math.max(15_000, Number(process.env.GEMINI_TIMEOUT_MS) || 90_000);
 const GEMINI_MAX_RETRIES = Math.max(0, Number(process.env.GEMINI_MAX_RETRIES) || 2);
 const GEMINI_RETRY_BASE_MS = Math.max(250, Number(process.env.GEMINI_RETRY_BASE_MS) || 1_500);
 const AI_DAILY_CRON = process.env.AI_DAILY_CRON || '5 21 * * *';
 
 let googleGenAiModulePromise = null;
-let conversationGraphPromise = null;
 const CATEGORY_LABELS = {
   deposit: '예금',
   installment: '적금',
@@ -109,6 +116,7 @@ const ACTION_SCHEMA = {
     cancelTarget: {
       type: 'object',
       properties: {
+        taskId: { type: 'string' },
         title: { type: 'string' },
         taskType: {
           type: 'string',
@@ -295,7 +303,9 @@ function getAiSettings() {
   return {
     configured: isAiConfigured(),
     model: GEMINI_MODEL,
-    thinkingLevel: GEMINI_THINKING_LEVEL,
+    streamThoughts: GEMINI_INCLUDE_THOUGHTS,
+    thinkingBudget: GEMINI_THINKING_BUDGET,
+    thinkingLevel: GEMINI_INCLUDE_THOUGHTS ? `thoughts+budget:${GEMINI_THINKING_BUDGET}` : 'off',
     timezone: APP_TIMEZONE,
     dailyCron: AI_DAILY_CRON,
   };
@@ -363,13 +373,17 @@ function convertJsonSchemaToGeminiSchema(schema, Type) {
   return converted;
 }
 
-async function buildGenerateConfig({ schema = null, useGoogleSearch = false }) {
+async function buildGenerateConfig({ schema = null, useGoogleSearch = false, streamWithThoughts = false }) {
   const config = {
-    thinkingConfig: {
-      thinkingLevel: GEMINI_THINKING_LEVEL,
-    },
     ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
   };
+
+  if (streamWithThoughts && GEMINI_INCLUDE_THOUGHTS && GEMINI_THINKING_BUDGET > 0) {
+    config.thinkingConfig = {
+      includeThoughts: true,
+      thinkingBudget: GEMINI_THINKING_BUDGET,
+    };
+  }
 
   if (!schema) {
     return config;
@@ -652,7 +666,7 @@ async function generateContent({
   logInfo('ai.generate.start', {
     logLabel,
     model: GEMINI_MODEL,
-    thinkingLevel: GEMINI_THINKING_LEVEL,
+    streamThoughts: GEMINI_INCLUDE_THOUGHTS,
     useGoogleSearch,
     hasSchema: Boolean(schema),
     timeoutMs: GEMINI_TIMEOUT_MS,
@@ -738,12 +752,29 @@ async function generateContent({
   }
 }
 
+function extractStreamingParts(chunk) {
+  const parts = chunk?.candidates?.[0]?.content?.parts;
+  if (Array.isArray(parts) && parts.length) {
+    let answerText = '';
+    let thoughtText = '';
+    for (const part of parts) {
+      if (typeof part.text !== 'string' || !part.text) continue;
+      if (part.thought) thoughtText += part.text;
+      else answerText += part.text;
+    }
+    return { answerText, thoughtText };
+  }
+  const fallback = String(chunk?.text || extractTextFromResponse(chunk) || '');
+  return { answerText: fallback, thoughtText: '' };
+}
+
 async function generateContentStream({
   systemPrompt,
   userPrompt,
   useGoogleSearch = false,
   logLabel = 'generate_content_stream',
   onChunk = null,
+  onThinkingChunk = null,
 }) {
   if (!isAiConfigured()) {
     throw new Error('GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
@@ -753,12 +784,12 @@ async function generateContentStream({
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const startedAt = Date.now();
   const maxAttempts = GEMINI_MAX_RETRIES + 1;
-  const config = await buildGenerateConfig({ useGoogleSearch });
+  const config = await buildGenerateConfig({ useGoogleSearch, streamWithThoughts: true });
 
   logInfo('ai.generate.start', {
     logLabel,
     model: GEMINI_MODEL,
-    thinkingLevel: GEMINI_THINKING_LEVEL,
+    streamThoughts: GEMINI_INCLUDE_THOUGHTS,
     useGoogleSearch,
     hasSchema: false,
     timeoutMs: GEMINI_TIMEOUT_MS,
@@ -770,6 +801,7 @@ async function generateContentStream({
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const attemptStartedAt = Date.now();
+    let emittedChunk = false;
 
     try {
       const stream = await withTimeout(
@@ -784,12 +816,16 @@ async function generateContentStream({
       const groundingSources = [];
 
       for await (const chunk of stream) {
-        const text = String(chunk?.text || extractTextFromResponse(chunk) || '');
-        if (text) {
-          answer += text;
+        const { answerText, thoughtText } = extractStreamingParts(chunk);
+        if (thoughtText && typeof onThinkingChunk === 'function') {
+          emittedChunk = true;
+          await onThinkingChunk(thoughtText);
+        }
+        if (answerText) {
+          answer += answerText;
           emittedChunk = true;
           if (typeof onChunk === 'function') {
-            await onChunk(text);
+            await onChunk(answerText);
           }
         }
         groundingSources.push(...getGroundingSources(chunk));
@@ -1069,6 +1105,8 @@ async function buildSupervisorPlan(userInput, context) {
         'task 는 portfolio, memory, manager, research 타입만 사용한다.',
         '사용자 요청이 자산 입력/수정/삭제, 설정 변경, 반복 작업 예약/취소에 해당하면 actions 배열에 실제 변경 계획을 넣는다.',
         '자산 입력은 holding 정보, 설정 변경은 profileChanges, 반복 작업은 scheduleTask, 취소는 cancelTarget에 담는다.',
+        'removeHolding 시 holding.name은 필수이며, 같은 이름이 서로 다른 category(예: 주식·예금)에 중복될 수 있으면 holding.category에 deposit/installment/stock/fund/pension 중 하나를 반드시 넣는다.',
+        'cancelScheduledTask 는 가능하면 cancelTarget.taskId(예약 작업 id)로 지정하고, 모를 때만 title+taskType으로 지정한다.',
         '반복 작업은 가능하면 cronExpression, nextRunLabel, taskType 을 함께 채운다.',
         '추가로 workspacePatch 를 반환해 어떤 패널을 강조/확장/숨김/이동할지 제안한다.',
         'workspacePatch 안에는 generatedInsights 배열도 포함해 지금 턴에 보여줄 실시간 카드/통계/집계 패널 내용을 만든다.',
@@ -1101,6 +1139,19 @@ async function buildSupervisorPlan(userInput, context) {
   });
 }
 
+function buildFallbackResearchTask(userInput) {
+  return {
+    id: randomUUID(),
+    agentType: 'research',
+    title: '자동 외부 조사',
+    objective: '사용자 질문에 맞는 외부 시장 정보를 요약한다.',
+    systemPrompt:
+      '당신은 외부 시장 조사 에이전트다. 검색 질의를 재구성하고, 필요한 사실만 간결히 보고한다.',
+    needsSearch: true,
+    searchQuery: String(userInput || '').trim() || '오늘의 주요 증시 뉴스',
+  };
+}
+
 async function runTaskPrompt(task, taskContext, useGoogleSearch = false) {
   const response = await generateContent({
     systemPrompt: task.systemPrompt,
@@ -1116,8 +1167,15 @@ async function runTaskPrompt(task, taskContext, useGoogleSearch = false) {
 }
 
 async function executeSpecialistTasks(plan, context, userInput) {
+  const allowed = new Set(['portfolio', 'memory', 'manager', 'research']);
+  let tasks = (plan.tasks || []).filter((task) => task && allowed.has(task.agentType));
+  if (!tasks.length) {
+    tasks = [buildFallbackResearchTask(userInput)];
+    logInfo('ai.specialist.fallback', { reason: 'empty_or_invalid_tasks', injectedAgentType: 'research' });
+  }
+
   const outputs = await Promise.all(
-    (plan.tasks || []).map(async (task) => {
+    tasks.map(async (task) => {
       const startedAt = Date.now();
       logInfo('ai.specialist.start', {
         taskId: task.id,
@@ -1174,25 +1232,85 @@ async function executeSpecialistTasks(plan, context, userInput) {
         );
       }
 
-      const result = await runTaskPrompt(task, taskContext, task.needsSearch);
-      logInfo('ai.specialist.finish', {
-        taskId: task.id,
-        agentType: task.agentType,
-        title: task.title,
-        durationMs: Date.now() - startedAt,
-        citationCount: (result.citations || []).length,
-        outputPreview: result.text.slice(0, 200),
-      });
-      return {
-        id: task.id,
-        agentType: task.agentType,
-        title: task.title,
-        objective: task.objective,
-        text: result.text,
-        citations: result.citations,
-      };
+      try {
+        const result = await runTaskPrompt(task, taskContext, task.needsSearch);
+        logInfo('ai.specialist.finish', {
+          taskId: task.id,
+          agentType: task.agentType,
+          title: task.title,
+          durationMs: Date.now() - startedAt,
+          citationCount: (result.citations || []).length,
+          outputPreview: result.text.slice(0, 200),
+        });
+        return {
+          id: task.id,
+          agentType: task.agentType,
+          title: task.title,
+          objective: task.objective,
+          text: result.text,
+          citations: result.citations,
+        };
+      } catch (error) {
+        logWarn('ai.specialist.task_failed', {
+          taskId: task.id,
+          agentType: task.agentType,
+          title: task.title,
+          message: String(error?.message || error).slice(0, 220),
+        });
+        return {
+          id: task.id,
+          agentType: task.agentType,
+          title: task.title,
+          objective: task.objective,
+          text: `이 전문가 단계를 완료하지 못했습니다: ${String(error?.message || error)}`,
+          citations: [],
+        };
+      }
     })
   );
+
+  const allFailed =
+    tasks.length > 0 &&
+    outputs.every((item) => {
+      const t = String(item?.text || '');
+      return t.startsWith('이 전문가 단계를 완료하지 못했습니다:');
+    });
+
+  if (allFailed) {
+    const fb = buildFallbackResearchTask(userInput);
+    logInfo('ai.specialist.fallback', { reason: 'all_tasks_failed', injectedAgentType: 'research' });
+    try {
+      const taskContext = JSON.stringify(
+        {
+          userInput,
+          objective: fb.objective,
+          tunedSearchQuery: fb.searchQuery,
+          profile: context.profile,
+          recentTranscript: context.recentTranscript,
+        },
+        null,
+        2
+      );
+      const result = await runTaskPrompt(fb, taskContext, true);
+      outputs.push({
+        id: fb.id,
+        agentType: fb.agentType,
+        title: fb.title,
+        objective: fb.objective,
+        text: result.text,
+        citations: result.citations,
+      });
+    } catch (error) {
+      outputs.push({
+        id: fb.id,
+        agentType: fb.agentType,
+        title: fb.title,
+        objective: fb.objective,
+        text: `폴백 조사도 실패했습니다: ${String(error?.message || error)}`,
+        citations: [],
+      });
+    }
+  }
 
   return {
     outputs,
@@ -1229,7 +1347,7 @@ async function synthesizeFinalAnswer({ userInput, context, plan, specialistOutpu
   };
 }
 
-async function synthesizeFinalAnswerStream({ userInput, context, plan, specialistOutputs, onChunk }) {
+async function synthesizeFinalAnswerStream({ userInput, context, plan, specialistOutputs, onChunk, onThinkingChunk }) {
   const response = await generateContentStream({
     systemPrompt: [
       plan.personaSystemPrompt,
@@ -1252,6 +1370,7 @@ async function synthesizeFinalAnswerStream({ userInput, context, plan, specialis
     ),
     logLabel: 'synthesizer_stream',
     onChunk,
+    onThinkingChunk,
   });
 
   return {
@@ -1260,59 +1379,102 @@ async function synthesizeFinalAnswerStream({ userInput, context, plan, specialis
   };
 }
 
-async function buildConversationGraph() {
-  if (!conversationGraphPromise) {
-    conversationGraphPromise = (async () => {
-      const { StateGraph, StateSchema, START, END } = await import('@langchain/langgraph');
-
-      const GraphState = new StateSchema({
-        userInput: z.string(),
-        threadId: z.string(),
-        context: z.any(),
-        supervisorPlan: z.any(),
-        specialistOutputs: z.array(z.any()).default(() => []),
-        citations: z.array(z.any()).default(() => []),
-        answer: z.string().default(''),
-      });
-
-      return new StateGraph(GraphState)
-        .addNode('supervisor', async (state) => ({
-          supervisorPlan: await buildSupervisorPlan(state.userInput, state.context),
-        }))
-        .addNode('specialists', async (state) => {
-          const result = await executeSpecialistTasks(
-            state.supervisorPlan,
-            state.context,
-            state.userInput
-          );
-          return {
-            specialistOutputs: result.outputs,
-            citations: result.citations,
-          };
-        })
-        .addNode('synthesizer', async (state) => {
-          const result = await synthesizeFinalAnswer({
-            userInput: state.userInput,
-            context: state.context,
-            plan: state.supervisorPlan,
-            specialistOutputs: state.specialistOutputs,
-          });
-          return {
-            answer: result.answer,
-          };
-        })
-        .addEdge(START, 'supervisor')
-        .addEdge('supervisor', 'specialists')
-        .addEdge('specialists', 'synthesizer')
-        .addEdge('synthesizer', END)
-        .compile();
-    })();
+async function runConversationPipeline({
+  userInput,
+  threadId,
+  context,
+  onAnswerChunk = null,
+  onStage = null,
+  onThinkingChunk = null,
+}) {
+  if (typeof onStage === 'function') {
+    await onStage({
+      key: 'supervisor',
+      phase: 'supervisor',
+      message: '대화 맥락과 작업 계획을 정리하고 있습니다.',
+    });
   }
 
-  return conversationGraphPromise;
+  const supervisorPlan = await buildSupervisorPlan(userInput, context);
+
+  if (typeof onStage === 'function') {
+    await onStage({
+      key: 'supervisor_done',
+      phase: 'supervisor_done',
+      message: '이번 턴의 전문가 작업 구성을 확정했습니다.',
+    });
+  }
+
+  if (typeof onStage === 'function') {
+    await onStage({
+      key: 'specialists',
+      phase: 'specialists',
+      message: '자산, 기억, 매니저 컨텍스트를 분석하고 있습니다.',
+    });
+  }
+
+  const specialistResult = await executeSpecialistTasks(supervisorPlan, context, userInput);
+
+  if (typeof onStage === 'function') {
+    await onStage({
+      key: 'specialist_done',
+      phase: 'specialist_done',
+      message: '전문가 분석 단계를 마쳤습니다.',
+    });
+  }
+
+  const synthesizerMessage =
+    typeof onAnswerChunk === 'function'
+      ? '답변을 스트리밍으로 작성하고 있습니다.'
+      : '답변을 작성하고 있습니다.';
+
+  if (typeof onStage === 'function') {
+    await onStage({
+      key: 'synthesizer',
+      phase: 'synth_stream',
+      message: synthesizerMessage,
+    });
+  }
+
+  let synthesisResult;
+  if (typeof onAnswerChunk === 'function') {
+    synthesisResult = await synthesizeFinalAnswerStream({
+      userInput,
+      context,
+      plan: supervisorPlan,
+      specialistOutputs: specialistResult.outputs,
+      onChunk: onAnswerChunk,
+      onThinkingChunk,
+    });
+  } else {
+    const nonStream = await synthesizeFinalAnswer({
+      userInput,
+      context,
+      plan: supervisorPlan,
+      specialistOutputs: specialistResult.outputs,
+    });
+    synthesisResult = {
+      answer: nonStream.answer,
+      citations: [],
+    };
+  }
+
+  return {
+    answer: synthesisResult.answer,
+    supervisorPlan,
+    specialistOutputs: specialistResult.outputs,
+    citations: mergeGroundingSources(specialistResult.citations || [], synthesisResult.citations || []),
+  };
 }
 
-async function runConversationGraph({ userInput, threadId, context, onAnswerChunk = null, onStage = null }) {
+async function runConversationGraph({
+  userInput,
+  threadId,
+  context,
+  onAnswerChunk = null,
+  onStage = null,
+  onThinkingChunk = null,
+}) {
   if (!isAiConfigured()) {
     throw new Error('GEMINI_API_KEY가 설정되지 않아 채팅 기능이 비활성화되어 있습니다.');
   }
@@ -1326,51 +1488,14 @@ async function runConversationGraph({ userInput, threadId, context, onAnswerChun
 
   let result;
   try {
-    if (typeof onAnswerChunk === 'function' || typeof onStage === 'function') {
-      if (typeof onStage === 'function') {
-        await onStage({
-          key: 'supervisor',
-          message: '대화 맥락과 작업 계획을 정리하고 있습니다.',
-        });
-      }
-      const supervisorPlan = await buildSupervisorPlan(userInput, context);
-
-      if (typeof onStage === 'function') {
-        await onStage({
-          key: 'specialists',
-          message: '자산, 기억, 매니저 컨텍스트를 분석하고 있습니다.',
-        });
-      }
-      const specialistResult = await executeSpecialistTasks(supervisorPlan, context, userInput);
-
-      if (typeof onStage === 'function') {
-        await onStage({
-          key: 'synthesizer',
-          message: '답변을 스트리밍으로 작성하고 있습니다.',
-        });
-      }
-      const synthesisResult = await synthesizeFinalAnswerStream({
-        userInput,
-        context,
-        plan: supervisorPlan,
-        specialistOutputs: specialistResult.outputs,
-        onChunk: onAnswerChunk,
-      });
-
-      result = {
-        answer: synthesisResult.answer,
-        supervisorPlan,
-        specialistOutputs: specialistResult.outputs,
-        citations: mergeGroundingSources(specialistResult.citations || [], synthesisResult.citations || []),
-      };
-    } else {
-      const graph = await buildConversationGraph();
-      result = await graph.invoke({
-        userInput,
-        threadId,
-        context,
-      });
-    }
+    result = await runConversationPipeline({
+      userInput,
+      threadId,
+      context,
+      onAnswerChunk,
+      onStage,
+      onThinkingChunk,
+    });
 
     logInfo('ai.graph.finish', {
       threadId,
@@ -1482,7 +1607,7 @@ async function inferAiProfile({ userProfile, threadSummaries, longTermMemories, 
   };
 }
 
-async function buildManagerReport({ portfolio, profile, memory, trigger }) {
+async function buildManagerReport({ portfolio, profile, memory, trigger, extraContext = '' }) {
   const fallback = {
     summary: 'AI 브리핑을 생성하지 못했습니다.',
     dailyObjective: '',
@@ -1494,13 +1619,19 @@ async function buildManagerReport({ portfolio, profile, memory, trigger }) {
   };
 
   const targetDate = getDateInTimezone(new Date(), APP_TIMEZONE);
+  const trimmedExtra = String(extraContext || '').trim();
   const result = await generateStructuredOutput(
     {
       systemPrompt: [
         '당신은 개인 자산 운영을 돕는 Quant Manager다.',
         '보유 자산, 최근 스냅샷, 대화 기억, 사용자 성향을 함께 읽고 오늘의 관리 지시를 만든다.',
         '실행 항목은 과장 없이 현실적인 수준으로 작성한다.',
-      ].join('\n'),
+        trimmedExtra
+          ? 'scheduledContext 필드는 사용자가 예약 작업에 남긴 추가 지시이므로 브리핑에 반영한다.'
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
       userPrompt: JSON.stringify(
         {
           targetDate,
@@ -1508,6 +1639,7 @@ async function buildManagerReport({ portfolio, profile, memory, trigger }) {
           portfolio,
           profile,
           memory,
+          ...(trimmedExtra ? { scheduledContext: trimmedExtra } : {}),
         },
         null,
         2
@@ -1536,10 +1668,91 @@ async function buildManagerReport({ portfolio, profile, memory, trigger }) {
   };
 }
 
+async function runScheduledIndicatorAnalysis({
+  title,
+  description,
+  prompt,
+  indicatorName,
+  portfolio,
+  profile,
+  memory,
+}) {
+  if (!isAiConfigured()) {
+    throw new Error('GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
+  }
+
+  const name = String(indicatorName || '').trim();
+  const extra = String(prompt || description || '').trim();
+  const userPrompt = JSON.stringify(
+    {
+      scheduledTaskTitle: String(title || '').trim(),
+      indicatorName: name,
+      instructions: extra || '지표·시장 관점에서 요약하고 사용자 포트폴리오와 연결할 수 있으면 연결한다.',
+      portfolio,
+      userProfile: profile?.userProfile || {},
+      market: memory?.market || {},
+    },
+    null,
+    2
+  );
+
+  const response = await generateContent({
+    systemPrompt: [
+      '당신은 개인 투자자를 돕는 시장·지표 리서처다.',
+      'Google 검색으로 최근 시황·뉴스·지표 해석을 확인하고, 확인한 사실만 간결히 정리한다.',
+      '한국어로 12문장 이내, 불필요한 인사말 없이 핵심 위주로 작성한다.',
+    ].join('\n'),
+    userPrompt,
+    useGoogleSearch: true,
+    logLabel: 'scheduled_indicator',
+  });
+
+  return extractTextFromResponse(response);
+}
+
+async function runScheduledCustomAnalysis({ title, description, prompt, portfolio, profile, memory }) {
+  if (!isAiConfigured()) {
+    throw new Error('GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
+  }
+
+  const userInstructions = String(prompt || '').trim();
+  if (!userInstructions) {
+    throw new Error('예약 작업에 실행 프롬프트(prompt)가 없습니다.');
+  }
+
+  const userPrompt = JSON.stringify(
+    {
+      scheduledTaskTitle: String(title || '').trim(),
+      taskDescription: String(description || '').trim(),
+      userInstructions,
+      portfolio,
+      userProfile: profile?.userProfile || {},
+      market: memory?.market || {},
+      longTermMemories: (memory?.longTermMemories || []).slice(0, 8),
+    },
+    null,
+    2
+  );
+
+  const response = await generateContent({
+    systemPrompt: [
+      '당신은 개인 자산·투자 보조 에이전트다.',
+      '사용자가 예약한 지시(userInstructions)에만 집중해 실행 가능한 요약과 체크리스트를 만든다.',
+      '한국어로 작성하고, 불필요한 인사말은 생략한다.',
+    ].join('\n'),
+    userPrompt,
+    useGoogleSearch: false,
+    logLabel: 'scheduled_custom',
+  });
+
+  return extractTextFromResponse(response);
+}
+
 module.exports = {
   AI_DAILY_CRON,
   GEMINI_MODEL,
-  GEMINI_THINKING_LEVEL,
+  GEMINI_INCLUDE_THOUGHTS,
+  GEMINI_THINKING_BUDGET,
   APP_TIMEZONE,
   isAiConfigured,
   getAiSettings,
@@ -1547,4 +1760,6 @@ module.exports = {
   summarizeThread,
   inferAiProfile,
   buildManagerReport,
+  runScheduledIndicatorAnalysis,
+  runScheduledCustomAnalysis,
 };

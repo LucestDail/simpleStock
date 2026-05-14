@@ -116,13 +116,17 @@ docker compose up -d --build
 
 ```bash
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-3.1-pro-preview
-GEMINI_THINKING_LEVEL=high
+GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_INCLUDE_THOUGHTS=true
+GEMINI_THINKING_BUDGET=2048
 APP_TIMEZONE=Asia/Seoul
 AI_DAILY_CRON=5 21 * * *
 TZ=Asia/Seoul
 ```
 
+- `GEMINI_MODEL`: 기본은 Stable **`gemini-3.1-flash-lite`**([모델 목록](https://ai.google.dev/gemini-api/docs/models)). 다른 계열을 쓰려면 문서에 나온 ID를 그대로 넣으면 됩니다(예: Latest 별칭 `gemini-flash-latest`는 별칭이 가리키는 빌드가 바뀔 수 있음).
+- `GEMINI_INCLUDE_THOUGHTS`: 기본 `true`. Gemini `thinkingConfig`로 스트림에 추론(생각) 토큰을 포함합니다. **3.1 Flash-Lite**에서 이 경로를 쓰는 설정이 맞고, 끄려면 `false`로 두면 됩니다.
+- `GEMINI_THINKING_BUDGET`: 추론 토큰 상한(최대 8192).
 - `APP_TIMEZONE`: 앱 기준 날짜/시각 계산용. 기본값 `Asia/Seoul`
 - `AI_DAILY_CRON`: 일일 Quant Manager 브리핑 스케줄. 기본값은 **매일 21:05 KST**
 - `GEMINI_API_KEY`가 없으면 자산/히스토리/설정 화면은 정상 동작하고, 채팅/매니저 브리핑만 비활성화됩니다.

@@ -291,6 +291,15 @@ watch(
                 <span class="mono-num">{{ formatTimestamp(message.createdAt) }}</span>
               </div>
               <div
+                v-if="message.role === 'assistant' && (message.metadata?.streaming || message.metadata?.thinkingText)"
+                class="stream-activity"
+              >
+                <p v-if="message.metadata?.streamPhase" class="stream-phase">
+                  {{ message.metadata.streamPhaseKey ? `[${message.metadata.streamPhaseKey}] ` : '' }}{{ message.metadata.streamPhase }}
+                </p>
+                <pre v-if="message.metadata?.thinkingText" class="stream-thinking">{{ message.metadata.thinkingText }}</pre>
+              </div>
+              <div
                 v-if="message.role === 'assistant'"
                 class="message-markdown"
                 v-html="renderAssistantMessage(message.content)"
@@ -578,6 +587,32 @@ watch(
   color: var(--color-body-strong);
   line-height: 1.4;
   font-size: 12px;
+}
+
+.stream-activity {
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(110, 123, 255, 0.08);
+  border: 1px solid rgba(110, 123, 255, 0.15);
+}
+
+.stream-phase {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.stream-thinking {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--color-muted);
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 
 .message-markdown {
