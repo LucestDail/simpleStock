@@ -49,6 +49,32 @@ test('applyEquityWatchDefaults fills US watchlist fields', () => {
   assert.equal(details.market, 'US');
 });
 
+test('empty detailsPatch does not wipe existing quantity', async () => {
+  const { applyConversationActions } = require('../server/actionService');
+  const { mutateStore, loadStore } = require('../server/dataStore');
+  await mutateStore((store) => {
+    store.portfolio.holdings = [
+      {
+        id: 'test-guard',
+        name: 'QLD',
+        category: 'stock',
+        amount: 7000,
+        details: { ticker: 'QLD', currency: 'USD', market: 'US', quantity: 85, averagePrice: 69.04 },
+      },
+    ];
+  });
+  await applyConversationActions([
+    {
+      type: 'upsertHolding',
+      rationale: 'test empty patch',
+      holding: { id: 'test-guard', name: 'QLD', category: 'stock' },
+    },
+  ]);
+  const h = loadStore().portfolio.holdings.find((x) => x.id === 'test-guard');
+  assert.equal(h.details.quantity, 85, 'quantity should not be wiped to 0');
+  assert.equal(h.details.averagePrice, 69.04);
+});
+
 test('mergeHoldingDetails updates ticker without wiping other fields', () => {
   const merged = mergeHoldingDetails(
     {

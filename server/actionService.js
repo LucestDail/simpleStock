@@ -137,6 +137,24 @@ function hasExplicitAmount(payload) {
   return payload.amount !== undefined && payload.amount !== null && String(payload.amount).trim() !== '';
 }
 
+const SUBSTANTIVE_DETAIL_KEYS = ['ticker', 'quantity', 'averagePrice', 'account', 'currency', 'market', 'nativeAmount', 'orders'];
+
+function hasSubstantiveDetails(patch, existing) {
+  if (!patch || typeof patch !== 'object') return false;
+  for (const key of SUBSTANTIVE_DETAIL_KEYS) {
+    const value = patch[key];
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'string' && !value.trim()) continue;
+    if (key === 'orders' && Array.isArray(value) && !value.length) continue;
+    if (key === 'quantity' && value === 0 && existing && Number.isFinite(Number(existing.quantity)) && Number(existing.quantity) > 0) {
+      continue;
+    }
+    if (typeof value === 'number' && value === 0) continue;
+    return true;
+  }
+  return false;
+}
+
 function inferHoldingCategory(category, detailsPatch) {
   const ticker = normalizeText(detailsPatch?.ticker);
   if (isEquityTicker(ticker)) return 'stock';
@@ -205,7 +223,11 @@ async function applyConversationActions(actions = []) {
             current.amount = mode === 'delta' ? Math.max(0, current.amount + amount) : amount;
           }
           current.category = category;
-          if (detailsPatch) {
+          const shouldMergeDetails =
+            detailsPatch &&
+            hasSubstantiveDetails(detailsPatch, current.details) &&
+            !(current.details?.ticker && !rawDetailsPatch);
+          if (shouldMergeDetails) {
             current.details = applyEquityWatchDefaults(
               mergeHoldingDetails(current.details, detailsPatch)
             );
