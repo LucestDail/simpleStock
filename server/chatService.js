@@ -24,6 +24,47 @@ function extractKrwAmountsFromText(text) {
   return amounts;
 }
 
+function dedupeUpsertHoldingActions(actions, threadId) {
+  if (!Array.isArray(actions) || actions.length === 0) return actions;
+  const seen = new Map();
+  const out = [];
+  let skipped = 0;
+  for (const a of actions) {
+    if (a?.type !== 'upsertHolding') {
+      out.push(a);
+      continue;
+    }
+    const key = String(a.holding?.id || a.holding?.name || '').trim().toLowerCase();
+    if (!key) {
+      out.push(a);
+      continue;
+    }
+    const prev = seen.get(key);
+    if (prev === undefined) {
+      seen.set(key, out.length);
+      out.push(a);
+      continue;
+    }
+    const existingHolding = out[prev].holding || {};
+    const incomingHolding = a.holding || {};
+    const merged = {
+      ...existingHolding,
+      ...Object.fromEntries(
+        Object.entries(incomingHolding).filter(([, v]) => v !== null && v !== undefined && v !== '')
+      ),
+    };
+    if (existingHolding.details || incomingHolding.details) {
+      merged.details = { ...(existingHolding.details || {}), ...(incomingHolding.details || {}) };
+    }
+    out[prev] = { ...out[prev], holding: merged };
+    skipped += 1;
+  }
+  if (skipped > 0) {
+    logInfo('chat.actions.dedupe_upsert', { threadId, skipped, finalCount: out.length });
+  }
+  return out;
+}
+
 function backfillMissingHoldingAmounts(actions, userMessage, threadId) {
   if (!Array.isArray(actions) || actions.length === 0) return actions;
   const upserts = actions.filter((a) => a?.type === 'upsertHolding');
@@ -35,23 +76,37 @@ function backfillMissingHoldingAmounts(actions, userMessage, threadId) {
   const candidates = extractKrwAmountsFromText(userMessage);
   if (candidates.length === 0) return actions;
 
-  if (missing.length === 1 && upserts.length === 1) {
-    const inferred = candidates.reduce((max, n) => (n > max ? n : max), 0);
-    if (inferred > 0) {
-      logInfo('chat.actions.amount_backfilled', {
-        threadId,
-        holdingName: missing[0].holding?.name || '',
-        holdingId: missing[0].holding?.id || '',
-        inferredAmount: inferred,
-        sourceTextPreview: String(userMessage || '').slice(0, 120),
-      });
-      return actions.map((a) => {
-        if (a !== missing[0]) return a;
-        return { ...a, holding: { ...a.holding, amount: inferred } };
-      });
-    }
+  const distinctIds = new Set(
+    upserts.map((a) => String(a.holding?.id || a.holding?.name || '').trim().toLowerCase()).filter(Boolean)
+  );
+  if (distinctIds.size !== 1) {
+    logInfo('chat.actions.amount_backfill_skipped', {
+      threadId,
+      reason: 'multiple_distinct_holdings',
+      distinctIds: distinctIds.size,
+      missingCount: missing.length,
+    });
+    return actions;
   }
-  return actions;
+
+  const inferred = candidates.reduce((max, n) => (n > max ? n : max), 0);
+  if (inferred <= 0) return actions;
+
+  logInfo('chat.actions.amount_backfilled', {
+    threadId,
+    holdingName: missing[0].holding?.name || '',
+    holdingId: missing[0].holding?.id || '',
+    inferredAmount: inferred,
+    affectedCount: missing.length,
+    sourceTextPreview: String(userMessage || '').slice(0, 120),
+  });
+
+  return actions.map((a) => {
+    if (a?.type !== 'upsertHolding') return a;
+    const isMissing = a.holding && (a.holding.amount === null || a.holding.amount === undefined || a.holding.amount === '');
+    if (!isMissing) return a;
+    return { ...a, holding: { ...a.holding, amount: inferred } };
+  });
 }
 
 function buildThreadTitle(content) {
@@ -472,7 +527,10 @@ async function resolveAssistantTurn({
 
     aiResult = {
       ...aiResult,
-      actions: backfillMissingHoldingAmounts(aiResult.actions || [], cleanContent, threadId),
+      actions: dedupeUpsertHoldingActions(
+        backfillMissingHoldingAmounts(aiResult.actions || [], cleanContent, threadId),
+        threadId
+      ),
     };
 
     actionState = await applyConversationActions(aiResult.actions || []);
@@ -685,5 +743,6 @@ module.exports = {
   __testables: {
     extractKrwAmountsFromText,
     backfillMissingHoldingAmounts,
+    dedupeUpsertHoldingActions,
   },
 };

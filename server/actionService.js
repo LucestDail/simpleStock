@@ -174,9 +174,12 @@ async function applyConversationActions(actions = []) {
       rationale: normalizeText(action?.rationale).slice(0, 160),
       holdingName: normalizeText(action?.holding?.name).slice(0, 60),
       holdingId: normalizeText(action?.holding?.id).slice(0, 40),
+      holdingCategory: normalizeText(action?.holding?.category) || null,
+      holdingMode: normalizeText(action?.holding?.mode) || 'set',
       holdingTicker: normalizeText(action?.holding?.details?.ticker).slice(0, 20),
       holdingQuantity: action?.holding?.details?.quantity ?? null,
       holdingAmount: action?.holding?.amount ?? null,
+      detailsKeys: action?.holding?.details ? Object.keys(action.holding.details) : [],
     })),
   });
 

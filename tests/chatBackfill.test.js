@@ -44,6 +44,31 @@ test('backfillMissingHoldingAmounts skips when multiple upserts present', () => 
   assert.equal(after[1].holding.amount, undefined);
 });
 
+test('backfillMissingHoldingAmounts fills duplicate same-id upserts', () => {
+  if (!__testables) return;
+  const before = [
+    { type: 'upsertHolding', holding: { id: 'irp', name: 'KB IRP', category: 'pension' } },
+    { type: 'upsertHolding', holding: { id: 'irp', name: 'KB IRP', category: 'pension' } },
+    { type: 'upsertHolding', holding: { id: 'irp', name: 'KB IRP', category: 'pension' } },
+  ];
+  const after = __testables.backfillMissingHoldingAmounts(before, '14,897,479원으로 갱신', 'thread');
+  for (const a of after) {
+    assert.equal(a.holding.amount, 14897479);
+  }
+});
+
+test('dedupeUpsertHoldingActions collapses same-id actions and merges fields', () => {
+  if (!__testables) return;
+  const before = [
+    { type: 'upsertHolding', holding: { id: 'irp', name: 'KB IRP', category: 'pension', amount: 14897479 } },
+    { type: 'upsertHolding', holding: { id: 'irp', name: 'KB IRP', category: 'pension' } },
+    { type: 'upsertHolding', holding: { id: 'irp', name: 'KB IRP', category: 'pension' } },
+  ];
+  const after = __testables.dedupeUpsertHoldingActions(before, 'thread');
+  assert.equal(after.length, 1);
+  assert.equal(after[0].holding.amount, 14897479);
+});
+
 test('backfillMissingHoldingAmounts is no-op when amount already provided', () => {
   if (!__testables) return;
   const before = [
