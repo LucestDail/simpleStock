@@ -103,6 +103,10 @@ function normalizeIncomingAction(action) {
   };
 }
 
+function normalizeForMatch(text) {
+  return normalizeText(text).toLowerCase().replace(/[\s\-_·()（）]/g, '');
+}
+
 function findHoldingIndex(holdings, name, category, id = '') {
   const targetId = normalizeText(id);
   if (targetId) {
@@ -110,12 +114,22 @@ function findHoldingIndex(holdings, name, category, id = '') {
     if (byId >= 0) return byId;
   }
 
-  const targetName = normalizeText(name).toLowerCase();
+  const targetName = normalizeForMatch(name);
+  if (!targetName) return -1;
   const targetCategory = normalizeText(category);
-  return holdings.findIndex((item) => {
-    const sameName = normalizeText(item.name).toLowerCase() === targetName;
+
+  const exactIndex = holdings.findIndex((item) => {
+    const sameName = normalizeForMatch(item.name) === targetName;
     const sameCategory = !targetCategory || item.category === targetCategory;
     return sameName && sameCategory;
+  });
+  if (exactIndex >= 0) return exactIndex;
+
+  return holdings.findIndex((item) => {
+    const itemName = normalizeForMatch(item.name);
+    const fuzzy = itemName.includes(targetName) || targetName.includes(itemName);
+    const sameCategory = !targetCategory || item.category === targetCategory;
+    return fuzzy && sameCategory;
   });
 }
 
@@ -137,6 +151,11 @@ async function applyConversationActions(actions = []) {
     actions: safeActions.map((action) => ({
       type: action?.type || '',
       rationale: normalizeText(action?.rationale).slice(0, 160),
+      holdingName: normalizeText(action?.holding?.name).slice(0, 60),
+      holdingId: normalizeText(action?.holding?.id).slice(0, 40),
+      holdingTicker: normalizeText(action?.holding?.details?.ticker).slice(0, 20),
+      holdingQuantity: action?.holding?.details?.quantity ?? null,
+      holdingAmount: action?.holding?.amount ?? null,
     })),
   });
 
