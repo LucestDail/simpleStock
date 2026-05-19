@@ -2,8 +2,7 @@
 
 개인 전용 **자산 현황 · 일별 변동 · 시세 연동 · AI 매니저** 통합 워크스페이스. 보유 자산을 한 화면(Workspace)에서 보고, Gemini 기반 채팅·매니저 브리핑·예약 작업으로 분석을 자동화합니다.
 
-**저장소:** [github.com/LucestDail/simpleStock](https://github.com/LucestDail/simpleStock)  
-**향후 과제:** [PLAN.md](./PLAN.md) (P3·운영 이슈만 유지)
+**저장소:** [github.com/LucestDail/simpleStock](https://github.com/LucestDail/simpleStock)
 
 ## 설계 원칙 (고정)
 
@@ -176,12 +175,41 @@ ssh source 'tar czf - -C ~/simpleStock data' \
   | ssh target 'cd ~/simpleStock && tar xzf -'
 ```
 
-## 완료된 마일스톤 (요약)
+## 향후 과제
 
-- P0: API 토큰, 로그 축소, env 통일, 백업·원자적 저장
-- P1: 워크스페이스 UX, Holdings·스냅샷·스트림·예약 UI, 통합 테스트
-- P2: 설정·기억·import 검증·시세 UI·토큰 집계
-- 2026-05-19: Manager Hub·LiveTicker·KR API 백오프·브리핑 스냅샷 버그 수정·**서버 포트 50000** 통일
+P0~P2(인증·워크스페이스 UX·AI 설정·시세 UI 등)는 2026-05-19 기준 반영 완료입니다.
+
+### 알려진 이슈 (운영)
+
+| 항목 | 설명 |
+|------|------|
+| **KR 시세 미매칭** | 일부 ETF(예: `411060`, `473580`)는 공공데이터 `getStockPriceInfo`에서 미조회. 활용(운영) API 키 승인 후에도 실패하면 `likeSrtnCd`/종목코드 정규화·대체 소스 검토 |
+| **API 키 로테이션** | 채팅·URL에 노출된 `PUBLIC_DATA_API_KEY` 등은 포털에서 재발급 권장 |
+| **원격 git pull** | `192.168.11.25:~/simpleStock`에 로컬 수정이 쌓이면 `git pull` 충돌 가능 → `scripts/deploy-remote.sh` 또는 rsync 배포 권장 |
+
+### 확장 (파일 DB 유지)
+
+| # | 과제 | 설명 |
+|---|------|------|
+| P3-1 | **다중 프로필** | `data/profiles/{id}/` 디렉터리 분리 — JSON 파일만 |
+| P3-2 | **대용량 완화** | 채팅·메모리 아카이브 분리, 오래된 스레드 gzip |
+| P3-3 | **모바일 PWA** | 오프라인 읽기 전용, 홈 화면 추가 |
+| P3-4 | **알림** | 브리핑·예약 완료 시 Telegram/이메일 webhook |
+| P3-5 | **역프록시 템플릿** | Caddy/Nginx + TLS compose overlay 예시 |
+
+### 선택
+
+| # | 과제 | 설명 |
+|---|------|------|
+| P1-6+ | **브리핑보내기** | Quant Manager 리포트 PDF/Markdown 다운로드 |
+
+### 배포 후 스모크 (수동)
+
+- [ ] `http://<host>:50000/` — 대시보드·스냅샷
+- [ ] `GET /api/system/status` — `aiConfigured`, `market`
+- [ ] 채팅 스트림 — `thought` / `done`
+- [ ] `POST /api/market/refresh` — US/KR 시세
+- [ ] QUANT OPS **브리핑** — 스냅샷 저장·UI 갱신
 
 ## 라이선스
 
