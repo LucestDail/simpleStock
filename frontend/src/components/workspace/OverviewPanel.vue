@@ -16,7 +16,6 @@ const {
   total,
   categoryShares,
   dayOverDay,
-  lastSnapshot,
   busyState,
   currentUsdKrwRate,
   holdings,
@@ -47,19 +46,12 @@ const summaryCards = computed(() => [
     visible: true,
   },
   {
-    id: 'lastSnapshot',
-    label: '최근 스냅샷',
-    value: lastSnapshot.value ? formatKRW(lastSnapshot.value.total) : '없음',
-    note: '',
-    visible: Boolean(lastSnapshot.value),
-  },
-  {
     id: 'delta',
-    label: '직전 대비',
+    label: '전일 대비',
     value: dayOverDay.value
       ? `${dayOverDay.value.delta >= 0 ? '+' : ''}${formatKRW(dayOverDay.value.delta)}`
       : '—',
-    note: '',
+    note: dayOverDay.value?.pct != null ? `${dayOverDay.value.pct >= 0 ? '+' : ''}${dayOverDay.value.pct}%` : '',
     visible: Boolean(dayOverDay.value),
   },
 ]);
@@ -78,9 +70,21 @@ const trendSnapshots = computed(() =>
     .sort((a, b) => String(a.date).localeCompare(String(b.date)))
     .slice(-14)
 );
-const trendMax = computed(() => {
-  const values = trendSnapshots.value.map((item) => Number(item.total) || 0);
-  return Math.max(...values, 1);
+const trendDeltas = computed(() => {
+  const snaps = trendSnapshots.value;
+  const deltas = [];
+  for (let i = 1; i < snaps.length; i++) {
+    const prev = Number(snaps[i - 1].total) || 0;
+    const curr = Number(snaps[i].total) || 0;
+    const delta = curr - prev;
+    const pct = prev ? Math.round(((curr - prev) / prev) * 1000) / 10 : null;
+    deltas.push({ date: snaps[i].date, delta, pct });
+  }
+  return deltas;
+});
+const trendDeltaMax = computed(() => {
+  const absValues = trendDeltas.value.map((d) => Math.abs(d.delta));
+  return Math.max(...absValues, 1);
 });
 const hasTodaySnapshot = computed(() => {
   const today = system.value.todayLocalDate;
@@ -110,15 +114,6 @@ function formatSnapshotDate(date) {
   return month && day ? `${Number(month)}/${Number(day)}` : date;
 }
 
-function formatDeltaPct(snapshot, index) {
-  if (index <= 0) return '';
-  const prev = trendSnapshots.value[index - 1];
-  const current = Number(snapshot.total) || 0;
-  const previous = Number(prev?.total) || 0;
-  if (!previous) return '';
-  const pct = Math.round(((current - previous) / previous) * 1000) / 10;
-  return `${pct >= 0 ? '+' : ''}${pct}%`;
-}
 
 function inspectCategory(categoryId) {
   if (selectedCategoryId.value === categoryId) {
@@ -248,40 +243,48 @@ function inspectHolding(holding) {
     </div>
     <div v-else class="empty-box">표시할 카테고리 요약이 아직 없습니다.</div>
 
-    <section v-if="trendSnapshots.length" class="trend-section">
+    <section v-if="trendDeltas.length" class="trend-section">
       <div class="trend-head">
-        <strong>일별 총액 추이</strong>
-        <span v-if="dayOverDay" class="mono-num trend-delta" :class="dayOverDay.delta >= 0 ? 'up' : 'down'">
-          전일 대비 {{ dayOverDay.delta >= 0 ? '+' : '' }}{{ formatKRW(dayOverDay.delta) }}
-          <template v-if="dayOverDay.pct != null"> ({{ dayOverDay.pct >= 0 ? '+' : '' }}{{ dayOverDay.pct }}%)</template>
-        </span>
+        <strong>일별 증감</strong>
         <button
           type="button"
           class="btn-snapshot"
           :disabled="snapshotBusy || busyState.addSnapshot || hasTodaySnapshot"
           @click="saveTodaySnapshot"
         >
-          {{ hasTodaySnapshot ? '오늘 저장됨' : snapshotBusy ? '저장 중…' : '수동 저장' }}
+          {{ hasTodaySnapshot ? '오늘 저장됨' : snapshotBusy ? '저장 중…' : '기록' }}
         </button>
       </div>
-      <div class="trend-chart" role="img" aria-label="최근 스냅샷 총액 막대 차트">
+      <div class="trend-chart" role="img" aria-label="일별 증감 막대 차트">
         <div
-          v-for="(snapshot, index) in trendSnapshots"
-          :key="snapshot.date"
+          v-for="item in trendDeltas"
+          :key="item.date"
           class="trend-bar"
+          :class="item.delta >= 0 ? 'is-up' : 'is-down'"
         >
-          <div
-            class="trend-bar__fill"
-            :style="{ height: `${Math.max(8, Math.round((Number(snapshot.total) / trendMax) * 100))}%` }"
-            :title="`${snapshot.date}: ${formatKRW(snapshot.total)}`"
-          />
-          <span class="trend-bar__label mono-num">{{ formatSnapshotDate(snapshot.date) }}</span>
+          <div class="trend-bar__upper">
+            <div
+              v-if="item.delta >= 0"
+              class="trend-bar__fill trend-bar__fill--up"
+              :style="{ height: `${Math.max(6, Math.round((item.delta / trendDeltaMax) * 100))}%` }"
+              :title="`${item.date}: +${formatKRW(item.delta)}`"
+            />
+          </div>
+          <div class="trend-bar__lower">
+            <div
+              v-if="item.delta < 0"
+              class="trend-bar__fill trend-bar__fill--down"
+              :style="{ height: `${Math.max(6, Math.round((Math.abs(item.delta) / trendDeltaMax) * 100))}%` }"
+              :title="`${item.date}: ${formatKRW(item.delta)}`"
+            />
+          </div>
+          <span class="trend-bar__label mono-num">{{ formatSnapshotDate(item.date) }}</span>
           <span
-            v-if="formatDeltaPct(snapshot, index)"
+            v-if="item.pct != null"
             class="trend-bar__pct mono-num"
-            :class="formatDeltaPct(snapshot, index).startsWith('+') ? 'up' : 'down'"
+            :class="item.delta >= 0 ? 'up' : 'down'"
           >
-            {{ formatDeltaPct(snapshot, index) }}
+            {{ item.pct >= 0 ? '+' : '' }}{{ item.pct }}%
           </span>
         </div>
       </div>
@@ -384,18 +387,6 @@ function inspectHolding(holding) {
   font-size: 12px;
 }
 
-.trend-delta {
-  font-size: 11px;
-}
-
-.trend-delta.up {
-  color: var(--color-semantic-up);
-}
-
-.trend-delta.down {
-  color: var(--color-semantic-down);
-}
-
 .btn-snapshot {
   margin-left: auto;
   height: 22px;
@@ -417,37 +408,64 @@ function inspectHolding(holding) {
 
 .trend-chart {
   display: flex;
-  align-items: flex-end;
-  gap: 4px;
-  min-height: 72px;
+  align-items: stretch;
+  gap: 3px;
+  height: 80px;
   overflow-x: auto;
-  padding-bottom: 2px;
 }
 
 .trend-bar {
   flex: 1 0 28px;
   max-width: 48px;
-  display: grid;
-  gap: 2px;
-  justify-items: center;
-  align-content: end;
-  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.trend-bar__upper,
+.trend-bar__lower {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.trend-bar__lower {
+  align-items: flex-start;
+  border-top: 1px solid var(--color-hairline);
 }
 
 .trend-bar__fill {
-  width: 100%;
-  min-height: 8px;
+  width: 60%;
+  min-height: 4px;
+  border-radius: var(--rounded-xs);
+}
+
+.trend-bar__fill--up {
+  background: var(--color-semantic-up);
+  opacity: 0.8;
   border-radius: var(--rounded-xs) var(--rounded-xs) 0 0;
-  background: linear-gradient(180deg, rgba(110, 123, 255, 0.85), rgba(0, 82, 255, 0.55));
+}
+
+.trend-bar__fill--down {
+  background: var(--color-semantic-down);
+  opacity: 0.8;
+  border-radius: 0 0 var(--rounded-xs) var(--rounded-xs);
 }
 
 .trend-bar__label {
-  font-size: 9px;
+  font-size: 8px;
   color: var(--color-muted);
+  position: absolute;
+  bottom: -14px;
 }
 
 .trend-bar__pct {
   font-size: 8px;
+  position: absolute;
+  top: -12px;
 }
 
 .trend-bar__pct.up {

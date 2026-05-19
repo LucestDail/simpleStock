@@ -415,6 +415,16 @@ function convertJsonSchemaToGeminiSchema(schema, Type) {
   return converted;
 }
 
+function isGemini3Model(model) {
+  return /gemini-3[.-]/.test(model || '');
+}
+
+function budgetToThinkingLevel(budget) {
+  if (budget <= 512) return 'low';
+  if (budget <= 2048) return 'medium';
+  return 'high';
+}
+
 async function buildGenerateConfig({ schema = null, useGoogleSearch = false, streamWithThoughts = false }) {
   const runtime = readAiRuntime();
   const config = {
@@ -422,10 +432,17 @@ async function buildGenerateConfig({ schema = null, useGoogleSearch = false, str
   };
 
   if (streamWithThoughts && runtime.includeThoughts && runtime.thinkingBudget > 0) {
-    config.thinkingConfig = {
-      includeThoughts: true,
-      thinkingBudget: runtime.thinkingBudget,
-    };
+    if (isGemini3Model(runtime.model)) {
+      config.thinkingConfig = {
+        includeThoughts: true,
+        thinkingLevel: budgetToThinkingLevel(runtime.thinkingBudget),
+      };
+    } else {
+      config.thinkingConfig = {
+        includeThoughts: true,
+        thinkingBudget: runtime.thinkingBudget,
+      };
+    }
   }
 
   if (!schema) {
