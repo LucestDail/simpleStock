@@ -69,8 +69,7 @@ async function lookupKrTickerByName(name) {
         const params = { likeItmsNm: text };
         if (basDt) params.basDt = basDt;
         const items = await fetchPublicDataOperation(operation, params);
-        const exact = items.find((it) => String(it?.itmsNm || '').trim() === text);
-        const matched = exact || items[0];
+        const matched = items.find((it) => String(it?.itmsNm || '').trim() === text);
         if (matched && matched.srtnCd) {
           const ticker = String(matched.srtnCd).replace(/^A/i, '').trim();
           if (ticker) {
@@ -185,10 +184,10 @@ async function lookupTickerViaGeminiSearch(name) {
     type: 'object',
     properties: {
       ticker: { type: 'string' },
-      market: { type: 'string', enum: ['KR', 'US', ''] },
-      currency: { type: 'string', enum: ['KRW', 'USD', ''] },
+      market: { type: 'string', enum: ['KR', 'US', 'NONE'] },
+      currency: { type: 'string', enum: ['KRW', 'USD', 'NONE'] },
       shortName: { type: 'string' },
-      confidence: { type: 'string', enum: ['high', 'medium', 'low', ''] },
+      confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
     },
     required: ['ticker', 'market'],
   };
@@ -207,12 +206,14 @@ async function lookupTickerViaGeminiSearch(name) {
         schema,
         useGoogleSearch: false,
         logLabel: 'ticker_lookup_gemini',
+        modelOverride: process.env.GEMINI_TICKER_LOOKUP_MODEL || 'gemini-2.5-flash',
+        timeoutOverrideMs: 30_000,
       },
       { ticker: '', market: '', currency: '', shortName: text, confidence: '' }
     );
     const ticker = String(result?.ticker || '').trim();
     const market = String(result?.market || '').trim();
-    if (!ticker || !market) return null;
+    if (!ticker || !market || market === 'NONE') return null;
     if (market === 'KR' && !/^\d{6}$/.test(ticker)) return null;
     if (market === 'US' && !/^[A-Z][A-Z0-9.-]{0,9}$/i.test(ticker)) return null;
     return {
