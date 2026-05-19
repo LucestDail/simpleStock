@@ -300,6 +300,32 @@ async function fetchYahooChartQuote(symbol) {
   };
 }
 
+async function fetchYahooKrStockQuote(symbol) {
+  const normalizedSymbol = normalizeTickerSymbol(symbol);
+  const candidates = [`${normalizedSymbol}.KS`, `${normalizedSymbol}.KQ`];
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      const quote = await fetchYahooChartQuote(candidate);
+      return {
+        ...quote,
+        symbol: normalizedSymbol,
+        shortName: String(quote.shortName || normalizedSymbol).replace(/\.KS$|\.KQ$/i, ''),
+        market: 'KR',
+        currency: 'KRW',
+        marketState: quote.marketState || 'delayed',
+        source: YAHOO_PROVIDER,
+        krPriceKind: 'yahoo',
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error(`${normalizedSymbol} Yahoo KR 시세를 확인하지 못했습니다.`);
+}
+
 async function fetchFinnhubQuote(symbol) {
   if (!FINNHUB_API_KEY) {
     throw new Error('FINNHUB_API_KEY가 설정되지 않았습니다.');
@@ -549,8 +575,16 @@ async function fetchPublicDataOperation(operation, params) {
   return parsed.items;
 }
 
+function buildKrPublicDataSearchParams(normalizedSymbol, basDt) {
+  const params = { likeSrtnCd: normalizedSymbol };
+  if (basDt) {
+    params.basDt = basDt;
+  }
+  return params;
+}
+
 async function fetchKrPublicDataMatch(normalizedSymbol, basDt) {
-  const params = { basDt, likeSrtnCd: normalizedSymbol };
+  const params = buildKrPublicDataSearchParams(normalizedSymbol, basDt);
   let lastError = null;
 
   for (const { operation, kind } of KR_PUBLIC_DATA_PRICE_OPERATIONS) {
@@ -588,8 +622,20 @@ async function fetchKrPublicStockQuote(symbol, options = {}) {
         if (resolved) break;
       }
 
+      if (!resolved) {
+        resolved = await fetchKrPublicDataMatch(normalizedSymbol, null);
+      }
+
       if (!resolved?.quote) {
-        throw new Error(`${normalizedSymbol} 공공데이터 시세를 찾지 못했습니다.`);
+        try {
+          return await fetchYahooKrStockQuote(normalizedSymbol);
+        } catch (yahooError) {
+          logWarn('market.kr.yahoo_fallback_failed', {
+            symbol: normalizedSymbol,
+            message: yahooError.message,
+          });
+          throw new Error(`${normalizedSymbol} 공공데이터·Yahoo 시세를 찾지 못했습니다.`);
+        }
       }
 
       return resolved.quote;

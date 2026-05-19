@@ -21,7 +21,7 @@
 ### 시세 연동
 - **Finnhub / Yahoo / 공공데이터포털** — US·KR·FX 프로바이더 분리
 - 폴링·TTL(US 60초, KR 6시간), `POST /api/market/refresh`
-- KR **quota 초과 시 30분 백오프**·영업일 조회 2일로 API 호출 절감
+- KR **quota 초과 시 30분 백오프**·영업일 조회 2일, 미등록 시 Yahoo `.KS` 폴백
 - SSE로 시세·FX·세션 변경 브로드캐스트
 
 ### Workspace UI
@@ -183,7 +183,7 @@ P0~P2(인증·워크스페이스 UX·AI 설정·시세 UI 등)는 2026-05-19 기
 
 | 항목 | 설명 |
 |------|------|
-| **KR 시세 예외** | ETF·수익증권은 `getSecuritiesPriceInfo`, 일반 주식은 `getStockPriceInfo`로 조회. 여전히 실패 시 종목코드·`PUBLIC_DATA_API_KEY`(디코딩 값) 확인 |
+| **KR 시세 예외** | 공공데이터: 주식 `getStockPriceInfo` → ETF `getSecuritiesPriceInfo`. 미등록 종목(일부 ETF)은 **Yahoo `종목코드.KS`** 폴백. `PUBLIC_DATA_API_KEY`는 포털 **디코딩** 값 사용 |
 | **API 키 로테이션** | 채팅·URL에 노출된 `PUBLIC_DATA_API_KEY` 등은 포털에서 재발급 권장 |
 | **원격 git pull** | `192.168.11.25:~/simpleStock`에 로컬 수정이 쌓이면 `git pull` 충돌 가능 → `scripts/deploy-remote.sh` 또는 rsync 배포 권장 |
 
