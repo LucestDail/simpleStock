@@ -97,7 +97,7 @@
 | P0-5 | **파일 저장 안정성** | `dataStore` temp→rename, corrupt `.bak` — 완료 (2026-05-19) |
 | P0-1 | **API 접근 제어** | `APP_ACCESS_TOKEN` + 프론트 `apiClient` — 완료 (2026-05-19) |
 | P0-2 | **로그 민감정보 축소** | `LOG_REQUEST_BODY=false` 기본 — 완료 (2026-05-19) |
-| P0-3 | **배포 env 통일** | 11.25 `GEMINI_INCLUDE_THOUGHTS`, `PORT=3000` — 완료 (2026-05-19) |
+| P0-3 | **배포 env 통일** | 11.25 `GEMINI_INCLUDE_THOUGHTS`, `PORT=50000` — 완료 (2026-05-19) |
 
 ### P1 — 제품 완성도
 

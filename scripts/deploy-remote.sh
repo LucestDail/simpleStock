@@ -16,7 +16,7 @@ fi
 REMOTE_HOST="${REMOTE_HOST:-192.168.11.25}"
 REMOTE_USER="${REMOTE_USER:-seunghyun}"
 REMOTE_DIR="${REMOTE_DIR:-~/simpleStock}"
-REMOTE_PORT="${REMOTE_PORT:-3000}"
+REMOTE_PORT="${REMOTE_PORT:-50000}"
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new)
 
 remote_ssh() {

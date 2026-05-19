@@ -184,7 +184,7 @@ USD_KRW_FALLBACK_RATE=1360
 ```
 
 ### 핵심 변수 메모
-- `PORT`: HTTP 포트. 기본 **50000** (로컬 3000 충돌 회피). 서버에서 3000을 유지하려면 `.env`에 `PORT=3000`.
+- `PORT`: HTTP 포트. 기본 **50000** (simpleStock 전용; 3000·28080 등 타 서비스와 분리). 원격 서버(11.25)도 `.env`에 `PORT=50000` 권장.
 - `GEMINI_MODEL`: 기본 Stable **`gemini-3.1-flash-lite`** ([공식 모델 목록](https://ai.google.dev/gemini-api/docs/models)). Latest 별칭(`gemini-flash-latest`)은 가리키는 빌드가 바뀔 수 있어 동작 변화 가능.
 - `GEMINI_INCLUDE_THOUGHTS`: `true`면 응답 스트림에 추론(thought) 토큰 포함, `GEMINI_THINKING_BUDGET`으로 상한 제어(최대 8192).
 - `GEMINI_TIMEOUT_MS` / `MAX_RETRIES` / `RETRY_BASE_MS`: 한 호출 타임아웃과 백오프 재시도.

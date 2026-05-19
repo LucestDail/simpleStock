@@ -1,6 +1,6 @@
 # SimpleStock — 개인 자산 추적
 # 사용: docker compose up -d
-# 접속: http://localhost:50000 (로컬 기본; .env의 PORT로 변경 가능)
+# 접속: http://localhost:50000 (simpleStock 기본 포트; .env의 PORT로 변경 가능)
 
 services:
   app:
