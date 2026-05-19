@@ -170,6 +170,64 @@ async function lookupTickerViaYahooSearch(name) {
   return null;
 }
 
+async function lookupTickerViaGeminiSearch(name) {
+  const text = normalizeName(name);
+  if (!text) return null;
+  let ai;
+  try {
+    ai = require('./aiService');
+  } catch (error) {
+    return null;
+  }
+  if (!ai.isAiConfigured?.()) return null;
+
+  const schema = {
+    type: 'object',
+    properties: {
+      ticker: { type: 'string' },
+      market: { type: 'string', enum: ['KR', 'US', ''] },
+      currency: { type: 'string', enum: ['KRW', 'USD', ''] },
+      shortName: { type: 'string' },
+      confidence: { type: 'string', enum: ['high', 'medium', 'low', ''] },
+    },
+    required: ['ticker', 'market'],
+  };
+
+  try {
+    const result = await ai.generateStructuredOutput(
+      {
+        systemPrompt: [
+          '너는 종목명-티커 매핑기다.',
+          '사용자가 입력한 회사/ETF/ETN 이름에 대해 거래소 단축코드(ticker)와 거래소(KR=KRX/KOSPI/KOSDAQ, US=NASDAQ/NYSE)를 알려줘.',
+          '한국 종목은 6자리 숫자 단축코드(예: 005930), 미국 종목은 알파벳 1~5자(예: NVDA)로 답한다.',
+          '확신할 수 없으면 ticker를 빈 문자열로 둔다.',
+          '반드시 JSON으로만 답한다.',
+        ].join('\n'),
+        userPrompt: JSON.stringify({ query: text }),
+        schema,
+        useGoogleSearch: false,
+        logLabel: 'ticker_lookup_gemini',
+      },
+      { ticker: '', market: '', currency: '', shortName: text, confidence: '' }
+    );
+    const ticker = String(result?.ticker || '').trim();
+    const market = String(result?.market || '').trim();
+    if (!ticker || !market) return null;
+    if (market === 'KR' && !/^\d{6}$/.test(ticker)) return null;
+    if (market === 'US' && !/^[A-Z][A-Z0-9.-]{0,9}$/i.test(ticker)) return null;
+    return {
+      ticker: ticker.toUpperCase(),
+      market,
+      currency: market === 'KR' ? 'KRW' : 'USD',
+      shortName: String(result?.shortName || text),
+      source: 'gemini-structured',
+    };
+  } catch (error) {
+    logWarn('ticker_lookup.gemini.failed', { name: text, message: error?.message });
+    return null;
+  }
+}
+
 async function resolveTickerByName(name) {
   const text = normalizeName(name);
   if (!text) return null;
@@ -202,6 +260,17 @@ async function resolveTickerByName(name) {
       });
       return yahooResult;
     }
+    const geminiResult = await lookupTickerViaGeminiSearch(text);
+    if (geminiResult) {
+      await setCachedTicker(text, geminiResult);
+      logInfo('ticker_lookup.resolved', {
+        name: text,
+        ticker: geminiResult.ticker,
+        market: geminiResult.market,
+        source: geminiResult.source,
+      });
+      return geminiResult;
+    }
     logWarn('ticker_lookup.unresolved', { name: text });
     return null;
   })().finally(() => {
@@ -218,6 +287,7 @@ module.exports = {
   setCachedTicker,
   lookupKrTickerByName,
   lookupTickerViaYahooSearch,
+  lookupTickerViaGeminiSearch,
   __testables: {
     normalizeName,
     buildCacheKey,

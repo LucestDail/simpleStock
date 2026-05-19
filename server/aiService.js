@@ -1811,6 +1811,7 @@ module.exports = {
   APP_TIMEZONE,
   isAiConfigured,
   getAiSettings,
+  generateStructuredOutput,
   runConversationGraph,
   summarizeThread,
   inferAiProfile,
