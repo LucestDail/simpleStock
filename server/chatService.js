@@ -12,6 +12,48 @@ function sanitizeMessage(content) {
   return String(content || '').replace(/\r\n/g, '\n').trim();
 }
 
+function extractKrwAmountsFromText(text) {
+  const matches = String(text || '').matchAll(/(\d{1,3}(?:[,，]\d{3})+|\d{4,})\s*(원|KRW|krw|won)?/g);
+  const amounts = [];
+  for (const m of matches) {
+    const num = Number(String(m[1]).replace(/[,，]/g, ''));
+    if (Number.isFinite(num) && num >= 1000 && num <= 1e12) {
+      amounts.push(num);
+    }
+  }
+  return amounts;
+}
+
+function backfillMissingHoldingAmounts(actions, userMessage, threadId) {
+  if (!Array.isArray(actions) || actions.length === 0) return actions;
+  const upserts = actions.filter((a) => a?.type === 'upsertHolding');
+  const missing = upserts.filter(
+    (a) => a?.holding && (a.holding.amount === null || a.holding.amount === undefined || a.holding.amount === '')
+  );
+  if (missing.length === 0) return actions;
+
+  const candidates = extractKrwAmountsFromText(userMessage);
+  if (candidates.length === 0) return actions;
+
+  if (missing.length === 1 && upserts.length === 1) {
+    const inferred = candidates.reduce((max, n) => (n > max ? n : max), 0);
+    if (inferred > 0) {
+      logInfo('chat.actions.amount_backfilled', {
+        threadId,
+        holdingName: missing[0].holding?.name || '',
+        holdingId: missing[0].holding?.id || '',
+        inferredAmount: inferred,
+        sourceTextPreview: String(userMessage || '').slice(0, 120),
+      });
+      return actions.map((a) => {
+        if (a !== missing[0]) return a;
+        return { ...a, holding: { ...a.holding, amount: inferred } };
+      });
+    }
+  }
+  return actions;
+}
+
 function buildThreadTitle(content) {
   const compact = sanitizeMessage(content).replace(/\s+/g, ' ');
   return compact ? compact.slice(0, 32) : '새 대화';
@@ -428,6 +470,11 @@ async function resolveAssistantTurn({
       });
     }
 
+    aiResult = {
+      ...aiResult,
+      actions: backfillMissingHoldingAmounts(aiResult.actions || [], cleanContent, threadId),
+    };
+
     actionState = await applyConversationActions(aiResult.actions || []);
     logInfo('chat.actions.applied', {
       threadId,
@@ -635,4 +682,8 @@ module.exports = {
   sendMessageStream,
   refreshThreadMemory,
   refreshAiProfileSummary,
+  __testables: {
+    extractKrwAmountsFromText,
+    backfillMissingHoldingAmounts,
+  },
 };

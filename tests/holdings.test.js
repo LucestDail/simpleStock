@@ -49,6 +49,38 @@ test('applyEquityWatchDefaults fills US watchlist fields', () => {
   assert.equal(details.market, 'US');
 });
 
+test('fund category preserves explicit category even when ticker-like text exists in name', async () => {
+  const { applyConversationActions } = require('../server/actionService');
+  const { mutateStore, loadStore } = require('../server/dataStore');
+  await mutateStore((store) => {
+    store.portfolio.holdings = [
+      {
+        id: 'kb-fund-cat',
+        name: 'KB 한국 인덱스 50 청년형 소득공제 증권 자투자신탁(채권혼합) C-E',
+        category: 'fund',
+        amount: 5516165,
+        details: null,
+      },
+    ];
+  });
+  await applyConversationActions([
+    {
+      type: 'upsertHolding',
+      rationale: 'fund update',
+      holding: {
+        id: 'kb-fund-cat',
+        name: 'KB 한국 인덱스 50 청년형 소득공제 증권 자투자신탁(채권혼합) C-E',
+        category: 'fund',
+        amount: 5600000,
+      },
+    },
+  ]);
+  const h = loadStore().portfolio.holdings.find((x) => x.id === 'kb-fund-cat');
+  assert.equal(h.category, 'fund');
+  assert.equal(h.amount, 5600000);
+  assert.equal(h.details, null);
+});
+
 test('upsertHolding without amount marks as ignored to avoid silent no-op', async () => {
   const { applyConversationActions } = require('../server/actionService');
   const { mutateStore, loadStore } = require('../server/dataStore');

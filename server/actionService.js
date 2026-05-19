@@ -155,7 +155,10 @@ function hasSubstantiveDetails(patch, existing) {
   return false;
 }
 
+const NON_EQUITY_CATEGORIES = new Set(['fund', 'installment', 'pension']);
+
 function inferHoldingCategory(category, detailsPatch) {
+  if (NON_EQUITY_CATEGORIES.has(category)) return category;
   const ticker = normalizeText(detailsPatch?.ticker);
   if (isEquityTicker(ticker)) return 'stock';
   return CATEGORIES.includes(category) ? category : 'deposit';
@@ -201,10 +204,13 @@ async function applyConversationActions(actions = []) {
         const payload = action.holding || {};
         const rawName = normalizeText(payload.name);
         const rawDetailsPatch = normalizeHoldingDetails(payload.details);
-        const equityPatch = buildEquityDetailsPatch({
-          name: rawName,
-          details: rawDetailsPatch,
-        });
+        const isNonEquityCategory = NON_EQUITY_CATEGORIES.has(payload.category);
+        const equityPatch = isNonEquityCategory
+          ? { detailsPatch: rawDetailsPatch, cleanName: rawName }
+          : buildEquityDetailsPatch({
+              name: rawName,
+              details: rawDetailsPatch,
+            });
         const name = equityPatch.cleanName || rawName;
         const detailsPatch = equityPatch.detailsPatch;
         const category = inferHoldingCategory(payload.category, detailsPatch);
@@ -235,7 +241,11 @@ async function applyConversationActions(actions = []) {
               mergeHoldingDetails(current.details, detailsPatch)
             );
           }
-          if (isEquityTicker(current.details?.ticker) && current.category !== 'stock') {
+          if (
+            isEquityTicker(current.details?.ticker) &&
+            current.category !== 'stock' &&
+            !NON_EQUITY_CATEGORIES.has(payload.category)
+          ) {
             current.category = 'stock';
           }
 
