@@ -1141,6 +1141,8 @@ async function buildSupervisorPlan(userInput, context) {
         '⚠ 사용자 메시지에 금액(원/$)이 명시되어 자산 가격/평가액 갱신을 요청한 경우, upsertHolding.holding.amount 필드에 반드시 해당 숫자(정수, 원 단위)를 그대로 채운다. 절대 null·생략하지 말 것. 예: "5,516,165원으로 갱신" → amount: 5516165.',
         '티커·종목코드·수량 등 세부 정보만 바꾸고 금액 변경이 전혀 없을 때만 amount 필드를 생략하고 details 에 변경 필드만 넣는다.',
         '가격 관찰용 0주 종목은 category=stock, holding.details.ticker·quantity=0 를 반드시 채운다. deposit 카테고리에 넣지 않는다.',
+        '⚠⚠ 사용자가 "추가해줘/등록해줘/관제해줘"라고 명시적으로 요청한 종목이 context.portfolio.holdings 의 name 목록에 없으면, 반드시 actions 배열에 upsertHolding 을 포함한다. memory(threadSummary, longTermMemory)에 "이미 추가됨" 같은 기록이 있어도 portfolio.holdings 에 실제로 없으면 그 기록을 무시하고 upsertHolding 을 발행한다. portfolio.holdings 가 단일 진실의 원천(source of truth)이다.',
+        '⚠ ticker 가 확실하지 않으면 holding.details.ticker 와 market 을 빈 문자열로 두고 holding.name 만 채운다 — 시스템이 검색·검증으로 자동 채워준다. 절대 추측한 ticker(예: 임의의 6자리 코드)를 넣지 않는다.',
         '한국 종목(삼성전자 005930): details.currency=KRW, market=KR. 미국 종목(NVDA): details.currency=USD, market=US.',
         'holding.name 은 종목명만(예: 삼성전자, NVIDIA) 쓰고, 설명·괄호 문구는 name에 넣지 않는다.',
         '가능하면 holding.id 로 대상 자산을 지정하고, 동일 이름이 여러 category에 있으면 holding.category(stock 등)를 반드시 넣는다.',
