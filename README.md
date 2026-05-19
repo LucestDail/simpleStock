@@ -183,7 +183,7 @@ P0~P2(인증·워크스페이스 UX·AI 설정·시세 UI 등)는 2026-05-19 기
 
 | 항목 | 설명 |
 |------|------|
-| **KR 시세 미매칭** | 일부 ETF(예: `411060`, `473580`)는 공공데이터 `getStockPriceInfo`에서 미조회. 활용(운영) API 키 승인 후에도 실패하면 `likeSrtnCd`/종목코드 정규화·대체 소스 검토 |
+| **KR 시세 예외** | ETF·수익증권은 `getSecuritiesPriceInfo`, 일반 주식은 `getStockPriceInfo`로 조회. 여전히 실패 시 종목코드·`PUBLIC_DATA_API_KEY`(디코딩 값) 확인 |
 | **API 키 로테이션** | 채팅·URL에 노출된 `PUBLIC_DATA_API_KEY` 등은 포털에서 재발급 권장 |
 | **원격 git pull** | `192.168.11.25:~/simpleStock`에 로컬 수정이 쌓이면 `git pull` 충돌 가능 → `scripts/deploy-remote.sh` 또는 rsync 배포 권장 |
 

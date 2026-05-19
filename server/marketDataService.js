@@ -485,19 +485,56 @@ function parsePublicDataBody(data) {
   };
 }
 
-async function fetchPublicDataJson(params) {
+const KR_PUBLIC_DATA_PRICE_OPERATIONS = Object.freeze([
+  { operation: 'getStockPriceInfo', kind: 'stock' },
+  { operation: 'getSecuritiesPriceInfo', kind: 'securities' },
+]);
+
+function findKrPublicDataItem(items, normalizedSymbol) {
+  return (
+    items.find((item) => normalizeTickerSymbol(item?.srtnCd) === normalizedSymbol) || null
+  );
+}
+
+function buildKrQuoteFromPublicDataItem(matched, normalizedSymbol, { kind = 'stock' } = {}) {
+  if (!matched || !Number.isFinite(Number(matched.clpr))) {
+    return null;
+  }
+
+  const price = Math.round(Number(matched.clpr));
+  const change = Number.isFinite(Number(matched.vs)) ? Math.round(Number(matched.vs)) : null;
+  const changePct = Number.isFinite(Number(matched.fltRt)) ? roundNumber(matched.fltRt) : null;
+  const previousClose = change == null ? null : price - change;
+
+  return {
+    symbol: normalizeTickerSymbol(matched.srtnCd || normalizedSymbol),
+    shortName: String(matched.itmsNm || normalizedSymbol),
+    market: String(matched.mrktCtg || (kind === 'securities' ? 'ETF' : 'KR')),
+    currency: 'KRW',
+    price,
+    previousClose,
+    change,
+    changePct,
+    marketState: 'delayed',
+    updatedAt: formatBasDtToIso(matched.basDt),
+    source: PUBLIC_DATA_PROVIDER,
+    krPriceKind: kind,
+  };
+}
+
+async function fetchPublicDataOperation(operation, params) {
   if (!PUBLIC_DATA_API_KEY) {
     throw new Error('PUBLIC_DATA_API_KEY가 설정되지 않았습니다.');
   }
 
   const search = new URLSearchParams({
     serviceKey: PUBLIC_DATA_API_KEY,
-    numOfRows: '10',
+    numOfRows: '100',
     pageNo: '1',
     resultType: 'json',
     ...params,
   });
-  const url = `${PUBLIC_DATA_BASE_URL}/getStockPriceInfo?${search.toString()}`;
+  const url = `${PUBLIC_DATA_BASE_URL}/${operation}?${search.toString()}`;
   const data = await fetchJson(url);
   const parsed = parsePublicDataBody(data);
 
@@ -512,47 +549,50 @@ async function fetchPublicDataJson(params) {
   return parsed.items;
 }
 
+async function fetchKrPublicDataMatch(normalizedSymbol, basDt) {
+  const params = { basDt, likeSrtnCd: normalizedSymbol };
+  let lastError = null;
+
+  for (const { operation, kind } of KR_PUBLIC_DATA_PRICE_OPERATIONS) {
+    try {
+      const items = await fetchPublicDataOperation(operation, params);
+      const matched = findKrPublicDataItem(items, normalizedSymbol);
+      const quote = buildKrQuoteFromPublicDataItem(matched, normalizedSymbol, { kind });
+      if (quote) {
+        return { quote, operation, kind };
+      }
+    } catch (error) {
+      if (isMarketUpstreamQuotaError(error)) {
+        throw error;
+      }
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return null;
+}
+
 async function fetchKrPublicStockQuote(symbol, options = {}) {
   const normalizedSymbol = normalizeTickerSymbol(symbol);
   return getCachedQuote(
     'quote',
     getTrackedQuoteKey({ market: 'KR', symbol: normalizedSymbol }),
     async () => {
-      let matched = null;
+      let resolved = null;
       for (const basDt of listRecentBasDates(MARKET_KR_BAS_DT_LOOKBACK_DAYS)) {
-        const items = await fetchPublicDataJson({
-          basDt,
-          likeSrtnCd: normalizedSymbol,
-        });
-        matched =
-          items.find((item) => String(item?.srtnCd || '') === normalizedSymbol) ||
-          items[0] ||
-          null;
-        if (matched) break;
+        resolved = await fetchKrPublicDataMatch(normalizedSymbol, basDt);
+        if (resolved) break;
       }
 
-      if (!matched || !Number.isFinite(Number(matched.clpr))) {
+      if (!resolved?.quote) {
         throw new Error(`${normalizedSymbol} 공공데이터 시세를 찾지 못했습니다.`);
       }
 
-      const price = Math.round(Number(matched.clpr));
-      const change = Number.isFinite(Number(matched.vs)) ? Math.round(Number(matched.vs)) : null;
-      const changePct = Number.isFinite(Number(matched.fltRt)) ? roundNumber(matched.fltRt) : null;
-      const previousClose = change == null ? null : price - change;
-
-      return {
-        symbol: normalizeTickerSymbol(matched.srtnCd || normalizedSymbol),
-        shortName: String(matched.itmsNm || normalizedSymbol),
-        market: String(matched.mrktCtg || 'KR'),
-        currency: 'KRW',
-        price,
-        previousClose,
-        change,
-        changePct,
-        marketState: 'delayed',
-        updatedAt: formatBasDtToIso(matched.basDt),
-        source: PUBLIC_DATA_PROVIDER,
-      };
+      return resolved.quote;
     },
     {
       ...options,
@@ -868,4 +908,7 @@ module.exports = {
   getMarketSnapshot,
   isMarketUpstreamQuotaError,
   listRecentBasDates,
+  KR_PUBLIC_DATA_PRICE_OPERATIONS,
+  findKrPublicDataItem,
+  buildKrQuoteFromPublicDataItem,
 };
