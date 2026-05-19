@@ -164,8 +164,74 @@ function inferHoldingCategory(category, detailsPatch) {
   return CATEGORIES.includes(category) ? category : 'deposit';
 }
 
+/**
+ * upsertHolding 액션 중 ticker가 비어있고 stock/미지정 카테고리인 경우
+ * 공공데이터포털·Yahoo Search 로 ticker 를 동적으로 조회해 details 를 보강한다.
+ * AI 가 ticker 를 누락해도 자연어 종목명만으로 분류·시세 조회가 가능하도록 만드는 안전망.
+ */
+async function enrichUpsertHoldingActionsWithTicker(actions) {
+  if (!Array.isArray(actions) || actions.length === 0) return;
+  const { resolveTickerByName } = require('./tickerLookupService');
+  const { extractTickerFromHoldingName } = require('./holdingTickerUtil');
+
+  for (const action of actions) {
+    if (!action || action.type !== 'upsertHolding') continue;
+    const holding = action.holding || {};
+    const name = normalizeText(holding.name);
+    if (!name) continue;
+    const explicitCategory = normalizeText(holding.category);
+    if (NON_EQUITY_CATEGORIES.has(explicitCategory)) continue;
+    if (explicitCategory === 'deposit' && !holding.details?.ticker) continue;
+
+    const existingTicker = normalizeText(holding.details?.ticker);
+    if (existingTicker && isEquityTicker(existingTicker)) continue;
+
+    const cleanName = name.replace(/\s*\(.*?\)\s*/g, ' ').trim();
+    if (extractTickerFromHoldingName(name) || extractTickerFromHoldingName(cleanName)) {
+      continue;
+    }
+    const candidates = Array.from(new Set([name, cleanName].filter(Boolean)));
+
+    let resolved = null;
+    for (const candidate of candidates) {
+      try {
+        const result = await resolveTickerByName(candidate);
+        if (result?.ticker) {
+          resolved = result;
+          break;
+        }
+      } catch (error) {
+        logInfo('action.enrich.lookup_failed', { name: candidate, message: error?.message });
+      }
+    }
+
+    if (!resolved) continue;
+
+    holding.details = holding.details && typeof holding.details === 'object' ? holding.details : {};
+    if (!normalizeText(holding.details.ticker)) holding.details.ticker = resolved.ticker;
+    if (!normalizeText(holding.details.market) && resolved.market) {
+      holding.details.market = resolved.market;
+    }
+    if (!normalizeText(holding.details.currency) && resolved.currency) {
+      holding.details.currency = resolved.currency;
+    }
+    if (holding.details.quantity == null) holding.details.quantity = 0;
+    if (!explicitCategory || explicitCategory === 'deposit') {
+      holding.category = 'stock';
+    }
+    logInfo('action.enrich.ticker_resolved', {
+      name,
+      ticker: resolved.ticker,
+      market: resolved.market,
+      source: resolved.source,
+      fromCache: Boolean(resolved.fromCache),
+    });
+  }
+}
+
 async function applyConversationActions(actions = []) {
   const safeActions = Array.isArray(actions) ? actions.slice(0, 12) : [];
+  await enrichUpsertHoldingActionsWithTicker(safeActions);
   let needsScheduleSync = false;
   logInfo('action.batch.start', {
     actionCount: safeActions.length,

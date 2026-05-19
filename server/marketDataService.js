@@ -962,5 +962,6 @@ module.exports = {
   KR_PUBLIC_DATA_PRICE_OPERATIONS,
   findKrPublicDataItem,
   buildKrQuoteFromPublicDataItem,
+  fetchPublicDataOperation,
   isTrackedKrStock,
 };

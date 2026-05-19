@@ -43,15 +43,6 @@ test('applyEquityWatchDefaults fills KR watchlist fields', () => {
   assert.equal(details.quantity, 0);
 });
 
-test('extractTickerFromHoldingName resolves Korean blue-chip names via dictionary', () => {
-  const { extractTickerFromHoldingName } = require('../server/holdingTickerUtil');
-  assert.equal(extractTickerFromHoldingName('삼성전자'), '005930');
-  assert.equal(extractTickerFromHoldingName('SK하이닉스'), '000660');
-  assert.equal(extractTickerFromHoldingName('카카오'), '035720');
-  assert.equal(extractTickerFromHoldingName('엔비디아'), 'NVDA');
-  assert.equal(extractTickerFromHoldingName('마이크론'), 'MU');
-});
-
 test('applyEquityWatchDefaults fills US watchlist fields', () => {
   const details = applyEquityWatchDefaults({ ticker: 'NVDA' });
   assert.equal(details.currency, 'USD');

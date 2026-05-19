@@ -39,6 +39,13 @@ function createDefaultMemory() {
     managerReports: [],
     scheduledTasks: [],
     market: createDefaultMarketState(),
+    tickerLookup: createDefaultTickerLookup(),
+  };
+}
+
+function createDefaultTickerLookup() {
+  return {
+    byName: {},
   };
 }
 
@@ -260,6 +267,7 @@ function normalizeMemory(data) {
   if (!Array.isArray(memory.managerReports)) memory.managerReports = [];
   if (!Array.isArray(memory.scheduledTasks)) memory.scheduledTasks = [];
   memory.market = normalizeMarketState(memory.market);
+  memory.tickerLookup = normalizeTickerLookup(memory.tickerLookup);
 
   memory.threadSummaries = memory.threadSummaries
     .filter((item) => item && item.id && item.threadId)
@@ -344,6 +352,26 @@ function normalizeMemory(data) {
       : null;
 
   return memory;
+}
+
+function normalizeTickerLookup(data) {
+  const lookup = data && typeof data === 'object' ? data : createDefaultTickerLookup();
+  const byName = lookup.byName && typeof lookup.byName === 'object' ? lookup.byName : {};
+  const cleaned = {};
+  for (const [key, value] of Object.entries(byName)) {
+    if (!key || !value || typeof value !== 'object') continue;
+    const ticker = String(value.ticker || '').trim();
+    if (!ticker) continue;
+    cleaned[String(key).trim()] = {
+      ticker,
+      market: String(value.market || '').trim() || null,
+      currency: String(value.currency || '').trim() || null,
+      shortName: String(value.shortName || '').trim() || null,
+      source: String(value.source || '').trim() || null,
+      cachedAt: value.cachedAt || null,
+    };
+  }
+  return { byName: cleaned };
 }
 
 function normalizeMarketState(data) {

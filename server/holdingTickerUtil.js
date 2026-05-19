@@ -2,73 +2,6 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
-const KR_NAME_TICKER_MAP = new Map([
-  ['삼성전자', '005930'],
-  ['삼성전자우', '005935'],
-  ['SK하이닉스', '000660'],
-  ['에스케이하이닉스', '000660'],
-  ['LG에너지솔루션', '373220'],
-  ['LG화학', '051910'],
-  ['NAVER', '035420'],
-  ['네이버', '035420'],
-  ['카카오', '035720'],
-  ['카카오뱅크', '323410'],
-  ['현대차', '005380'],
-  ['현대자동차', '005380'],
-  ['기아', '000270'],
-  ['POSCO홀딩스', '005490'],
-  ['포스코홀딩스', '005490'],
-  ['셀트리온', '068270'],
-  ['삼성바이오로직스', '207940'],
-  ['SK이노베이션', '096770'],
-  ['하이브', '352820'],
-  ['두산에너빌리티', '034020'],
-  ['HD현대중공업', '329180'],
-  ['한화에어로스페이스', '012450'],
-  ['LG전자', '066570'],
-  ['삼성SDI', '006400'],
-  ['KB금융', '105560'],
-  ['신한지주', '055550'],
-  ['하나금융지주', '086790'],
-  ['우리금융지주', '316140'],
-]);
-
-const US_NAME_TICKER_MAP = new Map([
-  ['엔비디아', 'NVDA'],
-  ['NVIDIA', 'NVDA'],
-  ['애플', 'AAPL'],
-  ['Apple', 'AAPL'],
-  ['마이크로소프트', 'MSFT'],
-  ['Microsoft', 'MSFT'],
-  ['구글', 'GOOGL'],
-  ['알파벳', 'GOOGL'],
-  ['Alphabet', 'GOOGL'],
-  ['아마존', 'AMZN'],
-  ['Amazon', 'AMZN'],
-  ['메타', 'META'],
-  ['테슬라', 'TSLA'],
-  ['Tesla', 'TSLA'],
-  ['마이크론', 'MU'],
-  ['Micron', 'MU'],
-  ['브로드컴', 'AVGO'],
-  ['Broadcom', 'AVGO'],
-  ['AMD', 'AMD'],
-  ['인텔', 'INTC'],
-  ['Intel', 'INTC'],
-]);
-
-function lookupTickerByKoreanName(name) {
-  const text = normalizeText(name);
-  if (!text) return { ticker: '', market: '' };
-  if (KR_NAME_TICKER_MAP.has(text)) {
-    return { ticker: KR_NAME_TICKER_MAP.get(text), market: 'KR' };
-  }
-  if (US_NAME_TICKER_MAP.has(text)) {
-    return { ticker: US_NAME_TICKER_MAP.get(text), market: 'US' };
-  }
-  return { ticker: '', market: '' };
-}
-
 function normalizeTickerSymbol(value) {
   return normalizeText(value).toUpperCase().replace(/\s+/g, '');
 }
@@ -105,9 +38,6 @@ function extractTickerFromHoldingName(name) {
   if (commaMatch && isUsEquityTicker(commaMatch[1])) return normalizeTickerSymbol(commaMatch[1]);
 
   if (isEquityTicker(text)) return normalizeTickerSymbol(text);
-
-  const lookup = lookupTickerByKoreanName(text);
-  if (lookup.ticker) return lookup.ticker;
 
   return '';
 }
@@ -240,5 +170,4 @@ module.exports = {
   repairWatchlistHolding,
   dedupeGhostHoldings,
   repairPortfolioHoldings,
-  lookupTickerByKoreanName,
 };
