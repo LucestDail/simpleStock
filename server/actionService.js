@@ -219,9 +219,12 @@ async function applyConversationActions(actions = []) {
         const index = findHoldingIndex(store.portfolio.holdings, name, category, holdingId);
         if (index >= 0) {
           const current = store.portfolio.holdings[index];
-          if (hasExplicitAmount(payload)) {
+          const amountChanged = hasExplicitAmount(payload);
+          const previousAmount = current.amount;
+          if (amountChanged) {
             current.amount = mode === 'delta' ? Math.max(0, current.amount + amount) : amount;
           }
+          const previousCategory = current.category;
           current.category = category;
           const shouldMergeDetails =
             detailsPatch &&
@@ -235,14 +238,31 @@ async function applyConversationActions(actions = []) {
           if (isEquityTicker(current.details?.ticker) && current.category !== 'stock') {
             current.category = 'stock';
           }
+
+          const actuallyChanged =
+            amountChanged ||
+            shouldMergeDetails ||
+            previousCategory !== current.category;
+          if (!actuallyChanged) {
+            actionResults.push({
+              type,
+              status: 'ignored',
+              message: `${current.name} 자산에 적용할 변경 데이터가 없어 반영하지 않았습니다. (AI가 amount/details 필드를 누락했을 가능성)`,
+            });
+            continue;
+          }
+
           const tickerNote =
             detailsPatch?.ticker && current.details?.ticker
               ? ` (티커 ${current.details.ticker})`
               : '';
+          const amountNote = amountChanged
+            ? ` ₩${previousAmount.toLocaleString('ko-KR')} → ₩${current.amount.toLocaleString('ko-KR')}`
+            : '';
           actionResults.push({
             type,
             status: 'applied',
-            message: `${current.name} 자산을 반영했습니다${tickerNote}.`,
+            message: `${current.name} 자산을 반영했습니다${amountNote}${tickerNote}.`,
           });
         } else {
           store.portfolio.holdings.push({
@@ -258,7 +278,10 @@ async function applyConversationActions(actions = []) {
             message: `${name} 자산을 새로 추가했습니다.`,
           });
         }
-        changedPortfolio = true;
+        const last = actionResults[actionResults.length - 1];
+        if (last && last.status === 'applied') {
+          changedPortfolio = true;
+        }
         continue;
       }
 

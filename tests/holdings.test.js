@@ -49,6 +49,62 @@ test('applyEquityWatchDefaults fills US watchlist fields', () => {
   assert.equal(details.market, 'US');
 });
 
+test('upsertHolding without amount marks as ignored to avoid silent no-op', async () => {
+  const { applyConversationActions } = require('../server/actionService');
+  const { mutateStore, loadStore } = require('../server/dataStore');
+  await mutateStore((store) => {
+    store.portfolio.holdings = [
+      {
+        id: 'kb-fund-test',
+        name: 'KB 한국 인덱스 50 청년형 소득공제 펀드',
+        category: 'fund',
+        amount: 5468619,
+        details: null,
+      },
+    ];
+  });
+  const result = await applyConversationActions([
+    {
+      type: 'upsertHolding',
+      rationale: 'AI dropped amount field',
+      holding: { id: 'kb-fund-test', name: 'KB 한국 인덱스 50 청년형 소득공제 펀드', category: 'fund' },
+    },
+  ]);
+  const r = result.actionResults[0];
+  assert.equal(r.status, 'ignored');
+  assert.match(r.message, /amount/);
+  const h = loadStore().portfolio.holdings.find((x) => x.id === 'kb-fund-test');
+  assert.equal(h.amount, 5468619);
+});
+
+test('upsertHolding with explicit amount applies and reports diff', async () => {
+  const { applyConversationActions } = require('../server/actionService');
+  const { mutateStore, loadStore } = require('../server/dataStore');
+  await mutateStore((store) => {
+    store.portfolio.holdings = [
+      {
+        id: 'kb-fund-test2',
+        name: 'KB 한국 인덱스 50 청년형 소득공제 펀드',
+        category: 'fund',
+        amount: 5468619,
+        details: null,
+      },
+    ];
+  });
+  const result = await applyConversationActions([
+    {
+      type: 'upsertHolding',
+      rationale: 'user provided new amount',
+      holding: { id: 'kb-fund-test2', name: 'KB 한국 인덱스 50 청년형 소득공제 펀드', category: 'fund', amount: 5516165 },
+    },
+  ]);
+  const r = result.actionResults[0];
+  assert.equal(r.status, 'applied');
+  assert.match(r.message, /5,468,619.*5,516,165/);
+  const h = loadStore().portfolio.holdings.find((x) => x.id === 'kb-fund-test2');
+  assert.equal(h.amount, 5516165);
+});
+
 test('empty detailsPatch does not wipe existing quantity', async () => {
   const { applyConversationActions } = require('../server/actionService');
   const { mutateStore, loadStore } = require('../server/dataStore');
