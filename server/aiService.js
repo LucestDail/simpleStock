@@ -1094,6 +1094,8 @@ async function buildSupervisorPlan(userInput, context) {
     return buildFallbackPlan(userInput, context);
   }
 
+  const { buildSupervisorContext } = require('./contextBuilder');
+  const slimContext = buildSupervisorContext(context);
   const fallback = buildFallbackPlan(userInput, context);
   return generateStructuredOutput(
     {
@@ -1123,7 +1125,7 @@ async function buildSupervisorPlan(userInput, context) {
       userPrompt: JSON.stringify(
         {
           userInput,
-          context,
+          context: slimContext,
         },
         null,
         2

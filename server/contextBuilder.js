@@ -56,7 +56,7 @@ function getThreadMessages(chat, threadId) {
   return Array.isArray(chat.messagesByThread?.[threadId]) ? chat.messagesByThread[threadId] : [];
 }
 
-function getRecentMessages(messages, limit = 14) {
+function getRecentMessages(messages, limit = 8) {
   return [...messages].slice(-limit);
 }
 
@@ -94,8 +94,40 @@ function buildConversationContext({ portfolio, profile, memory, chat, threadId }
   };
 }
 
+function buildSupervisorContext(fullContext) {
+  const portfolio = fullContext.portfolio || {};
+  const holdings = (portfolio.holdings || []).map((h) => ({
+    id: h.id,
+    name: h.name,
+    category: h.category,
+    amount: h.amount,
+    ticker: h.details?.ticker || '',
+    currency: h.details?.currency || '',
+    market: h.details?.market || '',
+    quantity: h.details?.quantity ?? null,
+  }));
+  const messages = (fullContext.recentMessages || []).slice(-6).map((m) => ({
+    role: m.role,
+    content: String(m.content || '').slice(0, 300),
+  }));
+  return {
+    portfolio: {
+      total: portfolio.total,
+      totalLabel: portfolio.totalLabel,
+      holdings,
+      categoryShares: portfolio.categoryShares,
+    },
+    profile: fullContext.profile,
+    memory: {
+      threadSummary: fullContext.memory?.threadSummary || null,
+    },
+    recentMessages: messages,
+  };
+}
+
 module.exports = {
   buildConversationContext,
+  buildSupervisorContext,
   buildPortfolioContext,
   buildProfileContext,
   buildMemoryContext,
