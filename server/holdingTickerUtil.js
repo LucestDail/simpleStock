@@ -11,7 +11,9 @@ function isUsEquityTicker(ticker) {
 }
 
 function isKrEquityTicker(ticker) {
-  return /^[A-Z0-9]{5,12}$/.test(normalizeTickerSymbol(ticker));
+  // KRX 단축코드 표준: 6자(숫자로 시작), 일반주식은 6자리 숫자, ETF/ETN은 마지막에 알파벳이 섞일 수 있음
+  // (예: 005930, 411060, 0183J0). 영문으로 시작하는 회사명(NVIDIA 등)이 통과되지 않도록 첫 글자는 숫자로 강제.
+  return /^[0-9][0-9A-Z]{5}$/.test(normalizeTickerSymbol(ticker));
 }
 
 function isEquityTicker(ticker) {

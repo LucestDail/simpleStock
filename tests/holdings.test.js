@@ -43,6 +43,17 @@ test('applyEquityWatchDefaults fills KR watchlist fields', () => {
   assert.equal(details.quantity, 0);
 });
 
+test('isKrEquityTicker rejects company-name-shaped strings (NVIDIA, APPLE, MICRON)', () => {
+  const { isKrEquityTicker, isEquityTicker } = require('../server/holdingTickerUtil');
+  assert.equal(isKrEquityTicker('NVIDIA'), false, 'NVIDIA must not be treated as a KR ticker');
+  assert.equal(isKrEquityTicker('APPLE'), false);
+  assert.equal(isKrEquityTicker('MICRON'), false);
+  assert.equal(isKrEquityTicker('005930'), true);
+  assert.equal(isKrEquityTicker('411060'), true);
+  assert.equal(isKrEquityTicker('0183J0'), true);
+  assert.equal(isEquityTicker('NVIDIA'), false);
+});
+
 test('applyEquityWatchDefaults fills US watchlist fields', () => {
   const details = applyEquityWatchDefaults({ ticker: 'NVDA' });
   assert.equal(details.currency, 'USD');

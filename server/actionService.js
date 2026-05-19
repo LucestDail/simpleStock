@@ -172,7 +172,11 @@ function inferHoldingCategory(category, detailsPatch) {
 async function enrichUpsertHoldingActionsWithTicker(actions) {
   if (!Array.isArray(actions) || actions.length === 0) return;
   const { resolveTickerByName } = require('./tickerLookupService');
-  const { extractTickerFromHoldingName } = require('./holdingTickerUtil');
+  const {
+    extractTickerFromHoldingName,
+    isKrEquityTicker,
+    isUsEquityTicker,
+  } = require('./holdingTickerUtil');
 
   for (const action of actions) {
     if (!action || action.type !== 'upsertHolding') continue;
@@ -181,15 +185,31 @@ async function enrichUpsertHoldingActionsWithTicker(actions) {
     if (!name) continue;
     const explicitCategory = normalizeText(holding.category);
     if (NON_EQUITY_CATEGORIES.has(explicitCategory)) continue;
-    if (explicitCategory === 'deposit' && !holding.details?.ticker) continue;
 
     const existingTicker = normalizeText(holding.details?.ticker);
-    if (existingTicker && isEquityTicker(existingTicker)) continue;
+    const existingMarket = normalizeText(holding.details?.market).toUpperCase();
+    const tickerValidShape = existingTicker && isEquityTicker(existingTicker);
+    const tickerMarketAligned =
+      !existingMarket
+        ? tickerValidShape
+        : existingMarket === 'KR'
+        ? isKrEquityTicker(existingTicker)
+        : existingMarket === 'US'
+        ? isUsEquityTicker(existingTicker)
+        : tickerValidShape;
+    const tickerSuspicious = existingTicker && (!tickerValidShape || !tickerMarketAligned);
+
+    if (explicitCategory === 'deposit' && !existingTicker) continue;
+    if (tickerValidShape && tickerMarketAligned) continue;
+
+    if (!tickerSuspicious) {
+      const cleanName = name.replace(/\s*\(.*?\)\s*/g, ' ').trim();
+      if (extractTickerFromHoldingName(name) || extractTickerFromHoldingName(cleanName)) {
+        continue;
+      }
+    }
 
     const cleanName = name.replace(/\s*\(.*?\)\s*/g, ' ').trim();
-    if (extractTickerFromHoldingName(name) || extractTickerFromHoldingName(cleanName)) {
-      continue;
-    }
     const candidates = Array.from(new Set([name, cleanName].filter(Boolean)));
 
     let resolved = null;
@@ -208,11 +228,13 @@ async function enrichUpsertHoldingActionsWithTicker(actions) {
     if (!resolved) continue;
 
     holding.details = holding.details && typeof holding.details === 'object' ? holding.details : {};
-    if (!normalizeText(holding.details.ticker)) holding.details.ticker = resolved.ticker;
-    if (!normalizeText(holding.details.market) && resolved.market) {
+    if (tickerSuspicious || !normalizeText(holding.details.ticker)) {
+      holding.details.ticker = resolved.ticker;
+    }
+    if (resolved.market && (tickerSuspicious || !normalizeText(holding.details.market))) {
       holding.details.market = resolved.market;
     }
-    if (!normalizeText(holding.details.currency) && resolved.currency) {
+    if (resolved.currency && (tickerSuspicious || !normalizeText(holding.details.currency))) {
       holding.details.currency = resolved.currency;
     }
     if (holding.details.quantity == null) holding.details.quantity = 0;
@@ -225,6 +247,7 @@ async function enrichUpsertHoldingActionsWithTicker(actions) {
       market: resolved.market,
       source: resolved.source,
       fromCache: Boolean(resolved.fromCache),
+      replacedSuspiciousTicker: tickerSuspicious ? existingTicker : null,
     });
   }
 }
