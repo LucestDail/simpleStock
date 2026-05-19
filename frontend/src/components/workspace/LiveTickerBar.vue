@@ -4,6 +4,8 @@ import { usePortfolio } from '../../composables/usePortfolio';
 import { useWorkspace } from '../../composables/useWorkspace';
 import { useRealtimeSubscription } from '../../composables/useRealtimeSubscription';
 import { useInsightDetail } from '../../composables/useInsightDetail';
+import { formatMarketClock } from '../../lib/marketClock';
+import { getHoldingQuoteLabel, isKrHolding } from '../../lib/holdingDisplay';
 
 defineProps({
   showExtras: { type: Boolean, default: true },
@@ -19,21 +21,7 @@ const { nextManagerBrief, marketPulse } = useInsightDetail();
 const now = ref(new Date());
 let clockTimer = null;
 
-const liveClock = computed(() => {
-  const date = now.value;
-  const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
-  const y = date.getFullYear();
-  const m = date.getMonth() + 1;
-  const d = date.getDate();
-  const w = weekdays[date.getDay()];
-  const h = String(date.getHours()).padStart(2, '0');
-  const min = String(date.getMinutes()).padStart(2, '0');
-  const s = String(date.getSeconds()).padStart(2, '0');
-  return {
-    date: `${y}년 ${m}월 ${d}일 (${w})`,
-    time: `${h}:${min}:${s}`,
-  };
-});
+const liveClock = computed(() => formatMarketClock(now.value));
 
 const connectionLabel = computed(() => {
   if (connectionState.value === 'connected') return '실시간 연결';
@@ -60,14 +48,20 @@ const marketItems = computed(() => {
     });
   }
 
+  const quotes = system.value.market?.quotes || {};
+
   for (const holding of holdings.value) {
     const details = holding.details || {};
     const ticker = String(details.ticker || '').trim();
     if (!ticker) continue;
-    const price = details.currentPrice ?? details.lastQuote;
+    const market = isKrHolding(holding) ? 'KR' : 'US';
+    const quoteKey = `${market}:${ticker}`;
+    const quote = quotes[quoteKey] || null;
+    const { label, sub } = getHoldingQuoteLabel(holding, quote);
+    const price = details.currentPrice ?? details.lastQuote ?? quote?.price;
     let priceLabel = '—';
     if (Number.isFinite(Number(price))) {
-      const currency = String(details.currency || '').toUpperCase();
+      const currency = String(details.currency || quote?.currency || '').toUpperCase();
       priceLabel =
         currency === 'USD'
           ? `$${Number(price).toFixed(2)}`
@@ -75,10 +69,10 @@ const marketItems = computed(() => {
     }
     items.push({
       id: holding.id,
-      label: ticker,
-      sub: holding.name?.slice(0, 8) || '',
+      label,
+      sub,
       price: priceLabel,
-      changePct: details.priceChangePct,
+      changePct: details.priceChangePct ?? quote?.changePct,
     });
   }
   return items.slice(0, 10);
@@ -89,7 +83,7 @@ const alertItems = computed(() => {
   rows.push({
     id: 'session',
     tone: 'info',
-    text: `장 상태 KR ${marketPulse.value.kr} · US ${marketPulse.value.us}`,
+    text: `장 KR ${marketPulse.value.kr} · US ${marketPulse.value.us} (${marketPulse.value.usClock})`,
   });
   if (nextManagerBrief.value) {
     rows.push({
@@ -123,7 +117,7 @@ const alertItems = computed(() => {
   return rows.slice(0, 6);
 });
 
-const lastSyncLabel = computed(() => {
+const lastRealtimeLabel = computed(() => {
   const iso = lastEventAt.value || system.value.market?.lastSuccessAt;
   if (!iso) return '';
   return new Intl.DateTimeFormat('ko-KR', {
@@ -160,9 +154,23 @@ onUnmounted(() => {
       </div>
 
       <div class="live-bar__clock" aria-live="polite">
-        <span class="live-bar__date">{{ liveClock.date }}</span>
-        <strong class="live-bar__time mono-num">{{ liveClock.time }}</strong>
-        <span v-if="lastSyncLabel" class="live-bar__sync">동기화 {{ lastSyncLabel }}</span>
+        <div class="live-bar__clock-block">
+          <span class="live-bar__tz">KST</span>
+          <span class="live-bar__date">{{ liveClock.kst.date }}</span>
+          <strong class="live-bar__time mono-num">{{ liveClock.kst.time }}</strong>
+        </div>
+        <div class="live-bar__clock-block live-bar__clock-block--us">
+          <span class="live-bar__tz">US {{ liveClock.us.zoneLabel }}</span>
+          <span class="live-bar__date">{{ liveClock.us.date }}</span>
+          <strong class="live-bar__time mono-num live-bar__time--us">{{ liveClock.us.time }}</strong>
+        </div>
+        <span
+          v-if="lastRealtimeLabel"
+          class="live-bar__sync"
+          title="서버 SSE로 포트폴리오·시세·브리핑이 갱신된 마지막 시각입니다."
+        >
+          실시간 갱신 {{ lastRealtimeLabel }}
+        </span>
       </div>
 
       <div class="live-bar__actions">
@@ -180,7 +188,10 @@ onUnmounted(() => {
     <div v-if="marketItems.length" class="live-bar__ticker" aria-label="시세 티커">
       <div class="live-bar__ticker-track">
         <article v-for="item in marketItems" :key="item.id" class="quote-chip">
-          <span class="quote-chip__label">{{ item.label }}</span>
+          <span class="quote-chip__label">
+            {{ item.label }}
+            <span v-if="item.sub" class="quote-chip__sub">{{ item.sub }}</span>
+          </span>
           <strong class="quote-chip__price mono-num">{{ item.price }}</strong>
           <span
             class="quote-chip__pct mono-num"
@@ -281,10 +292,34 @@ onUnmounted(() => {
 .live-bar__clock {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: flex-end;
   justify-content: center;
-  gap: 8px;
+  gap: 10px 14px;
   min-width: 0;
+}
+
+.live-bar__clock-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.live-bar__clock-block--us {
+  padding-left: 12px;
+  border-left: 1px solid var(--color-hairline-soft);
+}
+
+.live-bar__tz {
+  color: var(--color-muted-soft);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.live-bar__time--us {
+  color: #9aa8ff;
 }
 
 .live-bar__date {
@@ -385,6 +420,16 @@ onUnmounted(() => {
   color: var(--color-ink);
   font-size: 12px;
   font-weight: 700;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.15;
+}
+
+.quote-chip__sub {
+  color: var(--color-muted);
+  font-size: 9px;
+  font-weight: 500;
 }
 
 .quote-chip__price {

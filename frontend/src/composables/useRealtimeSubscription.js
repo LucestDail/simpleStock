@@ -70,7 +70,7 @@ export function useRealtimeSubscription() {
     await Promise.all([fetchPortfolio(), fetchProfile(), fetchThreads({ autoCreate: false })]);
     recordActivity({
       type: 'system',
-      title: '실시간 동기화 복구',
+      title: '실시간 연결 복구',
       description:
         reason === 'reconnect'
           ? '재연결 후 기준 데이터를 다시 불러왔습니다.'

@@ -6,6 +6,7 @@ import {
 } from './usePortfolio';
 import { useWorkspace } from './useWorkspace';
 import { formatRunLabel, getNextRunDate } from '../lib/cronSchedule';
+import { formatMarketClock } from '../lib/marketClock';
 
 const TONE_LABELS = {
   positive: '양호',
@@ -191,9 +192,11 @@ export function useInsightDetail() {
   const marketPulse = computed(() => {
     const sessions = system.value.market?.sessions || {};
     const fx = system.value.market?.fx?.USDKRW;
+    const usClock = formatMarketClock(new Date());
     return {
       kr: sessionLabel(sessions.kr?.state),
       us: sessionLabel(sessions.us?.state),
+      usClock: `${usClock.us.date} ${usClock.us.time}`,
       fxRate: fx?.rate ? Number(fx.rate).toLocaleString('ko-KR', { maximumFractionDigits: 2 }) : '—',
       fxChangePct:
         fx?.changePct != null

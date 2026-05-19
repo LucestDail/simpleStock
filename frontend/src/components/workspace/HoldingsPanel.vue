@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import PanelShell from './PanelShell.vue';
 import { CATEGORIES, formatKRW, formatUSD, usePortfolio } from '../../composables/usePortfolio';
+import { formatHoldingMetaLine } from '../../lib/holdingDisplay';
 import { useUi } from '../../composables/useUi';
 import { useWorkspace } from '../../composables/useWorkspace';
 
@@ -43,13 +44,7 @@ function formatHoldingMeta(holding) {
   const details = holding.details || {};
   return (
     details.summary ||
-    [
-      details.account,
-      details.ticker,
-      Number.isFinite(Number(details.quantity)) ? `${details.quantity}주` : '',
-    ]
-      .filter(Boolean)
-      .join(' · ') ||
+    formatHoldingMetaLine(holding) ||
     CATEGORIES.find((item) => item.id === holding.category)?.label
   );
 }

@@ -2,8 +2,11 @@ const { getCategoryShares } = require('./contextBuilder');
 
 function buildSnapshot(holdings, date) {
   const total = holdings.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-  const shares = getCategoryShares(holdings);
-  const byCategory = Object.fromEntries(shares.map((item) => [item.category, item.amount]));
+  const { shares, byCategory: categoryTotals } = getCategoryShares(holdings);
+  const byCategory =
+    categoryTotals && typeof categoryTotals === 'object'
+      ? { ...categoryTotals }
+      : Object.fromEntries(shares.map((item) => [item.category, item.amount]));
   return {
     date,
     total,
