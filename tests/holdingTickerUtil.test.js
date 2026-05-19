@@ -18,6 +18,10 @@ test('extractTickerFromHoldingName parses NVDA from descriptive name', () => {
   assert.equal(extractTickerFromHoldingName('NVIDIA (NVDA, 0주 관찰용 데이터 추가됨)'), 'NVDA');
 });
 
+test('extractTickerFromHoldingName parses 000660 from Korean stock name', () => {
+  assert.equal(extractTickerFromHoldingName('SK하이닉스 (000660, 0주 관찰용 데이터 추가됨)'), '000660');
+});
+
 test('applyEquityWatchDefaults sets USD for US tickers', () => {
   const details = applyEquityWatchDefaults({ ticker: 'NVDA' });
   assert.equal(details.currency, 'USD');
@@ -37,6 +41,21 @@ test('repairWatchlistHolding fixes malformed NVIDIA watch entry', () => {
   assert.equal(repaired.name, 'NVIDIA');
   assert.equal(repaired.details.ticker, 'NVDA');
   assert.equal(repaired.details.currency, 'USD');
+});
+
+test('repairWatchlistHolding fixes malformed SK hynix watch entry', () => {
+  const repaired = repairWatchlistHolding({
+    id: 'y',
+    name: 'SK하이닉스 (000660, 0주 관찰용 데이터 추가됨)',
+    category: 'deposit',
+    amount: 0,
+    details: null,
+  });
+  assert.equal(repaired.category, 'stock');
+  assert.equal(repaired.name, 'SK하이닉스');
+  assert.equal(repaired.details.ticker, '000660');
+  assert.equal(repaired.details.currency, 'KRW');
+  assert.equal(repaired.details.market, 'KR');
 });
 
 test('dedupeGhostHoldings removes deposit duplicate when stock exists', () => {

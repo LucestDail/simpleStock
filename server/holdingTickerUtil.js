@@ -23,8 +23,16 @@ function extractTickerFromHoldingName(name) {
   const text = normalizeText(name);
   if (!text) return '';
 
-  const parenMatch = text.match(/\(([A-Z]{1,5})\b/);
-  if (parenMatch) return normalizeTickerSymbol(parenMatch[1]);
+  const parenUsMatch = text.match(/\(([A-Z]{1,5})\b/);
+  if (parenUsMatch) return normalizeTickerSymbol(parenUsMatch[1]);
+
+  const parenKrMatch = text.match(/\((\d{6})\b/);
+  if (parenKrMatch) return normalizeTickerSymbol(parenKrMatch[1]);
+
+  const parenAlphanumMatch = text.match(/\(([A-Z0-9]{5,12})\b/i);
+  if (parenAlphanumMatch && isEquityTicker(parenAlphanumMatch[1])) {
+    return normalizeTickerSymbol(parenAlphanumMatch[1]);
+  }
 
   const commaMatch = text.match(/\b([A-Z]{1,5})\s*[,，]/);
   if (commaMatch && isUsEquityTicker(commaMatch[1])) return normalizeTickerSymbol(commaMatch[1]);
