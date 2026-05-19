@@ -6,6 +6,7 @@ const {
   KR_PUBLIC_DATA_PRICE_OPERATIONS,
   findKrPublicDataItem,
   buildKrQuoteFromPublicDataItem,
+  isTrackedKrStock,
 } = require('../server/marketDataService');
 
 test('isMarketUpstreamQuotaError detects quota and rate-limit messages', () => {
@@ -34,6 +35,27 @@ test('findKrPublicDataItem matches exact srtnCd only', () => {
   ];
   assert.equal(findKrPublicDataItem(items, '411060')?.srtnCd, '411060');
   assert.equal(findKrPublicDataItem(items, '999999'), null);
+});
+
+test('isTrackedKrStock accepts alphanumeric KRX tickers like 0183J0', () => {
+  assert.equal(
+    isTrackedKrStock({
+      details: { ticker: '0183J0', currency: 'KRW', market: '' },
+    }),
+    true
+  );
+  assert.equal(
+    isTrackedKrStock({
+      details: { ticker: '473580', currency: 'KRW', market: '' },
+    }),
+    true
+  );
+  assert.equal(
+    isTrackedKrStock({
+      details: { ticker: 'QLD', currency: 'USD', market: 'US' },
+    }),
+    false
+  );
 });
 
 test('buildKrQuoteFromPublicDataItem maps securities ETF rows', () => {

@@ -7,6 +7,12 @@ const { logInfo, logWarn, logError } = require('./logger');
 const { buildPortfolioPayload, buildProfilePayload } = require('./payloadService');
 const { broadcast } = require('./realtimeService');
 const { scheduleMarketRefresh } = require('./marketDataService');
+const {
+  isEquityTicker,
+  buildEquityDetailsPatch,
+  applyEquityWatchDefaults,
+  mergeHoldingDetailFields,
+} = require('./holdingTickerUtil');
 
 const PROFILE_FIELDS = new Set([
   'displayName',
@@ -22,6 +28,10 @@ const PROFILE_FIELDS = new Set([
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function mergeHoldingDetails(existing, patch) {
+  return mergeHoldingDetailFields(existing, patch);
 }
 
 function normalizeHoldingDetails(details) {
@@ -93,7 +103,13 @@ function normalizeIncomingAction(action) {
   };
 }
 
-function findHoldingIndex(holdings, name, category) {
+function findHoldingIndex(holdings, name, category, id = '') {
+  const targetId = normalizeText(id);
+  if (targetId) {
+    const byId = holdings.findIndex((item) => item.id === targetId);
+    if (byId >= 0) return byId;
+  }
+
   const targetName = normalizeText(name).toLowerCase();
   const targetCategory = normalizeText(category);
   return holdings.findIndex((item) => {
@@ -101,6 +117,16 @@ function findHoldingIndex(holdings, name, category) {
     const sameCategory = !targetCategory || item.category === targetCategory;
     return sameName && sameCategory;
   });
+}
+
+function hasExplicitAmount(payload) {
+  return payload.amount !== undefined && payload.amount !== null && String(payload.amount).trim() !== '';
+}
+
+function inferHoldingCategory(category, detailsPatch) {
+  const ticker = normalizeText(detailsPatch?.ticker);
+  if (isEquityTicker(ticker)) return 'stock';
+  return CATEGORIES.includes(category) ? category : 'deposit';
 }
 
 async function applyConversationActions(actions = []) {
@@ -136,34 +162,54 @@ async function applyConversationActions(actions = []) {
 
       if (type === 'upsertHolding') {
         const payload = action.holding || {};
-        const name = normalizeText(payload.name);
-        const category = CATEGORIES.includes(payload.category) ? payload.category : 'deposit';
+        const rawName = normalizeText(payload.name);
+        const rawDetailsPatch = normalizeHoldingDetails(payload.details);
+        const equityPatch = buildEquityDetailsPatch({
+          name: rawName,
+          details: rawDetailsPatch,
+        });
+        const name = equityPatch.cleanName || rawName;
+        const detailsPatch = equityPatch.detailsPatch;
+        const category = inferHoldingCategory(payload.category, detailsPatch);
         const amount = Math.max(0, Math.round(Number(payload.amount) || 0));
         const mode = payload.mode === 'delta' ? 'delta' : 'set';
-        const details = normalizeHoldingDetails(payload.details);
-        if (!name) {
+        const holdingId = normalizeText(payload.id);
+        if (!name && !holdingId) {
           actionResults.push({ type, status: 'ignored', message: '자산 이름이 없어 반영하지 않았습니다.' });
           continue;
         }
 
-        const index = findHoldingIndex(store.portfolio.holdings, name, category);
+        const index = findHoldingIndex(store.portfolio.holdings, name, category, holdingId);
         if (index >= 0) {
           const current = store.portfolio.holdings[index];
-          current.amount = mode === 'delta' ? Math.max(0, current.amount + amount) : amount;
+          if (hasExplicitAmount(payload)) {
+            current.amount = mode === 'delta' ? Math.max(0, current.amount + amount) : amount;
+          }
           current.category = category;
-          current.details = details || current.details || null;
+          if (detailsPatch) {
+            current.details = applyEquityWatchDefaults(
+              mergeHoldingDetails(current.details, detailsPatch)
+            );
+          }
+          if (isEquityTicker(current.details?.ticker) && current.category !== 'stock') {
+            current.category = 'stock';
+          }
+          const tickerNote =
+            detailsPatch?.ticker && current.details?.ticker
+              ? ` (티커 ${current.details.ticker})`
+              : '';
           actionResults.push({
             type,
             status: 'applied',
-            message: `${name} 자산을 ${current.amount.toLocaleString('ko-KR')}원으로 반영했습니다.`,
+            message: `${current.name} 자산을 반영했습니다${tickerNote}.`,
           });
         } else {
           store.portfolio.holdings.push({
-            id: crypto.randomUUID(),
+            id: holdingId || crypto.randomUUID(),
             name,
             category,
-            amount,
-            details,
+            amount: hasExplicitAmount(payload) ? amount : 0,
+            details: detailsPatch ? applyEquityWatchDefaults(detailsPatch) : null,
           });
           actionResults.push({
             type,
@@ -370,4 +416,7 @@ async function applyConversationActions(actions = []) {
 module.exports = {
   applyConversationActions,
   findHoldingIndex,
+  mergeHoldingDetails,
+  hasExplicitAmount,
+  inferHoldingCategory,
 };

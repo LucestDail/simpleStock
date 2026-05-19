@@ -3,7 +3,7 @@ export function isKrHolding(holding) {
   const market = String(details.market || '').toUpperCase();
   const currency = String(details.currency || '').toUpperCase();
   const ticker = String(details.ticker || '').trim();
-  return market === 'KR' || (currency === 'KRW' && /^\d{6,9}[A-Z]?$/.test(ticker));
+  return market === 'KR' || (currency === 'KRW' && /^[A-Z0-9]{5,12}$/i.test(ticker));
 }
 
 function isUsHolding(holding) {

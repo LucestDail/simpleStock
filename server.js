@@ -561,6 +561,14 @@ async function startAiSchedule() {
   }
 
   syncScheduledTasks();
+  try {
+    await mutateStore((store) => {
+      store.portfolio.holdings = store.portfolio.holdings;
+    });
+    scheduleMarketRefresh('portfolio:startup_normalize', { force: true, delayMs: 800 });
+  } catch (error) {
+    logError('portfolio.startup_normalize.failed', error);
+  }
   startMarketDataPolling();
 
   if (!isAiConfigured()) {

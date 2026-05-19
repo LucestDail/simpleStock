@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { repairPortfolioHoldings } = require('./holdingTickerUtil');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const FILES = {
@@ -176,7 +177,15 @@ function normalizePortfolio(data) {
   if (!Array.isArray(portfolio.holdings)) portfolio.holdings = [];
   if (!Array.isArray(portfolio.snapshots)) portfolio.snapshots = [];
 
-  portfolio.holdings = portfolio.holdings.map((item) => ({
+  portfolio.holdings = repairPortfolioHoldings(
+    portfolio.holdings.map((item) => ({
+      id: String(item.id || ''),
+      name: String(item.name || '이름 없음').slice(0, 200),
+      category: CATEGORIES.includes(item.category) ? item.category : 'deposit',
+      amount: Math.max(0, Math.round(Number(item.amount) || 0)),
+      details: normalizeHoldingDetails(item.details),
+    }))
+  ).map((item) => ({
     id: String(item.id || ''),
     name: String(item.name || '이름 없음').slice(0, 200),
     category: CATEGORIES.includes(item.category) ? item.category : 'deposit',

@@ -199,7 +199,10 @@ function isTrackedKrStock(holding) {
   if (!holding?.details?.ticker) return false;
   const market = String(holding.details.market || '').toUpperCase();
   const currency = String(holding.details.currency || '').toUpperCase();
-  return market === 'KR' || (currency === 'KRW' && /^\d{6,9}[A-Z]?$/.test(String(holding.details.ticker || '')));
+  if (market === 'US' || currency === 'USD') return false;
+  if (market === 'KR') return true;
+  const ticker = normalizeTickerSymbol(holding.details.ticker);
+  return currency === 'KRW' && /^[A-Z0-9]{5,12}$/.test(ticker);
 }
 
 function getTrackedQuoteKey({ market, symbol }) {
@@ -805,6 +808,8 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
           } else if (Number.isFinite(Number(details.nativeAmount))) {
             holding.amount = Math.round(Number(details.nativeAmount));
             details.summary = buildKrwSummary(details, quote.price, details.nativeAmount);
+          } else {
+            details.summary = buildKrwSummary(details, quote.price, null);
           }
         }
       }
@@ -957,4 +962,5 @@ module.exports = {
   KR_PUBLIC_DATA_PRICE_OPERATIONS,
   findKrPublicDataItem,
   buildKrQuoteFromPublicDataItem,
+  isTrackedKrStock,
 };

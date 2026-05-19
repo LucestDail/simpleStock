@@ -80,6 +80,7 @@ const ACTION_SCHEMA = {
     holding: {
       type: 'object',
       properties: {
+        id: { type: 'string' },
         name: { type: 'string' },
         category: {
           type: 'string',
@@ -89,6 +90,23 @@ const ACTION_SCHEMA = {
         mode: {
           type: 'string',
           enum: ['set', 'delta'],
+        },
+        details: {
+          type: 'object',
+          properties: {
+            account: { type: 'string' },
+            currency: { type: 'string' },
+            ticker: { type: 'string' },
+            market: { type: 'string' },
+            quantity: { type: 'number' },
+            averagePrice: { type: 'number' },
+            currentPrice: { type: 'number' },
+            summary: { type: 'string' },
+            orders: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+          },
         },
       },
     },
@@ -1087,6 +1105,11 @@ async function buildSupervisorPlan(userInput, context) {
         'task 는 portfolio, memory, manager, research 타입만 사용한다.',
         '사용자 요청이 자산 입력/수정/삭제, 설정 변경, 반복 작업 예약/취소에 해당하면 actions 배열에 실제 변경 계획을 넣는다.',
         '자산 입력은 holding 정보, 설정 변경은 profileChanges, 반복 작업은 scheduleTask, 취소는 cancelTarget에 담는다.',
+        '티커·종목코드·수량 등 세부 정보만 바꿀 때는 upsertHolding.holding.details 에 ticker 등 변경 필드만 넣고, 금액을 바꾸지 않으면 amount 필드는 생략한다.',
+        '가격 관찰용 0주 종목은 category=stock, holding.details.ticker·quantity=0 를 반드시 채운다. deposit 카테고리에 넣지 않는다.',
+        '한국 종목(삼성전자 005930): details.currency=KRW, market=KR. 미국 종목(NVDA): details.currency=USD, market=US.',
+        'holding.name 은 종목명만(예: 삼성전자, NVIDIA) 쓰고, 설명·괄호 문구는 name에 넣지 않는다.',
+        '가능하면 holding.id 로 대상 자산을 지정하고, 동일 이름이 여러 category에 있으면 holding.category(stock 등)를 반드시 넣는다.',
         'removeHolding 시 holding.name은 필수이며, 같은 이름이 서로 다른 category(예: 주식·예금)에 중복될 수 있으면 holding.category에 deposit/installment/stock/fund/pension 중 하나를 반드시 넣는다.',
         'cancelScheduledTask 는 가능하면 cancelTarget.taskId(예약 작업 id)로 지정하고, 모를 때만 title+taskType으로 지정한다.',
         '반복 작업은 가능하면 cronExpression, nextRunLabel, taskType 을 함께 채운다.',
