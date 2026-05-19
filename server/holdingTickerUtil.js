@@ -101,7 +101,13 @@ function buildEquityDetailsPatch({ name, details }) {
   };
 }
 
+const PROTECTED_HOLDING_CATEGORIES = new Set(['fund', 'installment', 'pension']);
+
 function repairWatchlistHolding(holding) {
+  if (PROTECTED_HOLDING_CATEGORIES.has(holding?.category)) {
+    return holding;
+  }
+
   const { detailsPatch, cleanName } = buildEquityDetailsPatch({
     name: holding?.name,
     details: holding?.details,

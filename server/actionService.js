@@ -205,12 +205,18 @@ async function applyConversationActions(actions = []) {
         const rawName = normalizeText(payload.name);
         const rawDetailsPatch = normalizeHoldingDetails(payload.details);
         const isNonEquityCategory = NON_EQUITY_CATEGORIES.has(payload.category);
-        const equityPatch = isNonEquityCategory
-          ? { detailsPatch: rawDetailsPatch, cleanName: rawName }
-          : buildEquityDetailsPatch({
-              name: rawName,
-              details: rawDetailsPatch,
-            });
+        let equityPatch;
+        if (isNonEquityCategory) {
+          const sanitizedPatch = rawDetailsPatch
+            ? { ...rawDetailsPatch, ticker: '', market: '', quantity: null, averagePrice: null }
+            : null;
+          equityPatch = { detailsPatch: sanitizedPatch, cleanName: rawName };
+        } else {
+          equityPatch = buildEquityDetailsPatch({
+            name: rawName,
+            details: rawDetailsPatch,
+          });
+        }
         const name = equityPatch.cleanName || rawName;
         const detailsPatch = equityPatch.detailsPatch;
         const category = inferHoldingCategory(payload.category, detailsPatch);
