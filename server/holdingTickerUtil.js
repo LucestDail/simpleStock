@@ -63,6 +63,17 @@ function mergeHoldingDetailFields(existing, patch) {
     if (typeof value === 'string' && !value.trim()) continue;
     if (key === 'orders' && Array.isArray(value) && !value.length) continue;
     if (typeof value === 'number' && !Number.isFinite(value)) continue;
+    // quantity:0 + existing.quantity>0 → applyEquityWatchDefaults 가 자동으로 추가한
+    // default 0 이 update 시 기존 보유량을 덮어쓰는 것을 방지.
+    // (새 holding 추가 시엔 base.quantity 가 없어 정상적으로 0 이 들어감)
+    if (
+      key === 'quantity' &&
+      value === 0 &&
+      Number.isFinite(Number(base.quantity)) &&
+      Number(base.quantity) > 0
+    ) {
+      continue;
+    }
     base[key] = value;
   }
   return Object.keys(base).length ? base : null;

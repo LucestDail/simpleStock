@@ -169,11 +169,14 @@ function inferHoldingCategory(category, detailsPatch) {
  * 공공데이터포털·Yahoo Search 로 ticker 를 동적으로 조회해 details 를 보강한다.
  * AI 가 ticker 를 누락해도 자연어 종목명만으로 분류·시세 조회가 가능하도록 만드는 안전망.
  */
+function holdingNameContainsKoreanText(name) {
+  return /[가-힣]/.test(String(name || ''));
+}
+
 async function enrichUpsertHoldingActionsWithTicker(actions) {
   if (!Array.isArray(actions) || actions.length === 0) return;
   const { resolveTickerByName } = require('./tickerLookupService');
   const {
-    extractTickerFromHoldingName,
     isKrEquityTicker,
     isUsEquityTicker,
   } = require('./holdingTickerUtil');
@@ -188,6 +191,10 @@ async function enrichUpsertHoldingActionsWithTicker(actions) {
 
     const existingTicker = normalizeText(holding.details?.ticker);
     const existingMarket = normalizeText(holding.details?.market).toUpperCase();
+
+    if (explicitCategory === 'deposit' && !existingTicker) continue;
+
+    // AI 가 보낸 ticker 의 정합성 평가
     const tickerValidShape = existingTicker && isEquityTicker(existingTicker);
     const tickerMarketAligned =
       !existingMarket
@@ -197,16 +204,17 @@ async function enrichUpsertHoldingActionsWithTicker(actions) {
         : existingMarket === 'US'
         ? isUsEquityTicker(existingTicker)
         : tickerValidShape;
-    const tickerSuspicious = existingTicker && (!tickerValidShape || !tickerMarketAligned);
 
-    if (explicitCategory === 'deposit' && !existingTicker) continue;
-    if (tickerValidShape && tickerMarketAligned) continue;
+    // 한글 이름인 경우 AI ticker 를 신뢰하지 않고 항상 검색으로 검증
+    // (예: "엔비디아"+NVDA, "레코 시스템즈"+109230 같이 AI 가 추측한 경우 모두 재검증)
+    const nameIsKorean = holdingNameContainsKoreanText(name);
+    const aiTickerLooksGuessed = nameIsKorean && existingTicker;
+    const tickerSuspicious =
+      existingTicker && (!tickerValidShape || !tickerMarketAligned);
 
-    if (!tickerSuspicious) {
-      const cleanName = name.replace(/\s*\(.*?\)\s*/g, ' ').trim();
-      if (extractTickerFromHoldingName(name) || extractTickerFromHoldingName(cleanName)) {
-        continue;
-      }
+    // 검색이 불필요한 케이스: ticker 형식·market 일치 + 한글 이름 아님 (예: "QLD" + market US)
+    if (!aiTickerLooksGuessed && !tickerSuspicious && tickerValidShape && tickerMarketAligned) {
+      continue;
     }
 
     const cleanName = name.replace(/\s*\(.*?\)\s*/g, ' ').trim();
@@ -225,19 +233,34 @@ async function enrichUpsertHoldingActionsWithTicker(actions) {
       }
     }
 
-    if (!resolved) continue;
+    if (!resolved) {
+      // lookup 실패하고 AI ticker 가 의심스러운 상태면 details 의 ticker/market 만 비워서
+      // 가짜 ticker(예: 'KR', '109230')가 저장되는 것을 방지. 단, holding.details 가
+      // 원래 없었다면 새로 만들지 않는다(다른 가드 로직과 충돌 방지).
+      if ((tickerSuspicious || aiTickerLooksGuessed) && holding.details && typeof holding.details === 'object') {
+        logInfo('action.enrich.unresolved_drop_ticker', {
+          name,
+          dropped: existingTicker,
+          reason: tickerSuspicious ? 'shape_or_market_mismatch' : 'korean_name_unresolved',
+        });
+        holding.details.ticker = '';
+        holding.details.market = '';
+      }
+      continue;
+    }
 
-    holding.details = holding.details && typeof holding.details === 'object' ? holding.details : {};
-    if (tickerSuspicious || !normalizeText(holding.details.ticker)) {
-      holding.details.ticker = resolved.ticker;
+    // lookup 결과를 적용해야 할 때만 details 객체를 만든다(원래 없는 details 를 이유 없이
+    // {} 로 만들면 actionService 의 'rawDetailsPatch null 가드' 가 깨져 quantity:85 가
+    // patch.quantity:0 으로 덮어씌워질 수 있음).
+    if (!holding.details || typeof holding.details !== 'object') {
+      holding.details = {};
     }
-    if (resolved.market && (tickerSuspicious || !normalizeText(holding.details.market))) {
-      holding.details.market = resolved.market;
-    }
-    if (resolved.currency && (tickerSuspicious || !normalizeText(holding.details.currency))) {
-      holding.details.currency = resolved.currency;
-    }
-    if (holding.details.quantity == null) holding.details.quantity = 0;
+    // 한글 이름이거나 의심스러운 ticker 면 lookup 결과로 강제 덮어쓰기
+    const shouldOverwrite = aiTickerLooksGuessed || tickerSuspicious || !existingTicker;
+    if (shouldOverwrite) holding.details.ticker = resolved.ticker;
+    if (shouldOverwrite && resolved.market) holding.details.market = resolved.market;
+    if (shouldOverwrite && resolved.currency) holding.details.currency = resolved.currency;
+    // quantity 는 절대 enrich 에서 건드리지 않는다 (기존 보유량을 0 으로 덮어쓰는 사고 방지).
     if (!explicitCategory || explicitCategory === 'deposit') {
       holding.category = 'stock';
     }
@@ -247,7 +270,13 @@ async function enrichUpsertHoldingActionsWithTicker(actions) {
       market: resolved.market,
       source: resolved.source,
       fromCache: Boolean(resolved.fromCache),
-      replacedSuspiciousTicker: tickerSuspicious ? existingTicker : null,
+      sourceUrl: resolved.sourceUrl || null,
+      replacedAiTicker: shouldOverwrite ? existingTicker : null,
+      reasonForOverride: aiTickerLooksGuessed
+        ? 'korean_name_force_verify'
+        : tickerSuspicious
+        ? 'shape_or_market_mismatch'
+        : 'no_existing_ticker',
     });
   }
 }
