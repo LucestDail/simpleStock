@@ -373,6 +373,30 @@ async function applyConversationActions(actions = []) {
             current.category = 'stock';
           }
 
+          // deposit/installment/pension(KRW) 은 amount 가 곧 KRW 평가액이므로
+          // amount 갱신 시 details.summary 와 details.nativeAmount 도 동기화한다.
+          // (이 동기화가 없으면 화면에 stale summary 가 amount 와 함께 동시 노출됨)
+          if (amountChanged) {
+            const cat = current.category;
+            if (cat === 'deposit' || cat === 'installment' || cat === 'pension') {
+              if (!current.details || typeof current.details !== 'object') {
+                current.details = {};
+              }
+              const ccy = String(current.details.currency || '').toUpperCase();
+              if (!ccy || ccy === 'KRW') {
+                current.details.nativeAmount = current.amount;
+                const newAmtStr = current.amount.toLocaleString('ko-KR');
+                const oldSummary = String(current.details.summary || '').trim();
+                if (oldSummary && /[0-9,]+\s*원/.test(oldSummary)) {
+                  // 기존 양식 보존하며 숫자 부분만 교체 (예: "예수금 652,617원" → "예수금 782,176원")
+                  current.details.summary = oldSummary.replace(/[0-9,]+\s*원/, `${newAmtStr}원`);
+                } else {
+                  current.details.summary = `${current.name} ${newAmtStr}원`;
+                }
+              }
+            }
+          }
+
           const actuallyChanged =
             amountChanged ||
             shouldMergeDetails ||
