@@ -7,10 +7,11 @@ const os = require('os');
 const crypto = require('crypto');
 const cron = require('node-cron');
 const { CATEGORIES, mutateStore } = require('./server/dataStore');
-const { getCategoryShares } = require('./server/contextBuilder');
+const { buildSnapshot } = require('./server/snapshotService');
 const { APP_TIMEZONE, getDateInTimezone, getDateTimeInTimezone } = require('./server/time');
 const { AI_DAILY_CRON, getAiSettings, isAiConfigured } = require('./server/aiService');
 const { syncScheduledTasks } = require('./server/taskService');
+const { ensureManagerBriefSchedule } = require('./server/managerBriefSchedule');
 const { logInfo, logError } = require('./server/logger');
 const {
   createThread,
@@ -36,17 +37,47 @@ const {
   startMarketDataPolling,
   getMarketSnapshot,
 } = require('./server/marketDataService');
+const { updateSettings, AI_PRESETS, MARKET_PROVIDER_OPTIONS } = require('./server/settingsService');
+const {
+  getMemoryState,
+  deleteLongTermMemory,
+  setLongTermMemoryPinned,
+  updateThreadSummary,
+  createLongTermMemory,
+} = require('./server/memoryService');
+const {
+  buildImportPreview,
+  applyImportWithUndo,
+  undoLastImport,
+} = require('./server/importPreviewService');
 
 const PORT = Number(process.env.PORT) || 50000;
+const APP_ACCESS_TOKEN = String(process.env.APP_ACCESS_TOKEN || '').trim();
+const LOG_REQUEST_BODY = String(process.env.LOG_REQUEST_BODY || 'false').trim().toLowerCase() === 'true';
 const app = express();
 
 app.use(express.json({ limit: '2mb' }));
 
+function extractAccessToken(req) {
+  const authHeader = String(req.headers.authorization || '');
+  if (authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7).trim();
+  }
+  return String(req.headers['x-access-token'] || req.query.token || '').trim();
+}
+
+function requireAccessToken(req, res, next) {
+  if (!APP_ACCESS_TOKEN) return next();
+  const token = extractAccessToken(req);
+  if (token && token === APP_ACCESS_TOKEN) return next();
+  return res.status(401).json({ error: '인증이 필요합니다. APP_ACCESS_TOKEN을 확인하세요.' });
+}
+
 function summarizeBody(req) {
-  if (!req.body || typeof req.body !== 'object') return undefined;
+  if (!LOG_REQUEST_BODY || !req.body || typeof req.body !== 'object') return undefined;
   if (req.path.includes('/messages')) {
     return {
-      contentPreview: String(req.body.content || '').slice(0, 120),
+      contentLength: String(req.body.content || '').length,
     };
   }
   if (req.path === '/api/portfolio') {
@@ -90,6 +121,8 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use('/api', requireAccessToken);
+
 function sanitizeHoldings(holdings) {
   const seen = new Set();
   return holdings.map((holding) => {
@@ -128,17 +161,6 @@ function sanitizeHoldings(holdings) {
       details,
     };
   });
-}
-
-function buildSnapshot(holdings, date) {
-  const total = holdings.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-  const shares = getCategoryShares(holdings);
-  const byCategory = Object.fromEntries(shares.map((item) => [item.category, item.amount]));
-  return {
-    date,
-    total,
-    byCategory,
-  };
 }
 
 app.get('/api/portfolio', (req, res) => {
@@ -414,23 +436,130 @@ app.get('/api/system/status', (req, res) => {
     market: getMarketSnapshot(),
     dataFiles: buildServerStatusPayload().system.dataFiles,
     orchestrationNotes: ORCHESTRATION_NOTES,
-    ai: getAiSettings(),
     latestManagerReport: getLatestManagerReport(),
+    aiPresets: AI_PRESETS,
+    marketProviderOptions: MARKET_PROVIDER_OPTIONS,
   });
 });
 
-const dist = path.join(__dirname, 'dist');
-app.use(express.static(dist));
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) return next();
-  const index = path.join(dist, 'index.html');
-  if (!fs.existsSync(index)) {
-    return res.status(503).send('프론트엔드 빌드가 없습니다. npm run build 실행 후 다시 시도하세요.');
-  }
-  return res.sendFile(index);
+app.get('/api/memory', (req, res) => {
+  res.json(getMemoryState());
 });
 
-function startAiSchedule() {
+app.post('/api/memory/long-term', async (req, res) => {
+  try {
+    const memory = await createLongTermMemory(req.body || {});
+    res.status(201).json({ memory, ...getMemoryState() });
+  } catch (error) {
+    res.status(400).json({ error: error.message || '기억 저장 실패' });
+  }
+});
+
+app.delete('/api/memory/long-term/:memoryId', async (req, res) => {
+  try {
+    const removed = await deleteLongTermMemory(req.params.memoryId);
+    if (!removed) return res.status(404).json({ error: '기억을 찾을 수 없습니다.' });
+    res.json(getMemoryState());
+  } catch (error) {
+    res.status(500).json({ error: error.message || '기억 삭제 실패' });
+  }
+});
+
+app.patch('/api/memory/long-term/:memoryId', async (req, res) => {
+  try {
+    const updated = await setLongTermMemoryPinned(req.params.memoryId, req.body?.pinned !== false);
+    if (!updated) return res.status(404).json({ error: '기억을 찾을 수 없습니다.' });
+    res.json(getMemoryState());
+  } catch (error) {
+    res.status(500).json({ error: error.message || '기억 갱신 실패' });
+  }
+});
+
+app.put('/api/memory/thread-summaries/:summaryId', async (req, res) => {
+  try {
+    const updated = await updateThreadSummary(req.params.summaryId, req.body || {});
+    if (!updated) return res.status(404).json({ error: '스레드 요약을 찾을 수 없습니다.' });
+    res.json({ summary: updated, ...getMemoryState() });
+  } catch (error) {
+    res.status(500).json({ error: error.message || '스레드 요약 저장 실패' });
+  }
+});
+
+app.put('/api/system/settings', async (req, res) => {
+  try {
+    const saved = await updateSettings(req.body || {});
+    res.json({
+      settings: saved,
+      system: getSystemStatus(),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || '설정 저장 실패' });
+  }
+});
+
+app.post('/api/import/preview', (req, res) => {
+  try {
+    res.json(buildImportPreview(req.body?.content || ''));
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'import 미리보기 실패' });
+  }
+});
+
+app.post('/api/import/apply', async (req, res) => {
+  try {
+    const result = await applyImportWithUndo(req.body?.content || '');
+    const payload = buildPortfolioPayload();
+    broadcast('portfolio.updated', payload);
+    if (result.workspacePatch) {
+      broadcast('workspace.patch', { workspacePatch: result.workspacePatch });
+    }
+    scheduleMarketRefresh('import:apply', { force: true, delayMs: 300 });
+    res.json({
+      ...result,
+      ...payload,
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'import 적용 실패' });
+  }
+});
+
+app.post('/api/import/undo', async (req, res) => {
+  try {
+    const result = await undoLastImport();
+    const payload = buildPortfolioPayload();
+    broadcast('portfolio.updated', payload);
+    res.json({ ...result, ...payload });
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'import 되돌리기 실패' });
+  }
+});
+
+const dist = path.join(__dirname, 'dist');
+app.use(express.static(dist, { index: false }));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  const indexPath = path.join(dist, 'index.html');
+  if (!fs.existsSync(indexPath)) {
+    return res.status(503).send('프론트엔드 빌드가 없습니다. npm run build 실행 후 다시 시도하세요.');
+  }
+  let html = fs.readFileSync(indexPath, 'utf8');
+  if (APP_ACCESS_TOKEN) {
+    const bootstrap = `<script>window.__SIMPLESTOCK_ACCESS_TOKEN__=${JSON.stringify(APP_ACCESS_TOKEN)};</script>`;
+    html = html.includes('</head>')
+      ? html.replace('</head>', `${bootstrap}</head>`)
+      : `${bootstrap}${html}`;
+  }
+  res.type('html').send(html);
+});
+
+async function startAiSchedule() {
+  const usePresetBriefSchedule =
+    String(process.env.MANAGER_BRIEF_PRESET_SCHEDULE ?? 'true').trim().toLowerCase() !== 'false';
+
+  if (usePresetBriefSchedule) {
+    await ensureManagerBriefSchedule();
+  }
+
   syncScheduledTasks();
   startMarketDataPolling();
 
@@ -442,10 +571,18 @@ function startAiSchedule() {
     return;
   }
 
-  if (!cron.validate(AI_DAILY_CRON)) {
-    logInfo('schedule.invalid_cron', {
-      cronExpression: AI_DAILY_CRON,
-    });
+  const legacyCronEnabled =
+    !usePresetBriefSchedule &&
+    AI_DAILY_CRON &&
+    cron.validate(AI_DAILY_CRON);
+
+  if (!legacyCronEnabled) {
+    if (usePresetBriefSchedule) {
+      logInfo('schedule.preset_manager_brief', {
+        timezone: APP_TIMEZONE,
+        slots: '22,23,06,09,10,18 weekdays',
+      });
+    }
     return;
   }
 
@@ -484,7 +621,7 @@ app.listen(PORT, '0.0.0.0', () => {
     timezone: APP_TIMEZONE,
     localTime: getDateTimeInTimezone(new Date(), APP_TIMEZONE),
   });
-  startAiSchedule();
+  void startAiSchedule();
 });
 
 process.on('unhandledRejection', (error) => {

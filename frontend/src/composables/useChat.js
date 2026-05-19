@@ -1,4 +1,6 @@
 import { ref } from 'vue';
+import { apiFetch, readApiError } from '../lib/apiClient';
+import { consumeNdjsonStream } from '../lib/ndjson';
 
 const threads = ref([]);
 const activeThread = ref(null);
@@ -159,7 +161,7 @@ function removeThreadLocal(threadId) {
 
 async function syncThreadState(threadId) {
   if (!threadId) return null;
-  const res = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}`);
+  const res = await apiFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.error || '대화 상태를 다시 불러오지 못했습니다.');
@@ -173,40 +175,13 @@ async function syncThreadState(threadId) {
   return data;
 }
 
-async function consumeNdjsonStream(body, onEvent) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-
-    let lineBreakIndex = buffer.indexOf('\n');
-    while (lineBreakIndex >= 0) {
-      const line = buffer.slice(0, lineBreakIndex).trim();
-      buffer = buffer.slice(lineBreakIndex + 1);
-      if (line) {
-        onEvent(JSON.parse(line));
-      }
-      lineBreakIndex = buffer.indexOf('\n');
-    }
-
-    if (done) break;
-  }
-
-  if (buffer.trim()) {
-    onEvent(JSON.parse(buffer.trim()));
-  }
-}
-
 export function useChat() {
   async function fetchThreads({ autoCreate = false } = {}) {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch('/api/chat/threads');
-      if (!res.ok) throw new Error('대화 목록을 불러오지 못했습니다.');
+      const res = await apiFetch('/api/chat/threads');
+      if (!res.ok) throw new Error(await readApiError(res, '대화 목록을 불러오지 못했습니다.'));
       const data = await res.json();
       applyThreadsPayload(data);
 
@@ -232,7 +207,7 @@ export function useChat() {
   }
 
   async function createThread(title = '새 대화') {
-    const res = await fetch('/api/chat/threads', {
+    const res = await apiFetch('/api/chat/threads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
@@ -261,7 +236,7 @@ export function useChat() {
   }
 
   async function removeThread(threadId) {
-    const res = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, {
+    const res = await apiFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, {
       method: 'DELETE',
     });
     const data = await res.json().catch(() => ({}));
@@ -288,7 +263,7 @@ export function useChat() {
     try {
       let res;
       try {
-        res = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}/messages/stream`, {
+        res = await apiFetch(`/api/chat/threads/${encodeURIComponent(threadId)}/messages/stream`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content }),
@@ -460,6 +435,19 @@ export function useChat() {
     }
   }
 
+  function getLastUserMessageContent() {
+    const userMessages = messages.value.filter((message) => message.role === 'user');
+    return String(userMessages.at(-1)?.content || '').trim();
+  }
+
+  async function retryLastMessage() {
+    const content = getLastUserMessageContent();
+    if (!content) {
+      throw new Error('다시 보낼 사용자 메시지가 없습니다.');
+    }
+    return sendMessageContent(content);
+  }
+
   return {
     threads,
     activeThread,
@@ -469,6 +457,8 @@ export function useChat() {
     sending,
     error,
     streamStatus,
+    getLastUserMessageContent,
+    retryLastMessage,
     applySystemPayload,
     applyThreadsPayload,
     upsertThread,

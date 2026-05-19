@@ -1,7 +1,8 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import PanelShell from './PanelShell.vue';
 import { usePortfolio, formatKRW, formatUSD } from '../../composables/usePortfolio';
+import { useUi } from '../../composables/useUi';
 import { useWorkspace } from '../../composables/useWorkspace';
 
 const props = defineProps({
@@ -11,7 +12,19 @@ const props = defineProps({
   },
 });
 
-const { total, categoryShares, dayOverDay, lastSnapshot, busyState, currentUsdKrwRate, holdings } = usePortfolio();
+const {
+  total,
+  categoryShares,
+  dayOverDay,
+  lastSnapshot,
+  busyState,
+  currentUsdKrwRate,
+  holdings,
+  sortedSnapshots,
+  addSnapshot,
+  system,
+} = usePortfolio();
+const { notify } = useUi();
 const {
   selectedCategoryId,
   selectCategory,
@@ -19,7 +32,9 @@ const {
   selectHolding,
   applyWorkspacePatch,
   openDrawer,
+  recordActivity,
 } = useWorkspace();
+const snapshotBusy = ref(false);
 
 const summaryCards = computed(() => [
   {
@@ -58,6 +73,52 @@ const filteredHoldings = computed(() =>
 const selectedCategoryLabel = computed(
   () => visibleCategoryShares.value.find((item) => item.id === selectedCategoryId.value)?.label || '전체 자산'
 );
+const trendSnapshots = computed(() =>
+  [...sortedSnapshots.value]
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    .slice(-14)
+);
+const trendMax = computed(() => {
+  const values = trendSnapshots.value.map((item) => Number(item.total) || 0);
+  return Math.max(...values, 1);
+});
+const hasTodaySnapshot = computed(() => {
+  const today = system.value.todayLocalDate;
+  return Boolean(today && sortedSnapshots.value.some((item) => item.date === today));
+});
+
+async function saveTodaySnapshot() {
+  snapshotBusy.value = true;
+  try {
+    await addSnapshot(system.value.todayLocalDate || undefined);
+    notify({ tone: 'success', message: '오늘 스냅샷을 저장했습니다.' });
+    recordActivity({
+      type: 'portfolio',
+      title: '스냅샷 저장',
+      description: system.value.todayLocalDate || '오늘',
+    });
+  } catch (error) {
+    notify({ tone: 'error', message: error.message || '스냅샷 저장 실패' });
+  } finally {
+    snapshotBusy.value = false;
+  }
+}
+
+function formatSnapshotDate(date) {
+  if (!date) return '';
+  const [, month, day] = String(date).split('-');
+  return month && day ? `${Number(month)}/${Number(day)}` : date;
+}
+
+function formatDeltaPct(snapshot, index) {
+  if (index <= 0) return '';
+  const prev = trendSnapshots.value[index - 1];
+  const current = Number(snapshot.total) || 0;
+  const previous = Number(prev?.total) || 0;
+  if (!previous) return '';
+  const pct = Math.round(((current - previous) / previous) * 1000) / 10;
+  return `${pct >= 0 ? '+' : ''}${pct}%`;
+}
 
 function inspectCategory(categoryId) {
   if (selectedCategoryId.value === categoryId) {
@@ -152,7 +213,7 @@ function inspectHolding(holding) {
 
 <template>
   <PanelShell
-    title="포트폴리오 개요 / 자산 현황"
+    title="포트폴리오 현황"
     subtitle="overview"
     :span="panel.span"
     :highlighted="panel.highlighted"
@@ -187,6 +248,45 @@ function inspectHolding(holding) {
     </div>
     <div v-else class="empty-box">표시할 카테고리 요약이 아직 없습니다.</div>
 
+    <section v-if="trendSnapshots.length" class="trend-section">
+      <div class="trend-head">
+        <strong>일별 총액 추이</strong>
+        <span v-if="dayOverDay" class="mono-num trend-delta" :class="dayOverDay.delta >= 0 ? 'up' : 'down'">
+          전일 대비 {{ dayOverDay.delta >= 0 ? '+' : '' }}{{ formatKRW(dayOverDay.delta) }}
+          <template v-if="dayOverDay.pct != null"> ({{ dayOverDay.pct >= 0 ? '+' : '' }}{{ dayOverDay.pct }}%)</template>
+        </span>
+        <button
+          type="button"
+          class="btn-snapshot"
+          :disabled="snapshotBusy || busyState.addSnapshot || hasTodaySnapshot"
+          @click="saveTodaySnapshot"
+        >
+          {{ hasTodaySnapshot ? '오늘 저장됨' : snapshotBusy ? '저장 중…' : '수동 저장' }}
+        </button>
+      </div>
+      <div class="trend-chart" role="img" aria-label="최근 스냅샷 총액 막대 차트">
+        <div
+          v-for="(snapshot, index) in trendSnapshots"
+          :key="snapshot.date"
+          class="trend-bar"
+        >
+          <div
+            class="trend-bar__fill"
+            :style="{ height: `${Math.max(8, Math.round((Number(snapshot.total) / trendMax) * 100))}%` }"
+            :title="`${snapshot.date}: ${formatKRW(snapshot.total)}`"
+          />
+          <span class="trend-bar__label mono-num">{{ formatSnapshotDate(snapshot.date) }}</span>
+          <span
+            v-if="formatDeltaPct(snapshot, index)"
+            class="trend-bar__pct mono-num"
+            :class="formatDeltaPct(snapshot, index).startsWith('+') ? 'up' : 'down'"
+          >
+            {{ formatDeltaPct(snapshot, index) }}
+          </span>
+        </div>
+      </div>
+    </section>
+
     <div class="section-head">
       <strong>{{ selectedCategoryLabel }}</strong>
       <span>
@@ -195,7 +295,7 @@ function inspectHolding(holding) {
     </div>
 
     <div v-if="!filteredHoldings.length" class="empty-box">
-      {{ selectedCategoryId ? '선택한 카테고리에 등록된 자산이 없습니다.' : '등록된 자산이 없습니다.' }}
+      {{ selectedCategoryId ? '이 카테고리에 등록된 자산이 없습니다. Quant Manager 대화로 추가하세요.' : '등록된 자산이 없습니다. Quant Manager 대화로 말해 주세요. 예: 「KB주식 10주 추가」' }}
     </div>
     <div v-else class="asset-list">
       <article v-for="holding in filteredHoldings" :key="holding.id" class="holding-row">
@@ -261,6 +361,101 @@ function inspectHolding(holding) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.trend-section {
+  display: grid;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.trend-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.trend-head strong {
+  color: var(--color-ink);
+  font-size: 12px;
+}
+
+.trend-delta {
+  font-size: 11px;
+}
+
+.trend-delta.up {
+  color: var(--color-semantic-up);
+}
+
+.trend-delta.down {
+  color: var(--color-semantic-down);
+}
+
+.btn-snapshot {
+  margin-left: auto;
+  height: 22px;
+  border: none;
+  border-radius: var(--rounded-pill);
+  padding: 0 8px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-snapshot:disabled {
+  background: var(--color-surface-strong);
+  color: var(--color-muted);
+  cursor: not-allowed;
+}
+
+.trend-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  min-height: 72px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.trend-bar {
+  flex: 1 0 28px;
+  max-width: 48px;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  align-content: end;
+  min-height: 64px;
+}
+
+.trend-bar__fill {
+  width: 100%;
+  min-height: 8px;
+  border-radius: var(--rounded-xs) var(--rounded-xs) 0 0;
+  background: linear-gradient(180deg, rgba(110, 123, 255, 0.85), rgba(0, 82, 255, 0.55));
+}
+
+.trend-bar__label {
+  font-size: 9px;
+  color: var(--color-muted);
+}
+
+.trend-bar__pct {
+  font-size: 8px;
+}
+
+.trend-bar__pct.up {
+  color: var(--color-semantic-up);
+}
+
+.trend-bar__pct.down {
+  color: var(--color-semantic-down);
 }
 
 .share-list {

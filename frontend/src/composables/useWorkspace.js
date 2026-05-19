@@ -7,7 +7,7 @@ const BASE_PANELS = [
     column: 'left',
     span: 'xs',
     priority: 5,
-    visible: true,
+    visible: false,
     detailType: 'system',
   },
   {
@@ -29,12 +29,21 @@ const BASE_PANELS = [
     detailType: 'threadDetail',
   },
   {
+    id: 'managerHub',
+    title: '매니저 허브',
+    column: 'right',
+    span: 'full',
+    priority: 5,
+    visible: true,
+    detailType: 'insight',
+  },
+  {
     id: 'insights',
     title: '라이브 인사이트',
     column: 'right',
     span: 'xs',
     priority: 5,
-    visible: true,
+    visible: false,
     detailType: 'insight',
   },
   {
@@ -43,7 +52,7 @@ const BASE_PANELS = [
     column: 'right',
     span: 'xs',
     priority: 10,
-    visible: true,
+    visible: false,
     detailType: 'managerBrief',
   },
   {
@@ -52,7 +61,7 @@ const BASE_PANELS = [
     column: 'right',
     span: 'xs',
     priority: 20,
-    visible: true,
+    visible: false,
     detailType: 'system',
   },
   {
@@ -61,7 +70,7 @@ const BASE_PANELS = [
     column: 'right',
     span: 'xs',
     priority: 30,
-    visible: true,
+    visible: false,
     detailType: 'threadDetail',
   },
   {
@@ -70,7 +79,7 @@ const BASE_PANELS = [
     column: 'right',
     span: 'xs',
     priority: 40,
-    visible: true,
+    visible: false,
     detailType: 'profile',
   },
   {
@@ -79,7 +88,7 @@ const BASE_PANELS = [
     column: 'left',
     span: 'xs',
     priority: 30,
-    visible: true,
+    visible: false,
     detailType: 'system',
   },
 ];
@@ -87,9 +96,23 @@ const BASE_PANELS = [
 const ALLOWED_COLUMNS = new Set(['left', 'center', 'right']);
 const ALLOWED_SPANS = new Set(['xs', 'sm', 'md', 'lg', 'xl', 'full']);
 const PANEL_IDS = new Set(BASE_PANELS.map((panel) => panel.id));
-const HIDEABLE_PANELS = new Set(['activity', 'profile', 'system', 'snapshots', 'insights', 'managerBrief']);
+const HIDEABLE_PANELS = new Set([
+  'activity',
+  'profile',
+  'system',
+  'snapshots',
+  'insights',
+  'managerBrief',
+  'managerHub',
+]);
+const RIGHT_HUB_ALIASES = new Set(['insights', 'managerBrief', 'snapshots', 'activity']);
 
-const focusMode = ref('balanced');
+function resolvePanelId(id) {
+  if (RIGHT_HUB_ALIASES.has(id)) return 'managerHub';
+  return PANEL_IDS.has(id) ? id : null;
+}
+
+const focusMode = ref('chat');
 const layoutReason = ref('기본 워크스페이스 레이아웃');
 const selectedHoldingId = ref(null);
 const selectedCategoryId = ref(null);
@@ -144,7 +167,7 @@ function normalizePatch(patch) {
     reason: typeof patch.reason === 'string' ? patch.reason : '',
     hasGeneratedInsights: Array.isArray(patch.generatedInsights),
     highlightPanelIds: Array.isArray(patch.highlightPanelIds)
-      ? patch.highlightPanelIds.filter((id) => PANEL_IDS.has(id))
+      ? [...new Set(patch.highlightPanelIds.map((id) => resolvePanelId(id)).filter(Boolean))]
       : [],
     openDrawer:
       patch.openDrawer && typeof patch.openDrawer === 'object'
@@ -189,9 +212,9 @@ function normalizePatch(patch) {
       : [],
     panelPatches: Array.isArray(patch.panelPatches)
       ? patch.panelPatches
-          .filter((item) => item && PANEL_IDS.has(item.id))
+          .filter((item) => item && resolvePanelId(item.id))
           .map((item) => ({
-            id: item.id,
+            id: resolvePanelId(item.id),
             column: ALLOWED_COLUMNS.has(item.column) ? item.column : null,
             span: ALLOWED_SPANS.has(item.span) ? item.span : null,
             priority: Number.isFinite(Number(item.priority)) ? Number(item.priority) : null,
@@ -332,7 +355,8 @@ function selectThread(threadId) {
 function handleAssistantMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object') return;
   if (metadata.workspacePatch) {
-    applyWorkspacePatch(metadata.workspacePatch, 'assistant');
+    const { openDrawer: _ignoredDrawer, ...patchWithoutDrawer } = metadata.workspacePatch;
+    applyWorkspacePatch(patchWithoutDrawer, 'assistant');
   }
   for (const item of metadata.actionResults || []) {
     if (item?.status !== 'applied') continue;

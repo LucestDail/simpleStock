@@ -373,14 +373,18 @@ async function prepareUserTurn(threadId, cleanContent) {
 }
 
 function buildAssistantMetadata(aiResult, actionState, workspacePatch, extra = {}) {
+  const patch = workspacePatch ? { ...workspacePatch } : null;
+  if (patch?.openDrawer) {
+    delete patch.openDrawer;
+  }
   return {
     citations: aiResult?.citations || [],
     supervisorPlan: aiResult?.supervisorPlan || null,
     specialistOutputs: aiResult?.specialistOutputs || [],
     actionResults: actionState?.actionResults || [],
-    workspacePatch: workspacePatch || null,
-    focusEntities: workspacePatch?.openDrawer?.entityId ? [workspacePatch.openDrawer.entityId] : [],
-    reason: workspacePatch?.reason || '',
+    workspacePatch: patch,
+    focusEntities: [],
+    reason: patch?.reason || '',
     ...extra,
   };
 }

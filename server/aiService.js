@@ -1,6 +1,13 @@
 const { randomUUID } = require('crypto');
 const { APP_TIMEZONE, getDateInTimezone } = require('./time');
 const { logInfo, logError, logWarn } = require('./logger');
+const {
+  getEffectiveAiConfig,
+  recordTokenUsage,
+  AI_PRESETS,
+  loadSettings,
+  getEnvAiDefaults,
+} = require('./settingsService');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 /** @see https://ai.google.dev/gemini-api/docs/models — 기본 Stable: Gemini 3.1 Flash-Lite */
@@ -17,7 +24,10 @@ const GEMINI_THINKING_BUDGET = Math.min(
 const GEMINI_TIMEOUT_MS = Math.max(15_000, Number(process.env.GEMINI_TIMEOUT_MS) || 90_000);
 const GEMINI_MAX_RETRIES = Math.max(0, Number(process.env.GEMINI_MAX_RETRIES) || 2);
 const GEMINI_RETRY_BASE_MS = Math.max(250, Number(process.env.GEMINI_RETRY_BASE_MS) || 1_500);
-const AI_DAILY_CRON = process.env.AI_DAILY_CRON || '5 21 * * *';
+const usePresetBriefSchedule =
+  String(process.env.MANAGER_BRIEF_PRESET_SCHEDULE ?? 'true').trim().toLowerCase() !== 'false';
+const AI_DAILY_CRON =
+  process.env.AI_DAILY_CRON || (usePresetBriefSchedule ? '' : '5 21 * * *');
 
 let googleGenAiModulePromise = null;
 const CATEGORY_LABELS = {
@@ -145,6 +155,7 @@ const WORKSPACE_PATCH_SCHEMA = {
           'chat',
           'insights',
           'managerBrief',
+          'managerHub',
           'snapshots',
           'activity',
           'profile',
@@ -169,6 +180,7 @@ const WORKSPACE_PATCH_SCHEMA = {
               'chat',
               'insights',
               'managerBrief',
+              'managerHub',
               'snapshots',
               'activity',
               'profile',
@@ -193,27 +205,11 @@ const WORKSPACE_PATCH_SCHEMA = {
         required: ['id', 'column', 'span', 'priority', 'visible'],
       },
     },
-    openDrawer: {
-      type: 'object',
-      properties: {
-        type: {
-          type: 'string',
-          enum: ['assetDetail', 'threadDetail', 'managerBrief', 'profile', 'system', 'insight'],
-        },
-        entityId: {
-          type: 'string',
-        },
-        title: {
-          type: 'string',
-        },
-      },
-      required: ['type', 'entityId', 'title'],
-    },
     reason: {
       type: 'string',
     },
   },
-  required: ['focusMode', 'highlightPanelIds', 'generatedInsights', 'panelPatches', 'openDrawer', 'reason'],
+  required: ['focusMode', 'highlightPanelIds', 'generatedInsights', 'panelPatches', 'reason'],
 };
 
 const SUPERVISOR_SCHEMA = {
@@ -299,13 +295,41 @@ function isAiConfigured() {
   return Boolean(GEMINI_API_KEY);
 }
 
+function readAiRuntime() {
+  return getEffectiveAiConfig();
+}
+
+function extractUsageFromResponse(response) {
+  const usage = response?.usageMetadata || response?.usage_metadata || {};
+  return {
+    promptTokens: Number(usage.promptTokenCount || usage.prompt_tokens || 0),
+    candidatesTokens: Number(usage.candidatesTokenCount || usage.candidates_tokens || 0),
+    totalTokens: Number(usage.totalTokenCount || usage.total_tokens || 0),
+  };
+}
+
+async function trackAiUsage(response, label) {
+  try {
+    await recordTokenUsage(extractUsageFromResponse(response), label);
+  } catch {
+    // usage tracking must not break AI flow
+  }
+}
+
 function getAiSettings() {
+  const runtime = readAiRuntime();
+  const env = getEnvAiDefaults();
   return {
     configured: isAiConfigured(),
-    model: GEMINI_MODEL,
-    streamThoughts: GEMINI_INCLUDE_THOUGHTS,
-    thinkingBudget: GEMINI_THINKING_BUDGET,
-    thinkingLevel: GEMINI_INCLUDE_THOUGHTS ? `thoughts+budget:${GEMINI_THINKING_BUDGET}` : 'off',
+    model: runtime.model,
+    streamThoughts: runtime.includeThoughts,
+    thinkingBudget: runtime.thinkingBudget,
+    thinkingLevel: runtime.includeThoughts ? `thoughts+budget:${runtime.thinkingBudget}` : 'off',
+    presetId: runtime.presetId,
+    source: runtime.source,
+    envDefaults: env,
+    presets: AI_PRESETS,
+    savedSettings: loadSettings().ai,
     timezone: APP_TIMEZONE,
     dailyCron: AI_DAILY_CRON,
   };
@@ -374,14 +398,15 @@ function convertJsonSchemaToGeminiSchema(schema, Type) {
 }
 
 async function buildGenerateConfig({ schema = null, useGoogleSearch = false, streamWithThoughts = false }) {
+  const runtime = readAiRuntime();
   const config = {
     ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
   };
 
-  if (streamWithThoughts && GEMINI_INCLUDE_THOUGHTS && GEMINI_THINKING_BUDGET > 0) {
+  if (streamWithThoughts && runtime.includeThoughts && runtime.thinkingBudget > 0) {
     config.thinkingConfig = {
       includeThoughts: true,
-      thinkingBudget: GEMINI_THINKING_BUDGET,
+      thinkingBudget: runtime.thinkingBudget,
     };
   }
 
@@ -535,21 +560,22 @@ function buildPrimaryChatWorkspacePatch({
   userInput,
   context,
   focusMode = 'balanced',
-  highlightPanelIds = ['chat', 'insights'],
-  openDrawer = { type: 'threadDetail', entityId: '', title: '대화 상세' },
+  highlightPanelIds = ['chat', 'managerHub'],
+  openDrawer = null,
   reason = 'Quant Manager 대화를 중심으로 워크스페이스를 유지합니다.',
   panelOverrides = [],
 }) {
   const basePanels = [
     { id: 'status', column: 'left', span: 'sm', priority: 5, visible: true },
     { id: 'overview', column: 'left', span: 'xl', priority: 10, visible: true },
-    { id: 'system', column: 'left', span: 'sm', priority: 30, visible: true },
+    { id: 'system', column: 'left', span: 'sm', priority: 30, visible: false },
     { id: 'chat', column: 'center', span: 'full', priority: 100, visible: true },
-    { id: 'insights', column: 'right', span: 'lg', priority: 5, visible: true },
-    { id: 'managerBrief', column: 'right', span: 'md', priority: 10, visible: true },
-    { id: 'snapshots', column: 'right', span: 'sm', priority: 20, visible: true },
-    { id: 'activity', column: 'right', span: 'md', priority: 30, visible: true },
-    { id: 'profile', column: 'right', span: 'sm', priority: 40, visible: true },
+    { id: 'managerHub', column: 'right', span: 'full', priority: 5, visible: true },
+    { id: 'insights', column: 'right', span: 'lg', priority: 5, visible: false },
+    { id: 'managerBrief', column: 'right', span: 'md', priority: 10, visible: false },
+    { id: 'snapshots', column: 'right', span: 'sm', priority: 20, visible: false },
+    { id: 'activity', column: 'right', span: 'md', priority: 30, visible: false },
+    { id: 'profile', column: 'right', span: 'sm', priority: 40, visible: false },
   ];
   const overrideMap = new Map((panelOverrides || []).map((item) => [item.id, item]));
 
@@ -561,7 +587,7 @@ function buildPrimaryChatWorkspacePatch({
       ...panel,
       ...(overrideMap.get(panel.id) || {}),
     })),
-    openDrawer,
+    ...(openDrawer?.type ? { openDrawer } : {}),
     reason,
   };
 }
@@ -659,14 +685,15 @@ async function generateContent({
 
   const GoogleGenAI = await getGoogleGenAI();
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const runtime = readAiRuntime();
   const startedAt = Date.now();
   const maxAttempts = GEMINI_MAX_RETRIES + 1;
   const config = await buildGenerateConfig({ schema, useGoogleSearch });
 
   logInfo('ai.generate.start', {
     logLabel,
-    model: GEMINI_MODEL,
-    streamThoughts: GEMINI_INCLUDE_THOUGHTS,
+    model: runtime.model,
+    streamThoughts: runtime.includeThoughts,
     useGoogleSearch,
     hasSchema: Boolean(schema),
     timeoutMs: GEMINI_TIMEOUT_MS,
@@ -682,7 +709,7 @@ async function generateContent({
     try {
       const response = await withTimeout(
         ai.models.generateContent({
-          model: GEMINI_MODEL,
+          model: runtime.model,
           contents: buildEnvelope(systemPrompt, userPrompt),
           config,
         }),
@@ -698,6 +725,7 @@ async function generateContent({
         groundingSourceCount: getGroundingSources(response).length,
       });
 
+      await trackAiUsage(response, logLabel);
       return response;
     } catch (error) {
       const retryable = isRetryableAiError(error);
@@ -782,14 +810,15 @@ async function generateContentStream({
 
   const GoogleGenAI = await getGoogleGenAI();
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const runtime = readAiRuntime();
   const startedAt = Date.now();
   const maxAttempts = GEMINI_MAX_RETRIES + 1;
   const config = await buildGenerateConfig({ useGoogleSearch, streamWithThoughts: true });
 
   logInfo('ai.generate.start', {
     logLabel,
-    model: GEMINI_MODEL,
-    streamThoughts: GEMINI_INCLUDE_THOUGHTS,
+    model: runtime.model,
+    streamThoughts: runtime.includeThoughts,
     useGoogleSearch,
     hasSchema: false,
     timeoutMs: GEMINI_TIMEOUT_MS,
@@ -806,7 +835,7 @@ async function generateContentStream({
     try {
       const stream = await withTimeout(
         ai.models.generateContentStream({
-          model: GEMINI_MODEL,
+          model: runtime.model,
           contents: buildEnvelope(systemPrompt, userPrompt),
           config,
         }),
@@ -967,13 +996,8 @@ function buildFallbackPlan(userInput, context) {
     userInput,
     context,
     focusMode: 'balanced',
-    highlightPanelIds: ['chat', 'insights', 'overview'],
-    openDrawer: {
-      type: 'threadDetail',
-      entityId: context.messages?.length ? String(context.messages.at(-1)?.id || '') : '',
-      title: '대화 상세',
-    },
-    reason: 'Quant Manager 대화를 중심으로 현재 자산 상태와 인사이트를 함께 유지합니다.',
+    highlightPanelIds: ['chat', 'managerHub', 'overview'],
+    reason: 'Quant Manager 대화를 중심으로 자산 대시보드와 매니저 허브를 함께 유지합니다.',
   });
 
   if (/(리밸런싱|비중|분산|재배치|재조정)/.test(lowered)) {
@@ -981,18 +1005,11 @@ function buildFallbackPlan(userInput, context) {
       userInput,
       context,
       focusMode: 'rebalance',
-      highlightPanelIds: ['chat', 'managerBrief', 'overview', 'insights'],
-      openDrawer: {
-        type: 'managerBrief',
-        entityId: '',
-        title: '리밸런싱 컨텍스트',
-      },
-      reason: '리밸런싱 요청이라 채팅을 중심으로 자산, 인사이트, 매니저 브리핑을 확장합니다.',
+      highlightPanelIds: ['chat', 'managerHub', 'overview'],
+      reason: '리밸런싱 요청이라 채팅·자산 개요·매니저 허브를 강조합니다.',
       panelOverrides: [
         { id: 'overview', span: 'xl', priority: 10 },
-        { id: 'insights', span: 'xl', priority: 5, visible: true },
-        { id: 'managerBrief', span: 'lg', priority: 10, visible: true },
-        { id: 'profile', visible: false },
+        { id: 'managerHub', span: 'full', priority: 5, visible: true },
       ],
     });
   } else if (/(전략|관리|지시|매니저|오늘)/.test(lowered)) {
@@ -1000,55 +1017,29 @@ function buildFallbackPlan(userInput, context) {
       userInput,
       context,
       focusMode: 'manager',
-      highlightPanelIds: ['chat', 'managerBrief', 'activity', 'insights'],
-      openDrawer: {
-        type: 'managerBrief',
-        entityId: '',
-        title: '매니저 브리핑 상세',
-      },
-      reason: '관리 지시 성격의 요청이라 채팅을 중심으로 브리핑, 활동, 인사이트를 크게 반영합니다.',
-      panelOverrides: [
-        { id: 'insights', span: 'lg', priority: 5, visible: true },
-        { id: 'managerBrief', span: 'xl', priority: 10, visible: true },
-        { id: 'activity', span: 'lg', priority: 20, visible: true },
-        { id: 'profile', visible: false },
-      ],
+      highlightPanelIds: ['chat', 'managerHub'],
+      reason: '관리 지시 요청이라 매니저 허브(브리핑·예약·활동)를 크게 반영합니다.',
+      panelOverrides: [{ id: 'managerHub', span: 'full', priority: 5, visible: true }],
     });
   } else if (/(뉴스|시장|시황|검색|찾아|외부|web|search)/.test(lowered)) {
     workspacePatch = buildPrimaryChatWorkspacePatch({
       userInput,
       context,
       focusMode: 'research',
-      highlightPanelIds: ['chat', 'insights', 'activity', 'system'],
-      openDrawer: {
-        type: 'system',
-        entityId: '',
-        title: '리서치 컨텍스트',
-      },
-      reason: '외부 검색/리서치 요청이라 채팅을 중심으로 인사이트, 활동, 시스템 컨텍스트를 강화합니다.',
-      panelOverrides: [
-        { id: 'insights', span: 'xl', priority: 5, visible: true },
-        { id: 'activity', span: 'lg', priority: 10, visible: true },
-        { id: 'managerBrief', span: 'sm', priority: 20, visible: true },
-        { id: 'profile', visible: false },
-      ],
+      highlightPanelIds: ['chat', 'managerHub'],
+      reason: '리서치 요청이라 매니저 허브 시황·활동 로그를 강조합니다.',
+      panelOverrides: [{ id: 'managerHub', span: 'full', priority: 5, visible: true }],
     });
   } else if (/(프로필|성향|선호|응답 스타일|메모리)/.test(lowered)) {
     workspacePatch = buildPrimaryChatWorkspacePatch({
       userInput,
       context,
       focusMode: 'balanced',
-      highlightPanelIds: ['chat', 'profile', 'insights'],
-      openDrawer: {
-        type: 'profile',
-        entityId: '',
-        title: '프로필 상세',
-      },
-      reason: '프로필/성향 요청이라 채팅을 중심으로 프로필과 인사이트 패널을 확장합니다.',
+      highlightPanelIds: ['chat', 'managerHub', 'profile'],
+      reason: '프로필/성향 요청이라 대화와 매니저 허브를 유지합니다.',
       panelOverrides: [
-        { id: 'insights', span: 'md', priority: 5, visible: true },
+        { id: 'managerHub', span: 'full', priority: 5, visible: true },
         { id: 'profile', span: 'lg', priority: 20, visible: true },
-        { id: 'activity', span: 'sm', priority: 30, visible: true },
       ],
     });
   } else if (/(대화|채팅|상담|질문)/.test(lowered)) {
@@ -1056,18 +1047,9 @@ function buildFallbackPlan(userInput, context) {
       userInput,
       context,
       focusMode: 'chat',
-      highlightPanelIds: ['chat', 'insights', 'activity'],
-      openDrawer: {
-        type: 'threadDetail',
-        entityId: '',
-        title: '대화 상세',
-      },
-      reason: '대화 중심 요청이라 Quant Manager 대화를 primary로 두고 보조 패널을 실시간 재정렬합니다.',
-      panelOverrides: [
-        { id: 'insights', span: 'lg', priority: 5, visible: true },
-        { id: 'activity', span: 'lg', priority: 20, visible: true },
-        { id: 'managerBrief', span: 'md', priority: 30, visible: true },
-      ],
+      highlightPanelIds: ['chat', 'managerHub'],
+      reason: '대화 중심 요청이라 채팅을 primary로 두고 매니저 허브를 보조합니다.',
+      panelOverrides: [{ id: 'managerHub', span: 'full', priority: 5, visible: true }],
     });
   }
 
@@ -1169,8 +1151,10 @@ async function runTaskPrompt(task, taskContext, useGoogleSearch = false) {
 async function executeSpecialistTasks(plan, context, userInput) {
   const allowed = new Set(['portfolio', 'memory', 'manager', 'research']);
   let tasks = (plan.tasks || []).filter((task) => task && allowed.has(task.agentType));
+  let specialistFallbackUsed = false;
   if (!tasks.length) {
     tasks = [buildFallbackResearchTask(userInput)];
+    specialistFallbackUsed = true;
     logInfo('ai.specialist.fallback', { reason: 'empty_or_invalid_tasks', injectedAgentType: 'research' });
   }
 
@@ -1277,6 +1261,7 @@ async function executeSpecialistTasks(plan, context, userInput) {
     });
 
   if (allFailed) {
+    specialistFallbackUsed = true;
     const fb = buildFallbackResearchTask(userInput);
     logInfo('ai.specialist.fallback', { reason: 'all_tasks_failed', injectedAgentType: 'research' });
     try {
@@ -1315,6 +1300,7 @@ async function executeSpecialistTasks(plan, context, userInput) {
   return {
     outputs,
     citations: outputs.flatMap((item) => item.citations || []),
+    specialistFallbackUsed,
   };
 }
 
@@ -1459,10 +1445,20 @@ async function runConversationPipeline({
     };
   }
 
+  let answer = synthesisResult.answer;
+  if (specialistResult.specialistFallbackUsed) {
+    answer = [
+      '> 일부 전문가 단계가 실패해 **조사(research) 전용 폴백**으로 답변을 구성했습니다. 시세·자산 수치는 최신 갱신 여부를 함께 확인해 주세요.',
+      '',
+      answer,
+    ].join('\n');
+  }
+
   return {
-    answer: synthesisResult.answer,
+    answer,
     supervisorPlan,
     specialistOutputs: specialistResult.outputs,
+    specialistFallbackUsed: Boolean(specialistResult.specialistFallbackUsed),
     citations: mergeGroundingSources(specialistResult.citations || [], synthesisResult.citations || []),
   };
 }

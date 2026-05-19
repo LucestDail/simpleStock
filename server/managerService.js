@@ -1,7 +1,15 @@
 const { loadStore, mutateStore } = require('./dataStore');
 const { buildManagerReport, getAiSettings, isAiConfigured } = require('./aiService');
+const {
+  getTokenUsageSummary,
+  AI_PRESETS,
+  loadSettings,
+  getEffectiveMarketProviders,
+} = require('./settingsService');
+const { getMemoryState } = require('./memoryService');
 const { getDateInTimezone } = require('./time');
 const { broadcast } = require('./realtimeService');
+const { upsertPortfolioSnapshot } = require('./snapshotService');
 
 function getLatestManagerReport() {
   const store = loadStore();
@@ -33,9 +41,12 @@ async function runManagerReview(trigger = 'manual', options = {}) {
     extraContext,
   });
 
+  let snapshotSaved = false;
   await mutateStore((draft) => {
     draft.memory.managerReports.unshift(report);
     draft.memory.managerReports = draft.memory.managerReports.slice(0, 30);
+    const today = getDateInTimezone(new Date(), getAiSettings().timezone);
+    snapshotSaved = upsertPortfolioSnapshot(draft.portfolio, today);
   });
 
   const nextStore = loadStore();
@@ -46,6 +57,10 @@ async function runManagerReview(trigger = 'manual', options = {}) {
     },
     system: getSystemStatus(),
   });
+  if (snapshotSaved) {
+    const { buildPortfolioPayload } = require('./payloadService');
+    broadcast('snapshots.updated', buildPortfolioPayload());
+  }
   broadcast('activity.created', {
     activity: {
       type: 'manager',
@@ -65,17 +80,33 @@ async function runManagerReview(trigger = 'manual', options = {}) {
 
 function getSystemStatus() {
   const store = loadStore();
+  const ai = getAiSettings();
+  const krAttempts = store.memory.market?.stats?.krQuoteAttempts || 0;
+  const krFailures = store.memory.market?.stats?.krQuoteFailures || 0;
   return {
-    timezone: getAiSettings().timezone,
-    todayLocalDate: getDateInTimezone(new Date(), getAiSettings().timezone),
+    timezone: ai.timezone,
+    todayLocalDate: getDateInTimezone(new Date(), ai.timezone),
     serverTimeIso: new Date().toISOString(),
     serverTimeLocal: new Intl.DateTimeFormat('ko-KR', {
-      timeZone: getAiSettings().timezone,
+      timeZone: ai.timezone,
       dateStyle: 'full',
       timeStyle: 'long',
     }).format(new Date()),
     aiConfigured: isAiConfigured(),
-    ai: getAiSettings(),
+    ai,
+    aiPresets: AI_PRESETS,
+    savedSettings: loadSettings(),
+    tokenUsage: getTokenUsageSummary(store),
+    memory: getMemoryState(),
+    importUndoAvailable: Boolean(store.memory?.lastImportUndo?.portfolioHoldings),
+    marketProviders: getEffectiveMarketProviders(),
+    marketMatchHealth: {
+      krFailureRate:
+        krAttempts > 0 ? Math.round((krFailures / krAttempts) * 1000) / 10 : null,
+      krQuoteAttempts: krAttempts,
+      krQuoteFailures: krFailures,
+      lastKrFailureSymbol: store.memory.market?.stats?.lastKrFailureSymbol || '',
+    },
     latestManagerReport: store.memory.managerReports[0] || null,
     scheduledTasks: (store.memory.scheduledTasks || []).slice(0, 12),
   };

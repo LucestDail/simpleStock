@@ -1,4 +1,5 @@
 import { ref } from 'vue';
+import { apiFetch } from '../lib/apiClient';
 
 const profile = ref({
   userProfile: {
@@ -52,7 +53,7 @@ export function useProfile() {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch('/api/profile');
+      const res = await apiFetch('/api/profile');
       if (!res.ok) throw new Error('프로필을 불러오지 못했습니다.');
       applyProfilePayload(await res.json());
     } catch (e) {
@@ -66,7 +67,7 @@ export function useProfile() {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch('/api/profile', {
+      const res = await apiFetch('/api/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(userProfile),

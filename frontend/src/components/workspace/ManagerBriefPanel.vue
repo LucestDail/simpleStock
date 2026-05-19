@@ -17,7 +17,18 @@ const { notify } = useUi();
 const { applyWorkspacePatch, recordActivity, openDrawer } = useWorkspace();
 const busy = ref(false);
 const latestManagerReport = computed(() => manager.value?.latestReport || null);
+const briefHistory = computed(() => (manager.value?.history || []).slice(0, 5));
 const effectiveSpan = computed(() => (latestManagerReport.value ? props.panel.span : 'xs'));
+
+function formatBriefDate(value) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
 
 async function generateBrief() {
   busy.value = true;
@@ -96,6 +107,18 @@ async function generateBrief() {
     </div>
 
     <div v-else class="empty-box">아직 생성된 브리핑이 없습니다.</div>
+
+    <section v-if="briefHistory.length > 1" class="history-section">
+      <h3 class="history-title">최근 브리핑</h3>
+      <ul class="history-list">
+        <li v-for="report in briefHistory" :key="report.id || report.createdAt">
+          <button type="button" class="history-item" @click="openDrawer('managerBrief', report.id || null, '브리핑 상세')">
+            <strong>{{ formatBriefDate(report.createdAt) }}</strong>
+            <span>{{ report.summary || report.dailyObjective || '요약 없음' }}</span>
+          </button>
+        </li>
+      </ul>
+    </section>
   </PanelShell>
 </template>
 
@@ -180,5 +203,55 @@ async function generateBrief() {
   color: var(--color-body);
   font-size: 11px;
   line-height: 1.2;
+}
+
+.history-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-hairline-soft);
+}
+
+.history-title {
+  margin: 0 0 4px;
+  font-size: 10px;
+  color: var(--color-muted);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.history-item {
+  width: 100%;
+  border: 1px solid var(--color-hairline-soft);
+  border-radius: var(--rounded-md);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 5px 6px;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+}
+
+.history-item strong {
+  color: var(--color-ink);
+  font-size: 10px;
+}
+
+.history-item span {
+  color: var(--color-muted);
+  font-size: 9px;
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 </style>

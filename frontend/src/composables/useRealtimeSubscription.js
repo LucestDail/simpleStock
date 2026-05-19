@@ -1,4 +1,5 @@
 import { ref } from 'vue';
+import { apiStreamUrl } from '../lib/apiClient';
 import { usePortfolio } from './usePortfolio';
 import { useChat } from './useChat';
 import { useProfile } from './useProfile';
@@ -199,7 +200,7 @@ export function useRealtimeSubscription() {
     manualDisconnect = false;
     connectionState.value = reconnectAttempt.value > 0 ? 'reconnecting' : 'connecting';
 
-    const eventSource = new EventSource('/api/stream');
+    const eventSource = new EventSource(apiStreamUrl('/api/stream'));
     source = eventSource;
     attachListeners(eventSource);
 

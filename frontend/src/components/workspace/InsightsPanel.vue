@@ -1,10 +1,10 @@
 <script setup>
 import { computed } from 'vue';
 import PanelShell from './PanelShell.vue';
-import { formatKRW, usePortfolio } from '../../composables/usePortfolio';
 import { useChat } from '../../composables/useChat';
 import { useProfile } from '../../composables/useProfile';
 import { useWorkspace } from '../../composables/useWorkspace';
+import { useInsightDetail } from '../../composables/useInsightDetail';
 
 const props = defineProps({
   panel: {
@@ -13,63 +13,55 @@ const props = defineProps({
   },
 });
 
-const { total, dayOverDay, categoryShares, manager } = usePortfolio();
 const { activeThread, messages } = useChat();
 const { profile } = useProfile();
-const { generatedInsights, openDrawer } = useWorkspace();
+const { openDrawer } = useWorkspace();
+const { portfolioSignalCard, managerBriefSection, nextManagerBrief, aiInsightCards } = useInsightDetail();
 
-const fallbackCards = computed(() => {
-  const dominant = [...categoryShares.value].sort((a, b) => b.amount - a.amount)[0] || null;
-  return [
-    {
-      id: 'fallback-portfolio',
-      title: '포트폴리오 시그널',
-      summary: dominant
-        ? `${dominant.label} 비중이 ${dominant.pct}%로 가장 큽니다.`
-        : '등록된 자산이 적어 포트폴리오 시그널을 계산하는 중입니다.',
-      tone: dominant && dominant.pct >= 55 ? 'warning' : 'positive',
-      metrics: [
-        { label: '총 자산', value: formatKRW(total.value) },
-        {
-          label: '직전 대비',
-          value:
-            dayOverDay.value && dayOverDay.value.delta != null
-              ? `${dayOverDay.value.delta >= 0 ? '+' : ''}${formatKRW(dayOverDay.value.delta)}`
-              : '데이터 없음',
-        },
-      ],
-      bullets: [
-        dominant ? `${dominant.label} 집중도를 우선 체크하세요.` : '자산 입력 후 집중도 분석이 더 정교해집니다.',
-      ],
-    },
-    {
-      id: 'fallback-conversation',
-      title: '대화 컨텍스트',
-      summary: activeThread.value?.title || '현재 활성 대화가 없습니다.',
-      tone: 'primary',
-      metrics: [
-        { label: '최근 메시지', value: `${messages.value.length}개` },
-        {
-          label: '프로필 상태',
-          value: profile.value.aiProfile?.summary ? 'AI 요약 반영됨' : '학습 중',
-        },
-      ],
-      bullets: [
-        manager.value.latestReport ? '최근 브리핑을 대화와 함께 참고하고 있습니다.' : '브리핑 생성 후 더 풍부한 카드가 나타납니다.',
-      ],
-    },
-  ];
+const panelCard = computed(() => {
+  if (aiInsightCards.value.length) {
+    return {
+      ...aiInsightCards.value[0],
+      toneLabel:
+        aiInsightCards.value[0].tone === 'warning'
+          ? '주의'
+          : aiInsightCards.value[0].tone === 'positive'
+            ? '양호'
+            : aiInsightCards.value[0].tone === 'primary'
+              ? '핵심'
+              : '실시간',
+    };
+  }
+  const signal = portfolioSignalCard.value;
+  const brief = managerBriefSection.value;
+  return {
+    id: signal.id,
+    title: signal.title,
+    summary: brief.available
+      ? `${signal.summary} 최근 브리핑: ${String(brief.summary || '').slice(0, 72)}…`
+      : signal.summary,
+    tone: signal.tone,
+    toneLabel: signal.toneLabel,
+    metrics: signal.metrics.slice(0, 2),
+    bullets: [
+      nextManagerBrief.value
+        ? `다음 보고 ${nextManagerBrief.value.label}`
+        : signal.bullets[0],
+    ],
+  };
 });
 
-const cards = computed(() =>
-  (generatedInsights.value.length ? generatedInsights.value : fallbackCards.value)
-    .map((card) => ({
-      ...card,
-      metrics: (card.metrics || []).slice(0, 2),
-      bullets: (card.bullets || []).slice(0, 2),
-    }))
-    .slice(0, 1)
-);
+const conversationHint = computed(() => ({
+  title: '대화 컨텍스트',
+  summary: activeThread.value?.title || '활성 대화 없음',
+  metrics: [
+    { label: '메시지', value: `${messages.value.length}개` },
+    {
+      label: '프로필',
+      value: profile.value.aiProfile?.summary ? 'AI 요약 반영' : '학습 중',
+    },
+  ],
+}));
 </script>
 
 <template>
@@ -80,32 +72,48 @@ const cards = computed(() =>
     :highlighted="panel.highlighted"
   >
     <template #actions>
-      <button type="button" class="btn-secondary" @click="openDrawer('insight', null, '실시간 인사이트')">
+      <button type="button" class="btn-secondary" @click="openDrawer('insight', null, '포트폴리오 인사이트')">
         상세
       </button>
     </template>
 
     <div class="insight-list">
-      <article
-        v-for="card in cards"
-        :key="card.id"
-        class="insight-card"
-        :class="`insight-card--${card.tone || 'default'}`"
-      >
+      <article class="insight-card" :class="`insight-card--${panelCard.tone || 'default'}`">
         <div class="insight-head">
-          <strong>{{ card.title }}</strong>
-          <span>{{ card.tone === 'warning' ? '주의' : card.tone === 'positive' ? '양호' : card.tone === 'primary' ? '핵심' : '실시간' }}</span>
+          <strong>{{ panelCard.title }}</strong>
+          <span>{{ panelCard.toneLabel }}</span>
         </div>
-        <p class="insight-summary">{{ card.summary }}</p>
-        <div v-if="card.metrics?.length" class="metric-grid">
-          <div v-for="metric in card.metrics" :key="`${card.id}-${metric.label}`" class="metric-card">
+        <p class="insight-summary">{{ panelCard.summary }}</p>
+        <div v-if="panelCard.metrics?.length" class="metric-grid">
+          <div
+            v-for="metric in panelCard.metrics"
+            :key="`${panelCard.id}-${metric.label}`"
+            class="metric-card"
+          >
             <span>{{ metric.label }}</span>
             <strong>{{ metric.value }}</strong>
           </div>
         </div>
-        <ul v-if="card.bullets?.length" class="bullet-list">
-          <li v-for="bullet in card.bullets" :key="bullet">{{ bullet }}</li>
+        <ul v-if="panelCard.bullets?.length" class="bullet-list">
+          <li v-for="bullet in panelCard.bullets" :key="bullet">{{ bullet }}</li>
         </ul>
+      </article>
+
+      <article class="insight-card insight-card--compact">
+        <div class="insight-head">
+          <strong>{{ conversationHint.title }}</strong>
+        </div>
+        <p class="insight-summary">{{ conversationHint.summary }}</p>
+        <div class="metric-grid">
+          <div
+            v-for="metric in conversationHint.metrics"
+            :key="metric.label"
+            class="metric-card"
+          >
+            <span>{{ metric.label }}</span>
+            <strong>{{ metric.value }}</strong>
+          </div>
+        </div>
       </article>
     </div>
   </PanelShell>
@@ -138,6 +146,10 @@ const cards = computed(() =>
   border-radius: var(--rounded-lg);
   border: 1px solid var(--color-hairline);
   background: rgba(255, 255, 255, 0.02);
+}
+
+.insight-card--compact {
+  opacity: 0.92;
 }
 
 .insight-card--primary {
@@ -181,7 +193,7 @@ const cards = computed(() =>
   font-size: 11px;
   line-height: 1.2;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

@@ -2,7 +2,14 @@
 
 개인 전용 **자산 현황 · 일별 변동 · 시세 연동 · AI 매니저** 통합 워크스페이스. 보유 자산을 한 화면(Workspace)에서 보고, Gemini 기반 채팅·매니저 브리핑·예약 작업으로 분석을 자동화합니다.
 
-**저장소:** [github.com/LucestDail/simpleStock](https://github.com/LucestDail/simpleStock)
+**저장소:** [github.com/LucestDail/simpleStock](https://github.com/LucestDail/simpleStock)  
+**로드맵:** [PLAN.md](./PLAN.md)
+
+## 설계 원칙 (고정)
+
+- **저장소 = 물리 파일만** — `data/*.json`이 유일한 DB입니다. SQLite·Postgres·Redis 등 **별도 DB 설치·연동은 하지 않습니다.**
+- **프로젝트 단독 실행** — 이 저장소 + Node.js(또는 포함된 Docker 이미지)만으로 동작합니다. DB·메시지 큐·외부 미들웨어는 요구하지 않습니다.
+- **배포 데이터** — `data/` 디렉터리 백업·복사가 곧 마이그레이션입니다.
 
 ## 핵심 기능
 
@@ -30,12 +37,12 @@
 
 ### Quant Manager · 예약 작업
 - 일일 매니저 브리핑(`POST /api/manager/run`, 별칭 `/api/ai/run`) — Gemini로 포트폴리오·시세·기억 통합 리뷰
-- KST 기준 cron으로 자동 실행 (`AI_DAILY_CRON`, 기본 매일 21:05)
+- KST 평일(월–금) 6회 자동 일일 보고: **22·23·06·09·10·18시** (`MANAGER_BRIEF_PRESET_SCHEDULE=true`, 기본). 레거시 단일 cron은 `MANAGER_BRIEF_PRESET_SCHEDULE=false` + `AI_DAILY_CRON`으로 사용.
 - 채팅에서 예약한 작업 종류: `managerBrief`, `marketReview`, `indicatorCheck`, `custom` — 실행 결과는 장기 기억(`schedule_run`)으로 누적
 
 ### 프로필 · 기억
 - 사용자 입력 프로필(`displayName`, `investorType`, `riskTolerance` 등) + AI 추론 프로필(`summary`, `inferredTraits`)
-- 대화 요약 / 장기 기억 / 매니저 리포트를 모두 JSON 파일로 보관 — DB 없음
+- 대화 요약 / 장기 기억 / 매니저 리포트를 모두 **`data/` JSON 파일**로 보관 (외부 DB 없음)
 
 ### 데이터 파일
 - `data/portfolio.json` — 보유 자산 / 스냅샷
@@ -63,7 +70,7 @@ Coinbase 공개 마케팅 서피스 톤을 준용합니다.
 | 시세 | Finnhub / Yahoo Finance / 공공데이터포털 어댑터, SSE 실시간 전파 |
 | 프론트엔드 | Vue 3, Vue Router 4, Vite 5, 패널형 워크스페이스 |
 | 스타일 | 순수 CSS + 디자인 토큰 (Coinbase 톤) |
-| 저장소 | JSON 파일 (`portfolio`, `chat`, `memory`, `profile`) |
+| 저장소 | **`data/` 물리 JSON 파일** (`portfolio`, `chat`, `memory`, `profile`) — DB 엔진 없음 |
 | 컨테이너 | Docker (Node 20 Alpine) |
 
 ## 프로젝트 구조
@@ -97,7 +104,8 @@ simpleStock/
 │       ├── App.vue
 │       ├── router/                 # 단일 라우트 → WorkspaceView
 │       ├── styles/tokens.css
-│       ├── views/WorkspaceView.vue
+│       ├── views/
+│       │   └── WorkspaceView.vue   # 실제 라우트 (/) — 아래 legacy 뷰는 미사용
 │       ├── components/workspace/   # StatusStrip, OverviewPanel, ChatPanel ...
 │       └── composables/            # usePortfolio, useChat, useProfile,
 │                                   #   useUi, useWorkspace, useRealtimeSubscription
@@ -157,7 +165,8 @@ GEMINI_TIMEOUT_MS=90000
 GEMINI_MAX_RETRIES=2
 GEMINI_RETRY_BASE_MS=1500
 APP_TIMEZONE=Asia/Seoul
-AI_DAILY_CRON=5 21 * * *
+MANAGER_BRIEF_PRESET_SCHEDULE=true
+AI_DAILY_CRON=
 TZ=Asia/Seoul
 
 # 시세
@@ -179,7 +188,7 @@ USD_KRW_FALLBACK_RATE=1360
 - `GEMINI_MODEL`: 기본 Stable **`gemini-3.1-flash-lite`** ([공식 모델 목록](https://ai.google.dev/gemini-api/docs/models)). Latest 별칭(`gemini-flash-latest`)은 가리키는 빌드가 바뀔 수 있어 동작 변화 가능.
 - `GEMINI_INCLUDE_THOUGHTS`: `true`면 응답 스트림에 추론(thought) 토큰 포함, `GEMINI_THINKING_BUDGET`으로 상한 제어(최대 8192).
 - `GEMINI_TIMEOUT_MS` / `MAX_RETRIES` / `RETRY_BASE_MS`: 한 호출 타임아웃과 백오프 재시도.
-- `APP_TIMEZONE`, `AI_DAILY_CRON`: 매니저 브리핑 스케줄 기준 시각.
+- `APP_TIMEZONE`, `MANAGER_BRIEF_PRESET_SCHEDULE`: 매니저 일일 보고 스케줄(평일 6회). 단일 cron만 쓸 때는 `AI_DAILY_CRON`.
 - `MARKET_*_PROVIDER`: 시장/통화별 시세 소스 분리. 키가 없으면 자동으로 Yahoo로 폴백.
 - `GEMINI_API_KEY`가 비어 있으면 자산/히스토리/설정 화면은 정상이고, 채팅 / 매니저 / 자동 액션만 비활성화됩니다.
 
@@ -209,7 +218,7 @@ USD_KRW_FALLBACK_RATE=1360
 
 ## 배포 메모
 
-- `~/.env`는 `.gitignore` 대상이므로 `git pull` / 신규 클론 후에도 보존됩니다.
+- 프로젝트 루트의 **`.env`** 는 `.gitignore` 대상이므로 `git pull` / 신규 클론 후에도 보존됩니다.
 - 처음 배포 시: `git clone` → `.env` 작성(또는 마이그레이션) → `./start_simpleStock.sh`.
 - 데이터 마이그레이션 예시(원본 → 대상):
   ```bash

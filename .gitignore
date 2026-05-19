@@ -6,6 +6,7 @@ dist/
 .env
 .env.*
 !.env.example
+backups/
 data/*.json
 !data/.gitkeep
 !data/README.md

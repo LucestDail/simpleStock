@@ -1,9 +1,11 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import PanelShell from './PanelShell.vue';
 import { usePortfolio } from '../../composables/usePortfolio';
 import { useUi } from '../../composables/useUi';
 import { useWorkspace } from '../../composables/useWorkspace';
+import { useScheduledTasks } from '../../composables/useScheduledTasks';
+import { useSystemSettings } from '../../composables/useSystemSettings';
 
 const props = defineProps({
   panel: {
@@ -13,6 +15,8 @@ const props = defineProps({
 });
 
 const { system, refreshMarket, busyState } = usePortfolio();
+const { displayTasks } = useScheduledTasks();
+const { saveSettings, saving: savingSettings } = useSystemSettings();
 const { notify } = useUi();
 const { openDrawer, recordActivity } = useWorkspace();
 const market = computed(() => system.value.market || {});
@@ -23,6 +27,11 @@ const marketSummary = computed(() => ({
   session: market.value.sessions?.us?.state || 'closed',
   lastRefreshAt: market.value.lastSuccessAt || market.value.lastRefreshAt,
 }));
+const aiPresets = computed(() => system.value.aiPresets || system.value.ai?.presets || []);
+const selectedPresetId = computed(() => system.value.ai?.presetId || system.value.savedSettings?.ai?.presetId || '');
+const tokenUsage = computed(() => system.value.tokenUsage?.current || null);
+const marketHealth = computed(() => system.value.marketMatchHealth || {});
+const marketProviders = computed(() => system.value.marketProviders || system.value.savedSettings?.market || {});
 
 function formatUsdKrw(rate) {
   return Number.isFinite(Number(rate)) ? Number(rate).toLocaleString('ko-KR', { maximumFractionDigits: 2 }) : '-';
@@ -34,6 +43,18 @@ function formatTime(value) {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(new Date(value));
+}
+
+async function applyAiPreset(preset) {
+  try {
+    await saveSettings({ ai: { presetId: preset.id } });
+    notify({
+      tone: 'success',
+      message: `${preset.label} 프리셋을 적용했습니다.`,
+    });
+  } catch (error) {
+    notify({ tone: 'error', message: error.message || '프리셋 적용 실패' });
+  }
 }
 
 async function handleRefreshMarket() {
@@ -86,6 +107,52 @@ async function handleRefreshMarket() {
       <li><span>시세 갱신</span><strong>{{ formatTime(marketSummary.lastRefreshAt) }}</strong></li>
     </ul>
     <p v-if="market.lastError" class="market-error">{{ market.lastError }}</p>
+
+    <section v-if="aiPresets.length" class="preset-section">
+      <h3 class="section-title">AI 프리셋</h3>
+      <div class="preset-row">
+        <button
+          v-for="preset in aiPresets"
+          :key="preset.id"
+          type="button"
+          class="preset-chip"
+          :class="{ active: selectedPresetId === preset.id }"
+          :disabled="savingSettings"
+          @click="applyAiPreset(preset)"
+        >
+          {{ preset.label }}
+        </button>
+      </div>
+    </section>
+
+    <section v-if="tokenUsage || marketHealth.krQuoteAttempts" class="stats-section">
+      <h3 class="section-title">운영 지표</h3>
+      <ul class="stats-list">
+        <li v-if="tokenUsage">
+          <span>이번 달 토큰</span>
+          <strong class="mono-num">{{ tokenUsage.totalTokens?.toLocaleString('ko-KR') || 0 }}</strong>
+        </li>
+        <li v-if="marketHealth.krQuoteAttempts">
+          <span>KR 시세 실패율</span>
+          <strong class="mono-num">{{ marketHealth.krFailureRate ?? 0 }}%</strong>
+        </li>
+        <li v-if="marketProviders.us || marketProviders.kr">
+          <span>시세 프로바이더</span>
+          <code>US {{ marketProviders.us || '-' }} · KR {{ marketProviders.kr || '-' }}</code>
+        </li>
+      </ul>
+    </section>
+
+    <section v-if="displayTasks.length" class="tasks-section">
+      <h3 class="tasks-title">예정 작업</h3>
+      <ul class="tasks-list">
+        <li v-for="task in displayTasks.slice(0, 4)" :key="task.id">
+          <strong>{{ task.title }}</strong>
+          <span>{{ task.displayRunLabel }}</span>
+          <code v-if="task.cronExpression">{{ task.cronExpression }}</code>
+        </li>
+      </ul>
+    </section>
   </PanelShell>
 </template>
 
@@ -156,5 +223,133 @@ async function handleRefreshMarket() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.section-title {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--color-muted);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.preset-section,
+.stats-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-hairline-soft);
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.preset-chip {
+  height: 22px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-pill);
+  padding: 0 8px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.preset-chip.active {
+  border-color: rgba(110, 123, 255, 0.32);
+  background: rgba(110, 123, 255, 0.1);
+  color: var(--color-ink);
+}
+
+.stats-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 11px;
+}
+
+.stats-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stats-list code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-body);
+}
+
+.tasks-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-hairline-soft);
+}
+
+.tasks-title {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--color-muted);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tasks-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.tasks-list li {
+  display: grid;
+  gap: 1px;
+  font-size: 11px;
+}
+
+.tasks-list strong {
+  color: var(--color-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tasks-list span {
+  color: var(--color-body);
+}
+
+.tasks-list code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-muted);
+}
+
+.access-token {
+  margin-top: 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.access-token__label {
+  font-size: 12px;
+  color: var(--color-body);
+}
+
+.access-token__input {
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-xs);
+  padding: 0 8px;
+  font-size: 12px;
+  font-family: var(--font-mono);
 }
 </style>

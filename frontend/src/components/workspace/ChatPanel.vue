@@ -3,7 +3,6 @@ import { computed, nextTick, ref, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import PanelShell from './PanelShell.vue';
 import { useChat } from '../../composables/useChat';
-import { formatKRW, usePortfolio } from '../../composables/usePortfolio';
 import { useUi } from '../../composables/useUi';
 import { useWorkspace } from '../../composables/useWorkspace';
 
@@ -27,10 +26,11 @@ const {
   selectThread,
   removeThread,
   sendMessageContent,
+  retryLastMessage,
+  getLastUserMessageContent,
 } = useChat();
-const { total, system: portfolioSystem } = usePortfolio();
 const { notify } = useUi();
-const { applyWorkspacePatch, recordActivity, handleAssistantMetadata, openDrawer, selectThread: focusThread } = useWorkspace();
+const { applyWorkspacePatch, recordActivity, handleAssistantMetadata, selectThread: focusThread } = useWorkspace();
 const markdown = new MarkdownIt({
   html: false,
   linkify: true,
@@ -40,30 +40,17 @@ const markdown = new MarkdownIt({
 const draft = ref('');
 const messagesRef = ref(null);
 const shouldStickToBottom = ref(true);
+const threadsOpen = ref(false);
+const collapsedThinkingIds = ref(new Set());
 const canSend = computed(() => Boolean(draft.value.trim()) && !sending.value);
-const visibleThreads = computed(() => threads.value.slice(0, 12));
-const chatStatusItems = computed(() => [
-  `스레드 ${threads.value.length}개`,
-  `총 자산 ${formatKRW(total.value)}`,
-  portfolioSystem.value.latestManagerReport ? '브리핑 반영됨' : '브리핑 대기',
-]);
-const composerNotice = computed(() => {
+const visibleThreads = computed(() => threads.value.slice(0, 20));
+const inlineStatus = computed(() => {
   if (sending.value) {
-    return {
-      tone: 'info',
-      title: '응답 생성 중',
-      message: streamStatus.value || '요청이 길어질 경우 자동 재시도 후 실패 사유를 안내합니다.',
-    };
+    return { tone: 'info', text: streamStatus.value || '응답을 작성하고 있습니다…' };
   }
-
   if (chatError.value) {
-    return {
-      tone: 'error',
-      title: '전송 실패',
-      message: chatError.value,
-    };
+    return { tone: 'error', text: chatError.value };
   }
-
   return null;
 });
 
@@ -79,6 +66,37 @@ function formatTimestamp(value) {
 
 function renderAssistantMessage(content) {
   return markdown.render(String(content || ''));
+}
+
+function isThinkingCollapsed(messageId) {
+  return collapsedThinkingIds.value.has(messageId);
+}
+
+function toggleThinking(messageId) {
+  const next = new Set(collapsedThinkingIds.value);
+  if (next.has(messageId)) {
+    next.delete(messageId);
+  } else {
+    next.add(messageId);
+  }
+  collapsedThinkingIds.value = next;
+}
+
+async function handleRetry() {
+  try {
+    await retryLastMessage();
+    recordActivity({
+      type: 'chat',
+      title: '메시지 재시도',
+      description: '마지막 사용자 메시지를 다시 전송했습니다.',
+      entityId: activeThread.value?.id || null,
+    });
+  } catch (error) {
+    notify({
+      tone: 'error',
+      message: error.message || '재시도에 실패했습니다.',
+    });
+  }
 }
 
 function scrollMessagesToBottom(behavior = 'auto') {
@@ -219,25 +237,24 @@ watch(
 
 <template>
   <PanelShell
-    title="Quant Manager 대화"
-    subtitle="chat"
+    title="Quant Manager"
     :span="panel.span"
     :highlighted="panel.highlighted"
-    :loading="loading || sending"
+    :loading="loading"
+    :fill="true"
     tone="dark"
   >
     <template #actions>
-      <button type="button" class="btn-secondary" @click="openDrawer('threadDetail', activeThread?.id || null, activeThread?.title || '대화 상세')">
-        상세
+      <button type="button" class="btn-secondary" @click="threadsOpen = !threadsOpen">
+        {{ threadsOpen ? '목록 닫기' : '대화 목록' }}
       </button>
       <button type="button" class="btn-primary" @click="handleCreateThread">새 대화</button>
     </template>
 
-    <div class="chat-layout">
-      <aside class="thread-panel">
+    <div class="chat-layout" :class="{ 'chat-layout--threads': threadsOpen }">
+      <aside v-show="threadsOpen" class="thread-panel">
         <div class="thread-panel__head">
-          <strong>대화 목록</strong>
-          <span>{{ chatStatusItems.join(' · ') }}</span>
+          <strong>이전 대화</strong>
         </div>
         <div class="thread-list">
           <article
@@ -262,26 +279,18 @@ watch(
 
       <section class="chat-main">
         <div v-if="!system.aiConfigured" class="disabled-box">
-          <strong>Gemini 키가 없어서 대화 응답은 비활성화되어 있습니다.</strong>
-          <p>키를 넣으면 대화와 함께 패널 배치 지시도 실시간으로 반영됩니다.</p>
+          <strong>AI 설정이 필요합니다.</strong>
+          <p>설정에서 Gemini 키를 넣으면 대화가 시작됩니다.</p>
         </div>
 
-        <div v-else class="conversation">
-          <div class="conversation-head">
-            <strong>{{ activeThread?.title || '새 대화' }}</strong>
-            <span>{{ activeThread ? '목록에서 대화를 선택해 이어서 볼 수 있습니다.' : '처음 메시지를 보내면 Quant Manager가 대화를 시작합니다.' }}</span>
-          </div>
-
+        <template v-else>
           <div ref="messagesRef" class="messages" @scroll="handleMessagesScroll">
             <div v-if="!messages.length" class="empty-box">
-              <strong>{{ activeThread?.title || '새 대화' }}</strong>
-              <p>
-                {{ activeThread ? '이 스레드에는 아직 저장된 대화 이력이 없습니다. 바로 새 메시지를 보내 이어서 사용할 수 있습니다.' : '자산 입력, 설정 변경, 반복 브리핑 등록도 자연어로 요청할 수 있습니다.' }}
-              </p>
+              <p>보유 자산·설정·데이터를 그대로 말해 주세요. 예: 「KB주식 10주 추가」, 「매주 월요일 브리핑」</p>
             </div>
 
             <article
-              v-for="message in messages.slice(-12)"
+              v-for="message in messages"
               :key="message.id"
               class="message"
               :class="message.role"
@@ -291,13 +300,26 @@ watch(
                 <span class="mono-num">{{ formatTimestamp(message.createdAt) }}</span>
               </div>
               <div
-                v-if="message.role === 'assistant' && (message.metadata?.streaming || message.metadata?.thinkingText)"
+                v-if="message.role === 'assistant' && (message.metadata?.streaming || message.metadata?.thinkingText || message.metadata?.streamPhase)"
                 class="stream-activity"
               >
-                <p v-if="message.metadata?.streamPhase" class="stream-phase">
-                  {{ message.metadata.streamPhaseKey ? `[${message.metadata.streamPhaseKey}] ` : '' }}{{ message.metadata.streamPhase }}
-                </p>
-                <pre v-if="message.metadata?.thinkingText" class="stream-thinking">{{ message.metadata.thinkingText }}</pre>
+                <div class="stream-activity__head">
+                  <p v-if="message.metadata?.streamPhase" class="stream-phase">
+                    {{ message.metadata.streamPhaseKey ? `[${message.metadata.streamPhaseKey}] ` : '' }}{{ message.metadata.streamPhase }}
+                  </p>
+                  <button
+                    v-if="message.metadata?.thinkingText"
+                    type="button"
+                    class="stream-toggle"
+                    @click="toggleThinking(message.id)"
+                  >
+                    {{ isThinkingCollapsed(message.id) ? '추론 펼치기' : '추론 접기' }}
+                  </button>
+                </div>
+                <pre
+                  v-if="message.metadata?.thinkingText && !isThinkingCollapsed(message.id)"
+                  class="stream-thinking"
+                >{{ message.metadata.thinkingText }}</pre>
               </div>
               <div
                 v-if="message.role === 'assistant'"
@@ -307,19 +329,28 @@ watch(
               <p v-else class="message-text">{{ message.content }}</p>
             </article>
           </div>
-        </div>
+
+          <p v-if="inlineStatus" class="chat-status-line" :class="`chat-status-line--${inlineStatus.tone}`">
+            <span>{{ inlineStatus.text }}</span>
+            <button
+              v-if="inlineStatus.tone === 'error' && getLastUserMessageContent()"
+              type="button"
+              class="btn-retry"
+              :disabled="sending"
+              @click="handleRetry"
+            >
+              다시 시도
+            </button>
+          </p>
+        </template>
 
         <div class="composer">
-          <div v-if="composerNotice" class="chat-notice" :class="composerNotice.tone">
-            <strong>{{ composerNotice.title }}</strong>
-            <p>{{ composerNotice.message }}</p>
-          </div>
           <div class="composer-row">
             <textarea
               v-model="draft"
               class="composer-input"
-              rows="3"
-              placeholder="Enter 전송, Shift+Enter 줄바꿈"
+              rows="1"
+              placeholder="메시지를 입력하세요 (Enter 전송)"
               :disabled="sending || !system.aiConfigured"
               @keydown="onComposerKeydown"
             />
@@ -366,11 +397,15 @@ watch(
 
 .chat-layout {
   display: grid;
-  grid-template-columns: minmax(150px, 176px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   height: 100%;
   min-height: 0;
   flex: 1;
+}
+
+.chat-layout--threads {
+  grid-template-columns: minmax(140px, 168px) minmax(0, 1fr);
 }
 
 .thread-panel,
@@ -379,6 +414,7 @@ watch(
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .thread-panel {
@@ -481,32 +517,6 @@ watch(
   align-self: start;
 }
 
-.conversation {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow: hidden;
-}
-
-.conversation-head {
-  display: grid;
-  gap: 2px;
-}
-
-.conversation-head strong {
-  color: var(--color-ink);
-  font-size: 13px;
-  line-height: 1.2;
-}
-
-.conversation-head span {
-  color: var(--color-muted);
-  font-size: 10px;
-  line-height: 1.2;
-}
-
 .disabled-box,
 .empty-box {
   border-radius: var(--rounded-lg);
@@ -597,11 +607,30 @@ watch(
   border: 1px solid rgba(110, 123, 255, 0.15);
 }
 
+.stream-activity__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .stream-phase {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 11px;
   font-weight: 600;
   color: var(--color-ink);
+  flex: 1;
+}
+
+.stream-toggle {
+  border: none;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
 }
 
 .stream-thinking {
@@ -681,18 +710,39 @@ watch(
   color: var(--color-primary);
 }
 
-.composer {
-  display: grid;
+.chat-status-line {
   flex: 0 0 auto;
-  gap: 5px;
-  margin-top: 4px;
+  margin: 0;
+  padding: 4px 2px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--color-muted);
+}
+
+.chat-status-line--info {
+  color: var(--color-primary);
+}
+
+.chat-status-line--error {
+  color: var(--color-semantic-down);
+}
+
+.composer {
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-hairline-soft);
+  background: rgba(6, 8, 12, 0.98);
 }
 
 .composer-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 56px;
+  display: flex;
   gap: 8px;
-  align-items: stretch;
+  align-items: flex-end;
 }
 
 .chat-notice {
@@ -714,9 +764,32 @@ watch(
   border-color: rgba(255, 92, 92, 0.2);
 }
 
+.chat-notice__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
 .chat-notice strong {
   color: var(--color-ink);
   font-size: 11px;
+}
+
+.btn-retry {
+  border: none;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.btn-retry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .chat-notice p {
@@ -727,15 +800,18 @@ watch(
 }
 
 .composer-input {
+  flex: 1;
   width: 100%;
   resize: none;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  padding: 7px 8px;
+  padding: 8px 10px;
   color: var(--color-ink);
   background: rgba(255, 255, 255, 0.02);
-  min-height: 72px;
-  font-size: 12px;
+  min-height: 40px;
+  max-height: 120px;
+  font-size: 13px;
+  line-height: 1.35;
   box-sizing: border-box;
 }
 
@@ -746,19 +822,20 @@ watch(
 }
 
 .composer-send {
-  width: 56px;
-  min-height: 72px;
-  height: 100%;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   border: none;
-  border-radius: var(--rounded-lg);
+  border-radius: 10px;
   background: var(--color-primary);
   color: var(--color-on-primary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 8px 18px rgba(102, 116, 216, 0.28);
-  align-self: stretch;
+  box-shadow: 0 6px 14px rgba(102, 116, 216, 0.24);
+  flex-shrink: 0;
 }
 
 .composer-send svg {
@@ -788,18 +865,8 @@ watch(
 }
 
 @media (max-width: 720px) {
-  .message-meta,
-  .composer-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .composer-row {
-    grid-template-columns: 1fr;
-  }
-
-  .composer-send {
-    width: 100%;
+  .message {
+    max-width: 100%;
   }
 }
 </style>

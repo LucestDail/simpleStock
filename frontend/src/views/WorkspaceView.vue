@@ -1,13 +1,10 @@
 <script setup>
 import { computed, markRaw, onMounted, onUnmounted, ref } from 'vue';
-import StatusStrip from '../components/workspace/StatusStrip.vue';
+import LiveTickerBar from '../components/workspace/LiveTickerBar.vue';
 import DetailDrawer from '../components/workspace/DetailDrawer.vue';
 import OverviewPanel from '../components/workspace/OverviewPanel.vue';
-import SnapshotsPanel from '../components/workspace/SnapshotsPanel.vue';
 import ChatPanel from '../components/workspace/ChatPanel.vue';
-import InsightsPanel from '../components/workspace/InsightsPanel.vue';
-import ActivityPanel from '../components/workspace/ActivityPanel.vue';
-import ManagerBriefPanel from '../components/workspace/ManagerBriefPanel.vue';
+import ManagerHubPanel from '../components/workspace/ManagerHubPanel.vue';
 import ProfilePanel from '../components/workspace/ProfilePanel.vue';
 import SystemPanel from '../components/workspace/SystemPanel.vue';
 import { usePortfolio } from '../composables/usePortfolio';
@@ -17,22 +14,20 @@ import { useUi } from '../composables/useUi';
 import { useWorkspace } from '../composables/useWorkspace';
 import { useRealtimeSubscription } from '../composables/useRealtimeSubscription';
 
-const { fetchPortfolio, holdings, manager, system } = usePortfolio();
+const { fetchPortfolio } = usePortfolio();
 const { fetchThreads } = useChat();
 const { fetchProfile, profile } = useProfile();
 const { notify } = useUi();
-const { columns, focusMode, recordActivity, openDrawer, generatedInsights } = useWorkspace();
+const { columns, focusMode, recordActivity, openDrawer } = useWorkspace();
 const { connect, disconnect } = useRealtimeSubscription();
 const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth);
+const showExtras = ref(true);
 
 const panelComponents = {
-  status: markRaw(StatusStrip),
+  status: markRaw(OverviewPanel),
   overview: markRaw(OverviewPanel),
-  snapshots: markRaw(SnapshotsPanel),
   chat: markRaw(ChatPanel),
-  insights: markRaw(InsightsPanel),
-  activity: markRaw(ActivityPanel),
-  managerBrief: markRaw(ManagerBriefPanel),
+  managerHub: markRaw(ManagerHubPanel),
   profile: markRaw(ProfilePanel),
   system: markRaw(SystemPanel),
 };
@@ -40,8 +35,6 @@ const panelComponents = {
 const workspaceClass = computed(() => `workspace-main--${focusMode.value || 'balanced'}`);
 const isCompactLayout = computed(() => viewportWidth.value <= 1180);
 const isStackedLayout = computed(() => viewportWidth.value <= 860);
-const hasManagerBrief = computed(() => Boolean(manager.value.latestReport));
-const hasScheduledTasks = computed(() => (system.value.scheduledTasks || []).length > 0);
 const hasProfileContent = computed(() => {
   const userProfile = profile.value.userProfile || {};
   const aiProfile = profile.value.aiProfile || {};
@@ -55,96 +48,65 @@ const hasProfileContent = computed(() => {
       (aiProfile.inferredTraits || []).length
   );
 });
-const hasInsights = computed(() => generatedInsights.value.length > 0 || holdings.value.length > 0);
-const renderedColumns = computed(() => {
-  const leftPanels = columns.value.left
-    .map((panel) => {
-      if (panel.id === 'status') {
-        return { ...panel, span: 'sm' };
-      }
-      if (panel.id === 'overview') {
-        return { ...panel, span: 'xl' };
-      }
-      if (panel.id === 'system') {
-        return { ...panel, span: hasManagerBrief.value || hasScheduledTasks.value ? 'xs' : 'sm' };
-      }
-      return panel;
-    });
 
-  const rightPanels = columns.value.right
-    .filter((panel) => panel.id !== 'managerBrief' || hasManagerBrief.value)
-    .filter((panel) => panel.id !== 'snapshots' || hasScheduledTasks.value)
-    .filter((panel) => panel.id !== 'profile' || hasProfileContent.value)
-    .filter((panel) => panel.id !== 'insights' || hasInsights.value)
-    .map((panel, _, list) => {
-      if (panel.id === 'profile') {
-        return { ...panel, span: list.length <= 2 ? 'md' : 'sm' };
-      }
-      if (panel.id === 'insights') {
-        return { ...panel, span: list.length <= 2 ? 'sm' : panel.span };
-      }
-      return panel;
-    });
-
-  return {
-    left: leftPanels,
-    center: columns.value.center,
-    right: rightPanels,
-  };
-});
 const finalColumns = computed(() => {
-  const left = [...renderedColumns.value.left];
-  const right = [...renderedColumns.value.right];
+  const left = columns.value.left
+    .filter((panel) => panel.id !== 'status')
+    .map((panel) => {
+    if (panel.id === 'overview') return { ...panel, span: 'xl' };
+    return panel;
+  });
 
-  if (!isStackedLayout.value) {
-    const systemIndex = left.findIndex((panel) => panel.id === 'system');
-    if (systemIndex >= 0) {
-      const [systemPanel] = left.splice(systemIndex, 1);
-      right.push({ ...systemPanel, column: 'right', span: 'sm' });
-    }
+  const right = columns.value.right
+    .filter((panel) => panel.id === 'managerHub' || (panel.id === 'profile' && hasProfileContent.value))
+    .map((panel) => {
+      if (panel.id === 'managerHub') return { ...panel, span: 'full' };
+      return panel;
+    });
 
-    const statusIndex = left.findIndex((panel) => panel.id === 'status');
-    if (statusIndex >= 0) {
-      left[statusIndex] = { ...left[statusIndex], span: 'md' };
-    }
-  }
 
   return {
     left,
-    center: renderedColumns.value.center,
+    center: columns.value.center.map((panel) => ({ ...panel, span: 'full' })),
     right,
   };
 });
+
 const orderedColumns = computed(() => {
+  if (!showExtras.value) {
+    return [{ key: 'center', panels: finalColumns.value.center, columnClass: 'workspace-column--chat' }];
+  }
   if (isStackedLayout.value) {
     return [
-      { key: 'center', panels: finalColumns.value.center },
-      { key: 'left', panels: finalColumns.value.left },
-      { key: 'right', panels: finalColumns.value.right },
+      { key: 'center', panels: finalColumns.value.center, columnClass: 'workspace-column--chat' },
+      { key: 'left', panels: finalColumns.value.left, columnClass: 'workspace-column--dashboard' },
+      { key: 'right', panels: finalColumns.value.right, columnClass: 'workspace-column--manager' },
     ];
   }
   return [
-    { key: 'left', panels: finalColumns.value.left },
-    { key: 'center', panels: finalColumns.value.center },
-    { key: 'right', panels: finalColumns.value.right },
+    { key: 'left', panels: finalColumns.value.left, columnClass: 'workspace-column--dashboard' },
+    { key: 'center', panels: finalColumns.value.center, columnClass: 'workspace-column--chat' },
+    { key: 'right', panels: finalColumns.value.right, columnClass: 'workspace-column--manager' },
   ];
 });
+
 const workspaceGridStyle = computed(() => {
+  if (!showExtras.value) {
+    return { gridTemplateColumns: '1fr' };
+  }
   if (isStackedLayout.value) {
-    return {
-      gridTemplateColumns: '1fr',
-    };
+    return { gridTemplateColumns: '1fr' };
   }
 
   const leftCount = finalColumns.value.left.length;
   const rightCount = finalColumns.value.right.length;
   const isChatMode = focusMode.value === 'chat';
   const leftTrack = leftCount
-    ? `minmax(${isCompactLayout.value ? 220 : (leftCount >= 4 ? 250 : 270)}px, ${isCompactLayout.value ? (isChatMode ? 1.65 : 1.85) : (isChatMode ? 2.55 : 2.95)}fr)`
+    ? `minmax(${isCompactLayout.value ? 220 : 270}px, ${isCompactLayout.value ? (isChatMode ? 1.65 : 1.85) : (isChatMode ? 2.55 : 2.95)}fr)`
     : '0px';
   const centerTrack = `minmax(${isCompactLayout.value ? (isChatMode ? 420 : 360) : (isChatMode ? 430 : 380)}px, ${isCompactLayout.value ? (isChatMode ? 6.1 : 5.7) : (isChatMode ? 5.5 : 5)}fr)`;
   const rightTrack = rightCount
-    ? `minmax(${isCompactLayout.value ? 190 : (rightCount <= 2 ? 250 : 230)}px, ${isCompactLayout.value ? 1.3 : (rightCount <= 2 ? 2.7 : 2.45)}fr)`
+    ? `minmax(${isCompactLayout.value ? 200 : 260}px, ${isCompactLayout.value ? 1.35 : 2.4}fr)`
     : '0px';
   return {
     gridTemplateColumns: `${leftTrack} ${centerTrack} ${rightTrack}`,
@@ -163,7 +125,7 @@ onMounted(async () => {
     recordActivity({
       type: 'system',
       title: '워크스페이스 로드',
-      description: '단일 화면 워크스페이스와 실시간 구독이 초기화되었습니다.',
+      description: '대시보드·대화·매니저 허브가 준비되었습니다.',
     });
   } catch (error) {
     notify({
@@ -181,22 +143,18 @@ onUnmounted(() => {
 
 <template>
   <div class="workspace" :class="{ 'workspace--stacked': isStackedLayout }">
-    <header class="workspace-header">
-      <div class="workspace-header__copy">
-        <p class="workspace-kicker">SimpleStock Workspace</p>
-        <h1 class="workspace-title">Quant Manager</h1>
-      </div>
-      <button type="button" class="workspace-settings-button" @click="openDrawer('settings', null, '설정')">
-        설정
-      </button>
-    </header>
+    <LiveTickerBar
+      :show-extras="showExtras"
+      @toggle-extras="showExtras = !showExtras"
+      @open-settings="openDrawer('settings', null, '설정')"
+    />
 
     <main class="workspace-main" :class="workspaceClass" :style="workspaceGridStyle">
       <section
         v-for="column in orderedColumns"
         :key="column.key"
         class="workspace-column"
-        :class="{ 'workspace-column--stacked': isStackedLayout }"
+        :class="[column.columnClass, { 'workspace-column--stacked': isStackedLayout }]"
       >
         <component
           :is="panelComponents[panel.id]"
@@ -225,49 +183,6 @@ onUnmounted(() => {
     var(--color-canvas);
 }
 
-.workspace-header {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-md);
-  align-items: center;
-  min-height: 0;
-}
-
-.workspace-header__copy {
-  min-width: 0;
-}
-
-.workspace-kicker {
-  margin: 0 0 2px;
-  color: var(--color-primary);
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.workspace-title {
-  margin: 0;
-  color: var(--color-ink);
-  font-size: clamp(13px, 1.05vw, 16px);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.12;
-}
-
-.workspace-settings-button {
-  flex: 0 0 auto;
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--rounded-pill);
-  background: var(--color-surface-strong);
-  color: var(--color-ink);
-  font-size: 10px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
 .workspace-main {
   min-height: 0;
   display: grid;
@@ -283,6 +198,47 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 6px;
   overflow: hidden;
+}
+
+/* 좌측: 대시보드 — 기존 패널 타이포 유지 */
+.workspace-column--dashboard :deep(.panel-shell__title) {
+  font-size: 15px;
+}
+
+.workspace-column--dashboard :deep(.panel-shell__subtitle) {
+  font-size: 11px;
+}
+
+/* 중앙: 대화 — 보통 크기 */
+.workspace-column--chat {
+  font-size: 14px;
+}
+
+.workspace-column--chat :deep(.panel-shell__title) {
+  font-size: 15px;
+}
+
+.workspace-column--chat :deep(.chat-bubble),
+.workspace-column--chat :deep(.composer-input),
+.workspace-column--chat :deep(.thread-item strong) {
+  font-size: 14px;
+}
+
+/* 우측: 매니저 허브 — 작게(한 단계 상향) */
+.workspace-column--manager {
+  font-size: 12px;
+}
+
+.workspace-column--manager :deep(.panel-shell__body) {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0;
+}
+
+.workspace-column--manager :deep(.manager-hub-shell) {
+  flex: 1;
+  min-height: 0;
 }
 
 .workspace--stacked {

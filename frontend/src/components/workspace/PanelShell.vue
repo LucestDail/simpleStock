@@ -24,6 +24,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  fill: {
+    type: Boolean,
+    default: false,
+  },
 });
 </script>
 
@@ -33,7 +37,7 @@ const props = defineProps({
     :class="[
       `panel-shell--${props.span}`,
       `panel-shell--tone-${props.tone}`,
-      { 'panel-shell--highlighted': props.highlighted },
+      { 'panel-shell--highlighted': props.highlighted, 'panel-shell--fill': props.fill },
     ]"
   >
     <header class="panel-shell__head">
@@ -165,8 +169,13 @@ const props = defineProps({
   overflow: auto;
 }
 
-.panel-shell--full .panel-shell__body {
+.panel-shell--full .panel-shell__body,
+.panel-shell--fill .panel-shell__body {
   overflow: hidden;
+}
+
+.panel-shell--fill .panel-shell__body {
+  padding-bottom: 0;
 }
 
 .panel-shell__body--loading {

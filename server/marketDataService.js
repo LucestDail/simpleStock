@@ -4,6 +4,7 @@ const { buildPortfolioPayload } = require('./payloadService');
 const { broadcast } = require('./realtimeService');
 const { logInfo, logWarn, logError } = require('./logger');
 const { USD_KRW_FALLBACK_RATE } = require('./structuredImportService');
+const { getEffectiveMarketProviders } = require('./settingsService');
 
 const MARKET_EVENT_TYPES = Object.freeze({
   QUOTE_UPDATED: 'market.quote.updated',
@@ -48,23 +49,40 @@ const MARKET_KR_QUOTE_TTL_MS = Math.max(
   60 * 60 * 1000,
   Number(process.env.MARKET_KR_QUOTE_TTL_MS) || 6 * 60 * 60 * 1000
 );
+const MARKET_KR_BAS_DT_LOOKBACK_DAYS = Math.max(
+  1,
+  Math.min(7, Number(process.env.MARKET_KR_BAS_DT_LOOKBACK_DAYS) || 2)
+);
+const MARKET_KR_QUOTA_BACKOFF_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.MARKET_KR_QUOTA_BACKOFF_MS) || 30 * 60 * 1000
+);
 const quoteCache = new Map();
+const negativeCache = new Map();
 const inflightRequests = new Map();
+let krProviderBackoffUntil = 0;
 
 let refreshTimer = null;
 let delayedRefreshTimer = null;
 let refreshPromise = null;
 
+function getResolvedProviders() {
+  const override = getEffectiveMarketProviders();
+  return {
+    kr: override.kr || KR_PROVIDER,
+    us: override.us || US_PROVIDER,
+    fx: override.fx || FX_PROVIDER,
+  };
+}
+
 function getMarketProviderConfig() {
+  const providers = getResolvedProviders();
   return {
     timezone: APP_TIMEZONE,
     provider: DEFAULT_PROVIDER,
     enabled: MARKET_DATA_ENABLED,
-    providers: {
-      kr: KR_PROVIDER,
-      us: US_PROVIDER,
-      fx: FX_PROVIDER,
-    },
+    providers,
+    effectiveProviders: providers,
     refreshIntervalsMs: {
       session: MARKET_REFRESH_INTERVAL_MS,
       quote: MARKET_REFRESH_INTERVAL_MS,
@@ -72,7 +90,37 @@ function getMarketProviderConfig() {
     },
     quoteTtlMs: MARKET_QUOTE_TTL_MS,
     krQuoteTtlMs: MARKET_KR_QUOTE_TTL_MS,
+    krBasDtLookbackDays: MARKET_KR_BAS_DT_LOOKBACK_DAYS,
+    krQuotaBackoffMs: MARKET_KR_QUOTA_BACKOFF_MS,
+    krQuotaBackoffUntil: krProviderBackoffUntil
+      ? new Date(krProviderBackoffUntil).toISOString()
+      : null,
   };
+}
+
+function isMarketUpstreamQuotaError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return (
+    message.includes('quota') ||
+    message.includes('한도') ||
+    message.includes('429') ||
+    message.includes('too many') ||
+    message.includes('token') ||
+    message.includes('trfc')
+  );
+}
+
+function isKrProviderBackoffActive() {
+  return Date.now() < krProviderBackoffUntil;
+}
+
+function markKrProviderBackoff(error) {
+  krProviderBackoffUntil = Date.now() + MARKET_KR_QUOTA_BACKOFF_MS;
+  logWarn('market.kr.quota_backoff', {
+    until: new Date(krProviderBackoffUntil).toISOString(),
+    backoffMs: MARKET_KR_QUOTA_BACKOFF_MS,
+    message: String(error?.message || error || '').slice(0, 200),
+  });
 }
 
 function roundNumber(value, digits = 2) {
@@ -295,7 +343,12 @@ async function fetchFinnhubQuote(symbol) {
   };
 }
 
-async function getCachedQuote(kind, symbol, fetcher, { force = false, ttlMs = MARKET_QUOTE_TTL_MS } = {}) {
+async function getCachedQuote(
+  kind,
+  symbol,
+  fetcher,
+  { force = false, ttlMs = MARKET_QUOTE_TTL_MS, staleOnQuota = false } = {}
+) {
   const cacheKey = getCacheKey(kind, symbol);
   const now = Date.now();
   const cached = quoteCache.get(cacheKey);
@@ -303,17 +356,41 @@ async function getCachedQuote(kind, symbol, fetcher, { force = false, ttlMs = MA
     return cached.value;
   }
 
+  const negative = negativeCache.get(cacheKey);
+  if (!force && negative && now < negative.until) {
+    if (cached?.value) return cached.value;
+    throw new Error(negative.message || '시세 API 한도 초과로 잠시 조회를 중단합니다.');
+  }
+
+  if (staleOnQuota && !force && isKrProviderBackoffActive()) {
+    if (cached?.value) return cached.value;
+    throw new Error('공공데이터포털 API 한도 초과로 한국 시세 조회를 일시 중단했습니다.');
+  }
+
   if (inflightRequests.has(cacheKey)) {
     return inflightRequests.get(cacheKey);
   }
 
   const pending = (async () => {
-    const value = await fetcher(symbol);
-    quoteCache.set(cacheKey, {
-      value,
-      cachedAt: Date.now(),
-    });
-    return value;
+    try {
+      const value = await fetcher(symbol);
+      quoteCache.set(cacheKey, {
+        value,
+        cachedAt: Date.now(),
+      });
+      negativeCache.delete(cacheKey);
+      return value;
+    } catch (error) {
+      if (staleOnQuota && isMarketUpstreamQuotaError(error)) {
+        markKrProviderBackoff(error);
+        negativeCache.set(cacheKey, {
+          until: Date.now() + MARKET_KR_QUOTA_BACKOFF_MS,
+          message: String(error.message || error),
+        });
+        if (cached?.value) return cached.value;
+      }
+      throw error;
+    }
   })().finally(() => {
     inflightRequests.delete(cacheKey);
   });
@@ -324,7 +401,8 @@ async function getCachedQuote(kind, symbol, fetcher, { force = false, ttlMs = MA
 
 async function fetchUsQuote(symbol, options = {}) {
   const normalizedSymbol = normalizeTickerSymbol(symbol);
-  const provider = US_PROVIDER === FINNHUB_PROVIDER ? FINNHUB_PROVIDER : YAHOO_PROVIDER;
+  const { us } = getResolvedProviders();
+  const provider = us === FINNHUB_PROVIDER ? FINNHUB_PROVIDER : YAHOO_PROVIDER;
   const fetcher = provider === FINNHUB_PROVIDER ? fetchFinnhubQuote : fetchYahooChartQuote;
   return getCachedQuote('quote', normalizedSymbol, fetcher, options);
 }
@@ -423,6 +501,10 @@ async function fetchPublicDataJson(params) {
   const data = await fetchJson(url);
   const parsed = parsePublicDataBody(data);
 
+  if (parsed.resultMsg && isMarketUpstreamQuotaError({ message: parsed.resultMsg })) {
+    throw new Error(`공공데이터포털: ${parsed.resultMsg}`.trim());
+  }
+
   if (parsed.resultCode && parsed.resultCode !== '00') {
     throw new Error(`공공데이터포털 오류: ${parsed.resultCode} ${parsed.resultMsg}`.trim());
   }
@@ -437,7 +519,7 @@ async function fetchKrPublicStockQuote(symbol, options = {}) {
     getTrackedQuoteKey({ market: 'KR', symbol: normalizedSymbol }),
     async () => {
       let matched = null;
-      for (const basDt of listRecentBasDates(7)) {
+      for (const basDt of listRecentBasDates(MARKET_KR_BAS_DT_LOOKBACK_DAYS)) {
         const items = await fetchPublicDataJson({
           basDt,
           likeSrtnCd: normalizedSymbol,
@@ -475,6 +557,7 @@ async function fetchKrPublicStockQuote(symbol, options = {}) {
     {
       ...options,
       ttlMs: MARKET_KR_QUOTE_TTL_MS,
+      staleOnQuota: true,
     }
   );
 }
@@ -528,14 +611,42 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
       }
     }
 
+    const quoteStats = {
+      krQuoteAttempts: 0,
+      krQuoteFailures: 0,
+      usQuoteAttempts: 0,
+      usQuoteFailures: 0,
+      lastKrFailureAt: null,
+      lastKrFailureSymbol: '',
+    };
+
     for (const ticker of trackedTickers) {
       try {
         const quoteKey = getTrackedQuoteKey(ticker);
+        if (ticker.market === 'KR') {
+          quoteStats.krQuoteAttempts += 1;
+          if (isKrProviderBackoffActive() && !force) {
+            const existingQuote = initialStore.memory.market?.quotes?.[quoteKey];
+            if (existingQuote) {
+              nextQuotes[quoteKey] = existingQuote;
+              continue;
+            }
+          }
+        } else {
+          quoteStats.usQuoteAttempts += 1;
+        }
         nextQuotes[quoteKey] =
           ticker.market === 'KR'
             ? await fetchKrPublicStockQuote(ticker.symbol, { force })
             : await fetchUsQuote(ticker.symbol, { force });
       } catch (error) {
+        if (ticker.market === 'KR') {
+          quoteStats.krQuoteFailures += 1;
+          quoteStats.lastKrFailureAt = new Date().toISOString();
+          quoteStats.lastKrFailureSymbol = ticker.symbol;
+        } else {
+          quoteStats.usQuoteFailures += 1;
+        }
         logWarn('market.quote.refresh_failed', {
           reason,
           market: ticker.market,
@@ -612,6 +723,7 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
         }
       }
 
+      const prevStats = market.stats && typeof market.stats === 'object' ? market.stats : {};
       store.memory.market = {
         provider: DEFAULT_PROVIDER,
         refreshStatus: errors.length && !Object.keys(nextQuotes).length && !nextFx ? 'error' : 'ready',
@@ -619,6 +731,14 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
         lastSuccessAt:
           Object.keys(nextQuotes).length || nextFx ? refreshedAt : market.lastSuccessAt || refreshedAt,
         lastError: errors.join(' | ').slice(0, 300),
+        stats: {
+          krQuoteAttempts: (prevStats.krQuoteAttempts || 0) + quoteStats.krQuoteAttempts,
+          krQuoteFailures: (prevStats.krQuoteFailures || 0) + quoteStats.krQuoteFailures,
+          usQuoteAttempts: (prevStats.usQuoteAttempts || 0) + quoteStats.usQuoteAttempts,
+          usQuoteFailures: (prevStats.usQuoteFailures || 0) + quoteStats.usQuoteFailures,
+          lastKrFailureAt: quoteStats.lastKrFailureAt || prevStats.lastKrFailureAt || null,
+          lastKrFailureSymbol: quoteStats.lastKrFailureSymbol || prevStats.lastKrFailureSymbol || '',
+        },
         trackedTickers,
         quotes: {
           ...existingQuotes,
@@ -746,4 +866,6 @@ module.exports = {
   scheduleMarketRefresh,
   startMarketDataPolling,
   getMarketSnapshot,
+  isMarketUpstreamQuotaError,
+  listRecentBasDates,
 };

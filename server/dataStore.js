@@ -48,6 +48,14 @@ function createDefaultMarketState() {
     lastRefreshAt: null,
     lastSuccessAt: null,
     lastError: '',
+    stats: {
+      krQuoteAttempts: 0,
+      krQuoteFailures: 0,
+      usQuoteAttempts: 0,
+      usQuoteFailures: 0,
+      lastKrFailureAt: null,
+      lastKrFailureSymbol: '',
+    },
     trackedTickers: [],
     quotes: {},
     fx: {
@@ -107,14 +115,36 @@ function readJson(filePath, fallbackFactory) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     return JSON.parse(raw);
-  } catch {
+  } catch (error) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const corruptPath = `${filePath}.corrupt-${Date.now()}.bak`;
+        fs.copyFileSync(filePath, corruptPath);
+      }
+    } catch {
+      // ignore backup failure
+    }
     return fallbackFactory();
   }
 }
 
 function writeJson(filePath, data) {
   ensureDataDir();
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  const payload = JSON.stringify(data, null, 2);
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  const tempPath = path.join(dir, `.${base}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    fs.writeFileSync(tempPath, payload, 'utf8');
+    fs.renameSync(tempPath, filePath);
+  } catch (error) {
+    try {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    } catch {
+      // ignore
+    }
+    throw error;
+  }
 }
 
 function normalizeHoldingDetails(details) {
@@ -296,6 +326,14 @@ function normalizeMemory(data) {
     }))
     .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
 
+  if (!memory.tokenUsageByMonth || typeof memory.tokenUsageByMonth !== 'object') {
+    memory.tokenUsageByMonth = {};
+  }
+  memory.lastImportUndo =
+    memory.lastImportUndo && typeof memory.lastImportUndo === 'object'
+      ? memory.lastImportUndo
+      : null;
+
   return memory;
 }
 
@@ -308,6 +346,16 @@ function normalizeMarketState(data) {
   market.lastRefreshAt = market.lastRefreshAt || null;
   market.lastSuccessAt = market.lastSuccessAt || null;
   market.lastError = String(market.lastError || '').slice(0, 300);
+  const defaultStats = defaults.stats || {};
+  const rawStats = market.stats && typeof market.stats === 'object' ? market.stats : {};
+  market.stats = {
+    krQuoteAttempts: Math.max(0, Number(rawStats.krQuoteAttempts) || 0),
+    krQuoteFailures: Math.max(0, Number(rawStats.krQuoteFailures) || 0),
+    usQuoteAttempts: Math.max(0, Number(rawStats.usQuoteAttempts) || 0),
+    usQuoteFailures: Math.max(0, Number(rawStats.usQuoteFailures) || 0),
+    lastKrFailureAt: rawStats.lastKrFailureAt || defaultStats.lastKrFailureAt || null,
+    lastKrFailureSymbol: String(rawStats.lastKrFailureSymbol || '').slice(0, 40),
+  };
   market.trackedTickers = Array.isArray(market.trackedTickers)
     ? market.trackedTickers
         .filter((item) => item && item.symbol)
@@ -454,6 +502,8 @@ async function mutateStore(mutator) {
 module.exports = {
   CATEGORIES,
   FILES,
+  readJson,
+  writeJson,
   createDefaultPortfolio,
   createDefaultChat,
   createDefaultMemory,

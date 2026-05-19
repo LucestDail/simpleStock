@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue';
+import { apiFetch, readApiError } from '../lib/apiClient';
 
 export const CATEGORIES = [
   { id: 'deposit', label: '예금' },
@@ -193,8 +194,8 @@ export function usePortfolio() {
     busyState.value.fetchPortfolio = true;
     error.value = null;
     try {
-      const res = await fetch('/api/portfolio');
-      if (!res.ok) throw new Error('불러오기 실패');
+      const res = await apiFetch('/api/portfolio');
+      if (!res.ok) throw new Error(await readApiError(res, '포트폴리오를 불러오지 못했습니다.'));
       applyPortfolioPayload(await res.json());
     } catch (e) {
       error.value = e.message || '오류';
@@ -207,7 +208,7 @@ export function usePortfolio() {
     busyState.value.saveHoldings = true;
     error.value = null;
     try {
-      const res = await fetch('/api/portfolio', {
+      const res = await apiFetch('/api/portfolio', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ holdings: list }),
@@ -225,7 +226,7 @@ export function usePortfolio() {
   async function addSnapshot(date) {
     busyState.value.addSnapshot = true;
     try {
-      const res = await fetch('/api/snapshots', {
+      const res = await apiFetch('/api/snapshots', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(date ? { date } : {}),
@@ -243,7 +244,7 @@ export function usePortfolio() {
   async function deleteSnapshot(date) {
     busyState.value.deleteSnapshot = true;
     try {
-      const res = await fetch(`/api/snapshots/${encodeURIComponent(date)}`, {
+      const res = await apiFetch(`/api/snapshots/${encodeURIComponent(date)}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('삭제 실패');
@@ -256,7 +257,7 @@ export function usePortfolio() {
   async function runManagerReview() {
     busyState.value.managerReview = true;
     try {
-      const res = await fetch('/api/manager/run', {
+      const res = await apiFetch('/api/manager/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -277,7 +278,7 @@ export function usePortfolio() {
     busyState.value.refreshMarket = true;
     error.value = null;
     try {
-      const res = await fetch('/api/market/refresh', {
+      const res = await apiFetch('/api/market/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
