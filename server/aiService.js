@@ -15,6 +15,11 @@ const GEMINI_MODEL =
   String(process.env.GEMINI_MODEL ?? '')
     .trim()
     .replace(/^['"]|['"]$/g, '') || 'gemini-3.1-flash-lite';
+/** supervisor는 빠른 라우팅/planning 전용 → 가벼운 모델 강제. answer 품질은 synthesizer가 보장. */
+const GEMINI_SUPERVISOR_MODEL =
+  String(process.env.GEMINI_SUPERVISOR_MODEL ?? '')
+    .trim()
+    .replace(/^['"]|['"]$/g, '') || 'gemini-2.5-flash';
 const GEMINI_INCLUDE_THOUGHTS =
   String(process.env.GEMINI_INCLUDE_THOUGHTS ?? 'true').trim().toLowerCase() !== 'false';
 const GEMINI_THINKING_BUDGET = Math.min(
@@ -22,6 +27,10 @@ const GEMINI_THINKING_BUDGET = Math.min(
   Math.max(0, Number.parseInt(String(process.env.GEMINI_THINKING_BUDGET || '2048'), 10) || 2048)
 );
 const GEMINI_TIMEOUT_MS = Math.max(15_000, Number(process.env.GEMINI_TIMEOUT_MS) || 90_000);
+const GEMINI_SUPERVISOR_TIMEOUT_MS = Math.max(
+  15_000,
+  Number(process.env.GEMINI_SUPERVISOR_TIMEOUT_MS) || 45_000
+);
 const GEMINI_MAX_RETRIES = Math.max(0, Number(process.env.GEMINI_MAX_RETRIES) || 2);
 const GEMINI_RETRY_BASE_MS = Math.max(250, Number(process.env.GEMINI_RETRY_BASE_MS) || 1_500);
 const usePresetBriefSchedule =
@@ -689,10 +698,11 @@ function isRetryableAiError(error) {
   );
 }
 
-function buildAiUserFacingError(error, { maxAttempts } = {}) {
+function buildAiUserFacingError(error, { maxAttempts, effectiveTimeoutMs } = {}) {
   if (error?.code === 'AI_TIMEOUT') {
+    const seconds = Math.round((effectiveTimeoutMs || GEMINI_TIMEOUT_MS) / 1000);
     return new Error(
-      `AI 응답이 ${Math.round(GEMINI_TIMEOUT_MS / 1000)}초 안에 완료되지 않아 중단했습니다. 잠시 후 다시 시도해 주세요.`
+      `AI 응답이 ${seconds}초 안에 완료되지 않아 중단했습니다. 잠시 후 다시 시도해 주세요.`
     );
   }
 
@@ -713,6 +723,8 @@ async function generateContent({
   schema = null,
   useGoogleSearch = false,
   logLabel = 'generate_content',
+  modelOverride = null,
+  timeoutOverrideMs = null,
 }) {
   if (!isAiConfigured()) {
     throw new Error('GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
@@ -721,17 +733,19 @@ async function generateContent({
   const GoogleGenAI = await getGoogleGenAI();
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const runtime = readAiRuntime();
+  const effectiveModel = modelOverride || runtime.model;
+  const effectiveTimeoutMs = timeoutOverrideMs || GEMINI_TIMEOUT_MS;
   const startedAt = Date.now();
   const maxAttempts = GEMINI_MAX_RETRIES + 1;
   const config = await buildGenerateConfig({ schema, useGoogleSearch });
 
   logInfo('ai.generate.start', {
     logLabel,
-    model: runtime.model,
+    model: effectiveModel,
     streamThoughts: runtime.includeThoughts,
     useGoogleSearch,
     hasSchema: Boolean(schema),
-    timeoutMs: GEMINI_TIMEOUT_MS,
+    timeoutMs: effectiveTimeoutMs,
     maxAttempts,
     systemPromptPreview: String(systemPrompt || '').slice(0, 160),
     userPromptPreview: String(userPrompt || '').slice(0, 200),
@@ -744,11 +758,11 @@ async function generateContent({
     try {
       const response = await withTimeout(
         ai.models.generateContent({
-          model: runtime.model,
+          model: effectiveModel,
           contents: buildEnvelope(systemPrompt, userPrompt),
           config,
         }),
-        GEMINI_TIMEOUT_MS
+        effectiveTimeoutMs
       );
 
       logInfo('ai.generate.finish', {
@@ -785,7 +799,7 @@ async function generateContent({
         continue;
       }
 
-      const userFacingError = buildAiUserFacingError(error, { maxAttempts });
+      const userFacingError = buildAiUserFacingError(error, { maxAttempts, effectiveTimeoutMs });
       logError('ai.generate.failed', error, {
         logLabel,
         attempt,
@@ -811,7 +825,7 @@ async function generateContent({
       hasSchema: Boolean(schema),
       retryable: false,
     });
-    throw buildAiUserFacingError(error, { maxAttempts });
+    throw buildAiUserFacingError(error, { maxAttempts, effectiveTimeoutMs });
   }
 }
 
@@ -1150,6 +1164,8 @@ async function buildSupervisorPlan(userInput, context) {
       ),
       schema: SUPERVISOR_SCHEMA,
       logLabel: 'supervisor_plan',
+      modelOverride: GEMINI_SUPERVISOR_MODEL,
+      timeoutOverrideMs: GEMINI_SUPERVISOR_TIMEOUT_MS,
     },
     fallback
   ).then((plan) => {
