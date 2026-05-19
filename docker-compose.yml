@@ -1,17 +1,17 @@
 # SimpleStock — 개인 자산 추적
 # 사용: docker compose up -d
-# 접속: http://localhost:3000
+# 접속: http://localhost:50000 (로컬 기본; .env의 PORT로 변경 가능)
 
 services:
   app:
     build: .
     image: simple-stock-app
     ports:
-      - "3000:3000"
+      - "${PORT:-50000}:${PORT:-50000}"
     volumes:
       - ./data:/app/data
     environment:
-      PORT: "3000"
+      PORT: "${PORT:-50000}"
       TZ: "${TZ:-Asia/Seoul}"
       APP_TIMEZONE: "${APP_TIMEZONE:-Asia/Seoul}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
