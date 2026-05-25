@@ -4,7 +4,12 @@
 
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # 통합 nginx 게이트웨이 뒤에 둘 때 prefix(/simpleStock) 를 빌드 타임에 주입.
+        # 단독 실행 시에는 빈 값으로 두면 / 루트로 동작.
+        VITE_BASE_PATH: "${VITE_BASE_PATH:-}"
     image: simple-stock-app
     ports:
       - "${PORT:-50000}:${PORT:-50000}"
