@@ -45,8 +45,10 @@ const MARKET_REFRESH_INTERVAL_MS = Math.max(
   Number(process.env.MARKET_REFRESH_INTERVAL_MS) || 60_000
 );
 const MARKET_QUOTE_TTL_MS = Math.max(10_000, Number(process.env.MARKET_QUOTE_TTL_MS) || 60_000);
+// KR 시세 캐시 TTL: 공공데이터포털 quota 보호용 기본값은 6시간이지만,
+// 사용자 환경변수로 1분(60s)까지 줄일 수 있도록 lower bound 를 60_000ms 로 완화.
 const MARKET_KR_QUOTE_TTL_MS = Math.max(
-  60 * 60 * 1000,
+  60_000,
   Number(process.env.MARKET_KR_QUOTE_TTL_MS) || 6 * 60 * 60 * 1000
 );
 const MARKET_KR_BAS_DT_LOOKBACK_DAYS = Math.max(
