@@ -68,7 +68,7 @@ echo "[deploy] app root OK"
 REMOTE_TOKEN="$(remote_ssh "grep -E '^APP_ACCESS_TOKEN=' ${REMOTE_DIR}/.env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"'" || true)"
 if [ -n "${REMOTE_TOKEN:-}" ]; then
   curl -sf -m 15 -H "Authorization: Bearer ${REMOTE_TOKEN}" \
-    "http://${REMOTE_HOST}:${REMOTE_PORT}/api/system/status" | head -c 240
+    "http://${REMOTE_HOST}:${REMOTE_PORT}/api/system/status" | head -c 240 || true
   echo ""
 else
   echo "[deploy] skip /api/system/status (APP_ACCESS_TOKEN not readable on remote)"
