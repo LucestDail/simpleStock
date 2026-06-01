@@ -142,6 +142,15 @@ function repairWatchlistHolding(holding) {
   };
 }
 
+function normalizeForMatch(text) {
+  return normalizeText(text).toLowerCase().replace(/[\s\-_·()（）,，]/g, '');
+}
+
+function looksLikeStockPurchaseDeposit(holding) {
+  if (holding?.category !== 'deposit') return false;
+  return /(\d+)\s*주|평단|매수|매입|샀|구매/i.test(String(holding.name || ''));
+}
+
 function dedupeGhostHoldings(holdings) {
   const stockKeys = new Set();
   for (const holding of holdings) {
@@ -152,7 +161,7 @@ function dedupeGhostHoldings(holdings) {
 
   return holdings.filter((holding) => {
     if (holding.category !== 'deposit') return true;
-    if (Number(holding.amount) > 0) return true;
+    if (looksLikeStockPurchaseDeposit(holding)) return false;
     if (holding.details?.ticker) return true;
 
     const nameKey = normalizeWatchlistHoldingName(holding.name).toLowerCase();
@@ -161,13 +170,17 @@ function dedupeGhostHoldings(holdings) {
     for (const key of stockKeys) {
       if (nameKey && (nameKey.includes(key) || key.includes(nameKey))) return false;
     }
+
+    if (Number(holding.amount) > 0) return true;
     return true;
   });
 }
 
 function repairPortfolioHoldings(holdings) {
+  const { mergeMisclassifiedDepositsIntoStocks } = require('./stockPurchaseUtil');
   const repaired = holdings.map((item) => repairWatchlistHolding(item));
-  return dedupeGhostHoldings(repaired);
+  const merged = mergeMisclassifiedDepositsIntoStocks(repaired);
+  return dedupeGhostHoldings(merged);
 }
 
 module.exports = {

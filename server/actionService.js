@@ -137,6 +137,17 @@ function hasExplicitAmount(payload) {
   return payload.amount !== undefined && payload.amount !== null && String(payload.amount).trim() !== '';
 }
 
+function syncStockHoldingAmount(holding) {
+  if (!holding || holding.category !== 'stock' || !holding.details) return;
+  const details = holding.details;
+  const qty = Number(details.quantity);
+  const price = Number(details.lastQuote || details.currentPrice || details.averagePrice);
+  if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0) return;
+  const nativeAmount = Math.round(qty * price);
+  details.nativeAmount = nativeAmount;
+  holding.amount = nativeAmount;
+}
+
 const SUBSTANTIVE_DETAIL_KEYS = ['ticker', 'quantity', 'averagePrice', 'account', 'currency', 'market', 'nativeAmount', 'orders'];
 
 function hasSubstantiveDetails(patch, existing) {
@@ -365,6 +376,7 @@ async function applyConversationActions(actions = []) {
               mergeHoldingDetails(current.details, detailsPatch)
             );
           }
+          syncStockHoldingAmount(current);
           if (
             isEquityTicker(current.details?.ticker) &&
             current.category !== 'stock' &&
@@ -423,13 +435,15 @@ async function applyConversationActions(actions = []) {
             message: `${current.name} 자산을 반영했습니다${amountNote}${tickerNote}.`,
           });
         } else {
-          store.portfolio.holdings.push({
+          const nextHolding = {
             id: holdingId || crypto.randomUUID(),
             name,
             category,
             amount: hasExplicitAmount(payload) ? amount : 0,
             details: detailsPatch ? applyEquityWatchDefaults(detailsPatch) : null,
-          });
+          };
+          syncStockHoldingAmount(nextHolding);
+          store.portfolio.holdings.push(nextHolding);
           actionResults.push({
             type,
             status: 'applied',

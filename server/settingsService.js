@@ -7,14 +7,14 @@ const AI_PRESETS = [
   {
     id: 'fast',
     label: '빠른 응답',
-    model: 'gemini-3.1-flash-lite',
+    model: 'gemini-3.5-flash',
     thinkingBudget: 1024,
     includeThoughts: true,
   },
   {
     id: 'balanced',
     label: '균형 (기본)',
-    model: 'gemini-3.1-flash-lite',
+    model: 'gemini-3.5-flash',
     thinkingBudget: 2048,
     includeThoughts: true,
   },
@@ -91,7 +91,7 @@ function getPresetById(presetId) {
 
 function getEnvAiDefaults() {
   return {
-    model: String(process.env.GEMINI_MODEL ?? 'gemini-3.1-flash-lite').trim() || 'gemini-3.1-flash-lite',
+    model: String(process.env.GEMINI_MODEL ?? 'gemini-3.5-flash').trim() || 'gemini-3.5-flash',
     thinkingBudget: Math.min(
       8192,
       Math.max(0, Number.parseInt(String(process.env.GEMINI_THINKING_BUDGET || '2048'), 10) || 2048)

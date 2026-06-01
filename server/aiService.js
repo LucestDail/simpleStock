@@ -10,16 +10,16 @@ const {
 } = require('./settingsService');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-/** @see https://ai.google.dev/gemini-api/docs/models — 기본 Stable: Gemini 3.1 Flash-Lite */
+/** @see https://ai.google.dev/gemini-api/docs/models — 기본 Stable: Gemini 3.5 Flash */
 const GEMINI_MODEL =
   String(process.env.GEMINI_MODEL ?? '')
     .trim()
-    .replace(/^['"]|['"]$/g, '') || 'gemini-3.1-flash-lite';
-/** supervisor는 빠른 라우팅/planning 전용 → 가벼운 모델 강제. answer 품질은 synthesizer가 보장. */
+    .replace(/^['"]|['"]$/g, '') || 'gemini-3.5-flash';
+/** supervisor/planning도 동일 계열 모델 사용 (구조화 JSON + 액션 정확도). */
 const GEMINI_SUPERVISOR_MODEL =
   String(process.env.GEMINI_SUPERVISOR_MODEL ?? '')
     .trim()
-    .replace(/^['"]|['"]$/g, '') || 'gemini-2.5-flash';
+    .replace(/^['"]|['"]$/g, '') || 'gemini-3.5-flash';
 const GEMINI_INCLUDE_THOUGHTS =
   String(process.env.GEMINI_INCLUDE_THOUGHTS ?? 'true').trim().toLowerCase() !== 'false';
 const GEMINI_THINKING_BUDGET = Math.min(
@@ -425,7 +425,7 @@ function convertJsonSchemaToGeminiSchema(schema, Type) {
 }
 
 function isGemini3Model(model) {
-  return /gemini-3[.-]/.test(model || '');
+  return /gemini-3(?:\.5)?[.-]/.test(model || '');
 }
 
 function budgetToThinkingLevel(budget) {
@@ -1140,6 +1140,9 @@ async function buildSupervisorPlan(userInput, context) {
         '자산 입력은 holding 정보, 설정 변경은 profileChanges, 반복 작업은 scheduleTask, 취소는 cancelTarget에 담는다.',
         '⚠ 사용자 메시지에 금액(원/$)이 명시되어 자산 가격/평가액 갱신을 요청한 경우, upsertHolding.holding.amount 필드에 반드시 해당 숫자(정수, 원 단위)를 그대로 채운다. 절대 null·생략하지 말 것. 예: "5,516,165원으로 갱신" → amount: 5516165.',
         '티커·종목코드·수량 등 세부 정보만 바꾸고 금액 변경이 전혀 없을 때만 amount 필드를 생략하고 details 에 변경 필드만 넣는다.',
+        '주식/ETF 매수·보유 등록: category=stock, details.quantity=보유 주수, details.averagePrice=평단가(원). amount 필드에 평단가를 넣지 말 것(평가액은 시스템이 시세×수량으로 계산).',
+        'holding.name 은 종목명만(예: 미래에셋 증권). "35주 샀고", "평단" 같은 구매 설명은 name에 넣지 말 것.',
+        'deposit 카테고리는 현금·예금·적금 등 현금성 자산만. 주식 매수/보유는 절대 deposit 가 아니다.',
         '가격 관찰용 0주 종목은 category=stock, holding.details.ticker·quantity=0 를 반드시 채운다. deposit 카테고리에 넣지 않는다.',
         '⚠⚠ 사용자가 "추가해줘/등록해줘/관제해줘"라고 명시적으로 요청한 종목이 context.portfolio.holdings 의 name 목록에 없으면, 반드시 actions 배열에 upsertHolding 을 포함한다. memory(threadSummary, longTermMemory)에 "이미 추가됨" 같은 기록이 있어도 portfolio.holdings 에 실제로 없으면 그 기록을 무시하고 upsertHolding 을 발행한다. portfolio.holdings 가 단일 진실의 원천(source of truth)이다.',
         '⚠ ticker 가 확실하지 않으면 holding.details.ticker 와 market 을 빈 문자열로 두고 holding.name 만 채운다 — 시스템이 검색·검증으로 자동 채워준다. 절대 추측한 ticker(예: 임의의 6자리 코드)를 넣지 않는다.',
