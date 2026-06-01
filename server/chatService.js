@@ -3,6 +3,7 @@ const { loadStore, mutateStore } = require('./dataStore');
 const { buildConversationContext, formatMessagesForPrompt, getThreadMessages } = require('./contextBuilder');
 const { isAiConfigured, runConversationGraph, summarizeThread, inferAiProfile } = require('./aiService');
 const { applyConversationActions } = require('./actionService');
+const { backfillScheduleTaskCrons } = require('./scheduleCronUtil');
 const { buildStructuredImportPlan } = require('./structuredImportService');
 const { logInfo, logError } = require('./logger');
 const { buildProfilePayload } = require('./payloadService');
@@ -528,7 +529,12 @@ async function resolveAssistantTurn({
     aiResult = {
       ...aiResult,
       actions: dedupeUpsertHoldingActions(
-        backfillMissingHoldingAmounts(aiResult.actions || [], cleanContent, threadId),
+        backfillScheduleTaskCrons(
+          backfillMissingHoldingAmounts(aiResult.actions || [], cleanContent, threadId),
+          cleanContent,
+          threadId,
+          logInfo
+        ),
         threadId
       ),
     };

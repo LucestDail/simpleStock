@@ -62,6 +62,31 @@ remote_ssh "cd ${REMOTE_DIR} && docker compose up -d --build && docker compose p
 
 echo "[deploy] 3/3 smoke test"
 sleep 3
-curl -sf -m 15 "http://${REMOTE_HOST}:${REMOTE_PORT}/api/system/status" | head -c 240
-echo ""
+curl -sf -m 15 "http://${REMOTE_HOST}:${REMOTE_PORT}/" >/dev/null
+echo "[deploy] app root OK"
+
+REMOTE_TOKEN="$(remote_ssh "grep -E '^APP_ACCESS_TOKEN=' ${REMOTE_DIR}/.env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"'" || true)"
+if [ -n "${REMOTE_TOKEN:-}" ]; then
+  curl -sf -m 15 -H "Authorization: Bearer ${REMOTE_TOKEN}" \
+    "http://${REMOTE_HOST}:${REMOTE_PORT}/api/system/status" | head -c 240
+  echo ""
+else
+  echo "[deploy] skip /api/system/status (APP_ACCESS_TOKEN not readable on remote)"
+fi
+
+GATEWAY_BASE_PATH="$(remote_ssh "grep -E '^VITE_BASE_PATH=' ${REMOTE_DIR}/.env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"'" || true)"
+GATEWAY_BASE_PATH="${GATEWAY_BASE_PATH:-}"
+if [ -n "$GATEWAY_BASE_PATH" ]; then
+  case "$GATEWAY_BASE_PATH" in
+    */) GATEWAY_URL="http://${REMOTE_HOST}${GATEWAY_BASE_PATH}" ;;
+    *) GATEWAY_URL="http://${REMOTE_HOST}/${GATEWAY_BASE_PATH#/}/" ;;
+  esac
+  echo "[deploy] gateway smoke: ${GATEWAY_URL}"
+  curl -sf -m 15 "${GATEWAY_URL}" >/dev/null
+  echo "[deploy] gateway OK"
+fi
+
 echo "[deploy] 완료: http://${REMOTE_HOST}:${REMOTE_PORT}/"
+if [ -n "${GATEWAY_URL:-}" ]; then
+  echo "[deploy] gateway: ${GATEWAY_URL}"
+fi
