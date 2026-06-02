@@ -85,7 +85,7 @@ const { dialog, toast, confirmDialog, cancelDialog, dismissToast } = useUi();
 
 .dialog-title {
   margin: 0 0 var(--space-sm);
-  font-size: 24px;
+  font-size: 25px;
   font-weight: 400;
   letter-spacing: -0.02em;
   color: var(--color-ink);
@@ -109,7 +109,7 @@ const { dialog, toast, confirmDialog, cancelDialog, dismissToast } = useUi();
   padding: 0 var(--space-md);
   border: none;
   border-radius: var(--rounded-pill);
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -161,7 +161,7 @@ const { dialog, toast, confirmDialog, cancelDialog, dismissToast } = useUi();
   border: none;
   background: transparent;
   color: var(--color-on-dark-soft);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
 }

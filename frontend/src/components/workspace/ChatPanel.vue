@@ -380,7 +380,7 @@ watch(
   border: none;
   border-radius: var(--rounded-pill);
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -433,12 +433,12 @@ watch(
 
 .thread-panel__head strong {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .thread-panel__head span {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.2;
 }
 
@@ -478,7 +478,7 @@ watch(
 
 .thread-item strong {
   color: inherit;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.2;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -489,7 +489,7 @@ watch(
 .thread-item span,
 .thread-item em {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-style: normal;
   line-height: 1.2;
 }
@@ -509,7 +509,7 @@ watch(
   border: none;
   background: transparent;
   color: var(--color-semantic-down);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   padding: 1px 0 0;
@@ -522,14 +522,14 @@ watch(
   border-radius: var(--rounded-lg);
   padding: 7px 8px;
   background: var(--color-surface-soft);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .empty-box strong {
   display: block;
   color: var(--color-ink);
   margin-bottom: 4px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .empty-box p,
@@ -537,7 +537,7 @@ watch(
   margin: 0;
   color: var(--color-body);
   line-height: 1.3;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .disabled-box strong {
@@ -582,12 +582,12 @@ watch(
 
 .message-meta strong {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .message-meta span {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .message-text {
@@ -596,7 +596,7 @@ watch(
   overflow-wrap: anywhere;
   color: var(--color-body-strong);
   line-height: 1.4;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .stream-activity {
@@ -616,7 +616,7 @@ watch(
 
 .stream-phase {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-ink);
   flex: 1;
@@ -626,7 +626,7 @@ watch(
   border: none;
   background: transparent;
   color: var(--color-primary);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   padding: 0;
@@ -637,7 +637,7 @@ watch(
   margin: 0;
   max-height: 160px;
   overflow: auto;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.35;
   color: var(--color-muted);
   white-space: pre-wrap;
@@ -646,7 +646,7 @@ watch(
 
 .message-markdown {
   color: var(--color-body-strong);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -673,7 +673,7 @@ watch(
 .message-markdown :deep(h4) {
   margin: 0 0 6px;
   color: var(--color-ink);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.3;
 }
 
@@ -688,7 +688,7 @@ watch(
 
 .message-markdown :deep(code) {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   background: rgba(255, 255, 255, 0.06);
   padding: 1px 3px;
   border-radius: var(--rounded-xs);
@@ -718,7 +718,7 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.3;
   color: var(--color-muted);
 }
@@ -751,7 +751,7 @@ watch(
   border: 1px solid var(--color-hairline);
   display: grid;
   gap: 3px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .chat-notice.info {
@@ -773,14 +773,14 @@ watch(
 
 .chat-notice strong {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .btn-retry {
   border: none;
   background: transparent;
   color: var(--color-primary);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   padding: 0;
@@ -810,7 +810,7 @@ watch(
   background: rgba(255, 255, 255, 0.02);
   min-height: 40px;
   max-height: 120px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.35;
   box-sizing: border-box;
 }

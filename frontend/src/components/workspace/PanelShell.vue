@@ -122,7 +122,7 @@ const props = defineProps({
 
 .panel-shell__subtitle {
   margin: 0 0 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -134,7 +134,7 @@ const props = defineProps({
 
 .panel-shell__title {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--color-ink);
   letter-spacing: -0.02em;

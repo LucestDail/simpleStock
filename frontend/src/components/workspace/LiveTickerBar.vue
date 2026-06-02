@@ -257,7 +257,7 @@ onUnmounted(() => {
   border-radius: var(--rounded-pill);
   background: rgba(207, 32, 47, 0.2);
   color: #ff6b6b;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   animation: live-pulse 2s ease-in-out infinite;
@@ -282,7 +282,7 @@ onUnmounted(() => {
 
 .live-bar__title {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--color-ink);
   letter-spacing: -0.02em;
@@ -312,7 +312,7 @@ onUnmounted(() => {
 
 .live-bar__tz {
   color: var(--color-muted-soft);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -324,12 +324,12 @@ onUnmounted(() => {
 
 .live-bar__date {
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .live-bar__time {
   color: var(--color-ink);
-  font-size: clamp(18px, 2vw, 22px);
+  font-size: clamp(19px, 2vw, 23px);
   font-weight: 600;
   letter-spacing: 0.04em;
   font-family: var(--font-mono);
@@ -338,7 +338,7 @@ onUnmounted(() => {
 
 .live-bar__sync {
   color: var(--color-muted-soft);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .live-bar__actions {
@@ -356,7 +356,7 @@ onUnmounted(() => {
   padding: 3px 8px;
   border-radius: var(--rounded-pill);
   border: 1px solid var(--color-hairline-soft);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-muted);
 }
@@ -385,7 +385,7 @@ onUnmounted(() => {
   border-radius: var(--rounded-pill);
   background: rgba(255, 255, 255, 0.04);
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -418,7 +418,7 @@ onUnmounted(() => {
 
 .quote-chip__label {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   display: inline-flex;
   flex-direction: column;
@@ -428,17 +428,17 @@ onUnmounted(() => {
 
 .quote-chip__sub {
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 500;
 }
 
 .quote-chip__price {
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .quote-chip__pct {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -461,7 +461,7 @@ onUnmounted(() => {
 
 .live-bar__alerts-label {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -481,7 +481,7 @@ onUnmounted(() => {
   border: 1px solid var(--color-hairline-soft);
   background: rgba(255, 255, 255, 0.02);
   color: var(--color-body);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.3;
   max-width: 100%;
   overflow: hidden;

@@ -59,7 +59,7 @@ function toggleExpand(id) {
   border-radius: var(--rounded-lg);
   padding: 8px;
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .activity-list {
@@ -110,7 +110,7 @@ function toggleExpand(id) {
 
 .activity-copy strong {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -121,13 +121,13 @@ function toggleExpand(id) {
   margin: 2px 0 0;
   color: var(--color-body);
   line-height: 1.2;
-  font-size: 11px;
+  font-size: 12px;
   white-space: pre-wrap;
 }
 
 .time {
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

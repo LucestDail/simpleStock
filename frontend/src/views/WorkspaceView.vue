@@ -202,31 +202,31 @@ onUnmounted(() => {
 
 /* 좌측: 대시보드 — 기존 패널 타이포 유지 */
 .workspace-column--dashboard :deep(.panel-shell__title) {
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .workspace-column--dashboard :deep(.panel-shell__subtitle) {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* 중앙: 대화 — 보통 크기 */
 .workspace-column--chat {
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .workspace-column--chat :deep(.panel-shell__title) {
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .workspace-column--chat :deep(.chat-bubble),
 .workspace-column--chat :deep(.composer-input),
 .workspace-column--chat :deep(.thread-item strong) {
-  font-size: 14px;
+  font-size: 15px;
 }
 
 /* 우측: 매니저 허브 — 작게(한 단계 상향) */
 .workspace-column--manager {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .workspace-column--manager :deep(.panel-shell__body) {

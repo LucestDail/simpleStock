@@ -56,7 +56,7 @@ const { openDrawer } = useWorkspace();
   padding: 0 8px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -73,7 +73,7 @@ const { openDrawer } = useWorkspace();
   border-radius: var(--rounded-lg);
   padding: 8px;
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .snapshot-row {
@@ -94,19 +94,19 @@ const { openDrawer } = useWorkspace();
 
 .snapshot-main strong {
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 
 .snapshot-main span {
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.2;
 }
 
 .cron {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 10px;
   color: var(--color-body);
 }
 
@@ -118,7 +118,7 @@ const { openDrawer } = useWorkspace();
 
 .snapshot-metrics strong {
   color: var(--color-ink);
-  font-size: 9px;
+  font-size: 10px;
   max-width: 130px;
   text-align: right;
   line-height: 1.2;
@@ -126,7 +126,7 @@ const { openDrawer } = useWorkspace();
 }
 
 .delta {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .delta.up {

@@ -609,7 +609,7 @@ function formatTime(value) {
 .drawer-kicker {
   margin: 0 0 4px;
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -618,7 +618,7 @@ function formatTime(value) {
 .drawer-title {
   margin: 0;
   color: var(--color-ink);
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 600;
 }
 
@@ -648,7 +648,7 @@ function formatTime(value) {
 
 .detail-block strong {
   color: var(--color-ink);
-  font-size: 16px;
+  font-size: 17px;
 }
 
 .asset-summary-card {
@@ -673,13 +673,13 @@ function formatTime(value) {
 }
 
 .asset-summary-card__amounts strong {
-  font-size: 24px;
+  font-size: 25px;
   line-height: 1.15;
 }
 
 .asset-summary-card__amounts span {
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .asset-chip-row {
@@ -693,7 +693,7 @@ function formatTime(value) {
   background: rgba(255, 255, 255, 0.05);
   padding: 4px 9px;
   color: var(--color-body-strong);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
 }
 
@@ -707,13 +707,13 @@ function formatTime(value) {
 }
 
 .detail-note-block strong {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .detail-note-block p {
   margin: 0;
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -724,7 +724,7 @@ function formatTime(value) {
   background: rgba(0, 82, 255, 0.08);
   border: 1px solid rgba(0, 82, 255, 0.18);
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
 }
 
@@ -780,12 +780,12 @@ function formatTime(value) {
 
 .detail-card span {
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .detail-card strong {
   color: var(--color-ink);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.35;
 }
 
@@ -794,7 +794,7 @@ function formatTime(value) {
   padding: 0 12px;
   border: none;
   border-radius: var(--rounded-pill);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -834,7 +834,7 @@ function formatTime(value) {
 .insight-lead {
   margin: 0;
   color: var(--color-ink);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -843,7 +843,7 @@ function formatTime(value) {
 .insight-meta {
   margin: 0;
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
@@ -862,14 +862,14 @@ function formatTime(value) {
 
 .insight-subblock > span {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .tone-chip {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -905,7 +905,7 @@ function formatTime(value) {
   display: flex;
   justify-content: space-between;
   gap: var(--space-sm);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .category-bar__track {
@@ -934,7 +934,7 @@ function formatTime(value) {
   grid-template-columns: 1fr auto;
   gap: 2px 8px;
   align-items: baseline;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .holding-mini-list li > span:first-child {
@@ -944,7 +944,7 @@ function formatTime(value) {
 .holding-mini-meta {
   grid-column: 1 / -1;
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .holding-mini-meta.up {
@@ -958,7 +958,7 @@ function formatTime(value) {
 .snapshot-table {
   display: grid;
   gap: 4px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .snapshot-table__head,
@@ -971,7 +971,7 @@ function formatTime(value) {
 
 .snapshot-table__head {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -1005,7 +1005,7 @@ function formatTime(value) {
 
 .insight-drawer-head span {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -1028,7 +1028,7 @@ function formatTime(value) {
   background: var(--color-surface-soft);
   padding: 10px 12px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -1049,7 +1049,7 @@ function formatTime(value) {
   padding: 8px;
   color: var(--color-ink);
   background: rgba(255, 255, 255, 0.02);
-  font-size: 12px;
+  font-size: 13px;
   resize: vertical;
 }
 
@@ -1073,13 +1073,13 @@ function formatTime(value) {
   border: 1px solid var(--color-hairline-soft);
   border-radius: var(--rounded-md);
   padding: 8px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .diff-list span {
   display: inline-block;
   margin-right: 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   color: var(--color-muted);

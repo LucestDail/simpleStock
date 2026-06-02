@@ -164,7 +164,7 @@ async function handleRefreshMarket() {
   padding: 0 8px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -192,12 +192,12 @@ async function handleRefreshMarket() {
   border-bottom: 1px solid var(--color-hairline-soft);
   padding-bottom: 2px;
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .meta-list strong {
   color: var(--color-ink);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -206,7 +206,7 @@ async function handleRefreshMarket() {
 
 .meta-list code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   background: var(--color-surface-soft);
   border-radius: var(--rounded-xs);
   padding: 1px 4px;
@@ -218,7 +218,7 @@ async function handleRefreshMarket() {
 .market-error {
   margin: 0;
   color: var(--color-accent-yellow);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -227,7 +227,7 @@ async function handleRefreshMarket() {
 
 .section-title {
   margin: 0 0 4px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-muted);
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -254,7 +254,7 @@ async function handleRefreshMarket() {
   padding: 0 8px;
   background: rgba(255, 255, 255, 0.02);
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -271,7 +271,7 @@ async function handleRefreshMarket() {
   padding: 0;
   display: grid;
   gap: 3px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .stats-list li {
@@ -282,7 +282,7 @@ async function handleRefreshMarket() {
 
 .stats-list code {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--color-body);
 }
 
@@ -294,7 +294,7 @@ async function handleRefreshMarket() {
 
 .tasks-title {
   margin: 0 0 4px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-muted);
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -312,7 +312,7 @@ async function handleRefreshMarket() {
 .tasks-list li {
   display: grid;
   gap: 1px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tasks-list strong {
@@ -328,7 +328,7 @@ async function handleRefreshMarket() {
 
 .tasks-list code {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--color-muted);
 }
 
@@ -339,7 +339,7 @@ async function handleRefreshMarket() {
 }
 
 .access-token__label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-body);
 }
 
@@ -349,7 +349,7 @@ async function handleRefreshMarket() {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-xs);
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 13px;
   font-family: var(--font-mono);
 }
 </style>

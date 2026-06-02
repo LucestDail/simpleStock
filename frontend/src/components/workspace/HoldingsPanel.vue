@@ -358,7 +358,7 @@ function inspectHolding(target) {
   padding: 0 8px;
   background: rgba(255, 255, 255, 0.02);
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -376,12 +376,12 @@ function inspectHolding(target) {
 
 .section-head strong {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .section-head span {
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.25;
 }
 
@@ -401,7 +401,7 @@ function inspectHolding(target) {
   border-radius: var(--rounded-md);
   background: rgba(255, 255, 255, 0.02);
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .input:focus {
@@ -423,7 +423,7 @@ function inspectHolding(target) {
   border: none;
   border-radius: var(--rounded-pill);
   padding: 0 8px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -450,7 +450,7 @@ function inspectHolding(target) {
   border-radius: var(--rounded-lg);
   padding: 8px;
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .holding-list {
@@ -484,14 +484,14 @@ function inspectHolding(target) {
 
 .holding-main strong {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
 .holding-main span {
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
@@ -504,13 +504,13 @@ function inspectHolding(target) {
 }
 
 .holding-value strong {
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.2;
 }
 
 .holding-secondary {
   color: var(--color-muted);
-  font-size: 8px;
+  font-size: 9px;
   line-height: 1.2;
 }
 
@@ -520,7 +520,7 @@ function inspectHolding(target) {
   justify-content: flex-end;
   gap: 3px;
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 10px;
   text-align: right;
 }
 
@@ -557,7 +557,7 @@ function inspectHolding(target) {
   border: none;
   background: transparent;
   color: var(--color-primary);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   padding: 0;

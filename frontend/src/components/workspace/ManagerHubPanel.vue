@@ -220,11 +220,11 @@ async function generateBrief() {
 
 <style scoped>
 .manager-hub-shell :deep(.panel-shell__title) {
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .manager-hub-shell :deep(.panel-shell__subtitle) {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .manager-hub-shell :deep(.panel-shell__body) {
@@ -242,7 +242,7 @@ async function generateBrief() {
   padding: 0 7px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -270,7 +270,7 @@ async function generateBrief() {
   border-radius: var(--rounded-pill);
   border: 1px solid var(--color-hairline-soft);
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -323,7 +323,7 @@ async function generateBrief() {
 .hub-block__label {
   flex: 1;
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -331,11 +331,11 @@ async function generateBrief() {
 
 .hub-meta {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .hub-badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -363,14 +363,14 @@ async function generateBrief() {
 .hub-lead {
   margin: 0;
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.35;
 }
 
 .hub-copy {
   margin: 0;
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.35;
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -382,7 +382,7 @@ async function generateBrief() {
 .hub-empty {
   margin: 0;
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.3;
 }
 
@@ -402,12 +402,12 @@ async function generateBrief() {
 
 .hub-metric span {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .hub-metric strong {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
@@ -423,7 +423,7 @@ async function generateBrief() {
   border-radius: var(--rounded-pill);
   background: rgba(255, 255, 255, 0.04);
   color: var(--color-body);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .hub-ai-card {
@@ -435,7 +435,7 @@ async function generateBrief() {
 }
 
 .hub-ai-card__tag {
-  font-size: 8px;
+  font-size: 9px;
   color: #9aa8ff;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -443,13 +443,13 @@ async function generateBrief() {
 }
 
 .hub-ai-card strong {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-ink);
 }
 
 .hub-ai-card p {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-body);
   line-height: 1.3;
 }
@@ -458,7 +458,7 @@ async function generateBrief() {
   margin: 0;
   padding-left: 14px;
   color: var(--color-body);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.35;
 }
 
@@ -467,7 +467,7 @@ async function generateBrief() {
   border: none;
   background: none;
   color: #9aa8ff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   padding: 0;
@@ -498,7 +498,7 @@ async function generateBrief() {
 
 .hub-schedule__main strong {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -507,13 +507,13 @@ async function generateBrief() {
 
 .hub-schedule__main span {
   color: #9aa8ff;
-  font-size: 10px;
+  font-size: 11px;
   flex-shrink: 0;
 }
 
 .hub-schedule__type {
   color: var(--color-muted);
-  font-size: 8px;
+  font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -552,14 +552,14 @@ async function generateBrief() {
 .hub-timeline__copy strong {
   display: block;
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.2;
 }
 
 .hub-timeline__copy p {
   margin: 2px 0 0;
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.25;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -569,7 +569,7 @@ async function generateBrief() {
 
 .hub-timeline time {
   color: var(--color-muted-soft);
-  font-size: 8px;
+  font-size: 9px;
   font-variant-numeric: tabular-nums;
 }
 </style>

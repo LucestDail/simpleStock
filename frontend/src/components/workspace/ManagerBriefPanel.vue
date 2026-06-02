@@ -129,7 +129,7 @@ async function generateBrief() {
   border: none;
   border-radius: var(--rounded-pill);
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -154,7 +154,7 @@ async function generateBrief() {
   border-radius: var(--rounded-lg);
   padding: 6px 8px;
   background: var(--color-surface-soft);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .disabled-box strong,
@@ -184,7 +184,7 @@ async function generateBrief() {
 }
 
 .kicker {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--color-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -194,14 +194,14 @@ async function generateBrief() {
 .summary {
   margin: 0;
   line-height: 1.2;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .list {
   margin: 0;
   padding-left: 14px;
   color: var(--color-body);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
 }
 
@@ -213,7 +213,7 @@ async function generateBrief() {
 
 .history-title {
   margin: 0 0 4px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--color-muted);
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -242,12 +242,12 @@ async function generateBrief() {
 
 .history-item strong {
   color: var(--color-ink);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .history-item span {
   color: var(--color-muted);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.2;
   display: -webkit-box;
   -webkit-line-clamp: 2;

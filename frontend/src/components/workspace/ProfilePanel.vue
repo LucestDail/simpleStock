@@ -68,7 +68,7 @@ const traitChips = computed(() => (profile.value.aiProfile?.inferredTraits || []
   border: none;
   border-radius: var(--rounded-pill);
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -95,12 +95,12 @@ const traitChips = computed(() => (profile.value.aiProfile?.inferredTraits || []
 
 .mini-field span {
   color: var(--color-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .mini-field strong {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
@@ -120,7 +120,7 @@ const traitChips = computed(() => (profile.value.aiProfile?.inferredTraits || []
   margin: 4px 0 0;
   color: var(--color-body);
   line-height: 1.2;
-  font-size: 11px;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
@@ -135,7 +135,7 @@ const traitChips = computed(() => (profile.value.aiProfile?.inferredTraits || []
   border-radius: var(--rounded-pill);
   background: var(--color-surface-strong);
   color: var(--color-body-strong);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 

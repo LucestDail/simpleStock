@@ -127,7 +127,7 @@ const conversationHint = computed(() => ({
   padding: 0 8px;
   background: var(--color-surface-strong);
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -175,13 +175,13 @@ const conversationHint = computed(() => ({
 
 .insight-head strong {
   color: var(--color-ink);
-  font-size: 12px;
+  font-size: 13px;
   overflow-wrap: anywhere;
 }
 
 .insight-head span {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -190,7 +190,7 @@ const conversationHint = computed(() => ({
 .insight-summary {
   margin: 0;
   color: var(--color-body);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -214,12 +214,12 @@ const conversationHint = computed(() => ({
 
 .metric-card span {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .metric-card strong {
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
@@ -228,7 +228,7 @@ const conversationHint = computed(() => ({
   margin: 0;
   padding-left: 14px;
   color: var(--color-body);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
 }
 

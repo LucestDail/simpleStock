@@ -33,6 +33,16 @@
   --font-sans: 'Inter', -apple-system, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
+  --text-3xs: 9px;
+  --text-2xs: 10px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 16px;
+  --text-md: 14px;
+  --text-lg: 17px;
+  --text-xl: 19px;
+  --text-2xl: 25px;
+
   --rounded-xs: 4px;
   --rounded-sm: 7px;
   --rounded-md: 9px;
@@ -73,7 +83,7 @@ body,
 body {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: var(--text-base);
   font-weight: 400;
   line-height: 1.5;
   color: var(--color-body);
