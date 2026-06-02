@@ -60,27 +60,21 @@ const props = defineProps({
   min-height: 0;
   max-height: 100%;
   border: 1px solid var(--color-hairline);
-  border-radius: var(--rounded-xl);
-  background: rgba(6, 8, 12, 0.94);
-  box-shadow: var(--shadow-soft);
+  border-radius: var(--rounded-lg);
+  background: var(--color-surface-soft);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   flex: 1 1 0;
   overflow: hidden;
   transition:
-    transform 0.22s ease,
-    box-shadow 0.22s ease,
-    border-color 0.22s ease,
-    flex 0.22s ease,
-    opacity 0.22s ease;
+    border-color 0.18s ease,
+    flex 0.18s ease,
+    opacity 0.18s ease;
 }
 
 .panel-shell--highlighted {
-  border-color: rgba(110, 123, 255, 0.24);
-  box-shadow:
-    0 12px 22px rgba(110, 123, 255, 0.08),
-    var(--shadow-soft);
-  transform: translateY(-1px);
+  border-color: rgba(122, 154, 184, 0.28);
 }
 
 .panel-shell--tone-dark {

@@ -1,33 +1,32 @@
 /**
- * Coinbase 마케팅 서피스 스타일 준용.
- * 폰트: CoinbaseDisplay/Sans → Inter, CoinbaseMono → JetBrains Mono (가이드 대체안)
+ * SimpleStock — 저자극 다크 테마 (눈 피로 완화)
  */
 :root {
-  --color-primary: #6674d8;
-  --color-primary-active: #5663b8;
-  --color-primary-disabled: #252c43;
-  --color-accent-yellow: #f4b000;
+  --color-primary: #7a9ab8;
+  --color-primary-active: #6889a6;
+  --color-primary-disabled: #2a3340;
+  --color-accent-yellow: #c9a24a;
 
-  --color-canvas: #030405;
-  --color-surface-soft: #05070a;
-  --color-surface-strong: #0a0d13;
-  --color-surface-dark: #010203;
-  --color-surface-dark-elevated: #0a0d12;
+  --color-canvas: #0c0e12;
+  --color-surface-soft: #111419;
+  --color-surface-strong: #161a21;
+  --color-surface-dark: #0a0c10;
+  --color-surface-dark-elevated: #141820;
 
-  --color-hairline: rgba(255, 255, 255, 0.08);
-  --color-hairline-soft: rgba(255, 255, 255, 0.05);
+  --color-hairline: rgba(255, 255, 255, 0.06);
+  --color-hairline-soft: rgba(255, 255, 255, 0.04);
 
-  --color-ink: #eef2f8;
-  --color-body: #a7b0bf;
-  --color-body-strong: #f5f7fb;
-  --color-muted: #79869a;
-  --color-muted-soft: #4e5868;
-  --color-on-primary: #ffffff;
-  --color-on-dark: #ffffff;
-  --color-on-dark-soft: #8e9cb1;
+  --color-ink: #d4dae3;
+  --color-body: #9aa4b2;
+  --color-body-strong: #e2e6ed;
+  --color-muted: #6f7888;
+  --color-muted-soft: #505862;
+  --color-on-primary: #f5f7fa;
+  --color-on-dark: #e2e6ed;
+  --color-on-dark-soft: #8a95a6;
 
-  --color-semantic-up: #05b169;
-  --color-semantic-down: #cf202f;
+  --color-semantic-up: #4a9e78;
+  --color-semantic-down: #b85a62;
 
   --font-display: 'Inter', -apple-system, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-sans: 'Inter', -apple-system, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -51,7 +50,7 @@
   --rounded-pill: 100px;
   --rounded-full: 9999px;
 
-  --shadow-soft: 0 8px 22px rgba(0, 0, 0, 0.34);
+  --shadow-soft: 0 4px 14px rgba(0, 0, 0, 0.22);
 
   --space-xxs: 2px;
   --space-xs: 5px;

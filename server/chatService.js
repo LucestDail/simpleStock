@@ -2,6 +2,7 @@ const { randomUUID } = require('crypto');
 const { loadStore, mutateStore } = require('./dataStore');
 const { buildConversationContext, formatMessagesForPrompt, getThreadMessages } = require('./contextBuilder');
 const { isAiConfigured, runConversationGraph, summarizeThread, inferAiProfile } = require('./aiService');
+const { buildAnswerFromActionResults } = require('./actionAnswerUtil');
 const { applyConversationActions } = require('./actionService');
 const { backfillScheduleTaskCrons } = require('./scheduleCronUtil');
 const { coerceMisclassifiedStockActions } = require('./stockPurchaseUtil');
@@ -550,8 +551,18 @@ async function resolveAssistantTurn({
       actionCount: Array.isArray(aiResult.actions) ? aiResult.actions.length : 0,
       appliedCount: actionState.actionResults.filter((item) => item.status === 'applied').length,
       ignoredCount: actionState.actionResults.filter((item) => item.status !== 'applied').length,
+      fastPath: Boolean(aiResult.fastPath),
       results: actionState.actionResults,
     });
+
+    if (aiResult.fastPath) {
+      const fastAnswer = buildAnswerFromActionResults(actionState.actionResults, cleanContent);
+      aiResult.answer = fastAnswer;
+      if (typeof onAnswerChunk === 'function' && fastAnswer) {
+        await onAnswerChunk(fastAnswer);
+      }
+    }
+
     if (actionState.changedProfile) {
       refreshAiProfileSummary().catch((error) => {
         logError('chat.profile_refresh_after_action.failed', error, {
@@ -565,7 +576,7 @@ async function resolveAssistantTurn({
       createdAt: assistantCreatedAt,
       content: aiResult.answer,
       model: 'gemini',
-      metadata: buildAssistantMetadata(aiResult, actionState, aiResult.workspacePatch || null),
+      metadata: buildAssistantMetadata(aiResult, actionState, null),
     });
   } catch (error) {
     const structuredImport = structuredImportPlan;
@@ -647,7 +658,7 @@ async function sendMessage(threadId, content) {
     throw new Error('보낼 메시지를 입력해 주세요.');
   }
   if (!isAiConfigured()) {
-    throw new Error('GEMINI_API_KEY가 설정되지 않아 채팅 기능이 비활성화되어 있습니다.');
+    throw new Error('AI가 설정되지 않아 채팅 기능이 비활성화되어 있습니다.');
   }
 
   const { context } = await prepareUserTurn(threadId, cleanContent);
@@ -665,7 +676,7 @@ async function sendMessageStream(threadId, content, emit = () => {}) {
     throw new Error('보낼 메시지를 입력해 주세요.');
   }
   if (!isAiConfigured()) {
-    throw new Error('GEMINI_API_KEY가 설정되지 않아 채팅 기능이 비활성화되어 있습니다.');
+    throw new Error('AI가 설정되지 않아 채팅 기능이 비활성화되어 있습니다.');
   }
 
   const assistantMessageId = randomUUID();

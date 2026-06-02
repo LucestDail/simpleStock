@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import { apiFetch, readApiError } from '../lib/apiClient';
 import { consumeNdjsonStream } from '../lib/ndjson';
+import { usePortfolio } from './usePortfolio';
 
 const threads = ref([]);
 const activeThread = ref(null);
@@ -251,6 +252,7 @@ export function useChat() {
   }
 
   async function sendMessageContent(content) {
+    const { fetchPortfolio } = usePortfolio();
     let threadId = activeThread.value?.id;
     if (!threadId) {
       const thread = await createThread();
@@ -410,6 +412,13 @@ export function useChat() {
               },
             });
             assistantMessage = event.assistantMessage;
+          }
+          const actionResults =
+            event.streamSummary?.actionResults ||
+            event.assistantMessage?.metadata?.actionResults ||
+            [];
+          if (actionResults.some((item) => item?.status === 'applied')) {
+            fetchPortfolio().catch(() => {});
           }
           return;
         }

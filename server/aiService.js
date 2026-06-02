@@ -8,6 +8,13 @@ const {
   loadSettings,
   getEnvAiDefaults,
 } = require('./settingsService');
+const {
+  isAiConfigured,
+  createGeminiClient,
+  getAiTransportLabel,
+  isGatewayMode,
+} = require('./geminiClient');
+const { shouldUseFastMutationPath, planNeedsResearch } = require('./conversationIntent');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 /** @see https://ai.google.dev/gemini-api/docs/models — 기본 Stable: Gemini 3.5 Flash */
@@ -21,15 +28,15 @@ const GEMINI_SUPERVISOR_MODEL =
     .trim()
     .replace(/^['"]|['"]$/g, '') || 'gemini-3.5-flash';
 const GEMINI_INCLUDE_THOUGHTS =
-  String(process.env.GEMINI_INCLUDE_THOUGHTS ?? 'true').trim().toLowerCase() !== 'false';
+  String(process.env.GEMINI_INCLUDE_THOUGHTS ?? 'false').trim().toLowerCase() === 'true';
 const GEMINI_THINKING_BUDGET = Math.min(
   8192,
-  Math.max(0, Number.parseInt(String(process.env.GEMINI_THINKING_BUDGET || '2048'), 10) || 2048)
+  Math.max(0, Number.parseInt(String(process.env.GEMINI_THINKING_BUDGET || '1024'), 10) || 1024)
 );
-const GEMINI_TIMEOUT_MS = Math.max(15_000, Number(process.env.GEMINI_TIMEOUT_MS) || 90_000);
+const GEMINI_TIMEOUT_MS = Math.max(15_000, Number(process.env.GEMINI_TIMEOUT_MS) || 60_000);
 const GEMINI_SUPERVISOR_TIMEOUT_MS = Math.max(
   15_000,
-  Number(process.env.GEMINI_SUPERVISOR_TIMEOUT_MS) || 45_000
+  Number(process.env.GEMINI_SUPERVISOR_TIMEOUT_MS) || 30_000
 );
 const GEMINI_MAX_RETRIES = Math.max(0, Number(process.env.GEMINI_MAX_RETRIES) || 2);
 const GEMINI_RETRY_BASE_MS = Math.max(250, Number(process.env.GEMINI_RETRY_BASE_MS) || 1_500);
@@ -318,10 +325,6 @@ const MANAGER_REPORT_SCHEMA = {
   ],
 };
 
-function isAiConfigured() {
-  return Boolean(GEMINI_API_KEY);
-}
-
 function readAiRuntime() {
   return getEffectiveAiConfig();
 }
@@ -349,6 +352,8 @@ function getAiSettings() {
   return {
     configured: isAiConfigured(),
     model: runtime.model,
+    transport: getAiTransportLabel(),
+    gatewayMode: isGatewayMode(),
     streamThoughts: runtime.includeThoughts,
     thinkingBudget: runtime.thinkingBudget,
     thinkingLevel: runtime.includeThoughts ? `thoughts+budget:${runtime.thinkingBudget}` : 'off',
@@ -727,11 +732,10 @@ async function generateContent({
   timeoutOverrideMs = null,
 }) {
   if (!isAiConfigured()) {
-    throw new Error('GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
+    throw new Error('AI가 설정되지 않아 요청을 처리할 수 없습니다. GEMINI_API_KEY 또는 GEMINI_GATEWAY_BASE_URL을 확인하세요.');
   }
 
-  const GoogleGenAI = await getGoogleGenAI();
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const ai = await createGeminiClient();
   const runtime = readAiRuntime();
   const effectiveModel = modelOverride || runtime.model;
   const effectiveTimeoutMs = timeoutOverrideMs || GEMINI_TIMEOUT_MS;
@@ -854,11 +858,10 @@ async function generateContentStream({
   onThinkingChunk = null,
 }) {
   if (!isAiConfigured()) {
-    throw new Error('GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
+    throw new Error('AI가 설정되지 않아 요청을 처리할 수 없습니다. GEMINI_API_KEY 또는 GEMINI_GATEWAY_BASE_URL을 확인하세요.');
   }
 
-  const GoogleGenAI = await getGoogleGenAI();
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const ai = await createGeminiClient();
   const runtime = readAiRuntime();
   const startedAt = Date.now();
   const maxAttempts = GEMINI_MAX_RETRIES + 1;
@@ -1152,10 +1155,8 @@ async function buildSupervisorPlan(userInput, context) {
         'removeHolding 시 holding.name은 필수이며, 같은 이름이 서로 다른 category(예: 주식·예금)에 중복될 수 있으면 holding.category에 deposit/installment/stock/fund/pension 중 하나를 반드시 넣는다.',
         'cancelScheduledTask 는 가능하면 cancelTarget.taskId(예약 작업 id)로 지정하고, 모를 때만 title+taskType으로 지정한다.',
         '반복 작업은 가능하면 cronExpression, nextRunLabel, taskType 을 함께 채운다.',
-        '추가로 workspacePatch 를 반환해 어떤 패널을 강조/확장/숨김/이동할지 제안한다.',
-        'workspacePatch 안에는 generatedInsights 배열도 포함해 지금 턴에 보여줄 실시간 카드/통계/집계 패널 내용을 만든다.',
-        'workspacePatch 는 허용된 panel id 와 제한된 focusMode/column/span 값만 사용한다.',
-        'chat 패널은 primary 영역이므로 이를 전제로 나머지 패널을 재배치한다.',
+        'workspacePatch 는 빈 객체에 가깝게 두고, 패널 재배치·generatedInsights 는 생성하지 않는다.',
+        '데이터 변경(actions)이 핵심이며, 답변은 짧게 요약하면 된다.',
         '요청이 모호하면 actions 는 비워 둔다.',
         '반드시 JSON 으로만 답한다.',
       ].join('\n'),
@@ -1212,11 +1213,14 @@ async function runTaskPrompt(task, taskContext, useGoogleSearch = false) {
   };
 }
 
-async function executeSpecialistTasks(plan, context, userInput) {
+async function executeSpecialistTasks(plan, context, userInput, { allowFallback = true } = {}) {
   const allowed = new Set(['portfolio', 'memory', 'manager', 'research']);
   let tasks = (plan.tasks || []).filter((task) => task && allowed.has(task.agentType));
   let specialistFallbackUsed = false;
   if (!tasks.length) {
+    if (!allowFallback || !planNeedsResearch(plan)) {
+      return { outputs: [], citations: [], specialistFallbackUsed: false };
+    }
     tasks = [buildFallbackResearchTask(userInput)];
     specialistFallbackUsed = true;
     logInfo('ai.specialist.fallback', { reason: 'empty_or_invalid_tasks', injectedAgentType: 'research' });
@@ -1451,31 +1455,60 @@ async function runConversationPipeline({
     await onStage({
       key: 'supervisor_done',
       phase: 'supervisor_done',
-      message: '이번 턴의 전문가 작업 구성을 확정했습니다.',
+      message: '작업 계획을 확정했습니다.',
     });
   }
 
-  if (typeof onStage === 'function') {
-    await onStage({
-      key: 'specialists',
-      phase: 'specialists',
-      message: '자산, 기억, 매니저 컨텍스트를 분석하고 있습니다.',
+  if (shouldUseFastMutationPath(userInput, supervisorPlan)) {
+    logInfo('ai.pipeline.fast_path', {
+      threadId,
+      actionCount: Array.isArray(supervisorPlan.actions) ? supervisorPlan.actions.length : 0,
     });
+    if (typeof onStage === 'function') {
+      await onStage({
+        key: 'actions',
+        phase: 'actions',
+        message: '포트폴리오 변경을 반영하고 있습니다.',
+      });
+    }
+    return {
+      answer: '',
+      fastPath: true,
+      supervisorPlan,
+      specialistOutputs: [],
+      specialistFallbackUsed: false,
+      citations: [],
+    };
   }
 
-  const specialistResult = await executeSpecialistTasks(supervisorPlan, context, userInput);
+  const needsSpecialists =
+    planNeedsResearch(supervisorPlan) ||
+    (supervisorPlan.tasks || []).some((task) => task && task.agentType === 'research');
 
-  if (typeof onStage === 'function') {
-    await onStage({
-      key: 'specialist_done',
-      phase: 'specialist_done',
-      message: '전문가 분석 단계를 마쳤습니다.',
+  let specialistResult = { outputs: [], citations: [], specialistFallbackUsed: false };
+  if (needsSpecialists) {
+    if (typeof onStage === 'function') {
+      await onStage({
+        key: 'specialists',
+        phase: 'specialists',
+        message: '필요한 조사·분석을 진행하고 있습니다.',
+      });
+    }
+    specialistResult = await executeSpecialistTasks(supervisorPlan, context, userInput, {
+      allowFallback: true,
     });
+    if (typeof onStage === 'function') {
+      await onStage({
+        key: 'specialist_done',
+        phase: 'specialist_done',
+        message: '분석 단계를 마쳤습니다.',
+      });
+    }
   }
 
   const synthesizerMessage =
     typeof onAnswerChunk === 'function'
-      ? '답변을 스트리밍으로 작성하고 있습니다.'
+      ? '답변을 작성하고 있습니다.'
       : '답변을 작성하고 있습니다.';
 
   if (typeof onStage === 'function') {
@@ -1520,6 +1553,7 @@ async function runConversationPipeline({
 
   return {
     answer,
+    fastPath: false,
     supervisorPlan,
     specialistOutputs: specialistResult.outputs,
     specialistFallbackUsed: Boolean(specialistResult.specialistFallbackUsed),
@@ -1536,7 +1570,7 @@ async function runConversationGraph({
   onThinkingChunk = null,
 }) {
   if (!isAiConfigured()) {
-    throw new Error('GEMINI_API_KEY가 설정되지 않아 채팅 기능이 비활성화되어 있습니다.');
+    throw new Error('AI가 설정되지 않아 채팅 기능이 비활성화되어 있습니다.');
   }
 
   const startedAt = Date.now();
@@ -1575,11 +1609,12 @@ async function runConversationGraph({
 
   return {
     answer: result.answer,
+    fastPath: Boolean(result.fastPath),
     supervisorPlan: result.supervisorPlan,
     specialistOutputs: result.specialistOutputs,
     citations: result.citations || [],
     actions: result.supervisorPlan?.actions || [],
-    workspacePatch: result.supervisorPlan?.workspacePatch || null,
+    workspacePatch: null,
   };
 }
 
@@ -1738,7 +1773,7 @@ async function runScheduledIndicatorAnalysis({
   memory,
 }) {
   if (!isAiConfigured()) {
-    throw new Error('GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
+    throw new Error('AI가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
   }
 
   const name = String(indicatorName || '').trim();
@@ -1772,7 +1807,7 @@ async function runScheduledIndicatorAnalysis({
 
 async function runScheduledCustomAnalysis({ title, description, prompt, portfolio, profile, memory }) {
   if (!isAiConfigured()) {
-    throw new Error('GEMINI_API_KEY가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
+    throw new Error('AI가 설정되지 않아 AI 기능이 비활성화되어 있습니다.');
   }
 
   const userInstructions = String(prompt || '').trim();

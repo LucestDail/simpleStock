@@ -16,7 +16,7 @@ import { useRealtimeSubscription } from '../composables/useRealtimeSubscription'
 
 const { fetchPortfolio } = usePortfolio();
 const { fetchThreads } = useChat();
-const { fetchProfile, profile } = useProfile();
+const { fetchProfile } = useProfile();
 const { notify } = useUi();
 const { columns, focusMode, recordActivity, openDrawer } = useWorkspace();
 const { connect, disconnect } = useRealtimeSubscription();
@@ -35,40 +35,16 @@ const panelComponents = {
 const workspaceClass = computed(() => `workspace-main--${focusMode.value || 'balanced'}`);
 const isCompactLayout = computed(() => viewportWidth.value <= 1180);
 const isStackedLayout = computed(() => viewportWidth.value <= 860);
-const hasProfileContent = computed(() => {
-  const userProfile = profile.value.userProfile || {};
-  const aiProfile = profile.value.aiProfile || {};
-  return Boolean(
-    userProfile.displayName ||
-      userProfile.investorType ||
-      userProfile.investmentGoal ||
-      userProfile.riskTolerance ||
-      userProfile.notes ||
-      aiProfile.summary ||
-      (aiProfile.inferredTraits || []).length
-  );
-});
 
 const finalColumns = computed(() => {
   const left = columns.value.left
-    .filter((panel) => panel.id !== 'status')
-    .map((panel) => {
-    if (panel.id === 'overview') return { ...panel, span: 'xl' };
-    return panel;
-  });
-
-  const right = columns.value.right
-    .filter((panel) => panel.id === 'managerHub' || (panel.id === 'profile' && hasProfileContent.value))
-    .map((panel) => {
-      if (panel.id === 'managerHub') return { ...panel, span: 'full' };
-      return panel;
-    });
-
+    .filter((panel) => panel.id === 'overview')
+    .map((panel) => ({ ...panel, span: 'xl' }));
 
   return {
     left,
     center: columns.value.center.map((panel) => ({ ...panel, span: 'full' })),
-    right,
+    right: [],
   };
 });
 
@@ -99,15 +75,12 @@ const workspaceGridStyle = computed(() => {
   }
 
   const leftCount = finalColumns.value.left.length;
-  const rightCount = finalColumns.value.right.length;
   const isChatMode = focusMode.value === 'chat';
   const leftTrack = leftCount
-    ? `minmax(${isCompactLayout.value ? 220 : 270}px, ${isCompactLayout.value ? (isChatMode ? 1.65 : 1.85) : (isChatMode ? 2.55 : 2.95)}fr)`
+    ? `minmax(${isCompactLayout.value ? 240 : 300}px, ${isCompactLayout.value ? (isChatMode ? 1.35 : 1.55) : (isChatMode ? 1.85 : 2.1)}fr)`
     : '0px';
-  const centerTrack = `minmax(${isCompactLayout.value ? (isChatMode ? 420 : 360) : (isChatMode ? 430 : 380)}px, ${isCompactLayout.value ? (isChatMode ? 6.1 : 5.7) : (isChatMode ? 5.5 : 5)}fr)`;
-  const rightTrack = rightCount
-    ? `minmax(${isCompactLayout.value ? 200 : 260}px, ${isCompactLayout.value ? 1.35 : 2.4}fr)`
-    : '0px';
+  const centerTrack = `minmax(${isCompactLayout.value ? (isChatMode ? 380 : 340) : (isChatMode ? 420 : 360)}px, ${isCompactLayout.value ? (isChatMode ? 7 : 6.2) : (isChatMode ? 6.2 : 5.5)}fr)`;
+  const rightTrack = '0px';
   return {
     gridTemplateColumns: `${leftTrack} ${centerTrack} ${rightTrack}`,
   };
@@ -177,10 +150,7 @@ onUnmounted(() => {
   grid-template-rows: auto minmax(0, 1fr);
   gap: 6px;
   overflow: hidden;
-  background:
-    radial-gradient(circle at top left, rgba(110, 123, 255, 0.04), transparent 24%),
-    radial-gradient(circle at right top, rgba(255, 255, 255, 0.02), transparent 18%),
-    var(--color-canvas);
+  background: var(--color-canvas);
 }
 
 .workspace-main {

@@ -34,7 +34,7 @@ const BASE_PANELS = [
     column: 'right',
     span: 'full',
     priority: 5,
-    visible: true,
+    visible: false,
     detailType: 'insight',
   },
   {
@@ -230,58 +230,9 @@ function normalizePatch(patch) {
   return next;
 }
 
-function applyWorkspacePatch(patch, source = 'system') {
-  const normalized = normalizePatch(patch);
-  if (!normalized) return;
-
-  const next = {
-    ...panelState.value,
-  };
-
-  for (const panel of BASE_PANELS) {
-    next[panel.id] = {
-      ...next[panel.id],
-      highlighted: normalized.highlightPanelIds.includes(panel.id),
-    };
-  }
-
-  for (const item of normalized.panelPatches) {
-    const prev = next[item.id];
-    const isChatPanel = item.id === 'chat';
-    const nextColumn = isChatPanel
-      ? 'center'
-      : item.column === 'center'
-        ? prev.column
-        : (item.column || prev.column);
-    next[item.id] = {
-      ...prev,
-      column: nextColumn,
-      span: isChatPanel ? 'full' : (item.span || prev.span),
-      priority: isChatPanel ? 100 : (item.priority ?? prev.priority),
-      visible: isChatPanel ? true : (item.visible ?? prev.visible),
-    };
-  }
-
-  panelState.value = next;
-  if (normalized.hasGeneratedInsights) {
-    generatedInsights.value = normalized.generatedInsights;
-  }
-  if (normalized.focusMode) {
-    focusMode.value = normalized.focusMode;
-  }
-  if (normalized.reason) {
-    layoutReason.value = normalized.reason;
-  }
-  if (normalized.openDrawer?.type) {
-    drawer.value = {
-      open: true,
-      type: normalized.openDrawer.type,
-      entityId: normalized.openDrawer.entityId,
-      title: normalized.openDrawer.title || drawer.value.title,
-    };
-  }
-  layoutUpdatedAt.value = new Date().toISOString();
-  lastPatchSource.value = source;
+function applyWorkspacePatch(_patch, _source = 'system') {
+  // 고정 레이아웃 유지 — AI workspacePatch 로 패널 재배치하지 않음
+  return;
 }
 
 function resetWorkspaceLayout() {
