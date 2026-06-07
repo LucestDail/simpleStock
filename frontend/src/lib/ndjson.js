@@ -12,7 +12,7 @@ export async function consumeNdjsonStream(body, onEvent) {
       const line = buffer.slice(0, lineBreakIndex).trim();
       buffer = buffer.slice(lineBreakIndex + 1);
       if (line) {
-        onEvent(JSON.parse(line));
+        await onEvent(JSON.parse(line));
       }
       lineBreakIndex = buffer.indexOf('\n');
     }
@@ -21,7 +21,7 @@ export async function consumeNdjsonStream(body, onEvent) {
   }
 
   if (buffer.trim()) {
-    onEvent(JSON.parse(buffer.trim()));
+    await onEvent(JSON.parse(buffer.trim()));
   }
 }
 

@@ -634,12 +634,14 @@ async function applyConversationActions(actions = []) {
     });
   }
 
-  if (result.changedPortfolio) {
+  if (result.changedPortfolio || result.changedSchedules) {
     broadcast('portfolio.updated', buildPortfolioPayload());
-    scheduleMarketRefresh('portfolio:conversation_action', {
-      force: true,
-      delayMs: 300,
-    });
+    if (result.changedPortfolio) {
+      scheduleMarketRefresh('portfolio:conversation_action', {
+        force: true,
+        delayMs: 300,
+      });
+    }
   }
 
   if (result.changedProfile) {

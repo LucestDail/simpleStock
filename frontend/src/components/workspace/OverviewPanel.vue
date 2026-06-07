@@ -1,7 +1,9 @@
 <script setup>
 import { computed, ref } from 'vue';
 import PanelShell from './PanelShell.vue';
+import MarketHeatmap from './MarketHeatmap.vue';
 import { usePortfolio, formatKRW, formatUSD } from '../../composables/usePortfolio';
+import { portfolioRevision } from '../../composables/usePortfolioSync';
 import { useUi } from '../../composables/useUi';
 import { useWorkspace } from '../../composables/useWorkspace';
 
@@ -56,12 +58,16 @@ const summaryCards = computed(() => [
   },
 ]);
 const visibleSummaryCards = computed(() => summaryCards.value.filter((item) => item.visible !== false));
-const visibleCategoryShares = computed(() => categoryShares.value.filter((item) => Number(item.amount) > 0));
-const filteredHoldings = computed(() =>
-  selectedCategoryId.value
+const visibleCategoryShares = computed(() => {
+  portfolioRevision.value;
+  return categoryShares.value.filter((item) => Number(item.amount) > 0);
+});
+const filteredHoldings = computed(() => {
+  portfolioRevision.value;
+  return selectedCategoryId.value
     ? holdings.value.filter((item) => item.category === selectedCategoryId.value)
-    : holdings.value
-);
+    : holdings.value;
+});
 const selectedCategoryLabel = computed(
   () => visibleCategoryShares.value.find((item) => item.id === selectedCategoryId.value)?.label || '전체 자산'
 );
@@ -209,11 +215,13 @@ function inspectHolding(holding) {
 <template>
   <PanelShell
     title="포트폴리오 현황"
-    subtitle="overview"
+    subtitle="대시보드"
     :span="panel.span"
     :highlighted="panel.highlighted"
     :loading="busyState.fetchPortfolio"
   >
+    <MarketHeatmap />
+
     <div class="summary-grid">
       <article v-for="item in visibleSummaryCards" :key="item.id" class="summary-card">
         <span class="summary-label">{{ item.label }}</span>
@@ -325,24 +333,24 @@ function inspectHolding(holding) {
 <style scoped>
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
-  gap: 5px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .summary-card {
-  padding: 6px 8px;
-  border-radius: var(--rounded-lg);
-  background: var(--color-surface-soft);
+  padding: 8px 10px;
+  border-radius: var(--rounded-md);
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-hairline-soft);
   display: grid;
-  gap: 2px;
+  gap: 3px;
 }
 
 .summary-label {
   color: var(--color-muted);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -369,10 +377,10 @@ function inspectHolding(holding) {
 .trend-section {
   display: grid;
   gap: 6px;
-  padding: 6px 8px;
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--rounded-lg);
-  background: rgba(255, 255, 255, 0.02);
+  padding: 8px 10px;
+  border: 1px solid var(--color-hairline-soft);
+  border-radius: var(--rounded-md);
+  background: var(--color-surface-strong);
 }
 
 .trend-head {
@@ -490,23 +498,24 @@ function inspectHolding(holding) {
 }
 
 .share-item {
-  border: 1px solid var(--color-hairline);
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: var(--rounded-lg);
-  padding: 6px 8px;
+  border: 1px solid var(--color-hairline-soft);
+  background: var(--color-surface-strong);
+  border-radius: var(--rounded-md);
+  padding: 7px 9px;
   text-align: left;
   cursor: pointer;
   display: grid;
-  gap: 3px;
+  gap: 4px;
+  transition: border-color 0.15s ease;
 }
 
 .share-item:hover {
-  border-color: rgba(0, 82, 255, 0.35);
+  border-color: rgba(122, 154, 184, 0.35);
 }
 
 .share-item--active {
-  border-color: rgba(110, 123, 255, 0.28);
-  background: rgba(110, 123, 255, 0.08);
+  border-color: rgba(122, 154, 184, 0.45);
+  background: rgba(122, 154, 184, 0.08);
 }
 
 .share-head {
@@ -577,12 +586,17 @@ function inspectHolding(holding) {
 .holding-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--rounded-lg);
-  padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--color-hairline-soft);
+  border-radius: var(--rounded-md);
+  padding: 8px 10px;
+  background: var(--color-surface-strong);
+  transition: border-color 0.15s ease;
+}
+
+.holding-row:hover {
+  border-color: rgba(122, 154, 184, 0.3);
 }
 
 .holding-main {
@@ -653,17 +667,20 @@ function inspectHolding(holding) {
 }
 
 .quote-chip {
-  padding: 1px 4px;
-  border-radius: var(--rounded-pill);
-  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 6px;
+  border-radius: var(--rounded-xs);
+  font-weight: 600;
+  font-size: 12px;
 }
 
 .quote-chip.up {
   color: var(--color-semantic-up);
+  background: rgba(74, 158, 120, 0.12);
 }
 
 .quote-chip.down {
   color: var(--color-semantic-down);
+  background: rgba(184, 90, 98, 0.12);
 }
 
 .quote-time {

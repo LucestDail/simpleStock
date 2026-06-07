@@ -28,6 +28,9 @@
   --color-semantic-up: #4a9e78;
   --color-semantic-down: #b85a62;
 
+  --heatmap-neutral-bg: rgba(255, 255, 255, 0.04);
+  --heatmap-neutral-fg: var(--color-body);
+
   --font-display: 'Inter', -apple-system, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-sans: 'Inter', -apple-system, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;

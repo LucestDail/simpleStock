@@ -8,7 +8,7 @@ const { backfillScheduleTaskCrons } = require('./scheduleCronUtil');
 const { coerceMisclassifiedStockActions } = require('./stockPurchaseUtil');
 const { buildStructuredImportPlan } = require('./structuredImportService');
 const { logInfo, logError } = require('./logger');
-const { buildProfilePayload } = require('./payloadService');
+const { buildProfilePayload, buildPortfolioPayload } = require('./payloadService');
 const { broadcast } = require('./realtimeService');
 
 function sanitizeMessage(content) {
@@ -498,11 +498,14 @@ async function resolveAssistantTurn({
   onAnswerChunk = null,
   onStage = null,
   onThinkingChunk = null,
+  onDataMutated = null,
 }) {
   let aiResult = null;
   let actionState = null;
   let assistantMessage = null;
   let skipMaintenance = false;
+  let portfolioPayload = null;
+  let profilePayload = null;
   const structuredImportPlan = buildStructuredImportPlan(cleanContent);
 
   try {
@@ -546,6 +549,30 @@ async function resolveAssistantTurn({
     };
 
     actionState = await applyConversationActions(aiResult.actions || []);
+    const shouldSyncData =
+      (Array.isArray(aiResult.actions) && aiResult.actions.length > 0) ||
+      Boolean(actionState?.changedPortfolio) ||
+      Boolean(actionState?.changedProfile) ||
+      Boolean(actionState?.changedSchedules);
+
+    if (shouldSyncData) {
+      portfolioPayload = buildPortfolioPayload();
+      if (actionState?.changedProfile) {
+        profilePayload = buildProfilePayload();
+      }
+
+      if (typeof onDataMutated === 'function') {
+        await onDataMutated({
+          portfolio: portfolioPayload,
+          profile: profilePayload,
+          actionResults: actionState?.actionResults || [],
+          changedPortfolio: Boolean(actionState?.changedPortfolio),
+          changedProfile: Boolean(actionState?.changedProfile),
+          changedSchedules: Boolean(actionState?.changedSchedules),
+        });
+      }
+    }
+
     logInfo('chat.actions.applied', {
       threadId,
       actionCount: Array.isArray(aiResult.actions) ? aiResult.actions.length : 0,
@@ -582,6 +609,17 @@ async function resolveAssistantTurn({
     const structuredImport = structuredImportPlan;
     if (structuredImport) {
       actionState = await applyConversationActions(structuredImport.actions || []);
+      portfolioPayload = buildPortfolioPayload();
+      if (typeof onDataMutated === 'function') {
+        await onDataMutated({
+          portfolio: portfolioPayload,
+          profile: null,
+          actionResults: actionState?.actionResults || [],
+          changedPortfolio: Boolean(actionState?.changedPortfolio),
+          changedProfile: Boolean(actionState?.changedProfile),
+          changedSchedules: Boolean(actionState?.changedSchedules),
+        });
+      }
       assistantMessage = buildAssistantMessage({
         id: assistantMessageId,
         createdAt: assistantCreatedAt,
@@ -620,6 +658,9 @@ async function resolveAssistantTurn({
   return {
     assistantMessage,
     skipMaintenance,
+    portfolioPayload,
+    profilePayload,
+    actionState,
   };
 }
 
@@ -662,12 +703,19 @@ async function sendMessage(threadId, content) {
   }
 
   const { context } = await prepareUserTurn(threadId, cleanContent);
-  const { assistantMessage, skipMaintenance } = await resolveAssistantTurn({
+  const { assistantMessage, skipMaintenance, portfolioPayload, profilePayload, actionState } =
+    await resolveAssistantTurn({
     cleanContent,
     threadId,
     context,
   });
-  return finalizeAssistantTurn(threadId, assistantMessage, { skipMaintenance });
+  const response = await finalizeAssistantTurn(threadId, assistantMessage, { skipMaintenance });
+  return {
+    ...response,
+    portfolio: portfolioPayload,
+    profile: profilePayload,
+    actionResults: actionState?.actionResults || [],
+  };
 }
 
 async function sendMessageStream(threadId, content, emit = () => {}) {
@@ -692,12 +740,29 @@ async function sendMessageStream(threadId, content, emit = () => {}) {
     message: '대화 맥락을 정리하고 있습니다.',
   });
 
-  const { assistantMessage, skipMaintenance } = await resolveAssistantTurn({
+  const { assistantMessage, skipMaintenance, portfolioPayload, profilePayload, actionState } =
+    await resolveAssistantTurn({
     cleanContent,
     threadId,
     context,
     assistantMessageId,
     assistantCreatedAt,
+    onDataMutated: async (mutation) => {
+      emit({
+        type: 'portfolio',
+        threadId,
+        assistantMessageId,
+        portfolio: mutation.portfolio,
+        profile: mutation.profile,
+        actionResults: mutation.actionResults,
+        changedPortfolio: mutation.changedPortfolio,
+        changedProfile: mutation.changedProfile,
+        changedSchedules: mutation.changedSchedules,
+        message: mutation.actionResults.some((item) => item?.status === 'applied')
+          ? '포트폴리오 변경을 반영했습니다.'
+          : '포트폴리오 상태를 동기화했습니다.',
+      });
+    },
     onStage: async (stage) => {
       emit({
         type: 'stage',
@@ -746,8 +811,13 @@ async function sendMessageStream(threadId, content, emit = () => {}) {
     type: 'done',
     thread: response.thread,
     assistantMessage,
+    portfolio: portfolioPayload,
+    profile: profilePayload,
     streamSummary: {
-      actionResults: assistantMessage?.metadata?.actionResults || [],
+      actionResults: assistantMessage?.metadata?.actionResults || actionState?.actionResults || [],
+      changedPortfolio: Boolean(actionState?.changedPortfolio),
+      changedProfile: Boolean(actionState?.changedProfile),
+      changedSchedules: Boolean(actionState?.changedSchedules),
     },
   });
   return response;

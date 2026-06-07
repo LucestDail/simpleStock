@@ -5,6 +5,7 @@ import PanelShell from './PanelShell.vue';
 import { useChat } from '../../composables/useChat';
 import { useUi } from '../../composables/useUi';
 import { useWorkspace } from '../../composables/useWorkspace';
+import { syncPortfolioState } from '../../composables/usePortfolioSync';
 
 const props = defineProps({
   panel: {
@@ -190,6 +191,10 @@ async function submit() {
       entityId: activeThread.value?.id || null,
     });
     handleAssistantMetadata(assistantMessage?.metadata);
+    await syncPortfolioState({
+      actionResults: assistantMessage?.metadata?.actionResults || [],
+      forceFetch: (assistantMessage?.metadata?.actionResults || []).length > 0,
+    });
   } catch (error) {
     if (error?.restoreDraft !== false) {
       draft.value = content;

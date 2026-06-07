@@ -230,12 +230,9 @@ onUnmounted(() => {
   display: grid;
   gap: 6px;
   padding: 8px 10px;
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--rounded-xl);
-  background:
-    linear-gradient(180deg, rgba(110, 123, 255, 0.08), rgba(6, 8, 12, 0.92)),
-    var(--color-surface-strong);
-  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--color-hairline-soft);
+  border-radius: var(--rounded-lg);
+  background: var(--color-surface-strong);
 }
 
 .live-bar__top {
@@ -255,29 +252,17 @@ onUnmounted(() => {
 .live-badge {
   padding: 2px 6px;
   border-radius: var(--rounded-pill);
-  background: rgba(207, 32, 47, 0.2);
-  color: #ff6b6b;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  animation: live-pulse 2s ease-in-out infinite;
+  background: rgba(184, 90, 98, 0.15);
+  color: #d4898f;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 .live-badge--sub {
-  background: rgba(110, 123, 255, 0.15);
-  color: #9aa8ff;
-  animation: none;
-  letter-spacing: 0.06em;
-}
-
-@keyframes live-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.65;
-  }
+  background: rgba(122, 154, 184, 0.12);
+  color: var(--color-primary);
+  letter-spacing: 0.04em;
 }
 
 .live-bar__title {
@@ -410,10 +395,10 @@ onUnmounted(() => {
   grid-template-columns: auto auto auto;
   gap: 6px;
   align-items: center;
-  padding: 4px 10px;
-  border-radius: var(--rounded-pill);
+  padding: 5px 10px;
+  border-radius: var(--rounded-md);
   border: 1px solid var(--color-hairline-soft);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-surface-soft);
 }
 
 .quote-chip__label {

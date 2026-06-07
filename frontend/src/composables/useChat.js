@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import { apiFetch, readApiError } from '../lib/apiClient';
 import { consumeNdjsonStream } from '../lib/ndjson';
-import { usePortfolio } from './usePortfolio';
+import { syncPortfolioState } from './usePortfolioSync';
 
 const threads = ref([]);
 const activeThread = ref(null);
@@ -252,7 +252,6 @@ export function useChat() {
   }
 
   async function sendMessageContent(content) {
-    const { fetchPortfolio } = usePortfolio();
     let threadId = activeThread.value?.id;
     if (!threadId) {
       const thread = await createThread();
@@ -294,7 +293,7 @@ export function useChat() {
       }
 
       let assistantMessage = null;
-      await consumeNdjsonStream(res.body, (event) => {
+      await consumeNdjsonStream(res.body, async (event) => {
         if (!event || typeof event !== 'object') return;
 
         if (event.type === 'start') {
@@ -393,6 +392,18 @@ export function useChat() {
           return;
         }
 
+        if (event.type === 'portfolio') {
+          const msg = event.message || '포트폴리오를 갱신하고 있습니다.';
+          streamStatus.value = msg;
+          syncPortfolioState({
+            portfolio: event.portfolio,
+            profile: event.profile,
+            actionResults: event.actionResults || [],
+            forceFetch: false,
+          }).catch(() => {});
+          return;
+        }
+
         if (event.type === 'done') {
           streamStatus.value = '';
           if (event.thread) {
@@ -417,9 +428,12 @@ export function useChat() {
             event.streamSummary?.actionResults ||
             event.assistantMessage?.metadata?.actionResults ||
             [];
-          if (actionResults.some((item) => item?.status === 'applied')) {
-            fetchPortfolio().catch(() => {});
-          }
+          await syncPortfolioState({
+            portfolio: event.portfolio,
+            profile: event.profile,
+            actionResults,
+            forceFetch: actionResults.length > 0 || Boolean(event.portfolio),
+          });
           return;
         }
 

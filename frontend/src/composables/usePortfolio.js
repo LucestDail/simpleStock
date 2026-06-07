@@ -65,42 +65,69 @@ const busyState = ref({
 const loading = computed(() => Object.values(busyState.value).some(Boolean));
 const error = ref(null);
 
+function cloneJson(value) {
+  if (value == null) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
 function applyPortfolioPayload(data = {}) {
   if (Array.isArray(data.holdings)) {
-    holdings.value = data.holdings;
+    holdings.value = cloneJson(data.holdings);
   }
 
   if (Array.isArray(data.snapshots)) {
-    snapshots.value = data.snapshots;
+    snapshots.value = cloneJson(data.snapshots);
   }
 
   if (data.manager && typeof data.manager === 'object') {
     manager.value = {
       ...manager.value,
-      ...data.manager,
+      ...cloneJson(data.manager),
     };
   }
 
   if (data.system && typeof data.system === 'object') {
+    const incoming = cloneJson(data.system);
+    const incomingMarket = incoming.market || {};
     system.value = {
       ...system.value,
-      ...data.system,
+      ...incoming,
       ai: {
         ...system.value.ai,
-        ...(data.system.ai || {}),
+        ...(incoming.ai || {}),
       },
       market: {
         ...system.value.market,
-        ...(data.system.market || {}),
+        ...incomingMarket,
+        trackedTickers: Array.isArray(incomingMarket.trackedTickers)
+          ? incomingMarket.trackedTickers
+          : system.value.market.trackedTickers,
+        quotes:
+          incomingMarket.quotes && typeof incomingMarket.quotes === 'object'
+            ? { ...incomingMarket.quotes }
+            : system.value.market.quotes,
         fx: {
           ...system.value.market.fx,
-          ...(data.system.market?.fx || {}),
+          ...(incomingMarket.fx || {}),
+          USDKRW: {
+            ...system.value.market.fx?.USDKRW,
+            ...(incomingMarket.fx?.USDKRW || {}),
+          },
         },
         sessions: {
-          ...system.value.market.sessions,
-          ...(data.system.market?.sessions || {}),
+          kr: {
+            ...system.value.market.sessions?.kr,
+            ...(incomingMarket.sessions?.kr || {}),
+          },
+          us: {
+            ...system.value.market.sessions?.us,
+            ...(incomingMarket.sessions?.us || {}),
+          },
         },
       },
+      scheduledTasks: Array.isArray(incoming.scheduledTasks)
+        ? incoming.scheduledTasks
+        : system.value.scheduledTasks,
     };
   }
 }
