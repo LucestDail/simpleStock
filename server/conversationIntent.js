@@ -18,26 +18,27 @@ function classifyConversationIntent(userInput) {
   const hasMutation = MUTATION_PATTERNS.some((pattern) => pattern.test(text));
   const hasResearch = RESEARCH_PATTERNS.some((pattern) => pattern.test(text));
 
-  if (hasMutation && !hasResearch) return 'mutation';
-  if (hasResearch && !hasMutation) return 'research';
+  if (hasMutation && hasResearch) return 'mixed';
   if (hasMutation) return 'mutation';
+  if (hasResearch) return 'research';
   return 'general';
-}
-
-function planNeedsResearch(supervisorPlan) {
-  const tasks = Array.isArray(supervisorPlan?.tasks) ? supervisorPlan.tasks : [];
-  return tasks.some((task) => task?.agentType === 'research' && task?.needsSearch !== false);
 }
 
 function shouldUseFastMutationPath(userInput, supervisorPlan) {
   const intent = classifyConversationIntent(userInput);
   const actions = Array.isArray(supervisorPlan?.actions) ? supervisorPlan.actions : [];
   if (!actions.length) return false;
+  if (intent === 'mixed') return false;
+  if (intent === 'research' && planNeedsResearch(supervisorPlan)) return false;
   // CRUD/자산 변경 요청은 supervisor가 research task를 붙여도 fast path 유지
   if (intent === 'mutation') return true;
-  if (intent === 'research' && planNeedsResearch(supervisorPlan)) return false;
   if (planNeedsResearch(supervisorPlan)) return false;
   return actions.length > 0;
+}
+
+function planNeedsResearch(supervisorPlan) {
+  const tasks = Array.isArray(supervisorPlan?.tasks) ? supervisorPlan.tasks : [];
+  return tasks.some((task) => task?.agentType === 'research' && task?.needsSearch !== false);
 }
 
 module.exports = {
