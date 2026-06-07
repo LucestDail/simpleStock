@@ -1,5 +1,5 @@
 const MUTATION_PATTERNS = [
-  /추가|등록|삭제|제거|갱신|업데이트|수정|변경|입력|저장|반영/,
+  /추가|등록|삭제|제거|없애|없애고|갱신|업데이트|수정|변경|입력|저장|반영/,
   /매수|매도|샀|평단|수량|\d+\s*주/,
   /예수금|적금|펀드|IRP|연금|예약|브리핑|스케줄|cron/i,
   /(\d{1,3}(?:[,，]\d{3})+|\d{4,})\s*(?:원|₩)/,
@@ -33,9 +33,11 @@ function shouldUseFastMutationPath(userInput, supervisorPlan) {
   const intent = classifyConversationIntent(userInput);
   const actions = Array.isArray(supervisorPlan?.actions) ? supervisorPlan.actions : [];
   if (!actions.length) return false;
+  // CRUD/자산 변경 요청은 supervisor가 research task를 붙여도 fast path 유지
+  if (intent === 'mutation') return true;
   if (intent === 'research' && planNeedsResearch(supervisorPlan)) return false;
   if (planNeedsResearch(supervisorPlan)) return false;
-  return intent === 'mutation' || actions.length > 0;
+  return actions.length > 0;
 }
 
 module.exports = {

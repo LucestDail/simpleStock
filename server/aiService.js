@@ -698,7 +698,7 @@ function isRetryableAiError(error) {
   }
 
   const message = String(error.message || error);
-  return /(fetch failed|sending request|network|socket|timed out|timeout|econnreset|etimedout|eai_again|enotfound|unavailable|resource_exhausted|temporarily unavailable|overloaded|internal error|service unavailable)/i.test(
+  return /(fetch failed|sending request|network|socket|timed out|timeout|econnreset|etimedout|eai_again|enotfound|unavailable|resource_exhausted|temporarily unavailable|overloaded|internal server error|service unavailable|got status: 5\d\d)/i.test(
     message
   );
 }
@@ -1157,6 +1157,7 @@ async function buildSupervisorPlan(userInput, context) {
         '반복 작업은 가능하면 cronExpression, nextRunLabel, taskType 을 함께 채운다.',
         'workspacePatch 는 빈 객체에 가깝게 두고, 패널 재배치·generatedInsights 는 생성하지 않는다.',
         '데이터 변경(actions)이 핵심이며, 답변은 짧게 요약하면 된다.',
+        'actions 배열에는 이번 턴에 실제로 필요한 변경만 넣고 최대 12개를 넘기지 않는다.',
         '요청이 모호하면 actions 는 비워 둔다.',
         '반드시 JSON 으로만 답한다.',
       ].join('\n'),
@@ -1175,6 +1176,13 @@ async function buildSupervisorPlan(userInput, context) {
     },
     fallback
   ).then((plan) => {
+    if (Array.isArray(plan.actions) && plan.actions.length > 12) {
+      logWarn('ai.supervisor.actions_trimmed', {
+        from: plan.actions.length,
+        to: 12,
+      });
+      plan.actions = plan.actions.slice(0, 12);
+    }
     logInfo('ai.supervisor.plan', {
       personaLabel: plan.personaLabel,
       taskCount: Array.isArray(plan.tasks) ? plan.tasks.length : 0,
@@ -1521,14 +1529,34 @@ async function runConversationPipeline({
 
   let synthesisResult;
   if (typeof onAnswerChunk === 'function') {
-    synthesisResult = await synthesizeFinalAnswerStream({
-      userInput,
-      context,
-      plan: supervisorPlan,
-      specialistOutputs: specialistResult.outputs,
-      onChunk: onAnswerChunk,
-      onThinkingChunk,
-    });
+    try {
+      synthesisResult = await synthesizeFinalAnswerStream({
+        userInput,
+        context,
+        plan: supervisorPlan,
+        specialistOutputs: specialistResult.outputs,
+        onChunk: onAnswerChunk,
+        onThinkingChunk,
+      });
+    } catch (streamError) {
+      logWarn('ai.synth.stream_fallback', {
+        threadId,
+        message: String(streamError?.message || streamError).slice(0, 220),
+      });
+      const nonStream = await synthesizeFinalAnswer({
+        userInput,
+        context,
+        plan: supervisorPlan,
+        specialistOutputs: specialistResult.outputs,
+      });
+      if (nonStream.answer && typeof onAnswerChunk === 'function') {
+        await onAnswerChunk(nonStream.answer);
+      }
+      synthesisResult = {
+        answer: nonStream.answer,
+        citations: [],
+      };
+    }
   } else {
     const nonStream = await synthesizeFinalAnswer({
       userInput,

@@ -30,6 +30,14 @@ test('shouldUseFastMutationPath skips when research task needs search', () => {
   assert.equal(shouldUseFastMutationPath('삼성전자 추가하고 전망도 알려줘', plan), false);
 });
 
+test('shouldUseFastMutationPath uses fast path for mutation even with research tasks', () => {
+  const plan = {
+    actions: [{ type: 'removeHolding', rationale: 'remove JEPI' }],
+    tasks: [{ agentType: 'research', needsSearch: true }],
+  };
+  assert.equal(shouldUseFastMutationPath('JEPI 없애고 AMDL 101주 추가해줘', plan), true);
+});
+
 test('buildAnswerFromActionResults lists applied changes', () => {
   const answer = buildAnswerFromActionResults(
     [{ status: 'applied', message: 'KB 펀드 5,516,165원으로 갱신' }],
