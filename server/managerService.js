@@ -10,6 +10,7 @@ const { getMemoryState } = require('./memoryService');
 const { getDateInTimezone } = require('./time');
 const { broadcast } = require('./realtimeService');
 const { upsertPortfolioSnapshot } = require('./snapshotService');
+const { getAiLatencySnapshot } = require('./aiLatencyMetrics');
 
 function getLatestManagerReport() {
   const store = loadStore();
@@ -109,6 +110,7 @@ function getSystemStatus() {
     },
     latestManagerReport: store.memory.managerReports[0] || null,
     scheduledTasks: (store.memory.scheduledTasks || []).slice(0, 12),
+    aiLatency: getAiLatencySnapshot(),
   };
 }
 

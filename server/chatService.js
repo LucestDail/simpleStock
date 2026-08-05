@@ -7,6 +7,7 @@ const { applyConversationActions } = require('./actionService');
 const { backfillScheduleTaskCrons } = require('./scheduleCronUtil');
 const { coerceMisclassifiedStockActions } = require('./stockPurchaseUtil');
 const { buildStructuredImportPlan } = require('./structuredImportService');
+const { classifyConversationIntent } = require('./conversationIntent');
 const { logInfo, logError } = require('./logger');
 const { buildProfilePayload, buildPortfolioPayload } = require('./payloadService');
 const { broadcast } = require('./realtimeService');
@@ -509,26 +510,51 @@ async function resolveAssistantTurn({
   const structuredImportPlan = buildStructuredImportPlan(cleanContent);
 
   try {
-    aiResult = await runConversationGraph({
-      userInput: cleanContent,
-      threadId,
-      context,
-      onAnswerChunk,
-      onStage,
-      onThinkingChunk,
-    });
-
-    if (structuredImportPlan?.actions?.length) {
-      aiResult = {
-        ...aiResult,
-        actions: mergeConversationActions(structuredImportPlan.actions, aiResult.actions || []),
-        workspacePatch: structuredImportPlan.workspacePatch || aiResult.workspacePatch || null,
-      };
-      logInfo('chat.actions.structured_import_supplemented', {
+    if (structuredImportPlan?.skipLlm && structuredImportPlan?.actions?.length) {
+      logInfo('chat.structured_import.skip_llm', {
         threadId,
-        structuredActionCount: structuredImportPlan.actions.length,
-        aiActionCount: Array.isArray(aiResult.actions) ? aiResult.actions.length : 0,
+        actionCount: structuredImportPlan.actions.length,
+        ruleBased: Boolean(structuredImportPlan.ruleBased),
       });
+      if (typeof onStage === 'function') {
+        await onStage({
+          key: 'actions',
+          phase: 'actions',
+          message: '규칙 기반 자산 갱신을 반영하고 있습니다.',
+        });
+      }
+      aiResult = {
+        answer: structuredImportPlan.answer || '',
+        fastPath: true,
+        structuredImport: true,
+        actions: structuredImportPlan.actions,
+        supervisorPlan: null,
+        specialistOutputs: [],
+        workspacePatch: structuredImportPlan.workspacePatch || null,
+      };
+    } else {
+      aiResult = await runConversationGraph({
+        userInput: cleanContent,
+        threadId,
+        context,
+        intent: classifyConversationIntent(cleanContent),
+        onAnswerChunk,
+        onStage,
+        onThinkingChunk,
+      });
+
+      if (structuredImportPlan?.actions?.length) {
+        aiResult = {
+          ...aiResult,
+          actions: mergeConversationActions(structuredImportPlan.actions, aiResult.actions || []),
+          workspacePatch: structuredImportPlan.workspacePatch || aiResult.workspacePatch || null,
+        };
+        logInfo('chat.actions.structured_import_supplemented', {
+          threadId,
+          structuredActionCount: structuredImportPlan.actions.length,
+          aiActionCount: Array.isArray(aiResult.actions) ? aiResult.actions.length : 0,
+        });
+      }
     }
 
     aiResult = {

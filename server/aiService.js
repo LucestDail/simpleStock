@@ -14,7 +14,8 @@ const {
   getAiTransportLabel,
   isGatewayMode,
 } = require('./geminiClient');
-const { shouldUseFastMutationPath, planNeedsResearch } = require('./conversationIntent');
+const { shouldUseFastMutationPath, planNeedsResearch, classifyConversationIntent } = require('./conversationIntent');
+const { recordAiLatency } = require('./aiLatencyMetrics');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 /** @see https://ai.google.dev/gemini-api/docs/models — 기본 Stable: Gemini 3.5 Flash */
@@ -278,6 +279,17 @@ const SUPERVISOR_SCHEMA = {
     },
   },
   required: ['personaLabel', 'personaSystemPrompt', 'synthesisInstructions', 'workspacePatch', 'tasks', 'actions'],
+};
+
+const ACTIONS_ONLY_SCHEMA = {
+  type: 'object',
+  properties: {
+    actions: {
+      type: 'array',
+      items: ACTION_SCHEMA,
+    },
+  },
+  required: ['actions'],
 };
 
 const THREAD_SUMMARY_SCHEMA = {
@@ -779,6 +791,14 @@ async function generateContent({
       });
 
       await trackAiUsage(response, logLabel);
+      recordAiLatency({
+        logLabel,
+        durationMs: Date.now() - startedAt,
+        success: true,
+        transport: getAiTransportLabel(),
+        model: effectiveModel,
+        streaming: false,
+      });
       return response;
     } catch (error) {
       const retryable = isRetryableAiError(error);
@@ -804,6 +824,14 @@ async function generateContent({
       }
 
       const userFacingError = buildAiUserFacingError(error, { maxAttempts, effectiveTimeoutMs });
+      recordAiLatency({
+        logLabel,
+        durationMs: Date.now() - startedAt,
+        success: false,
+        transport: getAiTransportLabel(),
+        model: effectiveModel,
+        streaming: false,
+      });
       logError('ai.generate.failed', error, {
         logLabel,
         attempt,
@@ -922,6 +950,15 @@ async function generateContentStream({
         streaming: true,
       });
 
+      recordAiLatency({
+        logLabel,
+        durationMs: Date.now() - startedAt,
+        success: true,
+        transport: getAiTransportLabel(),
+        model: runtime.model,
+        streaming: true,
+      });
+
       return {
         text: answer,
         citations: mergeGroundingSources(groundingSources),
@@ -951,6 +988,14 @@ async function generateContentStream({
       }
 
       const userFacingError = buildAiUserFacingError(error, { maxAttempts });
+      recordAiLatency({
+        logLabel,
+        durationMs: Date.now() - startedAt,
+        success: false,
+        transport: getAiTransportLabel(),
+        model: runtime.model,
+        streaming: true,
+      });
       logError('ai.generate.failed', error, {
         logLabel,
         attempt,
@@ -970,6 +1015,14 @@ async function generateContentStream({
   try {
     throw new Error('AI 스트리밍 응답 생성 루프가 예상치 못하게 종료되었습니다.');
   } catch (error) {
+    recordAiLatency({
+      logLabel,
+      durationMs: Date.now() - startedAt,
+      success: false,
+      transport: getAiTransportLabel(),
+      model: runtime.model,
+      streaming: true,
+    });
     logError('ai.generate.failed', error, {
       logLabel,
       durationMs: Date.now() - startedAt,
@@ -1192,6 +1245,63 @@ async function buildSupervisorPlan(userInput, context) {
     });
     return plan;
   });
+}
+
+async function buildMutationSupervisorPlan(userInput, context) {
+  if (!isAiConfigured()) {
+    return buildFallbackPlan(userInput, context);
+  }
+
+  const { buildSlimSupervisorContext } = require('./contextBuilder');
+  const slimContext = buildSlimSupervisorContext(context, userInput);
+  const fallback = buildFallbackPlan(userInput, context);
+  fallback.tasks = [];
+
+  const partial = await generateStructuredOutput(
+    {
+      systemPrompt: [
+        '당신은 포트폴리오 변경(actions) 추출 전용 supervisor다.',
+        '사용자 요청에서 자산 입력/수정/삭제, 설정 변경, 반복 작업 예약/취소만 actions 배열로 추출한다.',
+        'research task, workspacePatch, persona 는 생성하지 않는다.',
+        '⚠ 금액(원/$)이 명시되면 upsertHolding.holding.amount 에 정수(원)로 채운다.',
+        '주식/ETF: category=stock, details.quantity·averagePrice 사용. deposit 은 현금성 자산만.',
+        'holding.name 은 종목명·계좌명만. actions 는 최대 12개.',
+        '요청이 모호하면 actions 는 빈 배열.',
+        '반드시 JSON 으로만 답한다.',
+      ].join('\n'),
+      userPrompt: JSON.stringify(
+        {
+          userInput,
+          context: slimContext,
+        },
+        null,
+        2
+      ),
+      schema: ACTIONS_ONLY_SCHEMA,
+      logLabel: 'mutation_supervisor',
+      modelOverride: GEMINI_SUPERVISOR_MODEL,
+      timeoutOverrideMs: GEMINI_SUPERVISOR_TIMEOUT_MS,
+    },
+    { actions: [] }
+  );
+
+  const actions = Array.isArray(partial.actions) ? partial.actions : [];
+  const trimmed = actions.length > 12 ? actions.slice(0, 12) : actions;
+  if (actions.length > 12) {
+    logWarn('ai.mutation_supervisor.actions_trimmed', { from: actions.length, to: 12 });
+  }
+
+  logInfo('ai.mutation_supervisor.plan', {
+    actionCount: trimmed.length,
+    holdingCount: slimContext.portfolio?.holdings?.length || 0,
+  });
+
+  return {
+    ...fallback,
+    actions: trimmed,
+    tasks: [],
+    workspacePatch: fallback.workspacePatch || {},
+  };
 }
 
 function buildFallbackResearchTask(userInput) {
@@ -1445,19 +1555,36 @@ async function runConversationPipeline({
   userInput,
   threadId,
   context,
+  intent = null,
   onAnswerChunk = null,
   onStage = null,
   onThinkingChunk = null,
 }) {
+  const resolvedIntent = intent || classifyConversationIntent(userInput);
+
   if (typeof onStage === 'function') {
     await onStage({
       key: 'supervisor',
       phase: 'supervisor',
-      message: '대화 맥락과 작업 계획을 정리하고 있습니다.',
+      message:
+        resolvedIntent === 'research' || resolvedIntent === 'mixed'
+          ? '대화 맥락과 작업 계획을 정리하고 있습니다.'
+          : '포트폴리오 변경 사항을 추출하고 있습니다.',
     });
   }
 
-  const supervisorPlan = await buildSupervisorPlan(userInput, context);
+  const supervisorPlan =
+    resolvedIntent === 'research' || resolvedIntent === 'mixed'
+      ? await buildSupervisorPlan(userInput, context)
+      : await buildMutationSupervisorPlan(userInput, context);
+
+  logInfo('ai.pipeline.intent', {
+    threadId,
+    intent: resolvedIntent,
+    supervisorMode: resolvedIntent === 'research' || resolvedIntent === 'mixed' ? 'full' : 'mutation',
+    actionCount: Array.isArray(supervisorPlan.actions) ? supervisorPlan.actions.length : 0,
+    taskCount: Array.isArray(supervisorPlan.tasks) ? supervisorPlan.tasks.length : 0,
+  });
 
   if (typeof onStage === 'function') {
     await onStage({
@@ -1593,6 +1720,7 @@ async function runConversationGraph({
   userInput,
   threadId,
   context,
+  intent = null,
   onAnswerChunk = null,
   onStage = null,
   onThinkingChunk = null,
@@ -1614,6 +1742,7 @@ async function runConversationGraph({
       userInput,
       threadId,
       context,
+      intent,
       onAnswerChunk,
       onStage,
       onThinkingChunk,

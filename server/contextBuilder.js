@@ -125,9 +125,77 @@ function buildSupervisorContext(fullContext) {
   };
 }
 
+function extractContextKeywords(userInput) {
+  const text = String(userInput || '');
+  const tokens = text
+    .split(/[\s,，·]+/)
+    .map((part) => part.replace(/[^\p{L}\p{N}]/gu, '').trim())
+    .filter((part) => part.length >= 2);
+  const extras = [];
+  if (/예수금|달러|원화|통장|계좌|적금|예금|펀드|irp|연금/i.test(text)) {
+    extras.push('예수금', '예금', '통장', '계좌');
+  }
+  return [...new Set([...tokens, ...extras])].slice(0, 12);
+}
+
+function holdingMatchesKeywords(holding, keywords) {
+  if (!keywords.length) return true;
+  const haystack = [
+    holding.name,
+    holding.id,
+    holding.category,
+    holding.details?.ticker,
+    holding.details?.account,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return keywords.some((keyword) => haystack.includes(String(keyword).toLowerCase()));
+}
+
+/** mutation supervisor용 — holdings·메시지 축소, profile/memory 제외 */
+function buildSlimSupervisorContext(fullContext, userInput = '') {
+  const portfolio = fullContext.portfolio || {};
+  const keywords = extractContextKeywords(userInput);
+  let holdings = (portfolio.holdings || []).map((h) => ({
+    id: h.id,
+    name: h.name,
+    category: h.category,
+    amount: h.amount,
+    ticker: h.details?.ticker || '',
+    currency: h.details?.currency || '',
+    quantity: h.details?.quantity ?? null,
+  }));
+
+  if (keywords.length) {
+    const matched = holdings.filter((h) => holdingMatchesKeywords(h, keywords));
+    if (matched.length) holdings = matched;
+  }
+  if (holdings.length > 18) {
+    holdings = holdings.slice(0, 18);
+  }
+
+  const messages = (fullContext.recentMessages || []).slice(-2).map((m) => ({
+    role: m.role,
+    content: String(m.content || '').slice(0, 120),
+  }));
+
+  return {
+    portfolio: {
+      total: portfolio.total,
+      totalLabel: portfolio.totalLabel,
+      holdings,
+      categoryShares: portfolio.categoryShares,
+    },
+    recentMessages: messages,
+  };
+}
+
 module.exports = {
   buildConversationContext,
   buildSupervisorContext,
+  buildSlimSupervisorContext,
+  extractContextKeywords,
   buildPortfolioContext,
   buildProfileContext,
   buildMemoryContext,

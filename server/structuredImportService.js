@@ -202,10 +202,18 @@ function buildWorkspacePatch() {
 
 function buildStructuredImportPlan(content) {
   const source = String(content || '');
-  if (!/\[Portfolio Baseline & Rules\]/.test(source)) {
-    return buildSimpleAssetImportPlan(source);
+  if (/\[Portfolio Baseline & Rules\]/.test(source)) {
+    return buildPortfolioBaselineImportPlan(source);
   }
 
+  const multilineDeposit = parseMultilineDepositUpdate(source);
+  if (multilineDeposit) return multilineDeposit;
+
+  return buildSimpleAssetImportPlan(source);
+}
+
+function buildPortfolioBaselineImportPlan(content) {
+  const source = String(content || '');
   const lines = source
     .split('\n')
     .map((line) => line.trim())
@@ -289,12 +297,130 @@ function buildStructuredImportPlan(content) {
     answer,
     workspacePatch: buildWorkspacePatch(),
     usedFallback: true,
+    ruleBased: true,
+    skipLlm: true,
+  };
+}
+
+function parseMultilineDepositUpdate(content) {
+  const source = String(content || '').trim();
+  if (!source || !/(갱신|업데이트|반영|저장|등록|추가)/.test(source)) {
+    return null;
+  }
+
+  const lines = source.split('\n').map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return null;
+
+  const actions = [];
+  const parsedNames = [];
+
+  for (const line of lines) {
+    if (/^(예금|자산|계좌|현금).*(갱신|업데이트|반영)/.test(line) && !/\d/.test(line)) {
+      continue;
+    }
+
+    const dollarMatch = line.match(/^(달러\s*예수금)\s*:?\s*(.+)$/i);
+    if (dollarMatch) {
+      const name = normalizeText(dollarMatch[1]);
+      const nativeAmount = parseUsd(dollarMatch[2]);
+      if (nativeAmount == null) continue;
+      actions.push(
+        buildHoldingAction({
+          name,
+          category: 'deposit',
+          amount: convertUsdToKrw(nativeAmount),
+          rationale: `${name} 달러 예수금을 갱신했습니다.`,
+          details: {
+            account: '미국 계좌',
+            currency: 'USD',
+            market: 'US',
+            nativeAmount,
+            fxRate: USD_KRW_FALLBACK_RATE,
+            summary: `예수금 $${nativeAmount.toLocaleString('en-US')}`,
+            orders: [],
+          },
+        })
+      );
+      parsedNames.push(name);
+      continue;
+    }
+
+    const krwCashMatch = line.match(/^(원화\s*예수금)\s*:?\s*(.+)$/i);
+    if (krwCashMatch) {
+      const name = normalizeText(krwCashMatch[1]);
+      const amount = parseKrw(krwCashMatch[2]);
+      if (amount == null) continue;
+      actions.push(
+        buildHoldingAction({
+          name,
+          category: 'deposit',
+          amount,
+          rationale: `${name} 원화 예수금을 갱신했습니다.`,
+          details: {
+            account: '한국 계좌',
+            currency: 'KRW',
+            market: 'KR',
+            nativeAmount: amount,
+            summary: `예수금 ${amount.toLocaleString('ko-KR')}원`,
+            orders: [],
+          },
+        })
+      );
+      parsedNames.push(name);
+      continue;
+    }
+
+    const gluedMatch = line.match(/^(.+?)(\d{1,3}(?:,\d{3})+|\d{4,})(?:\.\d+)?\s*(원|\$|USD|usd)?$/);
+    if (gluedMatch) {
+      const name = normalizeText(gluedMatch[1].replace(/\s*통장\s*$/i, ' 통장'));
+      const unit = String(gluedMatch[3] || '').toUpperCase();
+      const isUsd = unit === 'USD' || unit === '$' || /\$/.test(line);
+      const nativeAmount = isUsd ? parseUsd(gluedMatch[2]) : parseKrw(gluedMatch[2]);
+      if (!name || nativeAmount == null) continue;
+      const amount = isUsd ? convertUsdToKrw(nativeAmount) : nativeAmount;
+      actions.push(
+        buildHoldingAction({
+          name,
+          category: inferCategoryFromName(name),
+          amount,
+          rationale: `${name} 잔액을 다줄 입력에서 읽어 갱신했습니다.`,
+          details: {
+            account: isUsd ? '미국 계좌' : '한국 계좌',
+            currency: isUsd ? 'USD' : 'KRW',
+            market: isUsd ? 'US' : 'KR',
+            nativeAmount,
+            fxRate: isUsd ? USD_KRW_FALLBACK_RATE : null,
+            summary: isUsd
+              ? `${name} $${nativeAmount.toLocaleString('en-US')}`
+              : `${name} ${amount.toLocaleString('ko-KR')}원`,
+            orders: [],
+          },
+        })
+      );
+      parsedNames.push(name);
+    }
+  }
+
+  if (!actions.length) return null;
+
+  return {
+    actions,
+    answer: [
+      '다줄 예금·예수금 입력을 규칙 기반으로 읽어 즉시 반영했습니다.',
+      '',
+      `갱신 자산: ${parsedNames.join(', ')}`,
+      'AI supervisor 없이 처리해 응답 지연을 줄였습니다.',
+    ].join('\n'),
+    workspacePatch: buildWorkspacePatch(),
+    usedFallback: true,
+    ruleBased: true,
+    skipLlm: true,
   };
 }
 
 function buildSimpleAssetImportPlan(content) {
   const source = String(content || '').trim();
-  if (!source || !/(반영|추가|저장|등록|업데이트)/.test(source)) {
+  if (!source || !/(반영|추가|저장|등록|업데이트|갱신)/.test(source)) {
     return null;
   }
 
@@ -360,6 +486,8 @@ function buildSimpleAssetImportPlan(content) {
     ].join('\n'),
     workspacePatch: buildWorkspacePatch(),
     usedFallback: true,
+    ruleBased: true,
+    skipLlm: true,
   };
 }
 
