@@ -28,11 +28,18 @@ const HOLDING_MARKET_FIELDS = Object.freeze([
 const YAHOO_PROVIDER = 'yahoo-finance';
 const FINNHUB_PROVIDER = 'finnhub';
 const PUBLIC_DATA_PROVIDER = 'public-data-portal';
+const MYAPI_PROVIDER = 'myapi';
 const FINNHUB_API_KEY = String(process.env.FINNHUB_API_KEY || '').trim();
 const PUBLIC_DATA_API_KEY = String(process.env.PUBLIC_DATA_API_KEY || '').trim();
+// myapi(생태계 단일 주가 소스) base-url. 미설정 시 myapi provider 비활성 → 기존 소스 사용(하위호환).
+// 예: http://192.168.11.25/myapi 또는 http://127.0.0.1/myapi (뒤 슬래시는 자동 정리)
+const MYAPI_BASE_URL = String(process.env.MYAPI_BASE_URL || '').trim().replace(/\/+$/, '');
 const DEFAULT_PROVIDER = String(process.env.MARKET_DATA_PROVIDER || '').trim() || (FINNHUB_API_KEY ? FINNHUB_PROVIDER : YAHOO_PROVIDER);
 const US_PROVIDER = String(process.env.MARKET_US_PROVIDER || '').trim() || DEFAULT_PROVIDER;
-const KR_PROVIDER = String(process.env.MARKET_KR_PROVIDER || '').trim() || PUBLIC_DATA_PROVIDER;
+// KR 기본을 myapi 우선(실시간)으로 통일. 단 MYAPI_BASE_URL 미설정 시 기존 공공데이터로 폴백(하위호환).
+const KR_PROVIDER =
+  String(process.env.MARKET_KR_PROVIDER || '').trim() ||
+  (MYAPI_BASE_URL ? MYAPI_PROVIDER : PUBLIC_DATA_PROVIDER);
 const FX_PROVIDER = String(process.env.MARKET_FX_PROVIDER || '').trim() || (DEFAULT_PROVIDER === FINNHUB_PROVIDER ? YAHOO_PROVIDER : DEFAULT_PROVIDER);
 const PUBLIC_DATA_BASE_URL =
   String(process.env.PUBLIC_DATA_BASE_URL || '').trim() ||
@@ -90,6 +97,7 @@ function getMarketProviderConfig() {
       quote: MARKET_REFRESH_INTERVAL_MS,
       fx: MARKET_REFRESH_INTERVAL_MS,
     },
+    myapiBaseUrl: MYAPI_BASE_URL || null,
     quoteTtlMs: MARKET_QUOTE_TTL_MS,
     krQuoteTtlMs: MARKET_KR_QUOTE_TTL_MS,
     krBasDtLookbackDays: MARKET_KR_BAS_DT_LOOKBACK_DAYS,
@@ -374,6 +382,62 @@ async function fetchFinnhubQuote(symbol) {
   };
 }
 
+/**
+ * myapi(생태계 단일 주가 소스) 응답을 simpleStock 내부 quote 형식으로 매핑하는 어댑터.
+ * myapi 응답: {symbol,name,price,previousClose,change,changePct,currency,market}
+ * → 내부: {symbol,shortName,market,currency,price,previousClose,change,changePct,marketState,updatedAt,source,...}
+ */
+function buildQuoteFromMyapi(data, normalizedSymbol, requestedMarket) {
+  if (!data || !Number.isFinite(Number(data.price)) || Number(data.price) <= 0) {
+    throw new Error(`${normalizedSymbol} myapi 시세를 확인하지 못했습니다.`);
+  }
+
+  const market = String(data.market || requestedMarket || '').toUpperCase() || 'US';
+  const isKr = market === 'KR';
+  const price = roundNumber(data.price, isKr ? 0 : 2);
+  const previousClose = Number.isFinite(Number(data.previousClose))
+    ? roundNumber(data.previousClose, isKr ? 0 : 2)
+    : null;
+  const change = Number.isFinite(Number(data.change))
+    ? roundNumber(data.change, isKr ? 0 : 2)
+    : previousClose == null
+      ? null
+      : roundNumber(price - previousClose, isKr ? 0 : 2);
+  const changePct = Number.isFinite(Number(data.changePct))
+    ? roundNumber(data.changePct)
+    : previousClose
+      ? roundNumber(((price - previousClose) / previousClose) * 100)
+      : null;
+
+  return {
+    symbol: normalizeTickerSymbol(data.symbol || normalizedSymbol),
+    shortName: String(data.name || normalizedSymbol),
+    market,
+    currency: String(data.currency || (isKr ? 'KRW' : 'USD')).toUpperCase(),
+    price,
+    previousClose,
+    change,
+    changePct,
+    marketState: 'active',
+    updatedAt: new Date().toISOString(),
+    source: MYAPI_PROVIDER,
+    ...(isKr ? { krPriceKind: 'myapi' } : {}),
+  };
+}
+
+async function fetchMyapiQuote(symbol, market) {
+  if (!MYAPI_BASE_URL) {
+    throw new Error('MYAPI_BASE_URL이 설정되지 않았습니다.');
+  }
+  const normalizedSymbol = normalizeTickerSymbol(symbol);
+  const search = new URLSearchParams({
+    symbol: String(symbol || '').trim(),
+    market: String(market || 'US').toUpperCase(),
+  });
+  const data = await fetchJson(`${MYAPI_BASE_URL}/api/stocks/quote?${search.toString()}`);
+  return buildQuoteFromMyapi(data, normalizedSymbol, market);
+}
+
 async function getCachedQuote(
   kind,
   symbol,
@@ -433,6 +497,10 @@ async function getCachedQuote(
 async function fetchUsQuote(symbol, options = {}) {
   const normalizedSymbol = normalizeTickerSymbol(symbol);
   const { us } = getResolvedProviders();
+  // myapi 옵션 선택 시 myapi 우선(BASE_URL 미설정이면 무시하고 기존 소스 사용 = 하위호환).
+  if (us === MYAPI_PROVIDER && MYAPI_BASE_URL) {
+    return getCachedQuote('quote', normalizedSymbol, (s) => fetchMyapiQuote(s, 'US'), options);
+  }
   const provider = us === FINNHUB_PROVIDER ? FINNHUB_PROVIDER : YAHOO_PROVIDER;
   const fetcher = provider === FINNHUB_PROVIDER ? fetchFinnhubQuote : fetchYahooChartQuote;
   return getCachedQuote('quote', normalizedSymbol, fetcher, options);
@@ -653,6 +721,53 @@ async function fetchKrPublicStockQuote(symbol, options = {}) {
   );
 }
 
+async function fetchKrMyapiStockQuote(symbol, options = {}) {
+  const normalizedSymbol = normalizeTickerSymbol(symbol);
+  return getCachedQuote(
+    'quote',
+    getTrackedQuoteKey({ market: 'KR', symbol: normalizedSymbol }),
+    async () => {
+      try {
+        return await fetchMyapiQuote(symbol, 'KR');
+      } catch (myapiError) {
+        // myapi 실패 시 기존 공공데이터/Yahoo 경로로 폴백(하위호환·복원력).
+        logWarn('market.kr.myapi_fallback', {
+          symbol: normalizedSymbol,
+          message: myapiError.message,
+        });
+        try {
+          let resolved = null;
+          for (const basDt of listRecentBasDates(MARKET_KR_BAS_DT_LOOKBACK_DAYS)) {
+            resolved = await fetchKrPublicDataMatch(normalizedSymbol, basDt);
+            if (resolved) break;
+          }
+          if (!resolved) {
+            resolved = await fetchKrPublicDataMatch(normalizedSymbol, null);
+          }
+          if (resolved?.quote) return resolved.quote;
+        } catch (publicError) {
+          logWarn('market.kr.public_fallback_failed', {
+            symbol: normalizedSymbol,
+            message: publicError.message,
+          });
+        }
+        return fetchYahooKrStockQuote(normalizedSymbol);
+      }
+    },
+    { ...options, ttlMs: MARKET_QUOTE_TTL_MS }
+  );
+}
+
+// KR 시세 디스패처: 해석된 provider 가 myapi(그리고 MYAPI_BASE_URL 설정)면 myapi 우선,
+// 아니면 기존 공공데이터포털 경로. MYAPI_BASE_URL 미설정 시 항상 기존 경로(하위호환).
+async function fetchKrQuote(symbol, options = {}) {
+  const { kr } = getResolvedProviders();
+  if (kr === MYAPI_PROVIDER && MYAPI_BASE_URL) {
+    return fetchKrMyapiStockQuote(symbol, options);
+  }
+  return fetchKrPublicStockQuote(symbol, options);
+}
+
 function buildUsdSummary(details, quotePrice, nativeAmount, amountKrw) {
   const fragments = [];
   if (details.ticker) fragments.push(details.ticker);
@@ -728,7 +843,7 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
         }
         nextQuotes[quoteKey] =
           ticker.market === 'KR'
-            ? await fetchKrPublicStockQuote(ticker.symbol, { force })
+            ? await fetchKrQuote(ticker.symbol, { force })
             : await fetchUsQuote(ticker.symbol, { force });
       } catch (error) {
         if (ticker.market === 'KR') {
@@ -966,4 +1081,5 @@ module.exports = {
   buildKrQuoteFromPublicDataItem,
   fetchPublicDataOperation,
   isTrackedKrStock,
+  buildQuoteFromMyapi,
 };
