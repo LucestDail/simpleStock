@@ -8,7 +8,11 @@ const FILES = {
   chat: path.join(DATA_DIR, 'chat.json'),
   memory: path.join(DATA_DIR, 'memory.json'),
   profile: path.join(DATA_DIR, 'profile.json'),
+  watchlist: path.join(DATA_DIR, 'watchlist.json'),
 };
+
+// v3 종합 트래커: 테마 그룹으로 묶은 관심종목(개인 자산/금액 개념 없음).
+const WATCHLIST_MARKETS = ['KR', 'US', 'ETF'];
 
 const CATEGORIES = ['deposit', 'installment', 'stock', 'fund', 'pension'];
 
@@ -116,6 +120,62 @@ function createDefaultProfile() {
       lastAiRefreshAt: null,
     },
   };
+}
+
+function createDefaultWatchlist() {
+  return { groups: [] };
+}
+
+function normalizeWatchlistTicker(item) {
+  if (!item || typeof item !== 'object') return null;
+  const symbol = String(item.symbol || '').trim().toUpperCase().slice(0, 40);
+  if (!symbol) return null;
+  const rawMarket = String(item.market || '').trim().toUpperCase();
+  const currency = String(item.currency || '').trim().toUpperCase().slice(0, 16);
+  let market = WATCHLIST_MARKETS.includes(rawMarket) ? rawMarket : '';
+  if (!market) market = currency === 'USD' ? 'US' : 'KR';
+  return {
+    symbol,
+    name: String(item.name || symbol).slice(0, 120),
+    market,
+    currency: currency || (market === 'US' ? 'USD' : 'KRW'),
+    addedAt: item.addedAt || null,
+  };
+}
+
+function normalizeWatchlist(data) {
+  const source = data && typeof data === 'object' ? data : createDefaultWatchlist();
+  const groups = Array.isArray(source.groups) ? source.groups : [];
+  const seenGroupIds = new Set();
+  const normalized = groups
+    .filter((g) => g && typeof g === 'object')
+    .map((g, idx) => {
+      let id = String(g.id || '').trim();
+      if (!id || seenGroupIds.has(id)) id = `grp-${idx}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+      seenGroupIds.add(id);
+      const seenSymbols = new Set();
+      const tickers = (Array.isArray(g.tickers) ? g.tickers : [])
+        .map(normalizeWatchlistTicker)
+        .filter(Boolean)
+        .filter((t) => {
+          const key = `${t.market}:${t.symbol}`;
+          if (seenSymbols.has(key)) return false;
+          seenSymbols.add(key);
+          return true;
+        })
+        .slice(0, 200);
+      return {
+        id,
+        name: String(g.name || '관심그룹').slice(0, 80),
+        order: Number.isFinite(Number(g.order)) ? Number(g.order) : idx,
+        tickers,
+      };
+    });
+  normalized.sort((a, b) => a.order - b.order);
+  normalized.forEach((g, idx) => {
+    g.order = idx;
+  });
+  return { groups: normalized };
 }
 
 function readJson(filePath, fallbackFactory) {
@@ -513,6 +573,7 @@ function loadStore() {
     chat: normalizeChat(readJson(FILES.chat, createDefaultChat)),
     memory: normalizeMemory(readJson(FILES.memory, createDefaultMemory)),
     profile: normalizeProfile(readJson(FILES.profile, createDefaultProfile)),
+    watchlist: normalizeWatchlist(readJson(FILES.watchlist, createDefaultWatchlist)),
   };
 }
 
@@ -521,6 +582,7 @@ function saveStore(store) {
   writeJson(FILES.chat, normalizeChat(store.chat));
   writeJson(FILES.memory, normalizeMemory(store.memory));
   writeJson(FILES.profile, normalizeProfile(store.profile));
+  writeJson(FILES.watchlist, normalizeWatchlist(store.watchlist));
 }
 
 async function mutateStore(mutator) {
@@ -546,6 +608,7 @@ module.exports = {
   createDefaultMemory,
   createDefaultMarketState,
   createDefaultProfile,
+  createDefaultWatchlist,
   loadStore,
   saveStore,
   mutateStore,
@@ -554,4 +617,6 @@ module.exports = {
   normalizeMemory,
   normalizeMarketState,
   normalizeProfile,
+  normalizeWatchlist,
+  WATCHLIST_MARKETS,
 };

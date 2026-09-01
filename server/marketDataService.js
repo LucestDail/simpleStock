@@ -219,28 +219,30 @@ function getTrackedQuoteKey({ market, symbol }) {
   return `${String(market || '').toUpperCase()}:${normalizeTickerSymbol(symbol)}`;
 }
 
+// v3 종합 트래커: 추적 대상은 개인 보유(holdings)가 아니라 watchlist 테마 그룹의 티커 합집합.
+// 시세 조회 경로는 US(=US/USD)와 KR(그 외, ETF 포함=KR 공공데이터가 stock+securities 둘 다 시도)로만 나눈다.
 function listTrackedTickerConfigs(store = loadStore()) {
   const tracked = new Map();
+  const groups = (store.watchlist && Array.isArray(store.watchlist.groups)) ? store.watchlist.groups : [];
 
-  for (const holding of store.portfolio.holdings || []) {
-    const isUs = isTrackedUsStock(holding);
-    const isKr = isTrackedKrStock(holding);
-    if (!isUs && !isKr) continue;
-    const symbol = normalizeTickerSymbol(holding.details.ticker);
-    if (!symbol) continue;
-    const market = isUs ? 'US' : 'KR';
-    const trackedKey = getTrackedQuoteKey({ market, symbol });
-
-    const existing = tracked.get(trackedKey) || {
-      symbol,
-      name: holding.name,
-      market,
-      currency: isUs ? 'USD' : 'KRW',
-      holdingIds: [],
-    };
-
-    existing.holdingIds.push(String(holding.id));
-    tracked.set(trackedKey, existing);
+  for (const group of groups) {
+    for (const ticker of group.tickers || []) {
+      const symbol = normalizeTickerSymbol(ticker.symbol);
+      if (!symbol) continue;
+      const rawMarket = String(ticker.market || '').toUpperCase();
+      const currency = String(ticker.currency || '').toUpperCase();
+      const isUs = rawMarket === 'US' || currency === 'USD';
+      const market = isUs ? 'US' : 'KR';
+      const trackedKey = getTrackedQuoteKey({ market, symbol });
+      if (tracked.has(trackedKey)) continue;
+      tracked.set(trackedKey, {
+        symbol,
+        name: ticker.name || symbol,
+        market,
+        currency: isUs ? 'USD' : 'KRW',
+        holdingIds: [],
+      });
+    }
   }
 
   return [...tracked.values()].sort((a, b) =>
