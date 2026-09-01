@@ -1,9 +1,9 @@
 const { APP_TIMEZONE } = require('./time');
 const { loadStore, mutateStore } = require('./dataStore');
-const { buildPortfolioPayload } = require('./payloadService');
 const { broadcast } = require('./realtimeService');
 const { logInfo, logWarn, logError } = require('./logger');
-const { USD_KRW_FALLBACK_RATE } = require('./structuredImportService');
+// USD/KRW 폴백 환율(structuredImportService 의존 제거, v3 인라인 상수).
+const USD_KRW_FALLBACK_RATE = Math.max(1000, Math.round(Number(process.env.USD_KRW_FALLBACK_RATE) || 1360));
 const { getEffectiveMarketProviders } = require('./settingsService');
 
 const MARKET_EVENT_TYPES = Object.freeze({
@@ -791,7 +791,7 @@ function buildKrwSummary(details, quotePrice, nativeAmount) {
 
 async function refreshMarketData({ reason = 'interval', force = false } = {}) {
   if (!MARKET_DATA_ENABLED) {
-    return buildPortfolioPayload();
+    return { system: { market: getMarketSnapshot() }, reason };
   }
 
   if (refreshPromise) {
@@ -802,12 +802,13 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
     const initialStore = loadStore();
     const trackedTickers = listTrackedTickerConfigs(initialStore);
     const sessions = getMarketSessionSnapshot();
-    const usdHoldings = (initialStore.portfolio.holdings || []).filter(isUsdHolding);
     const nextQuotes = {};
     const errors = [];
     let nextFx = null;
+    // v3: FX(USD/KRW)는 watchlist 에 US 종목이 있을 때 갱신(과거엔 개인 보유 USD holdings 기준이라 v3 에선 미갱신 버그였음).
+    const hasUsTicker = trackedTickers.some((t) => t.market === 'US');
 
-    if (usdHoldings.length) {
+    if (hasUsTicker) {
       try {
         nextFx = await fetchUsdKrwRate({ force });
       } catch (error) {
@@ -869,70 +870,7 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
     await mutateStore((store) => {
       const market = store.memory.market || {};
       const existingQuotes = market.quotes && typeof market.quotes === 'object' ? market.quotes : {};
-      const usdKrwRate = nextFx?.rate || market.fx?.USDKRW?.rate || USD_KRW_FALLBACK_RATE;
-
-      for (const holding of store.portfolio.holdings) {
-        const details = holding.details;
-        if (!details) continue;
-
-        const isUs = isTrackedUsStock(holding);
-        const isKr = isTrackedKrStock(holding);
-        const quoteKey = details.ticker ? getTrackedQuoteKey({ market: isUs ? 'US' : isKr ? 'KR' : details.market, symbol: details.ticker }) : null;
-        const quote = quoteKey ? nextQuotes[quoteKey] || existingQuotes[quoteKey] : null;
-
-        if (String(details.currency || '').toUpperCase() === 'USD') {
-          details.market = details.market || 'US';
-          details.fxRate = roundNumber(usdKrwRate, 2);
-
-          if (quote && Number.isFinite(Number(details.quantity))) {
-            const nativeAmount = roundNumber(Number(details.quantity) * Number(quote.price), 2);
-            const amountKrw = Math.round(nativeAmount * usdKrwRate);
-            details.currentPrice = quote.price;
-            details.lastQuote = quote.price;
-            details.previousClose = quote.previousClose;
-            details.priceChange = quote.change;
-            details.priceChangePct = quote.changePct;
-            details.marketState = quote.marketState;
-            details.lastQuoteAt = quote.updatedAt;
-            details.quoteSource = quote.source;
-            details.nativeAmount = nativeAmount;
-            details.summary = buildUsdSummary(details, quote.price, nativeAmount, amountKrw);
-            holding.amount = amountKrw;
-            continue;
-          }
-
-          if (Number.isFinite(Number(details.nativeAmount))) {
-            holding.amount = Math.round(Number(details.nativeAmount) * usdKrwRate);
-            details.summary = buildUsdSummary(details, details.lastQuote, details.nativeAmount, holding.amount);
-          }
-          continue;
-        }
-
-        if ((String(details.currency || '').toUpperCase() === 'KRW' || isKr) && quote) {
-          details.market = details.market || 'KR';
-          details.currentPrice = quote.price;
-          details.lastQuote = quote.price;
-          details.previousClose = quote.previousClose;
-          details.priceChange = quote.change;
-          details.priceChangePct = quote.changePct;
-          details.marketState = quote.marketState;
-          details.lastQuoteAt = quote.updatedAt;
-          details.quoteSource = quote.source;
-
-          if (Number.isFinite(Number(details.quantity))) {
-            const nativeAmount = Math.round(Number(details.quantity) * Number(quote.price));
-            details.nativeAmount = nativeAmount;
-            holding.amount = nativeAmount;
-            details.summary = buildKrwSummary(details, quote.price, nativeAmount);
-          } else if (Number.isFinite(Number(details.nativeAmount))) {
-            holding.amount = Math.round(Number(details.nativeAmount));
-            details.summary = buildKrwSummary(details, quote.price, details.nativeAmount);
-          } else {
-            details.summary = buildKrwSummary(details, quote.price, null);
-          }
-        }
-      }
-
+      // v3: 개인 보유(holdings)에 시세를 역적용하던 v2 로직 제거 — 관심종목 트래커는 holdings 를 사용하지 않는다.
       const prevStats = market.stats && typeof market.stats === 'object' ? market.stats : {};
       store.memory.market = {
         provider: DEFAULT_PROVIDER,
@@ -969,10 +907,9 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
       };
     });
 
-    const payload = buildPortfolioPayload();
     const marketPayload = {
       system: {
-        market: payload.system.market,
+        market: getMarketSnapshot(),
       },
       reason,
       updatedSymbols: Object.keys(nextQuotes),
@@ -988,9 +925,6 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
     if (Object.keys(nextQuotes).length) {
       broadcast(MARKET_EVENT_TYPES.QUOTE_UPDATED, marketPayload);
     }
-    if (Object.keys(nextQuotes).length || nextFx) {
-      broadcast('portfolio.updated', payload);
-    }
 
     logInfo('market.refresh.finish', {
       reason,
@@ -1001,7 +935,7 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
       errorCount: errors.length,
     });
 
-    return payload;
+    return marketPayload;
   })().catch((error) => {
     logError('market.refresh.failed', error, {
       reason,

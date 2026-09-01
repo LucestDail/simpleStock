@@ -1,13 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const { repairPortfolioHoldings } = require('./holdingTickerUtil');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const FILES = {
-  portfolio: path.join(DATA_DIR, 'portfolio.json'),
-  chat: path.join(DATA_DIR, 'chat.json'),
   memory: path.join(DATA_DIR, 'memory.json'),
-  profile: path.join(DATA_DIR, 'profile.json'),
   watchlist: path.join(DATA_DIR, 'watchlist.json'),
 };
 
@@ -20,20 +16,6 @@ let mutationQueue = Promise.resolve();
 
 function ensureDataDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-function createDefaultPortfolio() {
-  return {
-    holdings: [],
-    snapshots: [],
-  };
-}
-
-function createDefaultChat() {
-  return {
-    threads: [],
-    messagesByThread: {},
-  };
 }
 
 function createDefaultMemory() {
@@ -90,34 +72,6 @@ function createDefaultMarketState() {
         market: 'US',
         state: 'closed',
       },
-    },
-  };
-}
-
-function createDefaultProfile() {
-  return {
-    userProfile: {
-      displayName: '',
-      investorType: '',
-      investmentGoal: '',
-      riskTolerance: '',
-      timeHorizon: '',
-      liquidityNeeds: '',
-      responseStyle: '',
-      focusAreas: '',
-      notes: '',
-    },
-    aiProfile: {
-      summary: '',
-      inferredTraits: [],
-      preferences: [],
-      concerns: [],
-      updatedAt: null,
-      sourceMemoryIds: [],
-    },
-    metadata: {
-      lastManualUpdateAt: null,
-      lastAiRefreshAt: null,
     },
   };
 }
@@ -213,111 +167,6 @@ function writeJson(filePath, data) {
     }
     throw error;
   }
-}
-
-function normalizeHoldingDetails(details) {
-  if (!details || typeof details !== 'object') return null;
-  return {
-    account: String(details.account || '').slice(0, 120),
-    currency: String(details.currency || '').slice(0, 16),
-    ticker: String(details.ticker || '').slice(0, 40),
-    market: String(details.market || '').slice(0, 24),
-    quantity: Number.isFinite(Number(details.quantity)) ? Number(details.quantity) : null,
-    averagePrice: Number.isFinite(Number(details.averagePrice)) ? Number(details.averagePrice) : null,
-    currentPrice: Number.isFinite(Number(details.currentPrice)) ? Number(details.currentPrice) : null,
-    lastQuote: Number.isFinite(Number(details.lastQuote)) ? Number(details.lastQuote) : null,
-    previousClose: Number.isFinite(Number(details.previousClose)) ? Number(details.previousClose) : null,
-    priceChange: Number.isFinite(Number(details.priceChange)) ? Number(details.priceChange) : null,
-    priceChangePct: Number.isFinite(Number(details.priceChangePct)) ? Number(details.priceChangePct) : null,
-    marketState: String(details.marketState || '').slice(0, 24),
-    lastQuoteAt: details.lastQuoteAt ? String(details.lastQuoteAt).slice(0, 40) : null,
-    quoteSource: String(details.quoteSource || '').slice(0, 80),
-    nativeAmount: Number.isFinite(Number(details.nativeAmount)) ? Number(details.nativeAmount) : null,
-    fxRate: Number.isFinite(Number(details.fxRate)) ? Number(details.fxRate) : null,
-    summary: String(details.summary || '').slice(0, 240),
-    orders: Array.isArray(details.orders) ? details.orders.map((item) => String(item || '').slice(0, 160)).filter(Boolean).slice(0, 6) : [],
-  };
-}
-
-function normalizePortfolio(data) {
-  const portfolio = data && typeof data === 'object' ? data : createDefaultPortfolio();
-  if (!Array.isArray(portfolio.holdings)) portfolio.holdings = [];
-  if (!Array.isArray(portfolio.snapshots)) portfolio.snapshots = [];
-
-  portfolio.holdings = repairPortfolioHoldings(
-    portfolio.holdings.map((item) => ({
-      id: String(item.id || ''),
-      name: String(item.name || '이름 없음').slice(0, 200),
-      category: CATEGORIES.includes(item.category) ? item.category : 'deposit',
-      amount: Math.max(0, Math.round(Number(item.amount) || 0)),
-      details: normalizeHoldingDetails(item.details),
-    }))
-  ).map((item) => ({
-    id: String(item.id || ''),
-    name: String(item.name || '이름 없음').slice(0, 200),
-    category: CATEGORIES.includes(item.category) ? item.category : 'deposit',
-    amount: Math.max(0, Math.round(Number(item.amount) || 0)),
-    details: normalizeHoldingDetails(item.details),
-  }));
-
-  portfolio.snapshots = portfolio.snapshots
-    .filter((item) => item && typeof item === 'object')
-    .map((item) => ({
-      date: String(item.date || ''),
-      total: Math.max(0, Math.round(Number(item.total) || 0)),
-      byCategory: Object.fromEntries(
-        CATEGORIES.map((category) => [
-          category,
-          Math.max(0, Math.round(Number(item.byCategory?.[category]) || 0)),
-        ])
-      ),
-    }))
-    .filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item.date))
-    .sort((a, b) => a.date.localeCompare(b.date));
-
-  return portfolio;
-}
-
-function normalizeChat(data) {
-  const chat = data && typeof data === 'object' ? data : createDefaultChat();
-  if (!Array.isArray(chat.threads)) chat.threads = [];
-  if (!chat.messagesByThread || typeof chat.messagesByThread !== 'object') {
-    chat.messagesByThread = {};
-  }
-
-  chat.threads = chat.threads
-    .filter((thread) => thread && typeof thread === 'object' && thread.id)
-    .map((thread) => ({
-      id: String(thread.id),
-      title: String(thread.title || '새 대화').slice(0, 120),
-      createdAt: thread.createdAt || null,
-      updatedAt: thread.updatedAt || null,
-      summary: String(thread.summary || ''),
-      messageCount: Math.max(0, Math.round(Number(thread.messageCount) || 0)),
-      archived: Boolean(thread.archived),
-    }))
-    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
-
-  const nextMessages = {};
-  for (const thread of chat.threads) {
-    const rows = Array.isArray(chat.messagesByThread[thread.id])
-      ? chat.messagesByThread[thread.id]
-      : [];
-
-    nextMessages[thread.id] = rows
-      .filter((message) => message && typeof message === 'object' && message.id && message.role)
-      .map((message) => ({
-        id: String(message.id),
-        role: message.role === 'assistant' ? 'assistant' : 'user',
-        content: String(message.content || ''),
-        createdAt: message.createdAt || null,
-        model: message.model || null,
-        metadata: message.metadata && typeof message.metadata === 'object' ? message.metadata : {},
-      }));
-  }
-
-  chat.messagesByThread = nextMessages;
-  return chat;
 }
 
 function normalizeMemory(data) {
@@ -523,65 +372,16 @@ function normalizeMarketState(data) {
   return market;
 }
 
-function normalizeProfile(data) {
-  const profile = data && typeof data === 'object' ? data : createDefaultProfile();
-  const defaults = createDefaultProfile();
-
-  profile.userProfile = {
-    ...defaults.userProfile,
-    ...(profile.userProfile && typeof profile.userProfile === 'object' ? profile.userProfile : {}),
-  };
-
-  profile.aiProfile = {
-    ...defaults.aiProfile,
-    ...(profile.aiProfile && typeof profile.aiProfile === 'object' ? profile.aiProfile : {}),
-  };
-
-  profile.metadata = {
-    ...defaults.metadata,
-    ...(profile.metadata && typeof profile.metadata === 'object' ? profile.metadata : {}),
-  };
-
-  for (const key of Object.keys(profile.userProfile)) {
-    profile.userProfile[key] = String(profile.userProfile[key] || '');
-  }
-
-  profile.aiProfile.summary = String(profile.aiProfile.summary || '');
-  profile.aiProfile.inferredTraits = Array.isArray(profile.aiProfile.inferredTraits)
-    ? profile.aiProfile.inferredTraits.map(String)
-    : [];
-  profile.aiProfile.preferences = Array.isArray(profile.aiProfile.preferences)
-    ? profile.aiProfile.preferences.map(String)
-    : [];
-  profile.aiProfile.concerns = Array.isArray(profile.aiProfile.concerns)
-    ? profile.aiProfile.concerns.map(String)
-    : [];
-  profile.aiProfile.updatedAt = profile.aiProfile.updatedAt || null;
-  profile.aiProfile.sourceMemoryIds = Array.isArray(profile.aiProfile.sourceMemoryIds)
-    ? profile.aiProfile.sourceMemoryIds.map(String)
-    : [];
-
-  profile.metadata.lastManualUpdateAt = profile.metadata.lastManualUpdateAt || null;
-  profile.metadata.lastAiRefreshAt = profile.metadata.lastAiRefreshAt || null;
-
-  return profile;
-}
-
+// v3 종합 트래커: 개인 데이터(portfolio/chat/profile) 로딩 제거. memory(시세캐시·브리핑·예약)+watchlist 만.
 function loadStore() {
   return {
-    portfolio: normalizePortfolio(readJson(FILES.portfolio, createDefaultPortfolio)),
-    chat: normalizeChat(readJson(FILES.chat, createDefaultChat)),
     memory: normalizeMemory(readJson(FILES.memory, createDefaultMemory)),
-    profile: normalizeProfile(readJson(FILES.profile, createDefaultProfile)),
     watchlist: normalizeWatchlist(readJson(FILES.watchlist, createDefaultWatchlist)),
   };
 }
 
 function saveStore(store) {
-  writeJson(FILES.portfolio, normalizePortfolio(store.portfolio));
-  writeJson(FILES.chat, normalizeChat(store.chat));
   writeJson(FILES.memory, normalizeMemory(store.memory));
-  writeJson(FILES.profile, normalizeProfile(store.profile));
   writeJson(FILES.watchlist, normalizeWatchlist(store.watchlist));
 }
 
@@ -603,20 +403,14 @@ module.exports = {
   FILES,
   readJson,
   writeJson,
-  createDefaultPortfolio,
-  createDefaultChat,
   createDefaultMemory,
   createDefaultMarketState,
-  createDefaultProfile,
   createDefaultWatchlist,
   loadStore,
   saveStore,
   mutateStore,
-  normalizePortfolio,
-  normalizeChat,
   normalizeMemory,
   normalizeMarketState,
-  normalizeProfile,
   normalizeWatchlist,
   WATCHLIST_MARKETS,
 };

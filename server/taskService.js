@@ -9,7 +9,7 @@ const {
   runScheduledCustomAnalysis,
 } = require('./aiService');
 const { logInfo, logError } = require('./logger');
-const { buildPortfolioPayload } = require('./payloadService');
+const { buildServerStatusPayload } = require('./payloadService');
 const { broadcast } = require('./realtimeService');
 
 const scheduledHandles = new Map();
@@ -56,7 +56,7 @@ async function markTaskRun(taskId, status, message) {
     target.lastRunMessage = String(message || '').slice(0, 300);
     target.updatedAt = new Date().toISOString();
   });
-  broadcast('schedule.run.updated', buildPortfolioPayload());
+  broadcast('schedule.run.updated', buildServerStatusPayload());
   broadcast('activity.created', {
     activity: {
       type: 'schedule',
@@ -111,8 +111,8 @@ async function executeScheduledTask(taskId) {
         description,
         prompt,
         indicatorName,
-        portfolio: store.portfolio,
-        profile: store.profile,
+        portfolio: { holdings: [], snapshots: [] },
+        profile: { userProfile: {}, aiProfile: {}, metadata: {} },
         memory: store.memory,
       });
       await appendScheduledTaskInsight({
@@ -143,8 +143,8 @@ async function executeScheduledTask(taskId) {
         title: task.title,
         description: task.description,
         prompt: task.prompt,
-        portfolio: store.portfolio,
-        profile: store.profile,
+        portfolio: { holdings: [], snapshots: [] },
+        profile: { userProfile: {}, aiProfile: {}, metadata: {} },
         memory: store.memory,
       });
       await appendScheduledTaskInsight({
@@ -209,7 +209,7 @@ function syncScheduledTasks() {
     });
   }
 
-  broadcast('schedule.updated', buildPortfolioPayload());
+  broadcast('schedule.updated', buildServerStatusPayload());
 }
 
 function getScheduledTasks() {
