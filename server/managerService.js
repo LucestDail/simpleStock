@@ -99,6 +99,8 @@ async function runManagerReview(trigger = 'manual', options = {}) {
     extraContext ? `\n# 추가 지시\n${extraContext}` : '',
     '',
     '위 관심종목을 바탕으로 오늘의 시장 브리핑을 작성하세요.',
+    '반드시 아래 JSON 형식으로만, 키 이름을 정확히 그대로 사용해 한국어로 답하세요(다른 키 금지):',
+    '{"summary":"시장 요약 한 문단","marketOutlook":"관전 포인트 한 문단","tickerSignals":["관심종목별 시그널", "..."],"riskChecks":["리스크 체크", "..."],"themeNotes":["테마/섹터 코멘트", "..."]}',
   ].join('\n');
 
   const fallback = { summary: '', marketOutlook: '', tickerSignals: [], riskChecks: [], themeNotes: [] };
@@ -106,6 +108,12 @@ async function runManagerReview(trigger = 'manual', options = {}) {
     { systemPrompt, userPrompt, schema: BRIEFING_SCHEMA, useGoogleSearch: false, logLabel: 'market_briefing' },
     fallback
   );
+
+  // 게이트웨이 경유 모델이 responseSchema 키를 무시하고 다른 키(예: "브리핑")로 답하는 경우 방어.
+  if (!result.summary) {
+    const firstStr = Object.values(result).find((v) => typeof v === 'string' && v.trim());
+    if (firstStr) result.summary = firstStr;
+  }
 
   const report = {
     id: crypto.randomUUID(),
