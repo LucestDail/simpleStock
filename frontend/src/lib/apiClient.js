@@ -56,7 +56,10 @@ export function bootstrapAccessTokenFromUrl() {
 function withAuthHeaders(options = {}) {
   const headers = new Headers(options.headers || {});
   const token = getAccessToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  // 앱 토큰은 X-Access-Token 으로 전송(Authorization 은 게이트웨이 HTTP Basic 인증용으로 비움).
+  // 외부(게이트웨이 Basic) 접근 시 브라우저가 Authorization: Basic 을 자동 첨부하므로,
+  // 앱 토큰을 Authorization 에 실으면 nginx Basic 과 충돌한다. 서버는 x-access-token 도 인식한다.
+  if (token) headers.set('X-Access-Token', token);
   return { ...options, headers };
 }
 
