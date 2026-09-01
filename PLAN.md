@@ -51,24 +51,24 @@
 ## 단계별 계획 (각 단계 "완료"=검증 체커)
 
 ### Phase 1 — 백엔드 코어 전환 (추가적·저위험)
-- [ ] `server/watchlistService.js` 신설(그룹/티커 CRUD, dataStore 패턴 준수).
-- [ ] `data/watchlist.json` 스키마 + `dataStore` 정규화 함수.
-- [ ] `/api/watchlist/*` 라우트.
-- [ ] `listTrackedTickerConfigs()` watchlist 기반 전환(holdings 폴백은 마이그레이션 후 제거).
-- [ ] 마이그레이션 유틸: 기존 holdings→watchlist 티커 추출(개인필드 버림), 원본 백업.
+- [x] `server/watchlistService.js` 신설(그룹/티커 CRUD, dataStore 패턴 준수).
+- [x] `data/watchlist.json` 스키마 + `dataStore` 정규화 함수.
+- [x] `/api/watchlist/*` 라우트.
+- [x] `listTrackedTickerConfigs()` watchlist 기반 전환(holdings 폴백은 마이그레이션 후 제거).
+- [x] 마이그레이션 유틸: 기존 holdings→watchlist 티커 추출(개인필드 버림), 원본 백업.
 - **완료 체커**: `npm test`(신규 watchlistService 테스트 GREEN + 기존 회귀) · 로컬 서버 스모크(`/api/watchlist` CRUD 왕복 curl).
 
 ### Phase 2 — AI 브리핑 범용화 + 개인 라우트 제거
-- [ ] 브리핑 입력을 watchlist·시장으로 교체, 개인 프로필 의존 제거.
-- [ ] 개인 라우트/서비스 제거(위 목록), 관련 테스트 정리.
+- [x] 브리핑 입력을 watchlist·시장으로 교체, 개인 프로필 의존 제거.
+- [x] 개인 라우트/서비스 제거(위 목록), 관련 테스트 정리.
 - **완료 체커**: `npm test` GREEN · 브리핑 로컬 실행 시 개인정보 미참조 확인.
 
 ### Phase 3 — 프론트 재구성
-- [ ] WatchlistView·TickerDetail·BriefingPanel 신설, 개인 패널 제거.
+- [x] WatchlistView·TickerDetail·BriefingPanel 신설, 개인 패널 제거.
 - **완료 체커**: `npm run build`(vite) GREEN · 로컬 브라우저 스모크.
 
 ### Phase 4 — .25 배포
-- [ ] 데이터 마이그레이션(백업 필수) → docker rebuild → 게이트웨이(헤더 인증 하에) 검증.
+- [x] 데이터 마이그레이션(백업 필수) → docker rebuild → 게이트웨이(헤더 인증 하에) 검증.
 - **완료 체커**: `.25` `/simpleStock/` 200(Basic 인증) · watchlist 실동작 · 회귀 없음.
 
 ## 데이터 안전 (필수)
@@ -80,3 +80,6 @@
 - 8000+줄 리팩터 → 단계별 커밋·테스트로 회귀 관리.
 - `marketDataService`는 건드리지 않는 게 원칙(추적소스 주입점만 교체).
 - 커밋/배포는 사용자 승인 시점에.
+
+## ✅ 완료 상태 (2026-09-01)
+Phase 1~4 전부 완료 + 후속 완결. 커밋(푸시): `291d43c`(재설계)·`3557323`(X-Access-Token)·`3800e14`(브리핑키픽스)·`989bc94`(고아정리)·`a828e72`(개인결합 완전분리). .25 docker 재배포. 검증: 서버 36/36 + .25 통합 21/21 + HARU stock_portfolio 실WS + 외부 8030 게이팅 Lightsail 실측(401/200). HARU 연동 `43d597b`(/api/watchlist repoint). 잔여 없음.
