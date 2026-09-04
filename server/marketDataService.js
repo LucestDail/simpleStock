@@ -254,12 +254,17 @@ function getCacheKey(kind, symbol) {
   return `${kind}:${symbol}`;
 }
 
+// 시세 업스트림 응답 대기 상한. Node 의 fetch 는 기본 300초라 상한이 없는 것과 다름없어,
+// 업스트림이 느려지면 요청 스레드가 몇 분씩 매달린다.
+const UPSTREAM_TIMEOUT_MS = 8000;
+
 async function fetchJson(url) {
   const response = await fetch(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       Accept: 'application/json',
     },
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   });
 
   if (!response.ok) {
