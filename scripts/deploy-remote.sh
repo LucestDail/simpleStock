@@ -62,16 +62,33 @@ remote_ssh "cd ${REMOTE_DIR} && docker compose up -d --build && docker compose p
 
 echo "[deploy] 3/3 smoke test"
 sleep 3
-curl -sf -m 15 "http://${REMOTE_HOST}:${REMOTE_PORT}/" >/dev/null
-echo "[deploy] app root OK"
+if curl -sf -m 15 "http://${REMOTE_HOST}:${REMOTE_PORT}/" >/dev/null; then
+  echo "[deploy] app root OK"
+else
+  echo "[deploy] ❌ app root 응답 실패: http://${REMOTE_HOST}:${REMOTE_PORT}/"
+  exit 1
+fi
 
+# 🔴 2026-09-14: 종전에는 토큰을 못 읽으면 `skip`, 읽어도 `|| true` 라
+#    **인증·API 계층이 통째로 깨져도 배포가 성공**이었다. 검사가 있으나 마나였다.
+#    ⇒ 건너뛴 것은 요약에 남기고, 호출했으면 결과로 판정한다.
+DEPLOY_FAIL=0
+DEPLOY_SKIP=""
 REMOTE_TOKEN="$(remote_ssh "grep -E '^APP_ACCESS_TOKEN=' ${REMOTE_DIR}/.env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"'" || true)"
 if [ -n "${REMOTE_TOKEN:-}" ]; then
-  curl -sf -m 15 -H "Authorization: Bearer ${REMOTE_TOKEN}" \
-    "http://${REMOTE_HOST}:${REMOTE_PORT}/api/system/status" | head -c 240 || true
-  echo ""
+  if curl -sf -m 15 -H "Authorization: Bearer ${REMOTE_TOKEN}" \
+      "http://${REMOTE_HOST}:${REMOTE_PORT}/api/system/status" | head -c 240; then
+    echo ""
+    echo "[deploy] /api/system/status OK"
+  else
+    echo ""
+    echo "[deploy] ❌ /api/system/status 실패 — 인증 또는 API 계층이 깨졌다"
+    DEPLOY_FAIL=$((DEPLOY_FAIL + 1))
+  fi
 else
-  echo "[deploy] skip /api/system/status (APP_ACCESS_TOKEN not readable on remote)"
+  # 못 읽은 것은 통과가 아니다.
+  echo "[deploy] ⚠️ /api/system/status 검사 못 함(원격 .env 에서 APP_ACCESS_TOKEN 을 못 읽음)"
+  DEPLOY_SKIP="$DEPLOY_SKIP api/system/status"
 fi
 
 GATEWAY_BASE_PATH="$(remote_ssh "grep -E '^VITE_BASE_PATH=' ${REMOTE_DIR}/.env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"'" || true)"
@@ -89,4 +106,13 @@ fi
 echo "[deploy] 완료: http://${REMOTE_HOST}:${REMOTE_PORT}/"
 if [ -n "${GATEWAY_URL:-}" ]; then
   echo "[deploy] gateway: ${GATEWAY_URL}"
+fi
+
+# 🔴 마지막 줄이 그 실행의 전부를 말한다.
+if [ "${DEPLOY_FAIL:-0}" -gt 0 ]; then
+  echo "[deploy] ✖ 검증 실패 ${DEPLOY_FAIL}건${DEPLOY_SKIP:+ / 검사 못 함:$DEPLOY_SKIP}"
+  exit 1
+fi
+if [ -n "${DEPLOY_SKIP:-}" ]; then
+  echo "[deploy] 완료(검사 못 한 항목:$DEPLOY_SKIP)"
 fi
