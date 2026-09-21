@@ -242,7 +242,21 @@ async function setWatch(groupId, symbol, on) {
     found = true;
   });
   if (!found) throw new Error('해당 종목을 찾을 수 없습니다.');
-  logInfo('watchlist.ticker.watch', { groupId, symbol: target, on: Boolean(on) });
+  /**
+   * 🔴 **쓰고 나서 되읽어 확인한다** (2026-09-22 pm2 제안)
+   *
+   * 저장 정규화가 `watch` 를 버리고 있었는데 **200 과 로그 `on:true` 는 그대로 나갔다** —
+   * 사용자가 배지를 눌러도 아무 일이 안 일어나는데 **밖에서는 정상으로 보였다.**
+   * ⇒ 실제로 남았는지 보고 **안 맞으면 던진다.** 그래야 200 이 거짓말을 안 한다.
+   * ⚠️ 로그도 **되읽은 값**으로 찍는다 — 의도를 찍으면 로그가 거짓말한다.
+   */
+  const after = (loadStore().watchlist?.groups || [])
+    .find((g) => g.id === groupId)?.tickers
+    ?.find((x) => normalizeSymbol(x.symbol) === target);
+  if (Boolean(after?.watch) !== Boolean(on)) {
+    throw new Error('감시 설정이 저장되지 않았습니다(저장 계약을 확인하세요).');
+  }
+  logInfo('watchlist.ticker.watch', { groupId, symbol: target, on: Boolean(after?.watch) });
   broadcastWatchlist();
   return getWatchlistState();
 }

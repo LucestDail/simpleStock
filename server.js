@@ -172,7 +172,16 @@ app.get('/api/analyst/last', (req, res) => res.json({ report: analyst.readLast()
  */
 app.post('/api/watchlist/groups/:groupId/tickers/:symbol/watch', async (req, res) => {
   try {
-    const state = await setWatch(req.params.groupId, req.params.symbol, req.body?.on !== false);
+    /**
+     * ⚠️ **`on` 이 boolean 이 아니면 거부한다** (2026-09-22 pm2 지적)
+     *    종전엔 `on !== false` 라 **빈 바디도 ON** 이었다 — pm2 가 `{"watch":false}` 로 끄려 했을 때
+     *    `on` 이 `undefined` 라 **두 번 다 켜졌다.** 오타 한 번이면 감시가 켜진다.
+     *    `propose()` 가 빠진 값을 400 으로 돌려주는 것과 같은 규율이다.
+     */
+    if (typeof req.body?.on !== 'boolean') {
+      return res.status(400).json({ error: '`on` 은 true/false 여야 합니다.', got: typeof req.body?.on });
+    }
+    const state = await setWatch(req.params.groupId, req.params.symbol, req.body.on);
     return res.json(state);
   } catch (e) {
     return res.status(400).json({ error: e.message });

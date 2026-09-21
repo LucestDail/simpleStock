@@ -1,7 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+/**
+ * 🔴 **테스트는 다른 디렉토리를 써야 한다** (2026-09-22)
+ *
+ * 여기에 재정의가 **없어서** 감시 표시 테스트가 **로컬 실제 `data/watchlist.json` 에 썼다**
+ * (그룹 10 → 15개로 불었다). 오늘만 네 번째 데이터 오염이고, 앞선 셋과 달리
+ * 이건 **제품의 정본 데이터**라 제일 나쁘다.
+ * ⚠️ 그리고 오염 때문에 테스트가 **회차마다 다른 결과**를 냈다 — 자를 못 믿게 된다.
+ */
+const DATA_DIR = process.env.SIMPLESTOCK_DATA_DIR || path.join(__dirname, '..', 'data');
 const FILES = {
   memory: path.join(DATA_DIR, 'memory.json'),
   watchlist: path.join(DATA_DIR, 'watchlist.json'),
@@ -94,6 +102,14 @@ function normalizeWatchlistTicker(item) {
     market,
     currency: currency || (market === 'US' ? 'USD' : 'KRW'),
     addedAt: item.addedAt || null,
+    /**
+     * 🔴 **감시 표시** — 이 정규화가 **필드를 추리기 때문에** 여기 없으면 저장할 때 조용히 사라진다.
+     *
+     * 실제로 그랬다(2026-09-22, pm2 발견): `setWatch` 가 `t.watch = true` 를 넣고 200 을 주고
+     * 로그까지 `on:true` 로 찍는데 **파일에는 안 남았다.** 밖에서는 완벽히 정상으로 보인다.
+     * ★ 새 필드를 추가할 때 **쓰는 쪽만 고치면 안 된다** — 정규화(=저장 계약)가 정본이다.
+     */
+    watch: item.watch === true,
   };
 }
 
