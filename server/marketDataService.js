@@ -1,3 +1,4 @@
+const { resolveSession } = require('./marketCalendar');
 const { APP_TIMEZONE } = require('./time');
 const { loadStore, mutateStore } = require('./dataStore');
 const { broadcast } = require('./realtimeService');
@@ -164,20 +165,18 @@ function getSessionState(hour, windowStartHour, windowEndHour) {
 }
 
 function getMarketSessionSnapshot(now = new Date()) {
-  const hour = getTimezoneHour(now, APP_TIMEZONE);
+  // 🔴 2026-09-21: 종전에는 **시각만** 봐서 토요일 오전 10시도 'open' 이었다.
+  //    요일은 각 시장의 **현지 시간대**로 본다 — KST 로 자르면 KST 토요일 새벽인
+  //    미국 금요일장을 통째로 닫아 버린다. 공휴일은 아직 모른다(holidayAware:false).
+  const kr = resolveSession(now, 'KR', 9, 16, APP_TIMEZONE);
+  const us = resolveSession(now, 'US', 22, 5, APP_TIMEZONE);
 
   return {
     timezone: APP_TIMEZONE,
     asOf: now.toISOString(),
     sessions: {
-      kr: {
-        market: 'KRX',
-        state: getSessionState(hour, 9, 16),
-      },
-      us: {
-        market: 'US',
-        state: getSessionState(hour, 22, 5),
-      },
+      kr: { market: 'KRX', state: kr.state, reason: kr.reason, holidayAware: kr.holidayAware },
+      us: { market: 'US', state: us.state, reason: us.reason, holidayAware: us.holidayAware },
     },
   };
 }
