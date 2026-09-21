@@ -385,7 +385,15 @@ app.get('/api/telegram/status', (req, res) =>
 /** 알림 한 바퀴를 손으로 돌린다(점검용). `force` 면 꺼져 있어도 돈다 */
 app.post('/api/alerts/tick', async (req, res) => {
   try {
-    return res.json(await alerts.tick({ force: req.body?.force === true }));
+    /**
+     * 🔴 `force` 는 **돌리기만** 한다 — 보내지 않는다(2026-09-21 사고 후 분리).
+     *    실제로 보내 보려면 `{"force":true,"send":true}` 로 **명시**해야 한다.
+     */
+    return res.json(await alerts.tick({
+      force: req.body?.force === true,
+      dryRun: req.body?.dryRun === true,
+      send: req.body?.send === true,
+    }));
   } catch (e) {
     logError('alerts.route_failed', e, { requestId: req.requestId });
     return res.status(500).json({ error: e.message });

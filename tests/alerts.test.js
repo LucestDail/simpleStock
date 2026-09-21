@@ -176,6 +176,55 @@ test('조용한 시간에는 찾아도 보내지 않고, 그 사실을 남긴다
   delete process.env.ALERTS_QUIET_TO;
 });
 
+/**
+ * 🔴🔴 **2026-09-21 실사고 회귀 가드.**
+ *
+ * `force` 를 *"점검용"* 이라 부르며 *"켜기 전에 한 번 돌려 보자"* 고 안내했는데,
+ * 실제로는 **사용자 폰으로 12건이 나갔다.** `ALERTS_ENABLED` 는 꺼져 있었지만
+ * 아래층 `TELEGRAM_SEND_ENABLED` 가 켜져 있었고 `force` 가 위층만 건너뛰었기 때문이다.
+ *
+ * ★ **이름이 동작을 보증하지 않는다.** "점검용" 이라 부르려면 코드가 점검용이어야 한다.
+ *   ⇒ *돌 것인가* 와 *보낼 것인가* 를 **다른 축**으로 갈랐고, 여기서 못박는다.
+ */
+test('🔴 force 는 돌리기만 한다 — 보내지 않는다', async () => {
+  delete process.env.ALERTS_ENABLED;              // 알림은 꺼져 있고
+  process.env.TELEGRAM_SEND_ENABLED = 'true';      // 발송은 켜져 있다 ← 사고 당시 그대로
+  const a = freshAlerts();
+
+  const r = await a.tick({ force: true });
+
+  assert.equal(r.ran, true, 'force 인데 안 돌았다 — 점검을 못 한다');
+  assert.ok(r.found > 0, '찾은 게 0건이면 이 테스트가 아무것도 검사하지 못한다');
+  assert.equal(r.sent, 0, '🔴 force 만으로 발송됐다 — 사용자 폰으로 나간다');
+  assert.equal(r.willSend, false);
+  assert.equal(r.why, 'alerts_disabled');
+  assert.equal(sent.filter((x) => /sendMessage/.test(x.url)).length, 0);
+  // 점검의 목적 — **나갔을 내용**은 돌려줘야 한다
+  assert.ok(Array.isArray(r.preview) && r.preview.length === r.found);
+  delete process.env.TELEGRAM_SEND_ENABLED;
+});
+
+test('일부러 보내려면 send 를 **명시**해야 한다', async () => {
+  delete process.env.ALERTS_ENABLED;
+  process.env.TELEGRAM_SEND_ENABLED = 'true';
+  const a = freshAlerts();
+  const r = await a.tick({ force: true, send: true });
+  assert.equal(r.willSend, true);
+  assert.ok(r.sent > 0, '명시했는데도 안 보냈다');
+  delete process.env.TELEGRAM_SEND_ENABLED;
+});
+
+test('켜져 있어도 dryRun 이면 안 보낸다', async () => {
+  process.env.TELEGRAM_SEND_ENABLED = 'true';
+  const a = freshAlerts({ ALERTS_ENABLED: 'true' });
+  const r = await a.tick({ dryRun: true });
+  assert.equal(r.willSend, false);
+  assert.equal(r.why, 'dry-run');
+  assert.equal(r.sent, 0);
+  delete process.env.ALERTS_ENABLED;
+  delete process.env.TELEGRAM_SEND_ENABLED;
+});
+
 /** 🔴 못 하는 것을 **조용히 빼지 않는다** — 사용자가 "왜 어닝콜은 안 오지" 를 겪지 않게 */
 test('지원하지 않는 항목을 상태에 적어 둔다', () => {
   const a = freshAlerts();

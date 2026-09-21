@@ -196,8 +196,34 @@ async function rulePortfolio(st, now, out) {
 /**
  * 한 바퀴. 🔴 **부분 실패를 전체 실패로 만들지 않는다** — 규칙 하나가 죽어도 나머지는 돈다.
  */
-async function tick({ force = false } = {}) {
+/**
+ * 한 바퀴.
+ *
+ * ## 🔴 **"돈다" 와 "보낸다" 는 다른 축이다** (2026-09-21 실사고)
+ *
+ * 첫 판은 `force` 하나가 **둘 다** 열었다. 나는 그걸 *"점검용"* 이라 부르며
+ * *"켜기 전에 한 번 돌려 보자"* 고 안내했고 — **사용자 폰으로 12건이 실제로 나갔다.**
+ * `ALERTS_ENABLED` 는 꺼져 있었지만 아래층 `TELEGRAM_SEND_ENABLED` 가 켜져 있었고,
+ * `force` 가 위층 스위치만 건너뛰었기 때문이다.
+ *
+ * ★ **이름이 동작을 보증하지 않는다.** "점검용" 이라 부르려면 **코드가 점검용**이어야 한다.
+ * ⇒ 두 축을 갈랐다:
+ * ```
+ * 돌 것인가   ENABLED || force
+ * 보낼 것인가 ENABLED && !dryRun      ← force 만으로는 **절대 안 보낸다**
+ * ```
+ * 일부러 실제로 보내 보려면 `{force:true, send:true}` 로 **명시**해야 한다.
+ * 되돌릴 수 없는 행위는 **명시적으로 적었을 때만** 일어난다.
+ *
+ * @param {object} o
+ * @param {boolean} [o.force]  꺼져 있어도 **돌린다**(보내지는 않는다)
+ * @param {boolean} [o.dryRun] 켜져 있어도 **안 보낸다**
+ * @param {boolean} [o.send]   force 로 돌리면서 **일부러** 보낸다(기본 false)
+ */
+async function tick({ force = false, dryRun = false, send: sendOverride = false } = {}) {
   if (!ENABLED && !force) return { ran: false, why: 'disabled' };
+  // 🔴 발송 판정을 **한 곳에서** 낸다 — 흩어 두면 또 한쪽만 보고 지나간다
+  const willSend = dryRun ? false : (ENABLED || sendOverride);
   const now = new Date();
   const st = readState();
   const out = [];
@@ -217,6 +243,7 @@ async function tick({ force = false } = {}) {
   let sent = 0;
   for (const a of out) {
     if (quiet) continue;
+    if (!willSend) continue;
     const r = await telegram.send(a.text, { reason: `alert:${a.kind}` });
     if (r.ok) sent += 1;
   }
@@ -226,8 +253,19 @@ async function tick({ force = false } = {}) {
   lastError = failed.length ? `규칙 실패: ${failed.join(',')}` : null;
   sentCount += sent;
   // ★ 몇 건을 **찾았고** 몇 건을 **보냈는지** 따로 남긴다 — 조용한 시간에 걸러진 것을 구분한다
-  logInfo('alerts.tick', { found: out.length, sent, quiet, failedRules: failed });
-  return { ran: true, found: out.length, sent, quiet, failed };
+  logInfo('alerts.tick', { found: out.length, sent, willSend, quiet, failedRules: failed });
+  return {
+    ran: true,
+    found: out.length,
+    sent,
+    // 🔴 **보냈는지**와 **왜 안 보냈는지**를 함께 낸다 — 점검하는 사람이 착각하지 않게
+    willSend,
+    why: willSend ? null : dryRun ? 'dry-run' : ENABLED ? null : 'alerts_disabled',
+    quiet,
+    failed,
+    // 안 보냈을 때는 **나갔을 내용**을 돌려준다(그게 점검의 목적이다)
+    preview: willSend ? undefined : out.map((a) => a.text),
+  };
 }
 
 function start() {
