@@ -38,6 +38,18 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * 🔴 손익률은 **퍼센트가 아니라 소수비율**로 온다.
+ * 스펙 원문: *"손익률. 소수비율 (0.1077 = 10.77%)"*
+ * 처음에 그대로 화면에 뿌려 **100배 작게** 나왔다(+28.45% 가 "+0.28%" 로).
+ * 숫자가 작아서 "오늘 별로 안 움직였네" 로 읽히는 게 더 나빴다 — **틀린 줄도 모른다.**
+ * ⇒ **경계에서 한 번만** 퍼센트로 바꾸고, 이후 코드는 전부 퍼센트로 다룬다.
+ */
+function ratePct(v) {
+  const n = num(v);
+  return n == null ? null : Math.round(n * 100 * 10000) / 10000;
+}
+
 /** {krw, usd} 쌍을 숫자로. 없는 쪽은 null 로 둔다(0 으로 만들지 않는다) */
 function pair(o) {
   return { krw: num(o?.krw), usd: num(o?.usd) };
@@ -75,19 +87,19 @@ async function getHoldings() {
     purchaseAmount: num(it.marketValue?.purchaseAmount),
     marketValue: num(it.marketValue?.amount),
     profit: num(it.profitLoss?.amount),
-    profitRate: num(it.profitLoss?.rate),
+    profitRate: ratePct(it.profitLoss?.rate),
     // 🔴 모멘텀의 재료 — "오늘 얼마나 움직였나" 는 증권사가 계산해서 준다
     dailyProfit: num(it.dailyProfitLoss?.amount),
-    dailyRate: num(it.dailyProfitLoss?.rate),
+    dailyRate: ratePct(it.dailyProfitLoss?.rate),
   }));
 
   const summary = {
     purchase: pair(r?.totalPurchaseAmount),
     value: pair(r?.marketValue?.amount),
     profit: pair(r?.profitLoss?.amount),
-    profitRate: num(r?.profitLoss?.rate),
+    profitRate: ratePct(r?.profitLoss?.rate),
     dailyProfit: pair(r?.dailyProfitLoss?.amount),
-    dailyRate: num(r?.dailyProfitLoss?.rate),
+    dailyRate: ratePct(r?.dailyProfitLoss?.rate),
     accountType: acc.type,
   };
 

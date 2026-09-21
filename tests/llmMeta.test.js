@@ -80,3 +80,18 @@ test('★ 관측이 제품을 깨뜨리지 않는다 (헤더 읽다 터져도 �
   assert.equal(value, 'ok', '헤더 파싱 실패가 호출 전체를 깨뜨렸다');
   assert.equal(meta, null);
 });
+
+test('🔴 저장 정규화가 servedBy 를 버리지 않는다 (화면은 저장본을 읽는다)', () => {
+  /*
+   * 2026-09-21 실패: 포착은 됐는데 화면에 안 나왔다. 원인은 `dataStore` 의
+   * managerReports 정규화가 **허용목록**이라 servedBy 가 **저장 시 조용히 사라진** 것.
+   * ★ 같은 날 `providerDefault` 와 똑같다 — **만든 객체와 화면이 읽는 객체가 다르다.**
+   */
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'dataStore.js'), 'utf8');
+  const i = src.indexOf("model: String(item.model || '')");
+  assert.ok(i > 0, '리포트 정규화 블록을 못 찾았다 — 가드가 대상을 잃었다(통과 아님)');
+  const block = src.slice(i, i + 1200);
+  assert.ok(/servedBy:/.test(block), '정규화에 servedBy 가 없다 — 저장하면 사라진다');
+});

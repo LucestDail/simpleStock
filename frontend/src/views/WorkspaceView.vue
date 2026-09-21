@@ -191,6 +191,25 @@ async function loadPortfolio() {
   }
 }
 
+/**
+ * 🔴 보유가 전부 미국 종목이면 `krw` 는 0 이고 값은 `usd` 쪽에 있다.
+ *    처음에 krw 만 찍어서 **평가금액이 ₩0 으로 보였다**(2026-09-21 사용자 지적).
+ * ⇒ 원화 환산 합계를 만든다. 환산이면 `≈` 를 붙여 **계산값임을 밝힌다**.
+ */
+function krwTotal(pairValue) {
+  if (!pairValue) return { value: null, converted: false };
+  const krw = Number(pairValue.krw || 0);
+  const usd = Number(pairValue.usd || 0);
+  const rate = Number(fx.value?.USDKRW?.rate || 0);
+  if (usd && !rate) return { value: krw || null, converted: false, missingFx: true };
+  return { value: krw + usd * rate, converted: Boolean(usd) && Boolean(rate) };
+}
+function krwCell(pairValue) {
+  const t = krwTotal(pairValue);
+  if (t.value == null) return '—';
+  return `${t.converted ? '≈' : ''}${money(t.value, 'KRW')}`;
+}
+
 function money(v, cur) {
   if (v == null) return '—';
   return cur === 'USD'
@@ -351,23 +370,23 @@ onUnmounted(() => {
             <div class="kpis">
               <div class="kpi">
                 <span class="kpi__label">평가금액</span>
-                <span class="kpi__value mono-num">{{ money(portfolio.summary.value.krw, 'KRW') }}</span>
+                <span class="kpi__value mono-num">{{ krwCell(portfolio.summary.value) }}</span>
               </div>
               <div class="kpi">
-                <span class="kpi__label">매입금액</span>
-                <span class="kpi__value kpi__value--sub mono-num">{{ money(portfolio.summary.purchase.krw, 'KRW') }}</span>
+                <span class="kpi__label">매입금액<template v-if="portfolio.summary.purchase.usd"> · USD 보유</template></span>
+                <span class="kpi__value kpi__value--sub mono-num">{{ krwCell(portfolio.summary.purchase) }}</span>
               </div>
               <div class="kpi">
                 <span class="kpi__label">평가손익</span>
-                <span class="kpi__value mono-num" :class="signClass(portfolio.summary.profit.krw)">
-                  {{ money(portfolio.summary.profit.krw, 'KRW') }}
+                <span class="kpi__value mono-num" :class="signClass(krwTotal(portfolio.summary.profit).value)">
+                  {{ krwCell(portfolio.summary.profit) }}
                   <small>{{ pct(portfolio.summary.profitRate) }}</small>
                 </span>
               </div>
               <div class="kpi">
                 <span class="kpi__label">오늘</span>
-                <span class="kpi__value mono-num" :class="signClass(portfolio.summary.dailyProfit.krw)">
-                  {{ money(portfolio.summary.dailyProfit.krw, 'KRW') }}
+                <span class="kpi__value mono-num" :class="signClass(krwTotal(portfolio.summary.dailyProfit).value)">
+                  {{ krwCell(portfolio.summary.dailyProfit) }}
                   <small>{{ pct(portfolio.summary.dailyRate) }}</small>
                 </span>
               </div>

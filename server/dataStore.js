@@ -218,6 +218,20 @@ function normalizeMemory(data) {
       createdAt: item.createdAt || null,
       trigger: String(item.trigger || 'manual'),
       model: String(item.model || ''),
+      /**
+       * 🔴 2026-09-21: 이 정규화가 **허용목록**이라, 여기 없는 필드는 저장 시 **조용히 사라진다.**
+       *    `servedBy`(게이트웨이가 실제로 쓴 모델·사업자)를 만들어 놓고 여기 안 넣어서
+       *    화면에는 영영 안 나왔다 — 같은 날 `providerDefault` 와 **똑같은 모양**이다.
+       *    ⇒ 리포트에 필드를 더하면 **여기도 같이** 더해야 한다.
+       *    값은 문자열 둘만 받는다(모르는 필드를 통째로 담지 않는다).
+       */
+      servedBy:
+        item.servedBy && (item.servedBy.model || item.servedBy.provider)
+          ? {
+              model: String(item.servedBy.model || ''),
+              provider: String(item.servedBy.provider || ''),
+            }
+          : null,
       summary: String(item.summary || ''),
       dailyObjective: String(item.dailyObjective || ''),
       actionItems: Array.isArray(item.actionItems) ? item.actionItems.map(String) : [],

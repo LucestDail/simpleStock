@@ -330,19 +330,21 @@ function holdingsRoute(capture) {
       result: {
         totalPurchaseAmount: { krw: '1000000', usd: '0' },
         marketValue: { amount: { krw: '1120000', usd: '0' } },
-        profitLoss: { amount: { krw: '120000', usd: '0' }, rate: '12' },
-        dailyProfitLoss: { amount: { krw: '-30000', usd: '0' }, rate: '-2.6' },
+        // ⚠️ rate 는 **소수비율**이다(0.12 = 12%). 처음에 '12' 로 적었다가
+        //    실제 API 를 보고 고쳤다 — 픽스처가 틀리면 테스트가 틀린 것을 지킨다.
+        profitLoss: { amount: { krw: '120000', usd: '0' }, rate: '0.12' },
+        dailyProfitLoss: { amount: { krw: '-30000', usd: '0' }, rate: '-0.026' },
         items: [
           { symbol: '005930', name: '삼성전자', marketCountry: 'KR', currency: 'KRW',
             quantity: '3', lastPrice: '272500', averagePurchasePrice: '250000',
             marketValue: { purchaseAmount: '750000', amount: '817500' },
-            profitLoss: { amount: '67500', rate: '9' },
-            dailyProfitLoss: { amount: '-12000', rate: '-4.2' } },
+            profitLoss: { amount: '67500', rate: '0.09' },
+            dailyProfitLoss: { amount: '-12000', rate: '-0.042' } },
           { symbol: 'QLD', name: 'ProShares Ultra QQQ', marketCountry: 'US', currency: 'USD',
             quantity: '2', lastPrice: '91.72', averagePurchasePrice: '80',
             marketValue: { purchaseAmount: '160', amount: '183.44' },
-            profitLoss: { amount: '23.44', rate: '14.65' },
-            dailyProfitLoss: { amount: '1.2', rate: '0.9' } },
+            profitLoss: { amount: '23.44', rate: '0.1465' },
+            dailyProfitLoss: { amount: '1.2', rate: '0.009' } },
         ],
       },
     });
@@ -385,7 +387,7 @@ test('문자열 금액을 숫자로 바꾸고 통화별로 나눠 담는다', as
   portfolio._resetForTest();
   const { summary, items } = await portfolio.getHoldings();
   assert.equal(summary.value.krw, 1120000);
-  assert.equal(summary.profitRate, 12);
+  assert.equal(summary.profitRate, 12); // 0.12 → 12%
   assert.equal(summary.dailyProfit.krw, -30000);
   assert.equal(items[0].quantity, 3);
   assert.equal(items[1].avgPrice, 80);
@@ -418,4 +420,54 @@ test('모멘텀은 임계값을 넘은 것만 고르고 **판단은 안 한다**
   // ★ 자의 판별력 — 전부 고르지도, 아무것도 안 고르지도 않는다
   assert.equal(portfolio.pickMomentum(items, 100).length, 0);
   assert.equal(portfolio.pickMomentum(items, 0.5).length, 3, 'null 은 후보가 아니다');
+});
+
+test('🔴 손익률은 소수비율로 온다 — 퍼센트로 바꿔야 한다 (100배 함정)', async () => {
+  // 스펙: "손익률. 소수비율 (0.1077 = 10.77%)"
+  // 처음에 그대로 뿌려 +28.45% 가 화면에 "+0.28%" 로 나왔다.
+  // 🔴 값이 **작아서 그럴듯해 보이는** 종류라 틀린 줄도 모른다.
+  routes.set('/oauth2/token', () => okToken());
+  accountRoute();
+  routes.set('/api/v1/holdings', () =>
+    res(200, {
+      result: {
+        totalPurchaseAmount: { krw: '0', usd: '15539.8955' },
+        marketValue: { amount: { krw: '0', usd: '15267.18' } },
+        profitLoss: { amount: { krw: '0', usd: '-272.7155' }, rate: '-0.0988' },
+        dailyProfitLoss: { amount: { krw: '0', usd: '291.18' }, rate: '0.0171' },
+        items: [{ symbol: 'QLD', name: 'QLD', marketCountry: 'US', currency: 'USD',
+          quantity: '99', lastPrice: '92.21', averagePurchasePrice: '71.78',
+          marketValue: { purchaseAmount: '7106.22', amount: '9128.79' },
+          profitLoss: { amount: '2022.75', rate: '0.2845' },
+          dailyProfitLoss: { amount: '118.8', rate: '0.0167' } }],
+      },
+    })
+  );
+  portfolio._resetForTest();
+  const { summary, items } = await portfolio.getHoldings();
+  assert.equal(summary.profitRate, -9.88, `계좌 손익률이 ${summary.profitRate} — -9.88 이어야 한다`);
+  assert.equal(summary.dailyRate, 1.71, `계좌 일간률이 ${summary.dailyRate} — 1.71 이어야 한다`);
+  assert.equal(items[0].profitRate, 28.45, `종목 손익률이 ${items[0].profitRate} — 28.45 여야 한다`);
+  assert.equal(items[0].dailyRate, 1.67);
+
+  // ★ 자의 판별력 — 금액은 비율이 아니다(같이 100배 하면 안 된다)
+  assert.equal(items[0].profit, 2022.75);
+  assert.equal(summary.value.usd, 15267.18);
+});
+
+test('보유가 USD 뿐이면 krw 는 0 이다 (화면이 ₩0 으로 보이던 원인)', async () => {
+  routes.set('/oauth2/token', () => okToken());
+  accountRoute();
+  routes.set('/api/v1/holdings', () =>
+    res(200, { result: {
+      totalPurchaseAmount: { krw: '0', usd: '100' },
+      marketValue: { amount: { krw: '0', usd: '110' } },
+      profitLoss: { amount: { krw: '0', usd: '10' }, rate: '0.1' },
+      dailyProfitLoss: { amount: { krw: '0', usd: '1' }, rate: '0.01' },
+      items: [] } })
+  );
+  portfolio._resetForTest();
+  const { summary } = await portfolio.getHoldings();
+  assert.equal(summary.value.krw, 0);
+  assert.equal(summary.value.usd, 110, '화면은 krw 만 보면 안 된다 — usd 쪽에 값이 있다');
 });
