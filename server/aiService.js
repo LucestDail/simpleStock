@@ -11,6 +11,7 @@ const {
 const {
   isAiConfigured,
   createGeminiClient,
+  runWithLlmMeta,
   getAiTransportLabel,
   isGatewayMode,
 } = require('./geminiClient');
@@ -19,6 +20,10 @@ const { recordAiLatency } = require('./aiLatencyMetrics');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 /** @see https://ai.google.dev/gemini-api/docs/models — 기본 Stable: Gemini 3.5 Flash */
+/** 마지막으로 게이트웨이가 실제로 쓴 모델·사업자. 없으면 null(=모른다) */
+let lastServedBy = null;
+function getLastServedBy() { return lastServedBy ? { ...lastServedBy } : null; }
+
 const GEMINI_MODEL =
   String(process.env.GEMINI_MODEL ?? '')
     .trim()
@@ -730,14 +735,20 @@ async function generateContent({
     let emittedChunk = false;
 
     try {
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: effectiveModel,
-          contents: buildEnvelope(systemPrompt, userPrompt),
-          config,
-        }),
-        effectiveTimeoutMs
+      // 게이트웨이가 돌려주는 `x-llm-model`/`x-llm-provider` 를 이 호출 범위에서만 잡는다.
+      // (SDK 가 헤더를 안 주므로 fetch 를 감싼다. 동시 호출이 섞이지 않게 ALS 를 쓴다)
+      const { value: response, meta: servedBy } = await runWithLlmMeta(() =>
+        withTimeout(
+          ai.models.generateContent({
+            model: effectiveModel,
+            contents: buildEnvelope(systemPrompt, userPrompt),
+            config,
+          }),
+          effectiveTimeoutMs
+        )
       );
+      // ⚠️ 헤더가 없으면 null 이다. **요청한 이름으로 메우지 않는다.**
+      if (servedBy) lastServedBy = servedBy;
 
       logInfo('ai.generate.finish', {
         logLabel,
@@ -1953,6 +1964,7 @@ async function runScheduledCustomAnalysis({ title, description, prompt, portfoli
 }
 
 module.exports = {
+  getLastServedBy,
   AI_DAILY_CRON,
   GEMINI_MODEL,
   GEMINI_INCLUDE_THOUGHTS,

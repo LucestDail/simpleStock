@@ -4,7 +4,7 @@
 
 const crypto = require('crypto');
 const { loadStore, mutateStore } = require('./dataStore');
-const { generateStructuredOutput, getAiSettings, isAiConfigured } = require('./aiService');
+const { generateStructuredOutput, getAiSettings, isAiConfigured, getLastServedBy } = require('./aiService');
 const {
   getTokenUsageSummary,
   AI_PRESETS,
@@ -120,7 +120,10 @@ async function runManagerReview(trigger = 'manual', options = {}) {
     targetDate: today,
     createdAt: new Date().toISOString(),
     trigger,
+    // 🔴 `ai.model` 은 **우리가 요청한 이름**이다. 게이트웨이가 실제로 쓴 것을 알면 그걸 쓴다.
+    //    모르면 요청 이름을 남기되 화면이 구분할 수 있게 servedBy 를 함께 준다(없으면 null).
     model: ai.model,
+    servedBy: getLastServedBy(),
     summary: String(result.summary || '').slice(0, 4000),
     dailyObjective: String(result.marketOutlook || ''),
     actionItems: Array.isArray(result.tickerSignals) ? result.tickerSignals.map(String) : [],

@@ -509,8 +509,14 @@ onUnmounted(() => {
               <!-- 🔴 이 값은 **우리가 요청한 모델 이름**이지 실제로 답한 모델이 아니다.
                    호출은 osh-ai-gateway → OpenRouter 로 나가고, 사업자가 그때그때 다르다
                    (게이트웨이 기록으로 확인: simpleStock 은 전부 backend=openrouter). -->
-              <span class="report__model" :title="'요청한 모델 이름입니다. 실제 응답 모델은 게이트웨이(OpenRouter)가 정합니다.'">
-                요청 {{ briefing.model }} · osh-ai-gateway
+              <!-- 게이트웨이가 x-llm-model/x-llm-provider 를 주면 **실제로 답한 것**을 보여준다.
+                   안 주면 "확인 불가" 다 — 요청 이름으로 메우면 처음 문제로 돌아간다. -->
+              <span v-if="briefing.servedBy" class="report__model" :title="`요청: ${briefing.model}`">
+                {{ briefing.servedBy.model || '모델 미상' }}
+                <template v-if="briefing.servedBy.provider"> · {{ briefing.servedBy.provider }}</template>
+              </span>
+              <span v-else class="report__model report__model--unknown" :title="`요청한 이름: ${briefing.model}. 게이트웨이가 실제 모델을 알려주지 않았습니다.`">
+                응답 모델 확인 불가 · 요청 {{ briefing.model }}
               </span>
             </div>
 
@@ -1027,6 +1033,7 @@ onUnmounted(() => {
 .report__meta { display: flex; align-items: center; gap: var(--space-sm); font-size: var(--text-xs); }
 .report__date { color: var(--color-muted); }
 .report__model { color: var(--color-faint); }
+.report__model--unknown { color: var(--color-warn); }
 
 .report__summary {
   margin: 0;
