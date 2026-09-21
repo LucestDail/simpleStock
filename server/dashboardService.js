@@ -91,9 +91,16 @@ async function build({
         const symbols = new Set();
         for (const country of rankingCountries) {
           for (const type of rankingTypes) {
-            const r = await toss.getRankings({ type, country, duration: '1d', count: 10 });
-            out[`${country}:${type}`] = { ...r, country, type };
-            r.rows.forEach((x) => symbols.add(x.symbol));
+            // 🔴 종류 하나가 실패해도 **나머지 랭킹은 살린다.**
+            //    라이브에서 잘못된 종류 하나 때문에 랭킹이 통째로 비었다(2026-09-21).
+            try {
+              const r = await toss.getRankings({ type, country, duration: '1d', count: 10 });
+              out[`${country}:${type}`] = { ...r, country, type };
+              r.rows.forEach((x) => symbols.add(x.symbol));
+            } catch (e) {
+              out[`${country}:${type}`] = { country, type, rows: [], error: e.message, kind: e.kind || 'unknown' };
+              logWarn('dashboard.ranking_one_failed', { country, type, kind: e.kind, message: e.message });
+            }
             await new Promise((z) => setTimeout(z, 220)); // 한도 5/s
           }
         }

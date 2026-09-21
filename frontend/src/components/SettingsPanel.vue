@@ -28,11 +28,14 @@ const busy = ref(false);
 const msg = ref('');
 const err = ref('');
 
+/** 🔴 토스 실제 enum 이다. 임의로 만들면 400 이 나고 랭킹이 빈다(2026-09-21에 겪었다) */
 const RANKING_LABELS = {
   TOP_GAINERS: '급등',
   TOP_LOSERS: '급락',
-  tradingVolume: '거래량',
-  tradingAmount: '거래대금',
+  MARKET_TRADING_AMOUNT: '거래대금',
+  MARKET_TRADING_VOLUME: '거래량',
+  TOSS_SECURITIES_TRADING_AMOUNT: '토스 거래대금',
+  TOSS_SECURITIES_TRADING_VOLUME: '토스 거래량',
 };
 
 async function load() {

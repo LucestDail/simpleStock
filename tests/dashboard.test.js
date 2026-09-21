@@ -75,20 +75,41 @@ test('한 번에 모아 준다 (화면이 조각마다 요청하면 한도를 �
 
 test('🔴 조각 하나가 실패해도 나머지는 살아 있다', async () => {
   baseRoutes();
-  routes.set('/api/v1/rankings', () => res(500, { error: 'boom' }));
+  routes.set('/api/v1/stocks?', () => res(500, { error: 'boom' }));
   const d = await dashboard.build({ momentumPct: 3 });
-  assert.ok(d.portfolio, '랭킹이 죽었다고 보유까지 사라졌다');
-  assert.equal(d.parts.rankings.ok, false);
+  assert.ok(d.portfolio, '종목정보가 죽었다고 보유까지 사라졌다');
+  assert.equal(d.parts.stockInfo.ok, false);
   assert.equal(d.parts.holdings.ok, true);
+});
+
+test('🔴 랭킹 **종류 하나**가 실패해도 나머지 랭킹은 남는다 (2026-09-21 라이브 결함)', async () => {
+  /*
+   * 잘못된 종류 하나(내가 지어낸 `tradingVolume`) 때문에 **랭킹이 통째로 비었다.**
+   * 화면에 랭킹이 아예 안 떴고, 원인은 종류 하나였다.
+   * ⇒ 부분 실패 원칙을 **한 겹 더** 안으로 적용한다.
+   */
+  baseRoutes();
+  let n = 0;
+  routes.set('/api/v1/rankings', () => {
+    n += 1;
+    return n === 1 ? res(400, { error: 'bad type' }) : res(200, { result: { rankedAt: 'now', rankings: [{ rank: 1, symbol: 'A' }] } });
+  });
+  const d = await dashboard.build({ rankingTypes: ['TOP_GAINERS', 'TOP_LOSERS'], rankingCountries: ['US'] });
+  const keys = Object.keys(d.rankings);
+  assert.equal(keys.length, 2, '실패한 종류가 목록에서 사라졌다 — 화면이 왜 없는지 모른다');
+  const failed = Object.values(d.rankings).find((r) => r.error);
+  assert.ok(failed, '실패한 종류에 이유가 안 남았다');
+  assert.ok(Object.values(d.rankings).some((r) => r.rows.length), '멀쩡한 종류까지 비었다');
+  assert.equal(d.parts.rankings.ok, true, '종류 하나 때문에 랭킹 조각 전체가 실패로 찍혔다');
 });
 
 test('🔴 실패를 **조용히 빈 값으로** 만들지 않는다 (화면이 "없음" 과 "못 받음" 을 구분한다)', async () => {
   baseRoutes();
-  routes.set('/api/v1/rankings', () => res(500, { error: 'boom' }));
+  routes.set('/api/v1/stocks?', () => res(500, { error: 'boom' }));
   const d = await dashboard.build({});
   assert.equal(d.failedCount, 1, '실패를 세지 않았다');
-  assert.ok(d.parts.rankings.error, '실패 이유가 없다 — 원인을 영영 모른다');
-  assert.ok(d.parts.rankings.kind, 'kind 가 없다 — ip-denied 인지 429 인지 화면이 못 가른다');
+  assert.ok(d.parts.stockInfo.error, '실패 이유가 없다 — 원인을 영영 모른다');
+  assert.ok(d.parts.stockInfo.kind, 'kind 가 없다 — ip-denied 인지 429 인지 화면이 못 가른다');
 });
 
 test('보유가 통째로 실패해도 대시보드는 응답한다', async () => {
@@ -106,7 +127,7 @@ test('★ 자의 판별력 — 모두 성공일 때 failedCount 가 0 이다(항
   const okRun = await dashboard.build({});
   assert.equal(okRun.failedCount, 0);
   routes.set('/api/v1/stocks?', () => res(500, {}));
-  routes.set('/api/v1/rankings', () => res(500, {}));
+  routes.set('/api/v1/stocks/', () => res(500, {})); // warnings
   const badRun = await dashboard.build({});
   assert.equal(badRun.failedCount, 2, '두 조각이 실패했는데 세지 못했다');
 });
@@ -223,4 +244,23 @@ test('🔴 컴포넌트가 **남의 scoped 스타일**에 기대지 않는다', 
     [],
     `남의 scoped 클래스를 쓴다(화면에서 스타일이 안 먹는다): ${offenders.join(', ')}`
   );
+});
+
+test('🔴 지어낸 랭킹 종류를 **보내기 전에** 막는다 (400 은 원인을 안 알려준다)', async () => {
+  /*
+   * 2026-09-21 라이브: `tradingVolume` 로 불러 토스가 400 을 냈고 랭킹이 통째로 비었다.
+   * 그 이름은 **내가 스펙을 잘못 읽고 지어낸 것**이다(내 덤프가 긴 enum 을 잘랐다).
+   * ⇒ 클라이언트가 먼저 막고 **무엇이 허용되는지** 메시지에 담는다.
+   */
+  const toss = require('../server/tossClient');
+  await assert.rejects(
+    () => toss.getRankings({ type: 'tradingVolume' }),
+    (e) => {
+      assert.equal(e.kind, 'shape');
+      assert.match(e.message, /TOP_GAINERS/, '허용값을 안 알려준다 — 400 과 똑같아진다');
+      return true;
+    }
+  );
+  // ⚠️ 급등·급락은 realtime 을 지원하지 않는다(실측 400)
+  await assert.rejects(() => toss.getRankings({ type: 'TOP_GAINERS', duration: 'realtime' }), /realtime/);
 });

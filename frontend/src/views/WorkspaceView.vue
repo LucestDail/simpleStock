@@ -205,7 +205,11 @@ function pickSymbol(symbol, name) {
 }
 
 /** 조각이 실패했으면 그 사실을 화면에 남긴다 */
-const RANK_LABEL = { TOP_GAINERS: '급등', TOP_LOSERS: '급락', tradingVolume: '거래량', tradingAmount: '거래대금' };
+const RANK_LABEL = {
+  TOP_GAINERS: '급등', TOP_LOSERS: '급락',
+  MARKET_TRADING_AMOUNT: '거래대금', MARKET_TRADING_VOLUME: '거래량',
+  TOSS_SECURITIES_TRADING_AMOUNT: '토스 거래대금', TOSS_SECURITIES_TRADING_VOLUME: '토스 거래량',
+};
 function rankLabel(key) {
   const [country, type] = String(key).split(':');
   return `${country === 'US' ? '미국' : '한국'} ${RANK_LABEL[type] || type}`;
@@ -576,7 +580,9 @@ onUnmounted(() => {
                 <div class="rank">
                   <!-- 🔴 키가 `국가:종류` 다. 사람이 읽는 말로 바꾼다 -->
                   <span class="rank__type">{{ rankLabel(key) }}</span>
-                  <ol class="rank__list">
+                  <!-- 🔴 이 종류만 실패했으면 그렇게 말한다("없음" 과 다르다) -->
+                  <p v-if="r.error" class="rank__err">{{ r.error }}</p>
+                  <ol v-else class="rank__list">
                     <li v-for="row in (r.rows || []).slice(0, 5)" :key="row.symbol">
                       <!-- ⚠️ 이름이 없으면 코드를 보여준다(빈칸보다 낫다) -->
                       <button class="linkish" :title="row.symbol" @click="pickSymbol(row.symbol, row.name || row.symbol)">
@@ -1097,6 +1103,7 @@ onUnmounted(() => {
 .rank__type { font-size: var(--text-2xs); color: var(--color-faint); letter-spacing: 0.06em; }
 .rank__list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
 .rank__list li { font-size: var(--text-sm); }
+.rank__err { margin: 0; font-size: var(--text-xs); color: var(--color-down); }
 
 .banner--warn {
   background: var(--color-warn-soft);

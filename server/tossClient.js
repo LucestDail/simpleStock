@@ -296,7 +296,29 @@ async function getExchangeRate(base = 'USD', quote = 'KRW') {
 // ⚠️ 응답 값이 **전부 문자열**이다. 숫자로 바꾸는 건 소비하는 쪽(provider/대시보드)에서 한다.
 
 /** 랭킹. type=TOP_GAINERS|TOP_LOSERS|tradingVolume|tradingAmount … */
+const RANKING_TYPES = new Set([
+  'TOP_GAINERS', 'TOP_LOSERS',
+  'MARKET_TRADING_AMOUNT', 'MARKET_TRADING_VOLUME',
+  'TOSS_SECURITIES_TRADING_AMOUNT', 'TOSS_SECURITIES_TRADING_VOLUME',
+]);
+/** ⚠️ 급등·급락은 `realtime` 을 **지원하지 않는다**(실측: 400 unsupported-ranking-duration) */
+const NO_REALTIME = new Set(['TOP_GAINERS', 'TOP_LOSERS']);
+
 async function getRankings({ type = 'TOP_GAINERS', country = 'KR', duration = '1d', count = 10 } = {}) {
+  // 🔴 모르는 값을 그대로 보내지 않는다 — 토스가 400 을 내고 **랭킹 전체가 빈다.**
+  //    여기서 막으면 어느 값이 문제인지 메시지에 남는다(400 은 그걸 안 알려준다).
+  if (!RANKING_TYPES.has(type)) {
+    throw new TossError(`지원하지 않는 랭킹 종류: ${type} (허용: ${[...RANKING_TYPES].join(', ')})`, {
+      kind: 'shape',
+      path: '/api/v1/rankings',
+    });
+  }
+  if (duration === 'realtime' && NO_REALTIME.has(type)) {
+    throw new TossError(`${type} 은 realtime 을 지원하지 않습니다. 1d 등을 쓰세요.`, {
+      kind: 'shape',
+      path: '/api/v1/rankings',
+    });
+  }
   const q = new URLSearchParams({
     type,
     marketCountry: String(country).toUpperCase(),

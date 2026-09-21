@@ -60,7 +60,21 @@ function createDefaultSettings() {
   };
 }
 
-const RANKING_TYPES = ['TOP_GAINERS', 'TOP_LOSERS', 'tradingVolume', 'tradingAmount'];
+/**
+ * 🔴 2026-09-21: 처음에 `tradingVolume`·`tradingAmount` 로 적었다 — **내가 지어낸 이름**이다.
+ *    라이브에서 토스가 **400** 을 냈고 응답이 허용값을 알려줬다.
+ *    원인은 스펙을 읽을 때 **내 덤프 스크립트가 긴 enum 을 길이로 잘라낸 것**이다 —
+ *    정보는 스펙에 있었는데 **내 자가 가렸고** 나는 설명문을 보고 추측했다.
+ *    ⇒ 열거값은 **자르지 말고 전부** 본다.
+ */
+const RANKING_TYPES = [
+  'TOP_GAINERS',
+  'TOP_LOSERS',
+  'MARKET_TRADING_AMOUNT',
+  'MARKET_TRADING_VOLUME',
+  'TOSS_SECURITIES_TRADING_AMOUNT',
+  'TOSS_SECURITIES_TRADING_VOLUME',
+];
 const RANKING_COUNTRIES = ['US', 'KR'];
 const DASHBOARD_DEFAULTS = Object.freeze({
   momentumPct: 3,
