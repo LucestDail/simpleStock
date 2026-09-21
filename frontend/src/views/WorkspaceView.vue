@@ -179,6 +179,37 @@ const analystError = ref('');
  *    둘 다 "뉴스 없음" 으로 똑같이 보인다(오늘 하루 종일 본 그 실패 모드).
  */
 const mcpState = ref(null);
+
+/**
+ * 선택한 종목 뉴스(레이아웃 지시: 본문 좌열 상단).
+ * ⚠️ 종목을 바꿀 때마다 부른다 — **자동 새로고침 타이머에는 안 붙인다**(밖으로 나가는 호출이다).
+ */
+const news = ref({ loading: false, ok: false, items: [], error: '', when: null });
+let newsSeq = 0;
+
+async function loadNews() {
+  const sym = selected.value.symbol;
+  if (!sym) { news.value = { loading: false, ok: false, items: [], error: '', when: null }; return; }
+  const seq = ++newsSeq;
+  news.value = { ...news.value, loading: true, error: '' };
+  try {
+    const q = new URLSearchParams({ symbol: sym, name: selected.value.name || '' });
+    const res = await apiFetch(`/api/news?${q}`);
+    const b = await res.json().catch(() => ({}));
+    // 🔴 늦게 온 응답이 새 선택을 덮어쓰지 않게 한다(종목을 빨리 바꾸면 실제로 일어난다)
+    if (seq !== newsSeq) return;
+    news.value = {
+      loading: false,
+      ok: Boolean(b.ok),
+      items: b.items || [],
+      error: b.ok ? '' : (b.error || `뉴스를 불러오지 못했습니다 (${res.status})`),
+      when: new Date().toISOString(),
+    };
+  } catch (e) {
+    if (seq !== newsSeq) return;
+    news.value = { loading: false, ok: false, items: [], error: e.message || '뉴스 오류', when: null };
+  }
+}
 const useWebSearch = ref(true);
 
 async function loadMcpStatus() {
@@ -278,6 +309,8 @@ async function loadDashboard() {
 
 function pickSymbol(symbol, name) {
   selected.value = { symbol, name: name || symbol };
+  // 종목을 고르면 좌열 뉴스도 따라간다(차트와 같은 대상을 본다)
+  loadNews();
 }
 
 /** 조각이 실패했으면 그 사실을 화면에 남긴다 */
@@ -290,6 +323,19 @@ function rankLabel(key) {
   const [country, type] = String(key).split(':');
   return `${country === 'US' ? '미국' : '한국'} ${RANK_LABEL[type] || type}`;
 }
+
+/**
+ * 랭킹 탭. 🔴 **키가 사라져도 빈 화면이 되지 않게** 현재 탭을 항상 유효한 값으로 맞춘다
+ *    (설정에서 국가·종류를 빼면 고르던 탭이 없어진다).
+ */
+const rankTab = ref('');
+const rankKeys = computed(() => Object.keys(dash.value?.rankings || {}));
+const activeRank = computed(() => {
+  const keys = rankKeys.value;
+  if (!keys.length) return null;
+  const key = keys.includes(rankTab.value) ? rankTab.value : keys[0];
+  return dash.value.rankings[key];
+});
 
 function partError(name) {
   const p = dash.value?.parts?.[name];
@@ -446,7 +492,12 @@ onUnmounted(() => {
 
     <p v-if="error" class="banner banner--error">{{ error }}</p>
 
-    <!-- ── 관심 테마 스트립 (상단) ─────────────────────── -->
+    <!--
+      ── 상단 2열 (2026-09-21 사용자 레이아웃 지시) ─────────────
+         좌 = ETF 추가·관리(좌우 스크롤) · 우 = 내 자산
+      🔴 자산을 본문에서 위로 올렸다. 본문 좌열은 **선택 종목**(뉴스·차트) 전용이 된다.
+    -->
+    <div class="top">
     <section class="strip">
       <div v-if="!groups.length" class="strip__empty">
         관심 테마가 없습니다. ⚙ 설정에서 추가하세요.
@@ -487,90 +538,117 @@ onUnmounted(() => {
       </article>
     </section>
 
-    <!-- ── 본문: 넓으면 보드 + 브리핑 나란히 ──────────── -->
-    <div class="layout">
-      <div class="layout__main">
-        <!-- ── 내 자산 (토스 실계좌) ───────────────────────────── -->
-        <section class="assets">
-          <header class="assets__head">
-            <div class="assets__title">
-              <span class="assets__badge">TOSS</span>
-              <h2>내 자산</h2>
-              <span v-if="portfolio?.items?.length" class="group__count mono-num">{{ portfolio.items.length }}</span>
+      <!-- ── 내 자산 (토스 실계좌) ───────────────────────────── -->
+      <section class="assets">
+        <header class="assets__head">
+          <div class="assets__title">
+            <span class="assets__badge">TOSS</span>
+            <h2>내 자산</h2>
+            <span v-if="portfolio?.items?.length" class="group__count mono-num">{{ portfolio.items.length }}</span>
+          </div>
+          <span v-if="portfolioLoading" class="assets__note">불러오는 중…</span>
+          <span v-else-if="portfolio?.summary?.fx" class="assets__note">
+            ≈ USD/KRW {{ Number(portfolio.summary.fx.rate).toLocaleString('ko-KR') }} 환산
+          </span>
+        </header>
+
+        <p v-if="portfolioError" class="banner banner--error">{{ portfolioError }}</p>
+        <p v-else-if="!portfolio" class="banner banner--empty">토스 연동을 설정하면 실제 보유가 표시됩니다.</p>
+
+        <template v-else>
+          <div class="kpis">
+            <div class="kpi">
+              <span class="kpi__label">평가금액</span>
+              <span class="kpi__value mono-num">{{ krwCell(portfolio.summary.value) }}</span>
             </div>
-            <span v-if="portfolioLoading" class="assets__note">불러오는 중…</span>
-            <span v-else-if="portfolio?.summary?.fx" class="assets__note">
-              ≈ USD/KRW {{ Number(portfolio.summary.fx.rate).toLocaleString('ko-KR') }} 환산
-            </span>
-          </header>
-
-          <p v-if="portfolioError" class="banner banner--error">{{ portfolioError }}</p>
-          <p v-else-if="!portfolio" class="banner banner--empty">토스 연동을 설정하면 실제 보유가 표시됩니다.</p>
-
-          <template v-else>
-            <div class="kpis">
-              <div class="kpi">
-                <span class="kpi__label">평가금액</span>
-                <span class="kpi__value mono-num">{{ krwCell(portfolio.summary.value) }}</span>
-              </div>
-              <div class="kpi">
-                <span class="kpi__label">매입금액<template v-if="portfolio.summary.purchase.usd"> · USD 보유</template></span>
-                <span class="kpi__value kpi__value--sub mono-num">{{ krwCell(portfolio.summary.purchase) }}</span>
-              </div>
-              <div class="kpi">
-                <span class="kpi__label">평가손익</span>
-                <span class="kpi__value mono-num" :class="signClass(portfolio.summary.profit.krw ?? portfolio.summary.profit.usd)">
-                  {{ krwCell(portfolio.summary.profit) }}
-                  <small>{{ pct(portfolio.summary.profitRate) }}</small>
-                </span>
-              </div>
-              <div class="kpi">
-                <span class="kpi__label">오늘</span>
-                <span class="kpi__value mono-num" :class="signClass(portfolio.summary.dailyProfit.krw ?? portfolio.summary.dailyProfit.usd)">
-                  {{ krwCell(portfolio.summary.dailyProfit) }}
-                  <small>{{ pct(portfolio.summary.dailyRate) }}</small>
-                </span>
-              </div>
+            <div class="kpi">
+              <span class="kpi__label">매입금액<template v-if="portfolio.summary.purchase.usd"> · USD 보유</template></span>
+              <span class="kpi__value kpi__value--sub mono-num">{{ krwCell(portfolio.summary.purchase) }}</span>
             </div>
-
-            <!-- 모멘텀: 판단하지 않고 **고르기만** 한다 -->
-            <div v-if="portfolio.momentum?.length" class="momentum">
-              <span class="momentum__label">오늘 크게 움직임</span>
-              <span v-for="m in portfolio.momentum" :key="m.symbol" class="momentum__chip" :class="signClass(m.dailyRate)">
-                {{ m.name }} <b class="mono-num">{{ pct(m.dailyRate) }}</b>
+            <div class="kpi">
+              <span class="kpi__label">평가손익</span>
+              <span class="kpi__value mono-num" :class="signClass(portfolio.summary.profit.krw ?? portfolio.summary.profit.usd)">
+                {{ krwCell(portfolio.summary.profit) }}
+                <small>{{ pct(portfolio.summary.profitRate) }}</small>
               </span>
             </div>
+            <div class="kpi">
+              <span class="kpi__label">오늘</span>
+              <span class="kpi__value mono-num" :class="signClass(portfolio.summary.dailyProfit.krw ?? portfolio.summary.dailyProfit.usd)">
+                {{ krwCell(portfolio.summary.dailyProfit) }}
+                <small>{{ pct(portfolio.summary.dailyRate) }}</small>
+              </span>
+            </div>
+          </div>
 
-            <table class="holdings">
-              <thead>
-                <tr>
-                  <th>종목</th><th class="ta-r">수량</th><th class="ta-r">평단</th>
-                  <th class="ta-r">현재가</th><th class="ta-r">평가손익</th><th class="ta-r">오늘</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="h in portfolio.items"
-                  :key="h.symbol"
-                  class="holdings__row"
-                  :class="{ 'holdings__row--on': selected.symbol === h.symbol }"
-                  @click="pickSymbol(h.symbol, h.name)"
-                >
-                  <td>
-                    <span class="holdings__name">{{ h.name }}</span>
-                    <span class="holdings__meta">{{ h.market }} · {{ h.symbol }}</span>
-                  </td>
-                  <td class="ta-r mono-num">{{ h.quantity }}</td>
-                  <td class="ta-r mono-num">{{ money(h.avgPrice, h.currency) }}</td>
-                  <td class="ta-r mono-num">{{ money(h.lastPrice, h.currency) }}</td>
-                  <td class="ta-r mono-num" :class="signClass(h.profit)">
-                    {{ money(h.profit, h.currency) }} <small>{{ pct(h.profitRate) }}</small>
-                  </td>
-                  <td class="ta-r mono-num" :class="signClass(h.dailyRate)">{{ pct(h.dailyRate) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </template>
+          <!-- 모멘텀: 판단하지 않고 **고르기만** 한다 -->
+          <div v-if="portfolio.momentum?.length" class="momentum">
+            <span class="momentum__label">오늘 크게 움직임</span>
+            <span v-for="m in portfolio.momentum" :key="m.symbol" class="momentum__chip" :class="signClass(m.dailyRate)">
+              {{ m.name }} <b class="mono-num">{{ pct(m.dailyRate) }}</b>
+            </span>
+          </div>
+
+          <table class="holdings">
+            <thead>
+              <tr>
+                <th>종목</th><th class="ta-r">수량</th><th class="ta-r">평단</th>
+                <th class="ta-r">현재가</th><th class="ta-r">평가손익</th><th class="ta-r">오늘</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="h in portfolio.items"
+                :key="h.symbol"
+                class="holdings__row"
+                :class="{ 'holdings__row--on': selected.symbol === h.symbol }"
+                @click="pickSymbol(h.symbol, h.name)"
+              >
+                <td>
+                  <span class="holdings__name">{{ h.name }}</span>
+                  <span class="holdings__meta">{{ h.market }} · {{ h.symbol }}</span>
+                </td>
+                <td class="ta-r mono-num">{{ h.quantity }}</td>
+                <td class="ta-r mono-num">{{ money(h.avgPrice, h.currency) }}</td>
+                <td class="ta-r mono-num">{{ money(h.lastPrice, h.currency) }}</td>
+                <td class="ta-r mono-num" :class="signClass(h.profit)">
+                  {{ money(h.profit, h.currency) }} <small>{{ pct(h.profitRate) }}</small>
+                </td>
+                <td class="ta-r mono-num" :class="signClass(h.dailyRate)">{{ pct(h.dailyRate) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+      </section>
+    </div>
+
+    <!-- ── 본문 3열: [선택종목 뉴스+차트] [옵셔널 정보] [애널리스트 채팅] ── -->
+    <div class="layout">
+      <div class="layout__main">
+        <!-- ── 선택한 종목 뉴스 (레이아웃 지시: 좌열 상단) ───── -->
+        <section class="news">
+          <header class="news__head">
+            <h3 class="panel__h">
+              뉴스
+              <small v-if="selected.symbol">{{ selected.name || selected.symbol }}</small>
+            </h3>
+            <button class="btn btn--xs btn--soft" :disabled="!selected.symbol || news.loading" @click="loadNews">
+              {{ news.loading ? '검색 중…' : '새로고침' }}
+            </button>
+          </header>
+          <p v-if="!selected.symbol" class="panel__empty">종목을 고르면 뉴스를 찾습니다.</p>
+          <p v-else-if="news.loading" class="panel__empty">검색 중…</p>
+          <!-- 🔴 "없다" 와 "못 받았다" 를 구분해 보여준다 -->
+          <p v-else-if="news.error" class="panel__err">{{ news.error }}</p>
+          <p v-else-if="!news.items.length" class="panel__empty">검색 결과가 없습니다.</p>
+          <ul v-else class="news__list">
+            <li v-for="n in news.items" :key="n.rank">
+              <a v-if="n.url" :href="n.url" target="_blank" rel="noopener" class="news__title">{{ n.title }}</a>
+              <span v-else class="news__title">{{ n.title }}</span>
+              <!-- ⚠️ 날짜를 반드시 보여준다 — 실측에서 **6개월 지난 기사**가 섞여 왔다 -->
+              <time v-if="n.when" class="news__when">{{ n.when }}</time>
+            </li>
+          </ul>
         </section>
 
         <!-- ── 조각 실패를 숨기지 않는다 ─────────────────────── -->
@@ -612,24 +690,50 @@ onUnmounted(() => {
               </ul>
             </div>
 
+            <!--
+              🔴 2026-09-21 사용자: *"타이틀이랑 하단 정보가 안 맞는데. 차라리 그냥 정형화된
+                 테이블로 라도 하지"* ⇒ 목록을 **표**로 바꿨다.
+              ★ 목록형은 **어느 제목에 속한 줄인지**가 들여쓰기로만 표현돼서, 그룹이 4개로
+                늘어나자 제목과 내용이 어긋나 보였다. 표는 **열이 뜻을 고정**한다.
+              ⚠️ 그룹을 한 번에 다 펼치지 않고 **탭으로 하나씩** 본다 — 네 덩어리를 세로로
+                 쌓으면 어느 것이 어느 제목 밑인지 다시 헷갈린다.
+            -->
             <div class="panel">
               <h3 class="panel__h">랭킹</h3>
               <p v-if="partError('rankings')" class="panel__err">{{ partError('rankings').error }}</p>
-              <template v-else v-for="(r, key) in (dash?.rankings || {})" :key="key">
-                <div class="rank">
-                  <!-- 🔴 키가 `국가:종류` 다. 사람이 읽는 말로 바꾼다 -->
-                  <span class="rank__type">{{ rankLabel(key) }}</span>
-                  <!-- 🔴 이 종류만 실패했으면 그렇게 말한다("없음" 과 다르다) -->
-                  <p v-if="r.error" class="rank__err">{{ r.error }}</p>
-                  <ol v-else class="rank__list">
-                    <li v-for="row in (r.rows || []).slice(0, 5)" :key="row.symbol">
-                      <!-- ⚠️ 이름이 없으면 코드를 보여준다(빈칸보다 낫다) -->
-                      <button class="linkish" :title="row.symbol" @click="pickSymbol(row.symbol, row.name || row.symbol)">
-                        {{ row.name || row.symbol }}
-                      </button>
-                    </li>
-                  </ol>
+              <template v-else>
+                <div v-if="rankKeys.length" class="rank__tabs">
+                  <button
+                    v-for="k in rankKeys" :key="k"
+                    class="rank__tab" :class="{ 'rank__tab--on': k === rankTab }"
+                    @click="rankTab = k"
+                  >{{ rankLabel(k) }}</button>
                 </div>
+                <p v-if="!rankKeys.length" class="panel__empty">랭킹을 불러오지 못했습니다.</p>
+                <template v-else-if="activeRank">
+                  <!-- 🔴 이 종류만 실패했으면 그렇게 말한다("없음" 과 다르다) -->
+                  <p v-if="activeRank.error" class="rank__err">{{ activeRank.error }}</p>
+                  <p v-else-if="!activeRank.rows?.length" class="panel__empty">해당 종목 없음</p>
+                  <table v-else class="rtable">
+                    <thead>
+                      <tr><th class="rtable__n">#</th><th>종목</th><th class="rtable__r">등락률</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in activeRank.rows.slice(0, 8)" :key="row.symbol">
+                        <td class="rtable__n mono-num">{{ row.rank }}</td>
+                        <td>
+                          <!-- ⚠️ 이름이 없으면 코드를 보여준다(빈칸보다 낫다) -->
+                          <button class="linkish" :title="row.symbol" @click="pickSymbol(row.symbol, row.name || row.symbol)">
+                            {{ row.name || row.symbol }}
+                          </button>
+                          <!-- 🔴 이름이 붙었을 때만 코드를 따로 보여준다(같은 값을 두 번 쓰지 않는다) -->
+                          <small v-if="row.name" class="rtable__sym mono-num">{{ row.symbol }}</small>
+                        </td>
+                        <td class="rtable__r mono-num" :class="signClass(row.changePct)">{{ pct(row.changePct) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </template>
               </template>
             </div>
           </div>
@@ -1064,8 +1168,9 @@ onUnmounted(() => {
   border-radius: var(--rounded-md);
 }
 .kpi__label { font-size: var(--text-2xs); letter-spacing: 0.06em; color: var(--color-faint); }
-.kpi__value { font-size: var(--text-lg); font-weight: 700; color: var(--color-ink); }
-.kpi__value--sub { font-size: var(--text-md); color: var(--color-body); font-weight: 600; }
+/* 🔴 사용자: *"내 자산 부분 크기 좀 더 줄여"* — 상단으로 올라가므로 한 줄을 낮춘다 */
+.kpi__value { font-size: var(--text-base); font-weight: 700; color: var(--color-ink); }
+.kpi__value--sub { font-size: var(--text-sm); color: var(--color-body); font-weight: 600; }
 .kpi__value small { font-size: var(--text-sm); font-weight: 600; margin-left: 6px; opacity: 0.85; }
 .up { color: var(--color-up); }
 .down { color: var(--color-down); }
@@ -1089,6 +1194,15 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--color-hairline-soft);
 }
 .holdings td { padding: 5px var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); }
+/*
+  🔴 2026-09-21 사용자: *"수량 평단, 평가손익 금일 변동치가 각 항목과 위치가 안맞는데"*
+     원인은 데이터가 아니라 **CSS 특이도**였다 — `.holdings th`(0,1,1)가 `.ta-r`(0,1,0)를
+     이겨서 **헤더만 왼쪽 정렬**되고 데이터는 오른쪽으로 갔다. 표는 이미 <table> 이었고
+     열 폭도 맞았는데, **헤더 글자만 반대쪽에 붙어** 다른 열을 가리키는 것처럼 보였다.
+  ★ 눈으로는 "데이터가 밀렸다" 로 보이지만 실제로 움직인 건 **헤더**다 —
+    증상과 원인이 반대편에 있어서 데이터 정렬을 아무리 고쳐도 안 맞았을 자리.
+*/
+.holdings th.ta-r, .holdings td.ta-r { text-align: right; }
 .holdings tr:last-child td { border-bottom: none; }
 .holdings__name { display: block; font-weight: 600; color: var(--color-ink); }
 .holdings__meta { display: block; font-size: var(--text-xs); color: var(--color-faint); }
@@ -1096,6 +1210,23 @@ onUnmounted(() => {
 .ta-r { text-align: right; }
 
 /* ── 관심 테마 스트립 (상단) ───────────────────────── */
+/*
+  ── 상단 2열 (2026-09-21 레이아웃 지시) ──────────────────
+  좌 = 관심 테마(좌우 스크롤) · 우 = 내 자산
+  ⚠️ 좌열은 **반드시 min-width:0** 이어야 한다 — 안 주면 grid 항목이 내용 폭만큼
+     벌어져 `overflow-x` 가 안 먹고 우열(내 자산)을 화면 밖으로 밀어낸다.
+*/
+.top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-sm);
+  min-height: 0;
+}
+@media (min-width: 1180px) {
+  /* 자산이 더 넓다 — 숫자가 많고 잘리면 안 된다 */
+  .top { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
+}
+
 .strip {
   display: flex;
   /* 🔴 줄바꿈 금지 — 카드가 아래로 떨어지면 상단 높이가 들쭉날쭉해진다(2026-09-21 지시) */
@@ -1294,6 +1425,43 @@ onUnmounted(() => {
   border-top: 1px solid var(--color-hairline-soft);
 }
 .addticker__query { min-width: 0; }
+
+/* ── 선택 종목 뉴스 ──────────────────────────────── */
+.news {
+  background: var(--color-surface); border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg); padding: var(--space-sm) var(--space-base);
+  display: flex; flex-direction: column; gap: var(--space-xs);
+  /* 뉴스가 길어도 차트를 밀어내지 않는다 — 차트가 주인공이다 */
+  max-height: 168px; overflow-y: auto;
+}
+.news__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.news__head .panel__h { margin: 0; }
+.news__head small { margin-left: 6px; color: var(--color-faint); font-weight: 500; }
+.news__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.news__title { display: block; font-size: var(--text-xs); color: var(--color-body); text-decoration: none; }
+a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
+.news__when { display: block; font-size: var(--text-2xs); color: var(--color-faint); }
+
+/* ── 랭킹 표 ──────────────────────────────────────── */
+.rank__tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: var(--space-xs); }
+.rank__tab {
+  border: 0; background: var(--color-surface-sunken); color: var(--color-muted);
+  font-size: var(--text-2xs); font-weight: 600; padding: 3px 8px;
+  border-radius: var(--rounded-sm); cursor: pointer;
+}
+.rank__tab--on { background: var(--color-primary-soft); color: var(--color-primary); }
+.rtable { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
+.rtable th {
+  text-align: left; font-weight: 600; color: var(--color-faint);
+  font-size: var(--text-2xs); padding: 2px 4px; border-bottom: 1px solid var(--color-hairline);
+}
+.rtable td { padding: 3px 4px; border-bottom: 1px solid var(--color-hairline-soft); }
+.rtable tr:last-child td { border-bottom: 0; }
+/* ⚠️ 위와 **같은 함정**을 내가 이 표에도 넣었다(`.rtable th` 가 유틸 클래스를 이긴다).
+      한 곳 고칠 때 저장소를 훑으라는 규칙의 CSS 판본 — 아래는 th·td 를 함께 짚는다. */
+.rtable th.rtable__n, .rtable td.rtable__n { width: 1.6rem; color: var(--color-faint); text-align: right; }
+.rtable th.rtable__r, .rtable td.rtable__r { text-align: right; white-space: nowrap; }
+.rtable__sym { display: block; color: var(--color-faint); font-size: var(--text-2xs); }
 
 /* ── 매매 분석 ────────────────────────────────────── */
 .websearch {

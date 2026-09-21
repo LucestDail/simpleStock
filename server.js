@@ -178,6 +178,47 @@ app.post('/api/analyst/run', async (req, res) => {
 });
 
 /**
+ * 선택한 종목의 뉴스. 🔴 **검색어는 `mcpClient.buildQuery` 가 만든다** —
+ * 여기서 문자열을 조립하면 수량·금액이 섞여 들어갈 길이 하나 더 생긴다(가드를 우회하는 셈).
+ */
+app.get('/api/news', async (req, res) => {
+  const symbol = String(req.query.symbol || '').trim();
+  const name = String(req.query.name || '').trim();
+  if (!symbol && !name) return res.status(400).json({ error: 'symbol 또는 name 이 필요합니다.' });
+  const r = await mcp.searchMarketNews([{ symbol, name }], { maxSubjects: 1 });
+  if (!r.ok) {
+    // ⚠️ "뉴스가 없다" 와 "못 받았다" 를 화면이 구분할 수 있게 kind 를 그대로 준다
+    return res.status(200).json({ ok: false, error: r.error, kind: r.kind, items: [] });
+  }
+  const hit = r.results[0] || {};
+  if (hit.error) return res.status(200).json({ ok: false, error: hit.error, kind: hit.kind, items: [] });
+  return res.json({ ok: true, tool: r.tool, query: hit.query, items: parseNews(hit.text || '') });
+});
+
+/**
+ * `webSearch` 는 **서식 문자열**을 돌려준다(구조화 JSON 이 아니다).
+ * ```
+ * 1. 제목 - 매체
+ *    Wed, 11 Mar 2026 07:00:00 GMT
+ *    https://...
+ * ```
+ * ⚠️ 규칙을 우리가 정하는 것이므로 **못 맞추면 버리지 말고 원문을 남긴다**
+ *    (형식이 바뀌면 조용히 빈 목록이 되는 게 최악이다).
+ */
+function parseNews(text) {
+  const items = [];
+  const blocks = String(text).split(/\n(?=\s*\d+\.\s)/);
+  for (const b of blocks) {
+    const m = /^\s*(\d+)\.\s*(.+?)\s*$/m.exec(b);
+    if (!m) continue;
+    const url = (/https?:\/\/\S+/.exec(b) || [null])[0];
+    const when = (/^\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),[^\n]+)$/m.exec(b) || [null, null])[1];
+    items.push({ rank: Number(m[1]), title: m[2], url, when });
+  }
+  return items;
+}
+
+/**
  * MCP 연계 상태·도구 목록.
  * ⚠️ **화면이 "무엇이 붙어 있는지" 를 볼 수 있어야 한다** — 안 그러면 검색이 안 도는 것과
  *    도구가 없는 것과 토큰이 틀린 것이 전부 "결과 없음" 으로 똑같이 보인다.
