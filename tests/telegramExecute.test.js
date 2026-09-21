@@ -125,3 +125,31 @@ test('취소는 실행하지 않는다', async () => {
   assert.equal(calls.length, 0);
   assert.match(texts(), /취소됨/);
 });
+
+/**
+ * 🔴 **"안 나갔다" 는 "모른다" 와 다르게 다뤄야 한다** (2026-09-22)
+ *
+ * 연결조차 못 맺었으면 주문이 들어갔을 리 없다 ⇒ 버튼을 떼지 않고 다시 누르게 한다.
+ * 여기서 버튼을 떼면 사람이 제안을 처음부터 다시 만들어야 하고,
+ * 그 습관이 들면 **진짜 "모름" 도 그렇게 다루게 된다.**
+ */
+test('🔴 "안 나갔다" 면 버튼을 **떼지 않는다** (다시 누를 수 있어야 한다)', async () => {
+  const bot = fresh({ execute: async () => ({ ok: false, retryable: true, kind: 'not-sent', error: '토스에 연결하지 못했습니다(TypeError/ECONNREFUSED 120ms). **요청이 나가지 않았으니** 다시 시도해도 됩니다.' }) });
+  const r = await bot.handleCallback(cb('go:p1'));
+  assert.equal(r.reason, 'not_sent');
+  assert.equal(r.retryable, true);
+  assert.match(texts(), /주문은 나가지 않았습니다/);
+  assert.match(texts(), /다시 누르세요/);
+  // 🔴 버튼 제거(빈 키보드)를 하지 않았는가
+  const stripped = sent.some((x) => Array.isArray(x.body?.reply_markup?.inline_keyboard)
+    && x.body.reply_markup.inline_keyboard.length === 0);
+  assert.equal(stripped, false, '🔴 다시 누를 수 있어야 하는데 버튼을 떼어 버렸다');
+});
+
+test('🔴 반대로 **모름**이면 버튼을 뗀다 (다시 누르면 두 번 산다)', async () => {
+  const bot = fresh({ execute: async () => ({ ok: false, unknown: true, error: '응답 없음' }) });
+  await bot.handleCallback(cb('go:p1'));
+  const stripped = sent.some((x) => Array.isArray(x.body?.reply_markup?.inline_keyboard)
+    && x.body.reply_markup.inline_keyboard.length === 0);
+  assert.equal(stripped, true, '🔴 모름인데 버튼이 남아 있다 — 다시 누르면 두 번 산다');
+});

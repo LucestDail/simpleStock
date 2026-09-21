@@ -483,6 +483,19 @@ async function execute(id) {
       audit('send_unknown', { id, clientOrderId: key, message: e.message });
       return { ok: false, unknown: true, error: e.message, proposal: p };
     }
+    if (e.kind === 'not-sent') {
+      /**
+       * 🔴 **안 나간 것과 모르는 것은 다르다** (2026-09-22 폰 실행 첫 시험에서 갈라냈다).
+       *    연결조차 못 맺었으면 주문이 들어갔을 리 없다 ⇒ **승인을 태우지 않는다.**
+       *    사람이 «전송» 을 다시 누르면 된다.
+       * ⚠️ 그래도 안전망은 그대로다 — 멱등키가 **제안 id** 라서, 만에 하나 실제로는
+       *    나갔더라도 같은 키로 두 번째가 들어가면 토스가 막는다(키 유효 10분 > 제안 TTL 5분).
+       */
+      p.result = { mode: 'not_sent', error: e.message, kind: e.kind, at: new Date().toISOString() };
+      persist();
+      audit('send_not_sent', { id, kind: e.kind, message: e.message });
+      return { ok: false, retryable: true, error: e.message, kind: e.kind, proposal: p };
+    }
     if (e.kind === 'idempotency-conflict') {
       // 같은 키로 **다른 내용**을 보냈다 — 우리 상태가 꼬인 것이다. 조용히 재시도하면 안 된다
       p.status = 'FAILED';

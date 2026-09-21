@@ -35,6 +35,38 @@ const CLIENT_ID = String(process.env.TOSS_CLIENT_ID || '').trim();
 const CLIENT_SECRET = String(process.env.TOSS_CLIENT_SECRET || '').trim();
 
 const TIMEOUT_MS = Math.max(3000, Number(process.env.TOSS_TIMEOUT_MS) || 10000);
+
+/**
+ * 🔴 **연결조차 못 한 실패**의 코드들 (2026-09-22).
+ *
+ * 이 코드들은 **요청이 상대에게 간 적이 없다**는 뜻이다 ⇒ 주문이 들어갔을 리 없고 **재시도가 안전하다.**
+ * 그 밖(소켓이 중간에 끊김·타임아웃)은 **상대가 이미 처리했을 수 있으므로** 계속 "모름" 이다.
+ *
+ * ⚠️ `ECONNRESET` 은 **여기 넣지 않는다** — 서버가 받아서 처리한 뒤 끊었을 수도 있다.
+ *    "재시도 안전" 쪽으로 잘못 분류하면 **두 번 주문**이 나간다. 애매하면 모름이 맞다.
+ */
+const NEVER_SENT_CODES = new Set([
+  'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT', 'ERR_TLS_CERT_ALTNAME_INVALID', 'CERT_HAS_EXPIRED',
+]);
+
+/**
+ * fetch 가 던진 것을 **사실대로** 분류한다.
+ *
+ * 🔴 종전에는 `catch (e)` 가 `e` 를 **한 번도 안 보고** 전부
+ *    *"응답을 받지 못했습니다(10000ms)"* 라고 적었다. 그래서
+ *    ① 실제 경과가 5초인데 10초라고 **거짓말**했고
+ *    ② 무엇이 실패했는지 **영영 알 수 없었다**(원인을 버렸다)
+ *    ③ 확실히 안 나간 실패까지 **"모름"** 으로 잠가 사람이 손으로 확정해야 했다.
+ *    2026-09-22 폰 실행 첫 시험에서 정확히 이 세 가지를 한꺼번에 밟았다.
+ */
+function classifyFetchFailure(e, elapsedMs) {
+  const code = e?.cause?.code || e?.code || null;
+  const name = e?.name || 'Error';
+  const timedOut = name === 'TimeoutError' || name === 'AbortError';
+  const neverSent = !timedOut && code != null && NEVER_SENT_CODES.has(code);
+  return { code, name, elapsedMs, timedOut, neverSent, detail: `${name}${code ? `/${code}` : ''} ${elapsedMs}ms` };
+}
 /** 토큰 만료 전에 미리 갱신할 여유 — 만료 직전 호출이 401 로 새는 것을 막는다 */
 const TOKEN_MARGIN_MS = 5 * 60 * 1000;
 /** 429 를 맞으면 이 창 동안 그 경로를 쉰다. retry-after 가 없으므로 우리가 정한다 */
@@ -56,12 +88,23 @@ function isConfigured() {
 }
 
 class TossError extends Error {
-  constructor(message, { kind, status, path }) {
+  /**
+   * ⚠️ **넘기는데 안 받던 필드가 있었다** (2026-09-22 발견) — 호출부는 `code`·`data` 를
+   *    성실히 넘기고 있었는데 생성자가 **조용히 버렸다.** 넘기는 쪽만 보면 다 전달되는 것처럼 보인다.
+   *    ⇒ 토스가 준 오류 코드로 갈라야 할 자리에서 갈 수 없었다.
+   */
+  constructor(message, { kind, status, path, code, data, cause } = {}) {
     super(message);
     this.name = 'TossError';
-    this.kind = kind; // 'unconfigured' | 'ip-denied' | 'auth' | 'rate-limited' | 'timeout' | 'upstream' | 'shape'
+    // 'unconfigured' | 'ip-denied' | 'auth' | 'rate-limited' | 'timeout' | 'unreachable'
+    // | 'not-sent'(요청이 나간 적 없음 = 재시도 안전) | 'unknown'(나갔는지 모름 = 재시도 금지)
+    // | 'upstream' | 'shape' | 'idempotency-conflict' | 'in-progress'
+    this.kind = kind;
     this.status = status;
     this.path = path;
+    if (code != null) this.code = code;
+    if (data != null) this.data = data;
+    if (cause != null) this.cause = cause;
   }
 }
 
@@ -276,6 +319,7 @@ async function apiGet(path, { retriedAuth = false, accountSeq = null } = {}) {
   pathCounts.set(bucketOf(path), (pathCounts.get(bucketOf(path)) || 0) + 1);
   const accessToken = await getToken();
   let res;
+  const startedAt = Date.now();
   try {
     const headers = { Authorization: `Bearer ${accessToken}` };
     if (accountSeq != null) headers['X-Tossinvest-Account'] = String(accountSeq);
@@ -285,7 +329,15 @@ async function apiGet(path, { retriedAuth = false, accountSeq = null } = {}) {
     });
   } catch (e) {
     // ★ 타임아웃은 **재시도하지 않는다** — 이미 상한을 다 쓴 뒤라 호출자 예산을 넘긴다
-    throw new TossError(`토스 API 응답 없음 (${TIMEOUT_MS}ms 초과)`, { kind: 'timeout', path: bucketOf(path) });
+    // 🔴 그러나 **원인은 남긴다** — 버리면 다음 사람이 진단할 수 없다
+    const c = classifyFetchFailure(e, Date.now() - startedAt);
+    logWarn('toss.fetch_failed', { path: bucketOf(path), method: 'GET', ...c });
+    throw new TossError(
+      c.neverSent
+        ? `토스에 연결하지 못했습니다(${c.detail}). 요청이 나가지 않았습니다.`
+        : `토스 API 응답 없음 (${c.detail})`,
+      { kind: c.neverSent ? 'unreachable' : 'timeout', path: bucketOf(path), cause: c.detail }
+    );
   }
 
   if (res.status === 401 && !retriedAuth) {
@@ -522,6 +574,7 @@ async function apiPost(path, body, { accountSeq, method = 'POST' } = {}) {
   pathCounts.set(bucketOf(path), (pathCounts.get(bucketOf(path)) || 0) + 1);
 
   let res;
+  const startedAt = Date.now();
   try {
     res = await fetch(`${BASE_URL}${path}`, {
       method,
@@ -533,10 +586,22 @@ async function apiPost(path, body, { accountSeq, method = 'POST' } = {}) {
     /**
      * 🔴 **여기가 이 파일에서 가장 위험한 자리다.** 보냈는데 답을 못 받았다 —
      *    주문이 들어갔는지 **알 수 없다.** 재시도하면 두 번 살 수 있다.
+     *
+     * ⚠️ 단 **전부가 "모름" 은 아니다.** 연결조차 못 맺은 실패는 요청이 나간 적이 없다.
+     *    그것까지 잠그면 사람이 매번 거래소를 뒤져 확정해야 하고, 그러다 보면
+     *    **"모름" 이라는 신호 자체를 가볍게 여기게 된다.**
      */
+    const c = classifyFetchFailure(e, Date.now() - startedAt);
+    logWarn('toss.fetch_failed', { path: bucketOf(path), method, ...c });
+    if (c.neverSent) {
+      throw new TossError(
+        `토스에 연결하지 못했습니다(${c.detail}). **요청이 나가지 않았으니** 다시 시도해도 됩니다.`,
+        { kind: 'not-sent', path: bucketOf(path), cause: c.detail }
+      );
+    }
     throw new TossError(
-      `토스에 보냈지만 응답을 받지 못했습니다(${TIMEOUT_MS}ms). **재시도하지 말고 주문 조회로 확정하세요.**`,
-      { kind: 'unknown', path: bucketOf(path) }
+      `토스에 보냈지만 응답을 받지 못했습니다(${c.detail}). **재시도하지 말고 주문 조회로 확정하세요.**`,
+      { kind: 'unknown', path: bucketOf(path), cause: c.detail }
     );
   }
   noteRateLimitHeaders(path, res);

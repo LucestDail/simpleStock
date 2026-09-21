@@ -181,7 +181,19 @@ async function handleCallback(cb) {
       return { ok: false, reason: 'unknown' };
     }
     if (!ex.ok) {
+      /**
+       * ⚠️ **다시 눌러도 되는 실패**는 버튼을 떼지 않는다 — 연결조차 못 맺은 경우다.
+       *    여기서 버튼을 떼면 사람이 제안을 처음부터 다시 만들어야 하고,
+       *    그러다 보면 *"실패하면 그냥 다시 만들지"* 가 습관이 돼 **모름** 도 그렇게 다룬다.
+       */
       await answer(cb.id, ex.error || '전송 실패');
+      if (ex.retryable) {
+        await api('sendMessage', {
+          chat_id: cb.message.chat.id,
+          text: `⚠️ 보내지 못했습니다 — ${ex.error}\n**주문은 나가지 않았습니다.** 위 «전송» 을 다시 누르세요.`,
+        }).catch(() => {});
+        return { ok: false, reason: 'not_sent', error: ex.error, retryable: true };
+      }
       await stripButtons(cb.message.chat.id, cb.message.message_id, `🔴 전송 실패 — ${ex.error}`);
       return { ok: false, reason: 'execute_failed', error: ex.error };
     }
