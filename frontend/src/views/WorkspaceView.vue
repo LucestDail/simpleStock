@@ -207,6 +207,17 @@ function stopStages() {
 const activity = ref([]);
 let activityTimer = null;
 
+/**
+ * 🔴 사용자: *"화면 진입하면 내 종목 첫번째 클릭해."*
+ * ⚠️ **사용자가 이미 고른 게 있으면 덮지 않는다** — 자동 선택이 사람의 선택을 이기면 안 된다.
+ *    (보유를 늦게 받아 오므로 그 사이에 사용자가 다른 종목을 눌렀을 수 있다.)
+ */
+function autoPickFirstHolding() {
+  if (selected.value.symbol) return;
+  const first = portfolio.value?.items?.[0];
+  if (first?.symbol) pickSymbol(first.symbol, first.name);
+}
+
 async function loadActivity() {
   try {
     const res = await apiFetch('/api/activity?limit=60');
@@ -614,10 +625,11 @@ const activeRank = computed(() => {
 const visibleRankRows = computed(() => {
   const rows = activeRank.value?.rows || [];
   const q = rankQuery.value.trim().toLowerCase();
-  if (!q) return rows.slice(0, 8);
+  // 🔴 공간이 생겼으니 더 보여준다(사용자: "하단 공간이 비는데 다 채워")
+  if (!q) return rows.slice(0, 30);
   return rows
     .filter((r) => r.symbol?.toLowerCase().includes(q) || (r.name || '').toLowerCase().includes(q))
-    .slice(0, 8);
+    .slice(0, 30);
 });
 
 function partError(name) {
@@ -642,6 +654,8 @@ async function loadPortfolio() {
     const res = await apiFetch('/api/portfolio');
     if (res.ok) {
       portfolio.value = await res.json();
+      // 🔴 진입 시 첫 보유 종목을 고른다(사용자 지시). 이미 고른 게 있으면 안 덮는다
+      autoPickFirstHolding();
       portfolioError.value = '';
       return;
     }
@@ -1150,7 +1164,8 @@ onUnmounted(() => {
                   <!-- 🔴 이 종류만 실패했으면 그렇게 말한다("없음" 과 다르다) -->
                   <p v-if="activeRank.error" class="rank__err">{{ activeRank.error }}</p>
                   <p v-else-if="!activeRank.rows?.length" class="panel__empty">해당 종목 없음</p>
-                  <table v-else class="rtable">
+                  <div v-else class="rtable__scroll">
+                  <table class="rtable">
                     <thead>
                       <tr><th class="rtable__n">#</th><th>종목</th><th class="rtable__r">등락률</th></tr>
                     </thead>
@@ -1169,6 +1184,7 @@ onUnmounted(() => {
                       </tr>
                     </tbody>
                   </table>
+                  </div>
                 </template>
               </template>
             </div>
@@ -1728,16 +1744,20 @@ onUnmounted(() => {
 /* ── 관심 테마 스트립 (상단) ───────────────────────── */
 
 /* 🔴 사용자: *"관심 카테고리 / 관심 티커 **소형화** 제공"* — 상단은 자산이 주인공이다 */
+/*
+  🔴 **페이징으로 바꿨으면 가로 스크롤 전제도 같이 걷어내야 했다** (2026-09-21).
+     `overflow-x: auto` + `width: 236px` 를 그대로 둬서, 폭 194px 인 이 열에서
+     카드가 넘쳐 **왼쪽이 잘렸다**("국내 주식·ETF" 가 "식·ETF" 로 보였다).
+  ★ 한 가지를 바꾸면 **그 전제에 기대던 것**을 같이 훑어야 한다.
+  ⇒ 세로로 쌓고 · 카드는 **열 폭을 채우고** · 쪽 번호는 아래.
+*/
 .strip {
   display: flex;
+  flex-direction: column;
   font-size: var(--text-xs);
-  /* 🔴 줄바꿈 금지 — 카드가 아래로 떨어지면 상단 높이가 들쭉날쭉해진다(2026-09-21 지시) */
-  flex-wrap: nowrap;
   gap: var(--space-sm);
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 2px;
-  flex: none;
+  min-height: 0;
+  overflow: hidden;
 }
 .strip__empty {
   font-size: var(--text-sm); color: var(--color-faint);
@@ -1745,8 +1765,11 @@ onUnmounted(() => {
   border: 1px dashed var(--color-hairline); border-radius: var(--rounded-md);
 }
 .wcard {
-  flex: none;
-  width: 236px;
+  /* 고정 폭이면 좁은 열에서 잘린다 — 열을 채운다 */
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+  min-height: 0;
   background: var(--color-surface);
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md);
@@ -1759,7 +1782,9 @@ onUnmounted(() => {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .wcard__count { font-size: var(--text-2xs); color: var(--color-faint); }
-.wcard__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; max-height: 92px; overflow-y: auto; }
+.wcard__list {
+  /* 티커가 많으면 **카드 안에서** 스크롤한다(행 높이를 밀지 않는다) */
+  flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; max-height: 92px; overflow-y: auto; }
 .wrow {
   display: grid; grid-template-columns: minmax(0, 1fr) auto auto 14px;
   align-items: center; gap: 5px;
@@ -1777,10 +1802,23 @@ onUnmounted(() => {
 .input--xs { height: 26px; font-size: var(--text-xs); padding: 0 6px; }
 .btn--xs { height: 26px; padding: 0; font-size: var(--text-sm); }
 
+/*
+  🔴 사용자: *"랭킹 하단에 공간이 비는데 다 채워."*
+  ⇒ 랭킹 패널이 **남는 높이를 전부 가져가고**, 줄이 많으면 **표 안에서** 스크롤한다.
+  ⚠️ 패널이 아니라 **표**가 스크롤해야 한다 — 패널이 스크롤하면 검색창·탭이 위로 밀려 사라진다.
+*/
 .layout__signals {
   display: flex; flex-direction: column; gap: var(--space-sm);
-  min-width: 0; min-height: 0; overflow-y: auto;
+  min-width: 0; min-height: 0; overflow: hidden;
 }
+/*
+  ⚠️ 마크업이 `aside.layout__signals > div.signals > div.panel` 이라
+     `aside > .panel` 은 **아무것도 안 잡는다**(래퍼가 하나 끼어 있다).
+     선택자가 빗나가도 **CSS 는 조용하다** — 화면이 안 변하는 것으로만 알 수 있다.
+*/
+.layout__signals > .signals { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.signals > .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.rtable__scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .signals { display: flex; flex-direction: column; gap: var(--space-sm); }
 
 /* ── HTS: 차트 + 사이드 패널 ──────────────────────── */
@@ -1953,7 +1991,7 @@ onUnmounted(() => {
 .iconbtn:hover:not(:disabled) { background: var(--color-surface-hover); }
 .iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.pager { display: flex; align-items: center; gap: 4px; justify-content: center; padding-top: 4px; }
+.pager { display: flex; align-items: center; gap: 4px; justify-content: center; flex: none; }
 .pager__at { font-size: var(--text-2xs); color: var(--color-faint); }
 
 .analyst__warn { margin: 0; font-size: var(--text-2xs); color: var(--color-down); }

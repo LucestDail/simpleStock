@@ -6,6 +6,7 @@ const tape = require('./tickerTapeService');
 const toss = require('./tossClient');
 const tossPortfolio = require('./tossPortfolio');
 const { resolveSession } = require('./marketCalendar');
+const { getDashboardSettings } = require('./settingsService');
 const { APP_TIMEZONE } = require('./time');
 const activity = require('./activityLog');
 const { logInfo, logWarn, logError } = require('./logger');
@@ -113,6 +114,7 @@ function status() {
     indexPct: INDEX_PCT,
     quiet: `${QUIET_FROM}:00~${QUIET_TO}:00`,
     // 🔴 무엇을 못 보내는지도 함께 — 사용자가 "왜 어닝콜은 안 오지" 를 겪지 않게
+    rules: ['개장/폐장(+마감 요약)', '지수 급변', '보유 급변', '목표가·손절선', '종목 경고', '매매 제안'],
     unsupported: ['어닝콜 — 일정 데이터 출처가 없다(토스·야후 모두 미제공)'],
     marks: Object.keys(st).length,
   };
@@ -121,7 +123,7 @@ function status() {
 // ── 규칙들 ───────────────────────────────────────────────────
 
 /** 🔔 시장 개장/폐장 — **상태가 바뀐 순간에만** */
-async function ruleSessions(st, now, out, sup) {
+async function ruleSessions(st, now, out, sup, items, summary) {
   for (const [key, label, s, e] of [['kr', 'KRX', 9, 16], ['us', '미국장', 22, 6]]) {
     const cur = resolveSession(now, key, s, e, APP_TIMEZONE).state;
     const mark = `session:${key}`;
@@ -130,8 +132,12 @@ async function ruleSessions(st, now, out, sup) {
     st[mark] = cur;
     // 첫 실행에는 안 보낸다 — 기준선이 없어서 "바뀐 것" 이 아니다
     if (!was) { sup.push(`${label} 상태 기준선 설정(${cur})`); continue; }
-    const icon = cur === 'open' ? '🔔' : '🔕';
-    out.push({ text: `${icon} ${label} ${cur === 'open' ? '개장' : cur === 'pre' ? '장 전' : '폐장'}`, kind: 'session' });
+    if (cur === 'closed') {
+      // 🔴 폐장은 **요약과 함께** — 알림 하나로 그날이 정리된다(사용자 지시)
+      out.push({ text: closeSummary(items, summary, label), kind: 'close' });
+    } else {
+      out.push({ text: `🔔 ${label} ${cur === 'open' ? '개장' : '장 전'}`, kind: 'session' });
+    }
   }
 }
 
@@ -154,17 +160,73 @@ async function ruleIndices(st, now, out, sup) {
 }
 
 /** 📊 보유 종목 급변 + ⚠️ 종목 경고 신규 */
-async function rulePortfolio(st, now, out, sup) {
-  let p;
-  try {
-    p = await tossPortfolio.getHoldings({});
-  } catch (e) {
-    // 🔴 조용히 넘기지 않는다 — 보유를 못 읽으면 급변 감시가 통째로 죽는다
-    logWarn('alerts.portfolio_failed', { kind: e.kind, message: e.message });
-    return;
+/**
+ * 🎯 목표가·손절가 통과 (2026-09-21 사용자 지시).
+ *
+ * ★ **사람이 정한 기준이라 오경보가 없다** — 그래서 알림 축으로 값이 크다.
+ *   급변(5%)은 시장이 정하지만 이건 사용자가 정한다.
+ *
+ * 🔴 **통과할 때 한 번만** 알린다. 하루 한 번이 아니라 **상태 전이**다 —
+ *    목표가를 넘은 뒤 계속 위에 있으면 매 틱 알릴 이유가 없고,
+ *    아래로 내려갔다 다시 넘으면 그건 **새 사건**이다.
+ * ⚠️ 통화를 환산하지 않는다 — 사용자가 그 종목 화면에서 보는 단위로 적는다.
+ */
+function ruleTargets(items, st, out, sup) {
+  const targets = getDashboardSettings().targets || {};
+  for (const h of items) {
+    const t = targets[String(h.symbol).toUpperCase()];
+    if (!t || h.lastPrice == null) continue;
+    const px = Number(h.lastPrice);
+
+    for (const [kind, line, hit] of [
+      ['target', t.target, t.target != null && px >= t.target],
+      ['stop', t.stop, t.stop != null && px <= t.stop],
+    ]) {
+      if (line == null) continue;
+      const mark = `line:${h.symbol}:${kind}`;
+      if (hit && !st[mark]) {
+        st[mark] = 1;
+        const icon = kind === 'target' ? '🎯' : '🛑';
+        const word = kind === 'target' ? '목표가 도달' : '손절선 이탈';
+        out.push({
+          text: `${icon} ${h.name} ${word} — 기준 ${Number(line).toLocaleString('ko-KR')} · 현재 ${px.toLocaleString('ko-KR')}`
+            + ` (평가손익 ${h.profitRate >= 0 ? '+' : ''}${Number(h.profitRate).toFixed(2)}%)`,
+          kind: `line-${kind}`,
+        });
+      } else if (hit && st[mark]) {
+        sup.push(`${h.name} ${kind === 'target' ? '목표가' : '손절선'} (이미 통과 상태)`);
+      } else if (!hit && st[mark]) {
+        // 🔴 되돌아왔으면 표시를 **지운다** — 안 지우면 다음 통과를 영영 못 알린다
+        delete st[mark];
+      }
+    }
   }
+}
+
+/**
+ * 🔔 장 마감 요약 — 폐장 전이에서 **한 번**.
+ * ★ 하루 한 번이라 소음이 없고, 그날 무슨 일이 있었는지 한 줄로 남는다.
+ */
+function closeSummary(items, summary, label) {
+  if (!items.length) return `🔔 ${label} 폐장 — 보유 정보를 받지 못했습니다.`;
+  const sorted = [...items].filter((h) => h.dailyRate != null).sort((a, b) => b.dailyRate - a.dailyRate);
+  const best = sorted[0];
+  const worst = sorted[sorted.length - 1];
+  const lines = [`🔔 ${label} 폐장 · 오늘 요약`];
+  if (summary) {
+    lines.push(`평가 ${Math.round(summary.value?.krw || 0).toLocaleString('ko-KR')}원`
+      + ` · 오늘 ${summary.dailyRate >= 0 ? '+' : ''}${Number(summary.dailyRate ?? 0).toFixed(2)}%`
+      + ` · 누적 ${summary.profitRate >= 0 ? '+' : ''}${Number(summary.profitRate ?? 0).toFixed(2)}%`);
+  }
+  // ⚠️ 종목이 하나면 best 와 worst 가 같다 — 같은 줄을 두 번 쓰지 않는다
+  if (best) lines.push(`▲ ${best.name} ${best.dailyRate >= 0 ? '+' : ''}${best.dailyRate.toFixed(2)}%`);
+  if (worst && worst.symbol !== best?.symbol) lines.push(`▼ ${worst.name} ${worst.dailyRate.toFixed(2)}%`);
+  return lines.join('\n');
+}
+
+async function rulePortfolio(items, st, now, out, sup) {
   const day = kstDay(now);
-  for (const h of p.items || []) {
+  for (const h of items) {
     if (h.dailyRate != null && Math.abs(h.dailyRate) >= MOVE_PCT) {
       const dir = h.dailyRate >= 0 ? 'up' : 'down';
       const mark = `move:${h.symbol}:${dir}:${day}`;
@@ -238,7 +300,29 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
   const suppressed = [];
   const failed = [];
 
-  for (const [name, fn] of [['sessions', ruleSessions], ['indices', ruleIndices], ['portfolio', rulePortfolio]]) {
+  /**
+   * 🔴 보유는 **한 번만** 받아 규칙들이 나눠 쓴다.
+   *    종전에는 `rulePortfolio` 안에서 받았는데, 목표선·폐장 요약이 생기며 **세 번 부를 뻔했다**
+   *    (토스 한도 5/s 를 그냥 태우는 짓이다).
+   * ⚠️ 못 받아도 **나머지 규칙은 돈다** — 지수·세션은 보유와 무관하다.
+   */
+  let items = [];
+  let summary = null;
+  try {
+    const p = await tossPortfolio.getHoldings({});
+    items = p.items || [];
+    summary = p.summary || null;
+  } catch (e) {
+    failed.push('holdings');
+    logWarn('alerts.portfolio_failed', { kind: e.kind, message: e.message });
+  }
+
+  for (const [name, fn] of [
+    ['sessions', (a, b, c, d) => ruleSessions(a, b, c, d, items, summary)],
+    ['indices', ruleIndices],
+    ['portfolio', (a, b, c, d) => rulePortfolio(items, a, b, c, d)],
+    ['targets', (a, b, c, d) => ruleTargets(items, a, c, d)],
+  ]) {
     try {
       await fn(st, now, out, suppressed);
     } catch (e) {
@@ -254,7 +338,13 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
     if (quiet) continue;
     if (!willSend) continue;
     const r = await telegram.send(a.text, { reason: `alert:${a.kind}` });
-    if (r.ok) sent += 1;
+    /**
+     * 🔴 **`r.ok` 가 아니라 `r.sent` 를 센다.**
+     *    `telegram.send` 는 dry-run 에서도 `{ok:true, sent:false}` 를 준다 —
+     *    `r.ok` 로 세면 **안 보내고도 "보냈다"** 고 보고한다(테스트를 쓰다 걸렸다).
+     *    ★ 오늘 `force` 사고와 **같은 병**이다: *보낸 척하는 숫자*.
+     */
+    if (r.sent) sent += 1;
     // 🔴 보낸 것은 **타임라인에도** 남긴다 — 로그 파일에만 있으면 사람이 못 본다
     activity.record('alert', a.text, { alertKind: a.kind, sent: Boolean(r.sent) });
   }

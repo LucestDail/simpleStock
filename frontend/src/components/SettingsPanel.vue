@@ -18,6 +18,12 @@ const emit = defineEmits(['close', 'saved']);
 const form = ref({
   momentumPct: 3, refreshSec: 60, rankingTypes: [], rankingCountries: [],
   briefingPrompt: '', briefingCron: '',
+  /**
+   * 종목별 목표가·손절가 (2026-09-21 사용자 지시).
+   * ⚠️ 화면에서는 **행 배열**로 다룬다 — 객체로 두면 빈 행을 못 만들고 지우기도 까다롭다.
+   *    저장할 때 객체로 바꾼다.
+   */
+  targetRows: [],
 });
 /** 테마 그룹 관리 — 사용자가 "새 테마 추가도 설정에서" 라고 했다(2026-09-21) */
 const groups = ref([]);
@@ -38,6 +44,20 @@ const RANKING_LABELS = {
   TOSS_SECURITIES_TRADING_VOLUME: '토스 거래량',
 };
 
+/** 행 배열 → `{ SYMBOL: {target, stop} }`. ⚠️ 빈 행은 버린다(빈 껍데기를 저장하지 않는다) */
+function targetsObject() {
+  const out = {};
+  for (const r of form.value.targetRows) {
+    const sym = String(r.symbol || '').trim().toUpperCase();
+    if (!sym) continue;
+    const target = r.target === '' || r.target == null ? null : Number(r.target);
+    const stop = r.stop === '' || r.stop == null ? null : Number(r.stop);
+    if (target == null && stop == null) continue;
+    out[sym] = { target, stop };
+  }
+  return out;
+}
+
 async function load() {
   err.value = '';
   try {
@@ -53,6 +73,9 @@ async function load() {
         rankingCountries: [...(s.rankingCountries || [])],
         briefingPrompt: s.briefingPrompt || '',
         briefingCron: s.briefingCron || '',
+        targetRows: Object.entries(s.targets || {}).map(([symbol, v]) => ({
+          symbol, target: v?.target ?? '', stop: v?.stop ?? '',
+        })),
       };
       usingDefault.value = s.usingDefault || [];
     }
@@ -102,7 +125,8 @@ async function save() {
   try {
     const res = await apiFetch('/api/system/settings', {
       method: 'PUT',
-      body: JSON.stringify({ dashboard: { ...form.value } }),
+      // 🔴 화면은 **행 배열**, 서버는 **객체** 다 — 여기서 한 번만 바꾼다
+      body: JSON.stringify({ dashboard: { ...form.value, targetRows: undefined, targets: targetsObject() } }),
     });
     if (!res.ok) {
       const b = await res.json().catch(() => ({}));
@@ -237,6 +261,27 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
         <small>비워 두면 자동 실행하지 않습니다(버튼으로 직접).</small>
       </label>
 
+        <section class="sp__sec">
+          <h3 class="sp__h">
+            목표가 · 손절선
+            <small>종목별 기준선을 넘으면 텔레그램으로 알립니다</small>
+          </h3>
+          <!--
+            🔴 **사람이 정한 기준이라 오경보가 없다** — 급변(%)은 시장이 정하지만 이건 내가 정한다.
+            ⚠️ 통화를 환산하지 않는다 — 그 종목 화면에서 보는 단위 그대로 적는다
+               (환산해 두면 환율이 움직일 때 **기준선이 조용히 이동한다**).
+          -->
+          <div v-for="(row, i) in form.targetRows" :key="i" class="sp__target">
+            <input v-model="row.symbol" class="input sp__xs" placeholder="종목코드" />
+            <input v-model="row.target" class="input sp__xs" type="number" placeholder="목표가" />
+            <input v-model="row.stop" class="input sp__xs" type="number" placeholder="손절가" />
+            <button class="sp__icon" aria-label="삭제" title="삭제" @click="form.targetRows.splice(i, 1)">×</button>
+          </div>
+          <button class="btn sp__add" @click="form.targetRows.push({ symbol: '', target: '', stop: '' })">
+            + 기준선 추가
+          </button>
+        </section>
+
       <footer class="sp__foot">
         <button class="btn" @click="emit('close')">닫기</button>
         <button class="btn btn--primary" :disabled="busy" @click="save">{{ busy ? '저장 중…' : '저장' }}</button>
@@ -246,6 +291,23 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
 </template>
 
 <style scoped>
+/*
+  🔴 **자기 스타일만 쓴다.** 첫 판은 `input--xs`·`btn--xs`·`btn--soft`·`iconbtn` 을 그대로 썼는데
+     그건 전부 **WorkspaceView 의 scoped 클래스**라 여기서는 **아무 스타일도 안 먹는다.**
+     내가 오늘 만든 `noBorrowedScopedClass` 가드가 정확히 이걸 잡았다(입력칸이 맨몸으로 나왔을 것).
+*/
+.sp__target { display: grid; grid-template-columns: 1fr 1fr 1fr 26px; gap: 4px; margin-bottom: 4px; }
+.sp__xs { height: 28px; font-size: var(--text-xs); padding: 0 8px; }
+.sp__icon {
+  width: 26px; height: 28px; padding: 0; line-height: 1; cursor: pointer;
+  border: 1px solid var(--color-hairline); border-radius: var(--rounded-sm);
+  background: var(--color-surface-sunken); color: var(--color-body);
+}
+.sp__icon:hover { background: var(--color-surface-hover); }
+.sp__add {
+  height: 28px; padding: 0 10px; font-size: var(--text-xs);
+  background: var(--color-primary-soft); border-color: var(--color-primary-line); color: var(--color-primary);
+}
 .sp__backdrop {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
   display: flex; justify-content: flex-end; z-index: 40;

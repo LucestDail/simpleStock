@@ -55,6 +55,13 @@ function createDefaultSettings() {
       rankingCountries: null,       // 랭킹 종류
       briefingPrompt: null,     // 브리핑에 덧붙일 사용자 지시
       briefingCron: null,       // 브리핑 자동 생성 주기(cron)
+      /**
+       * 종목별 목표가·손절가 (2026-09-21 사용자 지시).
+       * `{ "005930": { target: 300000, stop: 240000 } }`
+       * 🔴 **사람이 정한 기준**이라 오경보가 없다 — 그래서 알림 축으로 값이 크다.
+       * ⚠️ 여기 두는 이유: 화면에서 자주 바꾸는 값이다. 위험한 스위치(주문)는 여전히 env 다.
+       */
+      targets: null,
     },
     updatedAt: null,
   };
@@ -84,6 +91,12 @@ const DASHBOARD_DEFAULTS = Object.freeze({
   rankingCountries: ['US', 'KR'],
   briefingPrompt: '',
   briefingCron: '',
+  /**
+   * 🔴 **여기에도 넣어야 한다.** `getDashboardSettings` 는 이 객체를 돌며 값을 채운다 —
+   *    `createDefaultSettings` 에만 넣었더니 **응답에서 통째로 빠졌다**(화면이 못 읽는다).
+   *    ★ 같은 항목을 **두 곳에** 적어야 하는 구조라 한쪽을 빠뜨리기 쉽다.
+   */
+  targets: null,
 });
 
 /**
@@ -108,6 +121,26 @@ function normalizeDashboard(d) {
     momentumPct: n(d?.momentumPct, 0.1, 50),
     refreshSec: n(d?.refreshSec, 15, 3600),
     rankingTypes: types && types.length ? types : null,
+    /**
+     * ⚠️ 통화가 섞인다 — 005930 은 원, QLD 는 달러다. **환산하지 않는다**:
+     *    사용자가 그 종목 화면에서 보는 단위로 적는 것이 자연스럽고,
+     *    환산해 두면 환율이 움직일 때 기준선이 **조용히 이동한다**.
+     */
+    targets: (() => {
+      const t = d?.targets;
+      if (!t || typeof t !== 'object') return null;
+      const out = {};
+      for (const [sym, v] of Object.entries(t)) {
+        const key = String(sym).trim().toUpperCase();
+        if (!key) continue;
+        const target = n(v?.target, 0, 1e12);
+        const stop = n(v?.stop, 0, 1e12);
+        // 둘 다 비었으면 항목 자체를 버린다(빈 껍데기를 쌓지 않는다)
+        if (target == null && stop == null) continue;
+        out[key] = { target, stop };
+      }
+      return Object.keys(out).length ? out : null;
+    })(),
     rankingCountries: (() => {
       const c = Array.isArray(d?.rankingCountries) ? d.rankingCountries.filter((x) => RANKING_COUNTRIES.includes(x)) : null;
       return c && c.length ? c : null;
