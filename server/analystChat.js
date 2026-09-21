@@ -3,6 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { createGeminiClient, isAiConfigured } = require('./geminiClient');
 const { getEffectiveAiConfig } = require('./settingsService');
+const { generateStructuredOutput } = require('./aiService');
 const { logInfo, logWarn, logError } = require('./logger');
 const toss = require('./tossClient');
 const tossPortfolio = require('./tossPortfolio');
@@ -112,13 +113,38 @@ const TOOL_DECLARATIONS = [
   },
 ];
 
+/**
+ * 🔴 **네이티브 function calling 을 쓰지 않는다 — 게이트웨이가 안 넘긴다.**
+ *
+ * 실측(2026-09-21): `tools: [{functionDeclarations}]` 를 실어 osh-ai-gateway 로 보냈더니
+ * **31청크가 전부 `text`** 였고 `functionCall` 파트는 **0개**였다. 모델은 도구가 있는 줄도
+ * 모르고 *"저는 사용자의 보유 종목을 확인할 수 없습니다"* 라고 답했다.
+ * (채팅으로도 같은 증상 — *"포트폴리오를 확인할게요"* 라고 **말만 하고** 아무 일도 안 일어났다.)
+ *
+ * ⇒ 이 생태계 표준대로 **프롬프트 기반**으로 간다(Probius 도 같은 이유로 그렇게 한다 —
+ *   폐쇄망·로컬 모델에도 그대로 붙는다는 부수 이점이 있다).
+ * ⚠️ 네이티브 경로는 **지우지 않는다** — `GEMINI_API_KEY` 직결이면 실제로 동작하고,
+ *    게이트웨이가 나중에 지원해도 그대로 받는다. 둘 다 받게 열어 둔다.
+ */
+function toolCatalog() {
+  return TOOL_DECLARATIONS.map((t) => {
+    const props = Object.entries(t.parameters?.properties || {})
+      .map(([k, v]) => `${k}: ${v.type}${(t.parameters.required || []).includes(k) ? ' (필수)' : ''} — ${v.description || ''}`)
+      .join(' · ');
+    return `- \`${t.name}\` — ${t.description}${props ? `\n    인자: ${props}` : '\n    인자: 없음'}`;
+  }).join('\n');
+}
+
 const SYSTEM_PROMPT = [
   '당신은 사용자의 주식 포트폴리오를 함께 보는 매수·매도 애널리스트입니다.',
   '',
-  '## 도구를 씁니다',
-  '- 추측하지 말고 **도구로 확인**합니다. 보유를 물으면 get_portfolio, 추세는 get_candles,',
-  '  최신 소식은 web_search, 예전에 한 얘기는 recall 을 씁니다.',
-  '- 도구가 실패하면 **실패했다고 말합니다.** 값을 지어내지 않습니다.',
+  '## 도구',
+  '',
+  toolCatalog(),
+  '',
+  '도구는 **시스템이 대신 실행해서 결과를 넣어 줍니다.** 당신은 도구를 부르는 글을',
+  '쓰지 않습니다 — 결과가 `[도구 결과]` 로 들어오면 그것만 근거로 답하세요.',
+  '- 도구가 실패했다고 적혀 있으면 **실패했다고 말합니다.** 값을 지어내지 않습니다.',
   '',
   '## 답하는 방식',
   '- **제공된 숫자를 인용**합니다. 근거 없는 수치는 쓰지 않습니다.',
@@ -130,6 +156,141 @@ const SYSTEM_PROMPT = [
   '## 🔴 주문은 내지 않습니다',
   '매수/매도는 **제안까지만** 합니다. 실행은 사람이 승인합니다. 당신은 주문을 넣을 수 없습니다.',
 ].join('\n');
+
+/**
+ * ── 도구 판단기 ─────────────────────────────────────────────
+ *
+ * 🔴 **왜 대화와 분리했나 — 실측 세 번의 결과다(2026-09-21).**
+ *
+ * ```
+ * ① 네이티브 function calling      게이트웨이가 안 넘긴다 (31청크 전부 text · functionCall 0)
+ * ② 프롬프트로 "JSON 만 내라"       모델이 **서술을 택한다**
+ *                                  ("포트폴리오를 조회할게요" 라고 말만 하고 끝)
+ * ③ systemInstruction 이 안 닿나?  **닿는다** (구분력 있는 지시로 확인: 양쪽 다 따랐다)
+ * ④ 스키마로 강제                  ✅ **된다** — 보유 질문→get_portfolio ·
+ *                                  "고마워"→[] · "20일선 위야?"→get_candles(005930,1d,30)
+ * ```
+ * ⇒ ②를 프롬프트로 더 밀어붙이지 않는다. 워크스페이스 규율 그대로다 —
+ *   *"프롬프트로 못 고치는 것을 프롬프트로 고치려 하지 말 것."* **구조를 바꾼다.**
+ *
+ * ⚠️ 대가: 라운드마다 **짧은 호출이 하나 더** 든다(실측 1.3~2.9초).
+ *    대신 사람에게 보이는 답은 **여전히 스트리밍**이고, 도구가 **실제로 불린다.**
+ * ★ ④ 검증에서 "고마워" 에 `[]` 가 나온 것이 중요하다 — 도구를 **안 쓸 줄도 알아야**
+ *   판단기이지, 늘 부르면 그냥 낭비다(자의 판별력을 함께 잰 것).
+ */
+const DECIDE_SCHEMA = {
+  type: 'object',
+  properties: {
+    tools: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          // ⚠️ enum 을 줘도 **키 이름은 모델이 바꾼다** — 아래 파서가 값으로 판정한다
+          name: { type: 'string', enum: TOOL_DECLARATIONS.map((d) => d.name) },
+          // ⚠️ 인자는 **JSON 문자열**로 받는다 — 도구마다 모양이 달라 한 스키마로 못 쓴다
+          argsJson: { type: 'string' },
+        },
+        required: ['name', 'argsJson'],
+      },
+    },
+  },
+  required: ['tools'],
+};
+
+function decidePrompt() {
+  return [
+    '당신은 **도구 사용 여부만** 정하는 판단기입니다. 사람에게 하는 답은 쓰지 않습니다.',
+    '',
+    '## 쓸 수 있는 도구',
+    toolCatalog(),
+    '',
+    '- 필요한 도구를 `tools` 에 담습니다. `argsJson` 은 인자를 담은 **JSON 문자열**입니다(없으면 "{}").',
+    '- 🔴 이미 정보가 충분하거나 잡담이면 `tools` 를 **빈 배열**로 둡니다. 억지로 부르지 마세요.',
+    '- 이미 `[도구 결과]` 로 받은 것을 **또 부르지 마세요.**',
+  ].join('\n');
+}
+
+/**
+ * 어떤 도구를 부를지 정한다.
+ * 🔴 실패하면 **빈 배열**을 돌려준다 — 판단기가 죽었다고 대화까지 죽이지 않는다.
+ *    다만 조용하지는 않다(로그 + 호출자가 notice 로 알린다).
+ */
+async function decideTools(transcript, injected = null) {
+  let out = injected;
+  try {
+    if (out) return shapeToolCalls(out);
+    out = await generateStructuredOutput({
+      systemPrompt: decidePrompt(),
+      userPrompt: transcript,
+      schema: DECIDE_SCHEMA,
+      logLabel: 'analyst_decide',
+      fallback: { tools: [] },
+    });
+  } catch (e) {
+    logWarn('chat.decide_failed', { message: e.message });
+    return { tools: [], error: e.message };
+  }
+  return shapeToolCalls(out);
+}
+
+/** 모델이 준 덩어리에서 도구 호출을 **모양으로** 읽어낸다(키 이름을 믿지 않는다) */
+function shapeToolCalls(out) {
+  const calls = [];
+  const known = new Set(TOOL_DECLARATIONS.map((d) => d.name));
+  /**
+   * 🔴 **같은 비대칭이 한 층 위에서 또 났다.** 4회차에 모델이 최상위 키를
+   *    `tools` → **`tool_requests`** 로 바꿔서, 아래 항목 파서를 아무리 튼튼히 해도
+   *    목록 자체가 안 잡혔다(증상은 똑같이 "도구를 안 부른다").
+   *    ⇒ 여기서도 **키가 아니라 모양**으로 찾는다 — 결과 안의 **첫 배열**이 목록이다.
+   * ★ 같은 실수를 층마다 반복했다. 규칙을 정했으면 **적용 범위를 그 자리에서 훑어야** 했다.
+   */
+  const list = Array.isArray(out)
+    ? out
+    : Array.isArray(out?.tools)
+      ? out.tools
+      : Object.values(out || {}).find(Array.isArray) || [];
+  for (const t of list) {
+    if (!t || typeof t !== 'object') continue;
+    /**
+     * 🔴 **키 이름을 열거해서는 못 이긴다 — 값으로 판정한다.**
+     *
+     * 실측(2026-09-21, 같은 스키마·같은 질문 3회): 모델이 도구 이름을
+     * **`name` · `tool` · `id`** 세 가지 키로 번갈아 줬다. `required:['name']` 도
+     * 강제되지 않는다(게이트웨이가 스키마 검증까지 하지는 않는다).
+     * 키를 더 추가하는 것은 **셸 가드 18/18 과 같은 비대칭**이다 — 나는 전부 열거해야 하고
+     * 모델은 새 이름 하나만 고르면 된다.
+     *
+     * ⇒ 뒤집는다: **어떤 키든 상관없이, 값이 우리가 아는 도구 이름이면 그것이다.**
+     *   도구 목록은 우리가 정하는 **닫힌 집합**이라 이쪽은 빠짐이 없다.
+     * ⚠️ 이걸 놓쳤을 때 증상은 **"도구를 안 부른다"** 였다 — 모델은 제대로 골랐는데
+     *    내 파서가 조용히 버렸고, 화면에는 아무 단서도 안 남았다.
+     */
+    let name = '';
+    for (const v of Object.values(t)) {
+      if (typeof v === 'string' && known.has(v.trim())) { name = v.trim(); break; }
+    }
+    if (!name) {
+      // 🔴 버려지는 경로를 조용히 두지 않는다 — 무엇을 못 읽었는지 남긴다
+      logWarn('chat.unknown_tool_shape', { item: JSON.stringify(t).slice(0, 200) });
+      continue;
+    }
+
+    // 인자도 같은 원칙 — 키가 아니라 **모양**으로 찾는다(객체이거나 JSON 문자열)
+    let args = {};
+    for (const [k, v] of Object.entries(t)) {
+      if (typeof v === 'string' && v.trim() === name) continue; // 이름 칸은 건너뛴다
+      if (v && typeof v === 'object' && !Array.isArray(v)) { args = v; break; }
+      if (typeof v === 'string' && /^\s*\{/.test(v)) {
+        try { args = JSON.parse(v); break; } catch {
+          logWarn('chat.bad_args', { name, key: k, raw: v.slice(0, 120) });
+        }
+      }
+    }
+    calls.push({ name, args: args && typeof args === 'object' ? args : {} });
+  }
+  return { tools: calls };
+}
 
 // ── 이력 (append-only) ───────────────────────────────────────
 
@@ -343,6 +504,8 @@ async function chat({ message, emit, fx = null, contextNote = '' }) {
 
   const config = {
     systemInstruction: SYSTEM_PROMPT,
+    // ⚠️ 게이트웨이는 이것을 **무시한다**(실측: functionCall 0개). 그래도 남겨 둔다 —
+    //    GEMINI_API_KEY 직결이면 네이티브로 동작하고, 위 루프가 둘 다 받는다.
     tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
     ...(runtime.includeThoughts && runtime.thinkingBudget > 0
       ? { thinkingConfig: { includeThoughts: true, thinkingBudget: runtime.thinkingBudget } }
@@ -350,46 +513,35 @@ async function chat({ message, emit, fx = null, contextNote = '' }) {
   };
 
   let answer = '';
+  /** 🔴 **도구 바퀴 수**다(응답 횟수가 아니다). 0 = 도구 없이 바로 답했다 */
   let rounds = 0;
   let toolCalls = 0;
+  let decideFailed = null;
 
+  /** 판단기에게 보여 줄 대화 사본 — 도구 결과가 쌓이면 여기에도 붙는다 */
+  const seen = [`## 사용자 발화\n${text}`];
+
+  // ── ① 도구 바퀴: **스키마로 강제된 판단기**가 정한다 ─────────
   for (let round = 1; round <= MAX_ROUNDS; round += 1) {
-    rounds = round;
-    const calls = [];
-    const modelParts = [];
-
-    const stream = await ai.models.generateContentStream({ model: runtime.model, contents, config });
-    for await (const chunk of stream) {
-      for (const part of partsOf(chunk)) {
-        if (part.functionCall) {
-          calls.push(part.functionCall);
-          modelParts.push({ functionCall: part.functionCall });
-          continue;
-        }
-        if (typeof part.text !== 'string' || !part.text) continue;
-        if (part.thought) {
-          // 🔴 사고 과정은 **답과 섞지 않는다** — 화면이 따로 접어 둘 수 있어야 한다
-          emit('thinking_delta', { text: part.text });
-        } else {
-          answer += part.text;
-          modelParts.push({ text: part.text });
-          emit('text_delta', { text: part.text });
-        }
-      }
+    const decision = await decideTools(seen.join('\n\n'));
+    if (decision.error) {
+      // 🔴 판단기가 죽어도 대화는 계속한다. 다만 **조용히** 계속하지 않는다
+      decideFailed = decision.error;
+      emit('notice', { text: `도구 판단에 실패해 도구 없이 답합니다: ${decision.error}` });
+      break;
     }
+    if (!decision.tools.length) break;
 
-    if (!calls.length) break;
-
-    // 모델이 도구를 불렀다 — 실행하고 결과를 붙여 **다시** 물어본다
-    contents.push({ role: 'model', parts: modelParts });
-    const responseParts = [];
-    for (const call of calls.slice(0, MAX_CALLS_PER_ROUND)) {
+    rounds = round;
+    contents.push({ role: 'model', parts: [{ text: '(도구 호출)' }] });
+    const resultParts = [];
+    for (const call of decision.tools.slice(0, MAX_CALLS_PER_ROUND)) {
       const callId = crypto.randomUUID().slice(0, 8);
       toolCalls += 1;
-      emit('tool_call', { id: callId, name: call.name, args: call.args || {} });
+      emit('tool_call', { id: callId, name: call.name, args: call.args });
       let result;
       try {
-        result = await runTool(call.name, call.args || {}, { fx });
+        result = await runTool(call.name, call.args, { fx });
         emit('tool_result', { id: callId, name: call.name, ok: true, preview: preview(result) });
       } catch (e) {
         // 🔴 실패도 모델에게 돌려준다. 삼키면 모델이 "받았다" 고 착각하고 지어낸다
@@ -397,9 +549,11 @@ async function chat({ message, emit, fx = null, contextNote = '' }) {
         logWarn('chat.tool_failed', { name: call.name, kind: e.kind, message: e.message });
         emit('tool_result', { id: callId, name: call.name, ok: false, error: e.message });
       }
-      responseParts.push({ functionResponse: { name: call.name, response: { result } } });
+      const line = `[도구 결과] ${call.name}(${JSON.stringify(call.args)})\n${JSON.stringify(result).slice(0, 4000)}`;
+      resultParts.push({ text: line });
+      seen.push(line);
     }
-    contents.push({ role: 'user', parts: responseParts });
+    contents.push({ role: 'user', parts: resultParts });
 
     if (round === MAX_ROUNDS) {
       // ⚠️ 상한에 걸린 것을 **조용히 넘기지 않는다** — 답이 어중간한 이유를 사람이 알아야 한다
@@ -407,9 +561,76 @@ async function chat({ message, emit, fx = null, contextNote = '' }) {
     }
   }
 
+  // ── ② 사람에게 하는 답: **여기만 스트리밍** ──────────────────
+  //    🔴 사용자 요구가 이것이다 — 이 구간이 REST 로 바뀌면 요구사항 위반이다
+  const stream = await ai.models.generateContentStream({ model: runtime.model, contents, config });
+  for await (const chunk of stream) {
+    for (const part of partsOf(chunk)) {
+      if (typeof part.text !== 'string' || !part.text) continue;
+      if (part.thought) {
+        // 사고 과정은 **답과 섞지 않는다** — 화면이 따로 접어 둘 수 있어야 한다
+        emit('thinking_delta', { text: part.text });
+      } else {
+        answer += part.text;
+        emit('text_delta', { text: part.text });
+      }
+    }
+  }
+
   appendHistory({ at: new Date().toISOString(), turnId, role: 'assistant', text: answer, toolCalls, rounds });
-  logInfo('chat.turn', { turnId, rounds, toolCalls, chars: answer.length, recalled: recalled.length, durationMs: Date.now() - startedAt });
-  return { turnId, rounds, toolCalls, chars: answer.length, recalled: recalled.length };
+  logInfo('chat.turn', {
+    turnId, rounds, toolCalls, chars: answer.length, recalled: recalled.length,
+    // ★ 도구가 **실제로 불렸다는 증거**를 지표에 함께 — 0이면 결과가 스스로 알려준다
+    decideFailed: decideFailed || null,
+    durationMs: Date.now() - startedAt,
+  });
+  return { turnId, rounds, toolCalls, chars: answer.length, recalled: recalled.length, decideFailed };
+}
+
+/**
+ * 모델이 텍스트로 낸 도구 호출을 읽는다.
+ *
+ * 받아 주는 모양 (모델은 **지시해도 흔든다** — 코드가 흡수한다):
+ * ```
+ * {"tool":"x","args":{}}            한 건
+ * [{"tool":"x"},{"tool":"y"}]       여러 건
+ * ```json { ... } ```               코드펜스로 감싼 것
+ * ```
+ * ⚠️ `name`/`tool`, `args`/`arguments`/`parameters` 를 모두 받는다 —
+ *    프롬프트로 한 가지만 쓰게 만드는 것보다 **코드가 흡수하는 쪽**이 싸다
+ *    (워크스페이스 규율: *"프롬프트로 못 고치는 것을 프롬프트로 고치려 하지 말 것"*).
+ * 🔴 **알 수 없는 도구 이름은 여기서 거르지 않는다** — `runTool` 이 이유를 담아 돌려주고
+ *    그게 모델에게 전달돼야 스스로 고친다.
+ */
+function parseToolCalls(text) {
+  let body = String(text || '').trim();
+  const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(body);
+  if (fence) body = fence[1].trim();
+
+  let data;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    // 앞뒤에 말이 섞였을 때 **첫 JSON 덩어리**만 떼어 본다
+    const m = /[[{][\s\S]*[\]}]/.exec(body);
+    if (!m) return [];
+    try {
+      data = JSON.parse(m[0]);
+    } catch {
+      return [];
+    }
+  }
+
+  const list = Array.isArray(data) ? data : [data];
+  const out = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const name = String(item.tool || item.name || '').trim();
+    if (!name) continue;
+    const args = item.args || item.arguments || item.parameters || {};
+    out.push({ name, args: typeof args === 'object' && args ? args : {} });
+  }
+  return out;
 }
 
 /** 도구 결과를 화면에 한 줄로 — 원본을 다 흘리면 채팅창이 잠긴다 */
@@ -431,6 +652,10 @@ module.exports = {
   appendHistory,
   TOOL_DECLARATIONS,
   SYSTEM_PROMPT,
+  parseToolCalls,
+  toolCatalog,
+  decideTools,
+  DECIDE_SCHEMA,
   HISTORY_FILE,
   MAX_ROUNDS,
 };

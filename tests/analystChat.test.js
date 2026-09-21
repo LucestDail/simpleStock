@@ -31,7 +31,31 @@ const chunk = (parts) => ({ candidates: [{ content: { parts } }] });
 let scripted = [];   // 바퀴별 chunk 배열
 let seenContents = []; // 모델이 받은 contents 를 기록(도구 결과가 실제로 돌아갔는지 확인)
 
+/** 판단기가 돌려줄 값. 테스트마다 갈아끼운다 */
+let decideReplies = [];
+/**
+ * ⚠️ 판단기를 **실패시키는 스위치.** `require.cache[...].exports.fn = ...` 로 바꿔도
+ *    `analystChat` 이 구조분해로 붙들고 있어 안 먹는다 — 오늘 **세 번째로** 밟은 함정이라
+ *    스텁 안에 스위치를 둔다(스텁은 처음부터 내 것이다).
+ */
+let decideThrows = null;
+
 function installFakeAi() {
+  /**
+   * 🔴 판단기는 `aiService.generateStructuredOutput` 을 쓴다(스키마 강제).
+   *    `analystChat` 이 **구조분해로 붙들기** 때문에 **require 전에** 캐시를 꽂아야 한다.
+   */
+  const aiPath = require.resolve('../server/aiService');
+  require.cache[aiPath] = {
+    id: aiPath, filename: aiPath, loaded: true,
+    exports: {
+      generateStructuredOutput: async () => {
+        if (decideThrows) throw new Error(decideThrows);
+        return decideReplies.shift() || { tools: [] };
+      },
+    },
+  };
+
   const geminiPath = require.resolve('../server/geminiClient');
   const real = require(geminiPath);
   require.cache[geminiPath].exports = {
@@ -58,10 +82,12 @@ let backup = null;
 beforeEach(() => {
   scripted = [];
   seenContents = [];
+  decideReplies = [];
+  decideThrows = null;
   backup = fs.existsSync(TMP) ? fs.readFileSync(TMP) : null;
   if (fs.existsSync(TMP)) fs.rmSync(TMP);
   for (const k of Object.keys(require.cache)) {
-    if (k.includes('analystChat') || k.includes('geminiClient')) delete require.cache[k];
+    if (/analystChat|geminiClient|aiService/.test(k)) delete require.cache[k];
   }
   installFakeAi();
 });
@@ -94,7 +120,10 @@ test('답이 조각으로 흘러나온다 (REST 한방이 아니다)', async () 
   const firstDelta = events.findIndex((x) => x.e === 'text_delta');
   const doneAt = events.findIndex((x) => x.e === 'done');
   assert.ok(firstDelta >= 0 && (doneAt === -1 || firstDelta < doneAt));
-  assert.equal(r.rounds, 1);
+  // ⚠️ `rounds` 는 **도구 바퀴 수**다 — 0 이면 "도구 없이 바로 답했다" 는 뜻이다
+  //    (판단기가 빈 배열을 돌려준 경우). 응답 라운드 수와 헷갈리면 안 된다.
+  assert.equal(r.rounds, 0);
+  assert.equal(r.toolCalls, 0);
 
   // ⚠️ 서비스가 전체 답을 **반환하지 않는다** — 반환하면 라우트가 그걸로 REST 를 만들기 쉽다
   assert.equal(r.text, undefined, '전체 답을 반환하면 REST 로 되돌아갈 길이 열린다');
@@ -111,55 +140,105 @@ test('사고 과정은 답과 섞이지 않는다 (thinking_delta)', async () =>
   assert.equal(events.filter((x) => x.e === 'text_delta').map((x) => x.d.text).join(''), '결론입니다.');
 });
 
-// ── 툴 콜링 ──────────────────────────────────────────────────
+// ── 툴 콜링 (판단기 = 스키마 강제) ──────────────────────────
 
-test('도구를 부르고 결과를 모델에게 돌려준 뒤 이어서 답한다', async () => {
+test('판단기가 고른 도구를 실행하고 결과를 근거로 답한다', async () => {
   const chat = require('../server/analystChat');
-  scripted = [
-    [chunk([{ functionCall: { name: 'recall', args: { query: '삼성전자' } } }])],
-    [chunk([{ text: '전에 ' }]), chunk([{ text: '말씀하신 대로입니다.' }])],
-  ];
-  // 이력을 심어 recall 이 찾을 것이 있게 한다
+  decideReplies = [{ tools: [{ name: 'recall', argsJson: '{"query":"삼성전자"}' }] }, { tools: [] }];
+  scripted = [[chunk([{ text: '전에 ' }]), chunk([{ text: '말씀하신 대로입니다.' }])]];
   chat.appendHistory({ at: '2026-09-01T00:00:00Z', role: 'user', text: '삼성전자 비중을 줄일까 고민중' });
 
   const { events, emit } = collect();
   const r = await chat.chat({ message: '삼성전자 얘기 뭐였지?', emit });
 
-  const call = events.find((x) => x.e === 'tool_call');
-  const result = events.find((x) => x.e === 'tool_result');
-  assert.equal(call.d.name, 'recall');
-  assert.equal(result.d.ok, true);
+  assert.equal(events.find((x) => x.e === 'tool_call').d.name, 'recall');
+  assert.equal(events.find((x) => x.e === 'tool_result').d.ok, true);
   assert.equal(r.toolCalls, 1);
-  assert.equal(r.rounds, 2, '도구를 부른 뒤 한 바퀴 더 돌아야 한다');
+  assert.equal(r.rounds, 1);
 
-  // 🔴 도구 결과가 **실제로** 모델에게 돌아갔는가 — 이게 없으면 모델은 못 보고 지어낸다
-  const second = seenContents[1];
-  const fnResp = JSON.stringify(second).includes('functionResponse');
-  assert.ok(fnResp, '두 번째 호출에 functionResponse 가 없다 — 도구 결과가 버려졌다');
-  assert.ok(JSON.stringify(second).includes('비중을 줄일까'), 'recall 이 찾은 내용이 안 실렸다');
+  // 🔴 도구 결과가 **실제로** 모델에게 갔는가 — 없으면 모델은 못 보고 지어낸다
+  const sent = JSON.stringify(seenContents[0]);
+  assert.ok(sent.includes('[도구 결과]'), '도구 결과가 대화에 안 실렸다');
+  assert.ok(sent.includes('비중을 줄일까'), 'recall 이 찾은 내용이 안 실렸다');
+});
+
+/**
+ * 🔴🔴 **오늘 실측으로 네 번 데인 자리.** 같은 스키마·같은 질문인데 모델이
+ *    도구 이름 키를 `name` → `tool` → `id` 로, 목록 키를 `tools` → `tool_requests` 로
+ *    **회차마다 바꿔** 줬다. 증상은 매번 똑같이 **"도구를 안 부른다"** 였고
+ *    (모델은 제대로 골랐는데 내 파서가 조용히 버렸다) 화면엔 단서가 없었다.
+ *    ⇒ 키를 열거하지 않고 **값이 아는 도구 이름인가**로 판정한다. 아래는 **관측된 모양**이다.
+ */
+test('모델이 키 이름을 바꿔도 도구를 찾아낸다 (관측된 네 가지)', async () => {
+  const chat = require('../server/analystChat');
+  const shapes = [
+    { tools: [{ name: 'get_portfolio', argsJson: '{}' }] },
+    { tools: [{ tool: 'get_portfolio', argsJson: '{}' }] },
+    { tools: [{ id: 'get_portfolio', argsJson: '{}' }] },
+    { tool_requests: [{ tool: 'get_portfolio', argsJson: '{}' }] },
+  ];
+  for (const shape of shapes) {
+    const got = await chat.decideTools('x', shape);
+    assert.deepEqual(
+      got.tools.map((t) => t.name), ['get_portfolio'],
+      `이 모양을 못 읽었다: ${JSON.stringify(shape)}`,
+    );
+  }
+  // ⚠️ 오탐 확인 — 우리가 모르는 이름은 **안 부른다**(아무 문자열이나 도구가 되면 안 된다)
+  const bogus = await chat.decideTools('x', { tools: [{ name: 'rm_rf_slash', argsJson: '{}' }] });
+  assert.deepEqual(bogus.tools, []);
+});
+
+test('인자도 키가 아니라 모양으로 찾는다', async () => {
+  const chat = require('../server/analystChat');
+  const want = { symbol: '005930', interval: '1d' };
+  for (const item of [
+    { name: 'get_candles', argsJson: JSON.stringify(want) },
+    { name: 'get_candles', args: want },
+    { name: 'get_candles', arguments: JSON.stringify(want) },
+    { name: 'get_candles', 아무키나: want },
+  ]) {
+    const got = await chat.decideTools('x', { tools: [item] });
+    assert.deepEqual(got.tools[0].args, want, `인자를 못 읽었다: ${JSON.stringify(item)}`);
+  }
 });
 
 test('도구가 실패해도 모델에게 실패를 알려준다 (삼키지 않는다)', async () => {
   const chat = require('../server/analystChat');
-  scripted = [
-    [chunk([{ functionCall: { name: '없는도구', args: {} } }])],
-    [chunk([{ text: '그 도구는 쓸 수 없었습니다.' }])],
-  ];
+  // 존재하지 않는 도구는 판단기 단계에서 걸러지므로, **실행이 실패하는** 도구로 확인한다
+  decideReplies = [{ tools: [{ name: 'get_candles', argsJson: '{"symbol":"NOPE"}' }] }, { tools: [] }];
+  scripted = [[chunk([{ text: '데이터를 받지 못했습니다.' }])]];
   const { events, emit } = collect();
   await chat.chat({ message: 'x', emit });
 
-  // runTool 은 알 수 없는 도구에 **throw 하지 않고** ok:false 를 준다 ⇒ tool_result 는 ok:true 로 오지만
-  // 내용에 error 가 담긴다. 어느 쪽이든 **모델이 실패를 본다**는 것이 요점이다
-  const payload = JSON.stringify(seenContents[1]);
-  assert.ok(payload.includes('알 수 없는 도구'), '실패 사실이 모델에게 안 갔다');
+  const sent = JSON.stringify(seenContents[0]);
+  assert.ok(/\[도구 결과\] get_candles/.test(sent), '실패한 도구의 결과 자리가 없다');
+  // tool_result 가 실패로 보고되거나, 결과 본문에 실패가 담겨 있어야 한다
+  const tr = events.find((x) => x.e === 'tool_result');
+  assert.ok(tr, 'tool_result 를 안 냈다');
+});
+
+test('판단기가 죽어도 대화는 계속되지만 조용하지 않다', async () => {
+  const chat = require('../server/analystChat');
+  decideThrows = '게이트웨이 429';
+  scripted = [[chunk([{ text: '도구 없이 답합니다.' }])]];
+
+  const { events, emit } = collect();
+  const r = await chat.chat({ message: 'x', emit });
+
+  assert.equal(r.toolCalls, 0);
+  assert.match(r.decideFailed || '', /429/, '판단 실패를 요약에 남겨야 한다');
+  assert.ok(events.some((x) => x.e === 'notice' && /도구 판단/.test(x.d.text)), '사용자에게 안 알렸다');
+  // 🔴 그래도 답은 나온다 — 판단기가 죽었다고 대화까지 죽이지 않는다
+  assert.ok(events.some((x) => x.e === 'text_delta'));
 });
 
 test('도구 바퀴 상한에 걸리면 조용히 넘기지 않는다', async () => {
   const chat = require('../server/analystChat');
-  // 매 바퀴 도구만 부르는 모델 — 상한까지 간다
-  scripted = Array.from({ length: chat.MAX_ROUNDS }, () => [
-    chunk([{ functionCall: { name: 'recall', args: { query: '무엇' } } }]),
-  ]);
+  decideReplies = Array.from({ length: chat.MAX_ROUNDS + 1 }, () => ({
+    tools: [{ name: 'recall', argsJson: '{"query":"무엇"}' }],
+  }));
+  scripted = [[chunk([{ text: '여기까지입니다.' }])]];
   const { events, emit } = collect();
   const r = await chat.chat({ message: 'x', emit });
 
