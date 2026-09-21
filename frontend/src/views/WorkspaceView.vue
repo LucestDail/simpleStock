@@ -173,6 +173,8 @@ async function onRefreshMarket() {
  */
 const report = ref(null);
 const proposals = ref([]);
+/** 'live' | 'dry-run' — 서버가 말하는 **실제** 모드. 화면이 지어내지 않는다 */
+const ordersMode = ref('dry-run');
 const analystLoading = ref(false);
 /**
  * 🔴 사용자: *"내부 분석시 **분석 상태 표시**"*
@@ -484,7 +486,17 @@ async function runAnalyst() {
 async function loadProposals() {
   try {
     const res = await apiFetch('/api/orders/proposals');
-    if (res.ok) proposals.value = (await res.json()).proposals || [];
+    if (res.ok) {
+      const body = await res.json();
+      proposals.value = body.proposals || [];
+      /**
+       * 🔴 **실거래인지 화면이 알아야 한다** (2026-09-22).
+       *    종전 버튼 이름이 `실행(모의)` 로 **박혀** 있었다 — 스위치를 켜는 순간
+       *    그 이름이 **거짓**이 되고, 사용자는 *"모의니까"* 하고 누른다.
+       *    ★ 오늘 밤 세 번 본 *"이름이 사실과 다른 것"* 의 가장 비싼 판본이 될 뻔했다.
+       */
+      ordersMode.value = body.status?.effective || 'dry-run';
+    }
   } catch {
     // 조용히 넘기지 않는다 — 실패하면 목록이 비는데, 그건 "제안 없음" 과 다르다
     analystError.value = '제안 목록을 불러오지 못했습니다.';
@@ -500,6 +512,22 @@ function statusLabel(p) {
 }
 
 async function decide(p, action) {
+  /**
+   * 🔴 **실거래 실행은 한 번 더 묻는다** (2026-09-22).
+   *    지금은 클릭 한 번이면 주문이 나간다. 되돌릴 수 없는 행위에 확인이 없으면
+   *    오터치가 곧 체결이다. ⚠️ 승인·거절은 되돌릴 수 있으니 안 묻는다 — **실행만** 묻는다.
+   */
+  const live = ordersMode.value === 'live';
+  if (action === 'execute' && live) {
+    const amount = (Number(p.quantity) * Number(p.price)).toLocaleString('ko-KR');
+    const ok = window.confirm(
+      `🔴 실제 주문을 냅니다 (모의 아님)\n\n`
+      + `${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주 · 지정가 ${p.price}\n`
+      + `평가금액 약 ${amount}\n\n진행할까요?`
+    );
+    if (!ok) return;
+  }
+
   try {
     const res = await apiFetch(`/api/orders/proposals/${encodeURIComponent(p.id)}/${action}`, { method: 'POST' });
     const b = await res.json().catch(() => ({}));
@@ -508,8 +536,11 @@ async function decide(p, action) {
       return;
     }
     if (action === 'execute') {
-      // ⚠️ 실제로 안 나갔다는 것을 **그대로** 말한다
-      notify({ message: b.proposal?.result?.note || '모의 실행했습니다(실제 주문 아님).', tone: 'info' });
+      // ⚠️ 서버가 말한 것을 **그대로** 옮긴다 — 화면이 모드를 추측해 문구를 지어내지 않는다
+      notify({
+        message: b.proposal?.result?.note || (live ? '전송했습니다.' : '모의 실행했습니다(실제 주문 아님).'),
+        tone: live ? 'warn' : 'info',
+      });
     }
     await loadProposals();
   } catch (e) {
@@ -1110,8 +1141,15 @@ onUnmounted(() => {
                   <button class="btn btn--sm btn--primary" @click="decide(p, 'approve')">승인</button>
                 </div>
                 <div v-else-if="p.status === 'APPROVED'" class="prop__act">
-                  <!-- ⚠️ 실행해도 실제로는 나가지 않는다(no-op). 그 사실을 버튼에 적는다 -->
-                  <button class="btn btn--sm btn--soft" @click="decide(p, 'execute')">실행(모의)</button>
+                  <!--
+                    🔴 **버튼 이름이 사실을 말한다.** 종전엔 `실행(모의)` 로 박혀 있어서
+                    스위치를 켜는 순간 이름이 거짓이 됐다. 서버가 주는 모드로 갈린다.
+                  -->
+                  <button
+                    class="btn btn--sm"
+                    :class="ordersMode === 'live' ? 'btn--danger' : 'btn--soft'"
+                    @click="decide(p, 'execute')"
+                  >{{ ordersMode === 'live' ? '🔴 실주문 전송' : '실행(모의)' }}</button>
                 </div>
                 <p v-else-if="p.result" class="prop__note">{{ p.result.note }}</p>
               </article>
@@ -1125,6 +1163,10 @@ onUnmounted(() => {
               </p>
             </div>
 
+            <!-- 🔴 실거래 모드는 **버튼을 누르기 전에** 보여야 한다 -->
+            <p v-if="ordersMode === 'live'" class="ordmode">
+              🔴 <b>실거래 모드</b> — 승인한 제안을 실행하면 <b>실제 주문</b>이 나갑니다.
+            </p>
             <div v-if="report.positions?.length" class="props">
               <h3 class="panel__h">종목 판단</h3>
               <article v-for="ps in report.positions" :key="ps.symbol" class="pos">
@@ -2386,6 +2428,11 @@ a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
 .prop__grid dd { margin: 0; font-size: var(--text-md); font-weight: 600; color: var(--color-ink); }
 .prop__why { margin: 0; font-size: var(--text-xs); color: var(--color-muted); line-height: 1.5; }
 .prop__act { display: flex; gap: 6px; justify-content: flex-end; }
+.ordmode {
+  margin: 4px 0; padding: 4px 8px; font-size: var(--text-2xs); font-weight: 700;
+  color: var(--color-down); border: 1px solid var(--color-down); border-radius: var(--rounded-xs);
+}
+.btn--danger { background: var(--color-down); color: #fff; border-color: var(--color-down); }
 .prop__note { margin: 0; font-size: var(--text-xs); color: var(--color-warn); }
 .prop__rej { margin: 0; font-size: var(--text-xs); color: var(--color-down); }
 .pos { border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }
