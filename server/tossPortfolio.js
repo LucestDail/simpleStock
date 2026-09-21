@@ -114,6 +114,22 @@ async function getHoldings({ fx = null } = {}) {
     dailyRate: ratePct(it.dailyProfitLoss?.rate),
   }));
 
+  /**
+   * 현금은 **통화별 별도 호출**이라 둘을 함께 받는다.
+   * ⚠️ 한쪽이 실패해도 다른 쪽은 쓴다 — `null` 은 "0" 이 아니라 **"못 받았다"** 로 구분한다.
+   */
+  const cash = { krw: null, usd: null, failed: [] };
+  for (const cur of ['KRW', 'USD']) {
+    try {
+      const bp = await toss.getBuyingPower(cur, { accountSeq: acc.seq });
+      cash[cur.toLowerCase()] = { raw: bp.cash.raw, amount: bp.cash.num };
+    } catch (e) {
+      cash.failed.push(cur);
+      // 🔴 조용히 넘기지 않는다 — 현금이 안 보이면 사용자는 "0 원인가" 로 읽는다
+      logWarn('toss.buying_power_failed', { currency: cur, kind: e.kind, message: e.message });
+    }
+  }
+
   const summary = {
     purchase: pair(r?.totalPurchaseAmount, fxRate),
     value: pair(r?.marketValue?.amount, fxRate),
@@ -122,6 +138,16 @@ async function getHoldings({ fx = null } = {}) {
     dailyProfit: pair(r?.dailyProfitLoss?.amount, fxRate),
     dailyRate: ratePct(r?.dailyProfitLoss?.rate),
     accountType: acc.type,
+    /**
+     * 🔴 **현금(매수 가능 금액)** — 사용자: *"내 자산에 내 현금 보유액은 안보이는데 토스에서 제공하나?"*
+     *    제공한다(`GET /api/v1/buying-power`). **우리가 안 부르고 있었다.**
+     *
+     * ⚠️ 이게 없으면 분석 프롬프트의 *"현금 여력을 넘지 않게"* 가 **지킬 수 없는 지시**다 —
+     *    모델에게 근거를 안 주고 규칙만 요구하고 있었다.
+     * ⚠️ 통화별로 따로 부른다(한 번에 둘이 안 온다) · **실패해도 보유는 돌려준다**(곁가지다).
+     * ⚠️ 금액은 **문자열**로 온다(정밀도) — 원문과 숫자를 함께 들고 간다.
+     */
+    cash,
     // 🔴 **언제·어디 환율로 계산했는지**를 값과 함께 내보낸다.
     //    없으면 "어제 환율로 계산된 금액" 을 사용자가 구분할 수 없다.
     fx: fxRate

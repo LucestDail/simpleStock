@@ -69,6 +69,13 @@ function fresh(generate) {
     id: ordPath, filename: ordPath, loaded: true,
     exports: {
       ...realOrd,
+      /**
+       * ⚠️ **계좌 검증이 새로 생겼다**(2026-09-22) — 제안은 이제 현금·판매가능수량을
+       *    통과해야 만들어진다. 스텁하지 않으면 토스가 미설정이라 `unknown` 으로 **막히고**,
+       *    그러면 이 테스트가 *"기본값인데 제안을 안 만들었다"* 로 보인다.
+       *    ★ 실패 메시지가 제품 결함처럼 읽히는 자리라 여기 적어 둔다.
+       */
+      checkAccountLimits: async () => ({ ok: true, available: '99999' }),
       propose: (o) => { proposed.push(o); return { ok: true, proposal: { id: 'p1', ...o } }; },
     },
   };

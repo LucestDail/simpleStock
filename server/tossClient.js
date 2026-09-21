@@ -480,6 +480,48 @@ async function getCandles(symbol, { interval = '1d', count = 120 } = {}) {
 }
 
 /** 투자자별 매매동향(개인·외국인·기관) */
+/**
+ * 🔴 **금액·수량은 문자열로 온다**(`decimal`, maxLength 30). 명세 확인.
+ *    `Number()` 로 바로 바꾸면 원화 큰 금액에서 정밀도가 깎이고, 미국 소수점 주식(`5.5`)도 있다.
+ *    ⇒ **원문 문자열을 같이 들고 다닌다.** 표시·비교는 문자열, 산수만 숫자로.
+ */
+function decimal(v) {
+  const raw = v == null ? null : String(v);
+  const num = raw == null || raw === '' ? null : Number(raw);
+  return { raw, num: Number.isFinite(num) ? num : null };
+}
+
+/**
+ * 매수 가능 금액(현금). **통화별로 따로 부른다** — 한 번에 둘이 오지 않는다.
+ *
+ * ⚠️ `currency` 는 **필수**다. 빼면 400 `invalid-request` + `data.field:"currency"` 가 온다
+ *    (실측으로도 확인했다 — 그 오류가 무엇이 빠졌는지 정확히 알려줘서 한 번에 찾았다).
+ * ⚠️ 명세가 *"클라이언트는 unknown enum 값을 허용하도록 구현해야 한다"* 고 적었다 ⇒
+ *    KRW/USD 로 **하드 스위치하지 않는다**(통화가 늘면 조용히 깨진다).
+ * ⚠️ 계좌를 못 찾으면 이 엔드포인트는 **404**, `sellable-quantity` 는 **400** 이다 —
+ *    **상태코드로 분기하면 한쪽이 깨진다.** 코드(`account-not-found`)로 봐야 한다.
+ */
+async function getBuyingPower(currency, { accountSeq } = {}) {
+  const c = String(currency || '').trim().toUpperCase();
+  if (!c) throw new TossError('통화를 지정해야 합니다(KRW/USD).', { kind: 'shape', path: '/api/v1/buying-power' });
+  const r = await apiGet(`/api/v1/buying-power?currency=${encodeURIComponent(c)}`, { accountSeq });
+  return { currency: r?.currency || c, cash: decimal(r?.cashBuyingPower) };
+}
+
+/**
+ * 판매 가능 수량.
+ * 🔴 **응답에 종목이 안 실린다**(`{sellableQuantity}` 하나뿐) ⇒ 요청한 심볼을 **우리가 붙인다.**
+ *    여러 종목을 병렬로 물으면 어느 답이 어느 종목인지 알 수 없기 때문이다.
+ * ⚠️ 해외주식은 **소수점 수량**이 가능하다(`"5.5"`) — 정수로 파싱하면 깨진다.
+ * ⚠️ `currency` 파라미터가 **없다** — 시장 구분은 심볼로만 된다(`buying-power` 와 모양이 다르다).
+ */
+async function getSellableQuantity(symbol, { accountSeq } = {}) {
+  const sym = String(symbol || '').trim();
+  if (!sym) throw new TossError('종목을 지정해야 합니다.', { kind: 'shape', path: '/api/v1/sellable-quantity' });
+  const r = await apiGet(`/api/v1/sellable-quantity?symbol=${encodeURIComponent(sym)}`, { accountSeq });
+  return { symbol: sym, quantity: decimal(r?.sellableQuantity) };
+}
+
 async function getInvestorTrading(symbol) {
   const r = await apiGet(`/api/v1/stocks/${encodeURIComponent(symbol)}/investor-trading`);
   return Array.isArray(r?.records) ? r.records : [];
@@ -540,6 +582,8 @@ module.exports = {
   getWarnings,
   getOrderbook,
   getCandles,
+  getBuyingPower,
+  getSellableQuantity,
   getInvestorTrading,
   getPriceLimits,
   getStockInfo,

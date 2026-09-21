@@ -457,6 +457,26 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     lines.push(
       `평가 ${fmt(summary.value?.krw, 0)}원(환산) · 평가손익률 ${fmt(summary.profitRate)}% · 당일 ${fmt(summary.dailyRate)}%`
     );
+    /**
+     * 🔴 **현금을 준다** (2026-09-22). 종전엔 프롬프트가 *"현금 여력을 넘지 않게"* 라고
+     *    지시하면서 **현금 데이터를 안 줬다** — 지킬 수 없는 규칙을 요구한 것이다.
+     * ⚠️ 못 받은 통화는 **"확인 못 함"** 이라고 쓴다. 빈칸으로 두면 모델이 0 으로 읽는다.
+     */
+    const c = summary.cash;
+    if (c) {
+      const part = (cur, v) => (v ? `${cur} ${v.raw}` : `${cur} 확인 못 함`);
+      lines.push(`현금(매수 가능): ${part('원화', c.krw)} · ${part('달러', c.usd)}`);
+      const krw = Number(c.krw?.amount || 0);
+      const usd = Number(c.usd?.amount || 0);
+      if (c.krw && c.usd && krw <= 0 && usd <= 0) {
+        // 🔴 살 돈이 없으면 **매수 제안 자체가 불가능**하다. 모델이 그걸 알아야 한다
+        lines.push('🔴 **현금이 사실상 0 입니다 — 신규 매수 제안을 내지 마세요.** 매도·보유 판단만 하세요.');
+      } else if (c.failed?.length) {
+        lines.push(`⚠️ ${c.failed.join('·')} 현금을 못 받았습니다 — **매수 수량의 근거가 없으니 제안하지 마세요.**`);
+      }
+    } else {
+      lines.push('⚠️ 현금 정보를 받지 못했습니다 — **매수 제안을 내지 마세요**(수량 근거가 없습니다).');
+    }
   } else {
     lines.push('보유 정보를 받지 못했습니다.');
   }
@@ -730,6 +750,19 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   const created = [];
   const rejected = [];
   for (const p of dryRun ? [] : (report.proposals || [])) {
+    /**
+     * 🔴 **계좌로 먼저 막는다** — 모델이 낼 수 없는 제안을 폰으로 보내면
+     *    사용자가 승인을 누르고 나서야 실패를 안다. 그건 HITL 이 아니라 헛수고다.
+     * ⚠️ 못 물어봤으면(`unknown`) **통과가 아니다** — 막고 이유를 화면에 적는다.
+     */
+    const chk = await orderService.checkAccountLimits({
+      symbol: p.symbol, side: p.side, quantity: p.quantity, price: p.price,
+    });
+    if (!chk.ok) {
+      rejected.push({ symbol: p.symbol, side: p.side, error: chk.error, kind: chk.kind });
+      logWarn('analyst.proposal_blocked', { symbol: p.symbol, side: p.side, kind: chk.kind, error: chk.error });
+      continue;
+    }
     const r = orderService.propose(
       { symbol: p.symbol, side: p.side, type: 'LIMIT', quantity: p.quantity, price: p.price, reason: p.reason },
       { source: 'analyst' }

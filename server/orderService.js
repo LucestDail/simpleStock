@@ -217,6 +217,59 @@ function num(v) {
  * ⚠️ 기본은 **보낸다** — 사용자 지시(*"승인 버튼 주고 사용자가 승인하면 진행"*)를 바꾸지 않는다.
  * ⚠️ 제안 **자체는 만들어진다.** 안 보내는 것뿐이라 승인 대기 목록에는 뜬다.
  */
+/**
+ * 🔴 **계좌로 막는다** — 프롬프트는 지시일 뿐이고 거부는 코드가 한다 (2026-09-22)
+ *
+ * 종전엔 프롬프트가 *"보유 수량과 현금 여력을 넘지 않게"* 라고 **말만** 했다.
+ * 심지어 **현금 데이터를 주지도 않았다** — 지킬 수 없는 규칙을 요구한 셈이다.
+ * ⇒ 실제 판정은 토스에 **물어서** 한다: 매수는 `buying-power`, 매도는 `sellable-quantity`.
+ *
+ * ⚠️ **`propose()` 는 동기**라 여기서 분리했다. 대신 호출자가 빠뜨리지 못하게
+ *    `orderCheckRule.test.js` 가 **`propose(` 를 부르는 파일은 이것도 부르는지** 구조로 강제한다.
+ * ⚠️ **못 물어봤으면 통과가 아니다** — 조회 실패는 `unknown` 이고, 그때는 제안을 **막는다**.
+ *    *"검사하지 않은 것" 과 "통과한 것" 을 구분하지 못하는 자를 만들지 말 것* 의 돈 버전이다.
+ * ⚠️ 금액·수량은 **문자열**로 온다(정밀도) — 비교만 숫자로 하고 표시는 원문을 쓴다.
+ */
+async function checkAccountLimits({ symbol, side, quantity, price, currency } = {}) {
+  const sym = String(symbol || '').trim();
+  const qty = Number(quantity);
+  const px = Number(price);
+  const up = String(side || '').toUpperCase();
+  if (!sym || !SIDES.has(up) || !(qty > 0)) return { ok: false, kind: 'shape', error: '종목·방향·수량이 필요합니다.' };
+
+  const toss = require('./tossClient');
+  try {
+    if (up === 'SELL') {
+      const r = await toss.getSellableQuantity(sym);
+      const have = r.quantity.num;
+      if (have == null) return { ok: false, kind: 'unknown', error: '판매 가능 수량을 확인하지 못했습니다.' };
+      if (qty > have) {
+        return { ok: false, kind: 'insufficient', error: `판매 가능 수량을 넘습니다 (요청 ${qty} > 가능 ${r.quantity.raw}).`, available: r.quantity.raw };
+      }
+      return { ok: true, available: r.quantity.raw };
+    }
+    /**
+     * 매수 — 통화를 모르면 **추측하지 않는다.** 6자리 숫자면 국내(KRW), 아니면 달러로 본다.
+     * ⚠️ 이건 심볼 모양에 기댄 판정이라, 호출자가 `currency` 를 주면 그걸 **우선**한다.
+     */
+    const cur = String(currency || (/^\d{6}$/.test(sym) ? 'KRW' : 'USD')).toUpperCase();
+    const bp = await toss.getBuyingPower(cur);
+    const cash = bp.cash.num;
+    if (cash == null) return { ok: false, kind: 'unknown', error: `${cur} 매수 가능 금액을 확인하지 못했습니다.` };
+    // ⚠️ 시장가는 가격을 모른다 — 그때는 **금액 판정을 못 한다**고 말한다(통과시키지 않는다)
+    if (!(px > 0)) return { ok: false, kind: 'unknown', error: '지정가가 없어 필요 금액을 계산할 수 없습니다.' };
+    const need = qty * px;
+    if (need > cash) {
+      return { ok: false, kind: 'insufficient', error: `현금이 부족합니다 (필요 ${need.toFixed(2)} ${cur} > 가능 ${bp.cash.raw}).`, available: bp.cash.raw, currency: cur };
+    }
+    return { ok: true, available: bp.cash.raw, currency: cur };
+  } catch (e) {
+    // 🔴 조회 실패를 **통과로 읽지 않는다**
+    logWarn('orders.account_check_failed', { symbol: sym, side: up, kind: e.kind, message: e.message });
+    return { ok: false, kind: 'unknown', error: `계좌 확인 실패: ${e.message}` };
+  }
+}
+
 function propose(input = {}, { source = 'manual', notify = true } = {}) {
   const symbol = String(input.symbol || '').trim().toUpperCase();
   const side = String(input.side || '').trim().toUpperCase();
@@ -402,6 +455,7 @@ restore();
 
 module.exports = {
   propose,
+  checkAccountLimits,
   onSettled,
   attachNotice,
   _restoreForTest: restore,

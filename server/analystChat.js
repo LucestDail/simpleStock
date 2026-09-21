@@ -521,6 +521,30 @@ async function runTool(name, args = {}, ctx = {}) {
       };
     }
     case 'propose_order': {
+      /**
+       * 🔴 **계좌로 먼저 막는다** (2026-09-22). 구조 가드가 이 경로를 찾아냈다 —
+       *    분석·라우트에는 검증을 붙였는데 **채팅 경로만 빠져 있었다.**
+       *    문이 셋인데 둘만 막으면 **안 막는 것**이고, 하필 여기가 사용자가
+       *    *"이거 사줘"* 라고 말하면 바로 제안이 만들어지는 자리다.
+       * ⚠️ 못 물어봤으면 통과가 아니다 — 모델에게 **왜 막혔는지**를 돌려줘야
+       *    "다시 시도" 대신 사용자에게 설명한다.
+       */
+      const chk = await orderService.checkAccountLimits({
+        symbol: args.symbol,
+        side: String(args.side || '').toUpperCase(),
+        quantity: args.quantity,
+        price: args.price,
+      });
+      if (!chk.ok) {
+        return {
+          ok: false,
+          error: chk.error,
+          kind: chk.kind,
+          note: chk.kind === 'unknown'
+            ? '계좌를 확인하지 못해 제안을 만들지 않았다. **추측해서 다시 시도하지 말고** 사용자에게 알려라.'
+            : '계좌 한도를 넘어 제안을 만들지 않았다. 수량을 줄이거나 사용자에게 알려라.',
+        };
+      }
       // 🔴 빈칸이 있으면 `orderService` 가 거부한다 — 승인 화면이 주문 화면이 되면 안 된다
       const r = orderService.propose(
         {

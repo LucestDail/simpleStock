@@ -586,7 +586,7 @@ app.get('/api/orders/proposals', (req, res) => {
   res.json({ status: orderService.status(), proposals: orderService.list() });
 });
 
-app.post('/api/orders/proposals', (req, res) => {
+app.post('/api/orders/proposals', async (req, res) => {
   /**
    * 🔴 `{"notify": false}` 면 **폰의 승인 버튼을 안 보낸다**(점검용).
    *    pm2 가 이 경로로 영속화를 검증하다 사용자 폰에 버튼을 보냈다 — 본인은 안 보내는 줄 알았다.
@@ -594,6 +594,12 @@ app.post('/api/orders/proposals', (req, res) => {
    *    ⚠️ 기본은 **보낸다** — 사용자 지시를 바꾸지 않는다.
    */
   const notify = req.body?.notify !== false;
+  /**
+   * 🔴 여기서도 **계좌로 막는다** — 제안을 만드는 문이 둘이면 한쪽만 막는 건 안 막는 것이다.
+   * ⚠️ `{"skipAccountCheck":true}` 로 건너뛸 수 있게 두지 **않는다** — 그런 문이 생기면 결국 쓰인다.
+   */
+  const chk = await orderService.checkAccountLimits(req.body || {});
+  if (!chk.ok) return res.status(400).json({ ok: false, error: chk.error, kind: chk.kind });
   const r = orderService.propose(req.body || {}, { source: String(req.body?.source || 'manual'), notify });
   // 빠진 값을 400 으로 돌려준다 — **승인 화면에서 채우게 두지 않는다**
   return res.status(r.ok ? 201 : 400).json(r);
