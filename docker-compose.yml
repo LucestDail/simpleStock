@@ -29,6 +29,16 @@ services:
     #    ⇒ 이름으로 고정한다. host-gateway 는 도커가 호스트 주소로 채워 준다.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # 🔴 컨테이너에서 IPv6 를 끈다 (2026-09-21)
+    #    api.telegram.org 는 A/AAAA 를 **둘 다** 주는데 이 컨테이너의 IPv6 는
+    #    바깥으로 경로가 없다(실측: ENETUNREACH). undici fetch 가 IPv6 를 잡고
+    #    **ETIMEDOUT 으로 늘어져** 텔레그램 발송이 통째로 실패했다.
+    #    ⚠️ toss·ipify 는 A 레코드만 줘서 **멀쩡했다** — 그래서 "인터넷은 되는데
+    #       텔레그램만 안 된다" 로 보였고 원인이 앱에 있는 것처럼 읽혔다.
+    #    NODE_OPTIONS=--dns-result-order=ipv4first 와 dns.setDefaultResultOrder 는
+    #    **둘 다 안 먹었다**(undici 가 자체 경로로 붙는다) — 실측으로 확인했다.
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
     environment:
       PORT: "${PORT:-50000}"
       APP_ACCESS_TOKEN: "${APP_ACCESS_TOKEN:-}"
