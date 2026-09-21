@@ -375,6 +375,11 @@ const PROSE_HINTS = [
 const PROSE_SKIP = ['confidence', '확신도', 'unverified', '확인못한', '확인못함'];
 /** ⚠️ 너무 짧은 문자열은 라벨·열거값이다(`매수`·`보수율`) — 서술로 치면 잡음이 섞인다 */
 const PROSE_MIN = 15;
+/**
+ * 모델이 **자기 총점·투자의견을 되뇐 줄**. 라이브에서 `"종합 9.2 / 10 · '강한 매수' 성격"` 이 왔다.
+ * ⚠️ 넓게 잡으면 정상 서술을 지운다 — **숫자와 등급이 함께 있는 줄**만 본다.
+ */
+const VERDICT_ECHO = /(종합|총점|overall)[^\n]{0,20}\d+(\.\d+)?\s*[/／]\s*(10|100)|\d+(\.\d+)?\s*[/／]\s*(10|100)[^\n]{0,20}(적극\s*매수|강한\s*매수|매수|중립|비중축소|매도)/;
 
 function shapeProse(out, names = []) {
   const rubric = new Map(names.map((n) => [normName(n), n]));
@@ -390,8 +395,20 @@ function shapeProse(out, names = []) {
     }
     // 숫자·불리언은 서술이 아니다
     if (typeof node !== 'string') return;
+    /**
+     * 🔴 **빈 값을 먼저 버린다** (2026-09-21 pm2 제안 — 라이브 `{ "분석": "", "서술": "…" }`).
+     *    빈 키와 내용 있는 키가 섞여 오는데, 빈 것을 먼저 만나 채택하면 **내용을 잃는다.**
+     */
     const text = node.trim();
-    if (text.length < PROSE_MIN) return;
+    if (!text || text.length < PROSE_MIN) return;
+    /**
+     * 🔴 **모델이 되뇐 총점·투자의견은 버린다** — 라이브 실측 `"종합 9.2 / 10 · '강한 매수' 성격"`.
+     *    사양이 못박았다: *"점수와 투자의견 구간이 절대 어긋나면 안 된다."*
+     *    코드가 계산한 `92점 · 적극 매수` 옆에 모델이 제멋대로 쓴 등급이 **같이 보이면**
+     *    어느 쪽이 맞는지 알 수 없다. ⚠️ 문단 전체가 아니라 **그 줄만** 버린다.
+     */
+    const kept = text.split('\n').filter((ln) => !VERDICT_ECHO.test(ln)).join('\n').trim();
+    if (!kept || kept.length < PROSE_MIN) return;
 
     const nk = normName(key);
     const rawKey = String(key || '').toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
@@ -399,14 +416,14 @@ function shapeProse(out, names = []) {
 
     // ① 채점표 항목 이름이면 **그 항목의 코멘트**다(`"강한_기업_선호_10": "…"` 모양)
     const item = rubric.get(nk);
-    if (item && !comments.has(item)) { comments.set(item, text); return; }
+    if (item && !comments.has(item)) { comments.set(item, kept); return; }
 
     // ② 힌트로 분류
     for (const [slot, hints] of PROSE_HINTS) {
-      if (hints.some((h) => nk.includes(normName(h)) || rawKey.includes(h))) { found[slot].push(text); return; }
+      if (hints.some((h) => nk.includes(normName(h)) || rawKey.includes(h))) { found[slot].push(kept); return; }
     }
     // ③ 🔴 분류 못 해도 **버리지 않는다**
-    found.interpretation.push(text);
+    found.interpretation.push(kept);
   };
   walk(out, '', 0);
 

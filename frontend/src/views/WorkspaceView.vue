@@ -1128,8 +1128,20 @@ onUnmounted(() => {
                     </tbody>
                   </table>
 
+                  <!--
+                    🔴 **서술이 들어오는 자리를 안 그리고 있었다** (2026-09-21 발견).
+                    라이브에서 `interpretation` 에 411~655자가 3/3 회차 다 도착하는데
+                    화면은 `oneLiner`·`weaknesses` 만 그려서 **사용자는 빈 칸을 봤다.**
+                    ★ "수집해 놓고 안 쓰는" 패턴 — 이 저장소에서 아홉 번째이고 이번엔 내가 했다.
+                    ⚠️ 모델이 한 덩어리로 주면 `interpretation` 에만 들어온다(그게 정상 동작이다) —
+                       그래서 **이 칸이 실제로는 주된 출력**이다.
+                  -->
                   <p v-if="rated(ps.symbol).oneLiner" class="rt__one">{{ rated(ps.symbol).oneLiner }}</p>
+                  <p v-if="rated(ps.symbol).strengths" class="rt__st">강점 · {{ rated(ps.symbol).strengths }}</p>
                   <p v-if="rated(ps.symbol).weaknesses" class="rt__wk">약점 · {{ rated(ps.symbol).weaknesses }}</p>
+                  <p v-if="rated(ps.symbol).interpretation" class="rt__int">{{ rated(ps.symbol).interpretation }}</p>
+                  <!-- 🔴 "비었다" 와 "안 물어봤다" 를 구분해 보여준다 — 부실한 평가로 오해하면 안 된다 -->
+                  <p v-if="rated(ps.symbol).proseSkipped" class="rt__why">{{ rated(ps.symbol).proseSkipped }}</p>
                   <p v-if="rated(ps.symbol).confidenceWhy" class="rt__why">{{ rated(ps.symbol).confidenceWhy }}</p>
                   <p v-if="rated(ps.symbol).unverified?.length" class="rt__why">
                     확인 못 함 · {{ rated(ps.symbol).unverified.join(' / ') }}
@@ -2319,6 +2331,9 @@ a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
 .rt__c { color: var(--color-faint); }
 .rt__one { margin: 4px 0 0; font-size: var(--text-2xs); color: var(--color-body); }
 .rt__wk { margin: 2px 0 0; font-size: var(--text-2xs); color: var(--color-warn); }
+.rt__st { margin: 2px 0 0; font-size: var(--text-2xs); color: var(--color-up); }
+/* 모델이 한 덩어리로 주면 여기로 온다 — 실제로는 이 칸이 주된 출력이다. 줄바꿈을 살린다 */
+.rt__int { margin: 4px 0 0; font-size: var(--text-2xs); color: var(--color-body); white-space: pre-wrap; line-height: 1.45; }
 .rt__why { margin: 2px 0 0; font-size: var(--text-2xs); color: var(--color-faint); }
 .gaps { border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }
 
