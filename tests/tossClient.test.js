@@ -297,3 +297,20 @@ test('🔴 표시되는 provider 가 **실제로 쓰는 것**을 따라간다 (2
   settings.updateSettings({ market: { krProvider: null, usProvider: null } });
   assert.notEqual(mds.getMarketProviderConfig().providers.kr, 'toss');
 });
+
+test('저장 스냅샷에도 providerDefault 가 실린다 (화면은 스냅샷을 본다)', async () => {
+  /*
+   * 2026-09-21: getMarketProviderConfig() 에만 넣고 **스냅샷에 안 실어서**
+   * /api/market/status 에서 null 이었다. 설정 객체와 화면이 보는 객체가 **다르다** —
+   * 한쪽에만 넣으면 "넣었는데 안 보인다" 가 된다.
+   */
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'marketDataService.js'), 'utf8');
+  const snapshotBlock = src.slice(src.indexOf('store.memory.market = {'), src.indexOf('store.memory.market = {') + 900);
+  assert.ok(
+    /providerDefault:/.test(snapshotBlock),
+    '저장 스냅샷에 providerDefault 가 없다 — 설정 조회에만 있으면 화면에서는 null 이다'
+  );
+  assert.ok(/providers:/.test(snapshotBlock), '스냅샷에 providers 가 없다');
+});

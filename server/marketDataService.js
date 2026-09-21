@@ -944,6 +944,11 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
         // 표시·기록 모두 **이번 갱신에 실제로 쓴** 프로바이더여야 한다(위 주석 참고)
         provider: activeProviders.kr || activeProviders.us || DEFAULT_PROVIDER,
         providers: activeProviders,
+        // ⚠️ 2026-09-21: 이 줄을 빠뜨려 `/api/market/status` 에서 null 이었다.
+        //    getMarketProviderConfig() 에만 넣고 **저장 스냅샷에 안 실은 것** —
+        //    스냅샷은 memory.market 을 그대로 내보내므로 여기 없으면 화면에도 없다.
+        //    "무엇이 덮였는가" 를 보여 주려고 만든 필드인데 정작 화면에서 안 보였다.
+        providerDefault: DEFAULT_PROVIDER,
         refreshStatus: errors.length && !Object.keys(nextQuotes).length && !nextFx ? 'error' : 'ready',
         lastRefreshAt: refreshedAt,
         lastSuccessAt:
