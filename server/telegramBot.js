@@ -117,6 +117,21 @@ async function clearProposalButtons(p, why = '') {
   return { ok: true };
 }
 
+/**
+ * 버튼을 **다른 버튼으로 바꾼다**(제거가 아니라 교체).
+ * 🔴 실거래 실행 확인에 쓴다 — 폰 오터치가 곧 체결이 되지 않게 **두 번 탭**으로 만든다.
+ */
+async function replaceButtons(chatId, messageId, text, buttons) {
+  try {
+    await api('editMessageReplyMarkup', {
+      chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: buttons },
+    });
+    if (text) await api('sendMessage', { chat_id: chatId, text });
+  } catch (e) {
+    logWarn('tgbot.replace_failed', { message: e.message });
+  }
+}
+
 async function stripButtons(chatId, messageId, suffix) {
   try {
     await api('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
@@ -140,12 +155,49 @@ async function handleCallback(cb) {
   }
 
   const data = String(cb?.data || '');
-  const m = /^(ok|no):(.+)$/.exec(data);
+  const m = /^(ok|no|go):(.+)$/.exec(data);
   if (!m) {
     await answer(cb.id, '알 수 없는 버튼입니다.');
     return { ok: false, reason: 'bad_data' };
   }
   const [, verb, id] = m;
+
+  /**
+   * 🔴 **`go` = 실제 전송** (2026-09-22 사용자 지시: *"폰 승인도 실행까지 연결해"*)
+   *
+   * ⚠️ 승인(`ok`)과 **한 탭 떼어 놓았다.** 폰 버튼은 알림을 넘기다 눌리기 쉽고,
+   *    이 경로는 **되돌릴 수 없다**(체결되면 끝이다). 화면 쪽에도 같은 확인을 넣었으니
+   *    두 경로가 **같은 규율**을 갖는다.
+   * ⚠️ 그래도 두 번째 탭은 **폰에서 끝난다** — 자리를 옮길 필요는 없다.
+   */
+  if (verb === 'go') {
+    const ex = await orderService.execute(id);
+    if (ex.unknown) {
+      // 🔴 "실패" 가 아니라 "모름" 이다 — 다시 누르면 두 번 살 수 있다
+      await answer(cb.id, '전송했으나 응답을 못 받았습니다');
+      await stripButtons(cb.message.chat.id, cb.message.message_id,
+        '⚠️ **보냈는데 응답을 못 받았습니다.**\n다시 누르지 마세요 — 주문 조회로 확정합니다.');
+      logWarn('tgbot.execute_unknown', { id });
+      return { ok: false, reason: 'unknown' };
+    }
+    if (!ex.ok) {
+      await answer(cb.id, ex.error || '전송 실패');
+      await stripButtons(cb.message.chat.id, cb.message.message_id, `🔴 전송 실패 — ${ex.error}`);
+      return { ok: false, reason: 'execute_failed', error: ex.error };
+    }
+    const sent = ex.proposal;
+    await answer(cb.id, ex.dryRun ? '모의 실행했습니다' : '전송했습니다');
+    await stripButtons(cb.message.chat.id, cb.message.message_id,
+      ex.dryRun
+        ? `⚠️ 모의 실행 — 실제 주문은 나가지 않았습니다(${sent.symbol}).`
+        : `🔴 **주문을 보냈습니다** — ${sent.side === 'BUY' ? '매수' : '매도'} ${sent.symbol} ${sent.quantity}주 @ ${sent.price}\n`
+          + `주문번호 ${String(ex.orderId || '').slice(0, 12)}…\n`
+          + `⚠️ **접수**입니다. 체결 여부는 화면에서 확인하세요.`);
+    activity.record('execution', `주문 전송 — ${sent.symbol} ${sent.quantity}주 (텔레그램)`,
+      { proposalId: id, symbol: sent.symbol, orderId: ex.orderId || null, dryRun: Boolean(ex.dryRun) });
+    logInfo('tgbot.executed', { id, orderId: ex.orderId || null, dryRun: Boolean(ex.dryRun) });
+    return { ok: true, verb, id, orderId: ex.orderId || null };
+  }
 
   const r = verb === 'ok' ? orderService.approve(id) : orderService.reject(id, 'telegram');
   if (!r.ok) {
@@ -155,14 +207,33 @@ async function handleCallback(cb) {
   }
 
   const p = r.proposal;
-  // 🔴 **승인은 실행이 아니다.** 그 사실을 사용자에게 그대로 말한다 —
-  //    "승인했으니 샀겠지" 로 오해하면 그게 제일 위험하다.
-  const note = verb === 'ok'
-    ? `✅ 승인됨 — ${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주\n`
-      + `${orderService.status().effective === 'live' ? '주문을 보냅니다.' : '⚠️ 실거래는 꺼져 있어 실제 주문은 나가지 않습니다.'}`
-    : `✖️ 취소됨 — ${p.symbol}`;
+  const live = orderService.status().effective === 'live';
 
-  await answer(cb.id, verb === 'ok' ? '승인했습니다' : '취소했습니다');
+  if (verb === 'ok') {
+    /**
+     * 🔴 종전 문구가 *"주문을 보냅니다"* 였는데 **아무것도 안 보냈다.**
+     *    승인은 승인일 뿐이고 실행을 부르는 곳이 없었다 — 또 *"말과 사실이 다른 것"* 이다.
+     *    이제 실제로 보낼 수 있으니, **보내기 전에 한 번 더 묻는다.**
+     */
+    const amount = (Number(p.quantity) * Number(p.price)).toLocaleString('ko-KR');
+    await answer(cb.id, '승인했습니다');
+    await replaceButtons(cb.message.chat.id, cb.message.message_id,
+      live
+        ? `✅ 승인됨 — ${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주 @ ${p.price}\n`
+          + `평가금액 약 ${amount}\n\n🔴 **아직 안 보냈습니다.** 아래 «전송» 을 눌러야 실제 주문이 나갑니다.`
+        : `✅ 승인됨 — ${p.symbol}\n⚠️ 실거래가 꺼져 있어 «전송» 을 눌러도 실제 주문은 나가지 않습니다.`,
+      [[
+        { text: live ? '🔴 전송(실주문)' : '전송(모의)', callback_data: `go:${p.id}` },
+        { text: '✖️ 취소', callback_data: `no:${p.id}` },
+      ]]);
+    logInfo('tgbot.callback', { verb, id, symbol: p.symbol, live });
+    activity.record('approval', `승인 — ${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주 (텔레그램)`,
+      { proposalId: p.id, symbol: p.symbol, via: 'telegram' });
+    return { ok: true, verb, id, awaitingSend: true };
+  }
+
+  const note = `✖️ 취소됨 — ${p.symbol}`;
+  await answer(cb.id, '취소했습니다');
   await stripButtons(cb.message.chat.id, cb.message.message_id, note);
   logInfo('tgbot.callback', { verb, id, symbol: p.symbol });
   activity.record(verb === 'ok' ? 'approval' : 'rejection',
