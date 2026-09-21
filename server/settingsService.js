@@ -124,6 +124,12 @@ const DASHBOARD_DEFAULTS = Object.freeze({
    *    ★ 같은 항목을 **두 곳에** 적어야 하는 구조라 한쪽을 빠뜨리기 쉽다.
    */
   targets: null,
+  /**
+   * 한 건에 걸 수 있는 **최대 손실 비율**(계좌 평가액 대비 %).
+   * 🔴 **사용자가 정한다** — 내가 정하면 그 수량은 근거 없는 숫자다.
+   *    비어 있으면 손익비는 내되 **수량은 계산하지 않는다**(0 으로 두면 "위험 없음" 처럼 보인다).
+   */
+  riskPerTradePct: 2,
 });
 
 /**
@@ -153,6 +159,7 @@ function normalizeDashboard(d) {
      *    사용자가 그 종목 화면에서 보는 단위로 적는 것이 자연스럽고,
      *    환산해 두면 환율이 움직일 때 기준선이 **조용히 이동한다**.
      */
+    riskPerTradePct: n(d?.riskPerTradePct, 0.1, 20),
     targets: (() => {
       const t = d?.targets;
       if (!t || typeof t !== 'object') return null;

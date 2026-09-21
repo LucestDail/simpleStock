@@ -103,7 +103,10 @@ const THEME_PRESETS = [
       { symbol: 'JPM', name: 'JPMorgan', market: 'US' },
       { symbol: 'BAC', name: 'Bank of America', market: 'US' },
       { symbol: 'GS', name: 'Goldman Sachs', market: 'US' },
-      { symbol: 'BRK-B', name: 'Berkshire Hathaway B', market: 'US' },
+      // 🔴 `BRK-B` 제거(2026-09-21 사용자 결정) — **토스가 이 티커를 모른다**(quote null).
+      //    야후는 안다(509.77). 폴백을 새로 놓는 대신 목록에서 뺐다.
+      //    ⚠️ 이미 라이브 데이터에 들어간 것은 **코드로 안 지워진다**(프리셋은 add 만 한다) — pm2 가 따로 지웠다.
+      { symbol: 'AXP', name: 'American Express', market: 'US' },
       { symbol: 'V', name: 'Visa', market: 'US' },
     ],
   },

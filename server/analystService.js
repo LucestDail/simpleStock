@@ -55,6 +55,12 @@ const REPORT_SCHEMA = {
           rationale: { type: 'string' },
           evidence: { type: 'array', items: { type: 'string' } },
           risk: { type: 'string' },
+          // 🔴 **레벨만** 모델이 정한다 — 손익비·수량은 코드가 계산한다(모델은 산수를 틀린다)
+          entry: { type: 'number' },
+          stop: { type: 'number' },
+          target: { type: 'number' },
+          scenarioUp: { type: 'string' },
+          scenarioDown: { type: 'string' },
         },
         required: ['symbol', 'stance', 'confidence', 'rationale', 'evidence', 'risk'],
       },
@@ -96,6 +102,17 @@ const SYSTEM_PROMPT = [
   '- quantity 는 **보유 수량과 현금 여력을 넘지 않게** 합니다. 매도는 보유 수량 이내입니다.',
   '- price 는 지정가입니다. 현재가에서 **터무니없이 먼 값을 쓰지 않습니다**.',
   '- 🔴 이 제안은 **사람이 승인해야만** 실행됩니다. 당신은 실행하지 않습니다.',
+  '',
+  '## 손익비 · 손절 · 시나리오 (2026-09-21 추가)',
+  '각 종목 판단에 아래를 **숫자로** 답하세요. 없는 데이터를 지어내지 말고, 제공된',
+  '현재가·20/60일선·최근 20일 스윙 고저·일간 변동성(volPct)·하루 폭(atrPct) 안에서 정하세요.',
+  '- `entry`  지금 들어간다면(또는 이미 보유면 현재가 기준) 기준이 되는 가격',
+  '- `stop`   🔴 **여기가 깨지면 판단이 틀린 것**이라는 가격. 스윙 저점·이동평균처럼',
+  '           **차트에 근거가 있는 자리**로 잡으세요. "10% 아래" 같은 임의값은 쓰지 마세요.',
+  '- `target` 도달하면 판단이 맞은 것이라는 가격(스윙 고점·전고점 등)',
+  '- `scenarioUp` / `scenarioDown` 각각 **한 문장** — 그 방향이 될 때 먼저 보이는 신호',
+  '⚠️ **손익비와 수량은 계산하지 마세요.** 시스템이 계산합니다 — 당신은 레벨만 정합니다.',
+  '⚠️ 매도 판단이면 `stop` 은 현재가 **위**입니다(반등하면 판단이 틀린 것).',
 ].join('\n');
 
 /**
@@ -154,9 +171,18 @@ function asPosition(o) {
   }
   symbol = pickString(o, ['symbol', 'ticker', 'code', 'stock']);
   if (!stance) return null;
+  const num = (names) => {
+    for (const n of names) { const v = Number(o?.[n]); if (Number.isFinite(v) && v > 0) return v; }
+    return null;
+  };
   return {
     symbol: symbol || '(종목 미상)',
     stance,
+    entry: num(['entry', 'entryPrice', 'basePrice']),
+    stop: num(['stop', 'stopLoss', 'stopPrice']),
+    target: num(['target', 'targetPrice', 'takeProfit']),
+    scenarioUp: pickString(o, ['scenarioUp', 'upside', 'bullCase']),
+    scenarioDown: pickString(o, ['scenarioDown', 'downside', 'bearCase']),
     confidence: (pickString(o, ['confidence', 'stanceConfidence', 'conviction']) || 'LOW').toUpperCase(),
     rationale: pickString(o, ['rationale', 'reason', 'why', 'comment']) || longestProse(o, new Set(['symbol'])),
     evidence: Array.isArray(o.evidence) ? o.evidence : [],
@@ -217,18 +243,45 @@ function fmt(n, d = 2) {
   return n == null ? '-' : Number(n).toFixed(d);
 }
 
-/** 일봉에서 **계산으로 확인 가능한** 것만 뽑는다(모델이 추정하지 않게) */
+/**
+ * 일봉에서 **계산으로 확인 가능한** 것만 뽑는다(모델이 추정하지 않게).
+ *
+ * 🔴 2026-09-21 추가: **변동성과 스윙 레벨**. 손절 위치를 "감" 으로 잡지 않으려면
+ *    그 종목이 하루에 얼마나 움직이는지가 있어야 한다.
+ *    · `volPct`  일간 수익률 표준편차(%) — 평소 흔들림
+ *    · `atrPct`  (고가-저가)/종가 평균(%) — 하루 폭
+ *    · `swingLow/High` 최근 20일 최저/최고 — 손절·목표의 **자연스러운 자리**
+ * ⚠️ 표본이 적으면 변동성이 **거짓말한다** ⇒ 20개 미만이면 null 로 둔다(0 이 아니다).
+ */
 function summarizeCandles(rows) {
   if (!rows || rows.length < 20) return null;
   const closes = rows.map((r) => r.c).filter(Number.isFinite);
+  if (closes.length < 20) return null;
   const last = closes[closes.length - 1];
   const ma = (n) => {
     if (closes.length < n) return null;
-    const s = closes.slice(-n).reduce((a, b) => a + b, 0);
-    return s / n;
+    return closes.slice(-n).reduce((a, b) => a + b, 0) / n;
   };
   const hi = Math.max(...closes);
   const lo = Math.min(...closes);
+
+  // 일간 수익률 표준편차
+  const rets = [];
+  for (let i = 1; i < closes.length; i += 1) {
+    if (closes[i - 1] > 0) rets.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+  }
+  const mean = rets.reduce((a, b) => a + b, 0) / (rets.length || 1);
+  const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / (rets.length || 1);
+  const volPct = rets.length >= 19 ? Math.sqrt(variance) * 100 : null;
+
+  // 하루 폭(ATR 대용) — 고·저가가 있는 봉만 쓴다
+  const ranges = rows
+    .filter((r) => Number.isFinite(r.h) && Number.isFinite(r.l) && Number.isFinite(r.c) && r.c > 0)
+    .slice(-20)
+    .map((r) => ((r.h - r.l) / r.c) * 100);
+  const atrPct = ranges.length >= 10 ? ranges.reduce((a, b) => a + b, 0) / ranges.length : null;
+
+  const win = closes.slice(-20);
   return {
     last,
     ma20: ma(20),
@@ -237,15 +290,60 @@ function summarizeCandles(rows) {
     low: lo,
     fromHighPct: hi ? ((last - hi) / hi) * 100 : null,
     fromLowPct: lo ? ((last - lo) / lo) * 100 : null,
+    volPct,
+    atrPct,
+    swingLow: Math.min(...win),
+    swingHigh: Math.max(...win),
     bars: closes.length,
   };
 }
 
 /**
+ * 🔴 **산수는 코드가 한다.** 모델은 *어디가 손절이고 어디가 목표인가* 를 판단하고,
+ *    손익비·수량은 **여기서** 계산한다 — 모델에게 곱셈·나눗셈을 시키면 틀린다
+ *    (오늘 내내 본 "그럴듯한 숫자" 의 가장 흔한 출처다).
+ *
+ * 손익비(R/R) = (목표 − 진입) / (진입 − 손절)   ※ 매도는 부호를 뒤집는다
+ * 수량        = floor(위험예산 / 주당 위험액)
+ *   · 위험예산 = 계좌 평가액 × `riskPerTradePct`  ← **사용자가 정한다**(내가 정하지 않는다)
+ *
+ * ⚠️ 손절이 진입과 **같거나 반대편**이면 계산 불가다 — 0 으로 두지 않고 `null` 과 이유를 남긴다.
+ */
+function computeTrade({ side, entry, stop, target, riskBudget }) {
+  const e = Number(entry);
+  const s2 = Number(stop);
+  const t = Number(target);
+  if (!Number.isFinite(e) || e <= 0) return { error: '진입가 없음' };
+  if (!Number.isFinite(s2) || s2 <= 0) return { error: '손절가 없음' };
+
+  const isBuy = String(side).toUpperCase() !== 'SELL';
+  const perShareRisk = isBuy ? e - s2 : s2 - e;
+  if (!(perShareRisk > 0)) {
+    // 🔴 매수인데 손절이 진입 위에 있으면 **방향이 뒤집힌 것**이다. 조용히 넘기면 수량이 음수가 된다
+    return { error: `손절 위치가 방향과 맞지 않습니다(${isBuy ? '매수' : '매도'}인데 손절 ${s2} / 진입 ${e})` };
+  }
+
+  const out = { perShareRisk: round2(perShareRisk), riskPct: round2((perShareRisk / e) * 100) };
+  if (Number.isFinite(t) && t > 0) {
+    const reward = isBuy ? t - e : e - t;
+    out.rr = reward > 0 ? round2(reward / perShareRisk) : null;
+    if (out.rr === null) out.rrNote = '목표가가 진입 대비 이익 방향이 아닙니다';
+  }
+  if (Number.isFinite(riskBudget) && riskBudget > 0) {
+    out.riskBudget = Math.round(riskBudget);
+    out.sizedQuantity = Math.floor(riskBudget / perShareRisk);
+    if (out.sizedQuantity < 1) out.sizeNote = '위험예산이 1주 위험액보다 작습니다';
+  }
+  return out;
+}
+
+const round2 = (n) => Math.round(Number(n) * 100) / 100;
+
+/**
  * 리포트를 만든다. 실패해도 **부분 결과를 돌려준다**(조각 실패를 전체 실패로 만들지 않는다).
  * @param {object} dash `/api/dashboard` 결과
  */
-async function analyze(dash, { userInstruction = '', useWebSearch = true } = {}) {
+async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = null } = {}) {
   const items = dash?.portfolio?.items || [];
   const summary = dash?.portfolio?.summary || null;
 
@@ -291,7 +389,11 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true } = {})
       `- ${h.name}(${h.symbol}/${h.market}) 수량 ${h.quantity} · 평단 ${fmt(h.avgPrice)} · 현재 ${fmt(h.lastPrice)} ` +
         `· 평가손익 ${fmt(h.profitRate)}% · 당일 ${fmt(h.dailyRate)}%` +
         (t
-          ? ` · 20일선 ${fmt(t.ma20)} · 60일선 ${fmt(t.ma60)} · ${t.bars}일 고점대비 ${fmt(t.fromHighPct)}% · 저점대비 ${fmt(t.fromLowPct)}%`
+          ? ` · 20일선 ${fmt(t.ma20)} · 60일선 ${fmt(t.ma60)}`
+            + ` · ${t.bars}일 고점대비 ${fmt(t.fromHighPct)}% · 저점대비 ${fmt(t.fromLowPct)}%`
+            + ` · 최근20일 스윙 ${fmt(t.swingLow)}~${fmt(t.swingHigh)}`
+            + (t.volPct != null ? ` · 일간변동성 ${fmt(t.volPct)}%` : '')
+            + (t.atrPct != null ? ` · 하루폭 ${fmt(t.atrPct)}%` : '')
           : ' · (일봉 없음)')
     );
   }
@@ -364,6 +466,28 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true } = {})
     if (r.ok) created.push(r.proposal);
     // 🔴 버려진 제안을 조용히 넘기지 않는다 — 왜 안 만들어졌는지 화면이 알아야 한다
     else rejected.push({ symbol: p.symbol, side: p.side, error: r.error, missing: r.missing });
+  }
+
+  /**
+   * 🔴 **산수는 코드가 한다.** 모델이 준 레벨로 손익비·수량을 여기서 계산해 붙인다.
+   *    ⚠️ 위험예산은 **사용자가 정한 비율**에서 나온다 — 내가 임의로 정하지 않는다.
+   *       설정이 없으면 계산을 **안 한다**(0 으로 두면 "위험 없음" 처럼 보인다).
+   */
+  const riskPct = Number(getDashboardSettings().riskPerTradePct);
+  const accountKrw = Number(summary?.value?.krw) || 0;
+  for (const ps of report.positions) {
+    if (!ps.entry || !ps.stop) continue;
+    // ⚠️ 계좌는 원화, 종목은 달러일 수 있다 — 통화가 섞이면 수량이 엉뚱해진다.
+    //    보유 종목의 통화를 찾아 **같은 통화로** 예산을 환산한다.
+    const held = items.find((h) => String(h.symbol).toUpperCase() === String(ps.symbol).toUpperCase());
+    const fxRate = Number(fx?.rate) || 0;
+    let budget = null;
+    if (Number.isFinite(riskPct) && riskPct > 0 && accountKrw > 0) {
+      const krwBudget = accountKrw * (riskPct / 100);
+      budget = held?.currency === 'USD' ? (fxRate > 0 ? krwBudget / fxRate : null) : krwBudget;
+    }
+    const calc = computeTrade({ side: ps.stance, entry: ps.entry, stop: ps.stop, target: ps.target, riskBudget: budget });
+    ps.trade = { ...calc, currency: held?.currency || null };
   }
 
   // 🔴 웹검색 실패를 **코드가** dataGaps 에 적는다 — 모델에게 맡기면 빠뜨린다.
@@ -460,4 +584,4 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true } = {})
   };
 }
 
-module.exports = { analyze, summarizeCandles, shapeReport, REPORT_SCHEMA, SYSTEM_PROMPT };
+module.exports = { analyze, summarizeCandles, shapeReport, computeTrade, REPORT_SCHEMA, SYSTEM_PROMPT };

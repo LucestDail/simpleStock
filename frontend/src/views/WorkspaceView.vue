@@ -1045,8 +1045,29 @@ onUnmounted(() => {
                   <b>{{ ps.symbol }}</b>
                   <span class="pos__stance" :class="`pos--${ps.stance.toLowerCase()}`">{{ ps.stance }}</span>
                   <span class="pos__conf">{{ ps.confidence }}</span>
+                  <!--
+                    🔴 손익비는 **코드가 계산**한 값이다(모델이 아니라).
+                    ⚠️ 계산이 안 된 이유가 있으면 그걸 보여준다 — 빈칸은 "위험 없음" 으로 읽힌다.
+                  -->
+                  <span v-if="ps.trade?.rr" class="pos__rr">R/R {{ ps.trade.rr }}</span>
+                  <span v-else-if="ps.trade?.error || ps.trade?.rrNote" class="pos__rrbad">
+                    {{ ps.trade.error || ps.trade.rrNote }}
+                  </span>
                 </header>
                 <p>{{ ps.rationale }}</p>
+
+                <dl v-if="ps.entry || ps.stop || ps.target" class="pos__lv">
+                  <div v-if="ps.entry"><dt>진입</dt><dd class="mono-num">{{ ps.entry }}</dd></div>
+                  <div v-if="ps.stop"><dt>손절</dt><dd class="mono-num">{{ ps.stop }}</dd></div>
+                  <div v-if="ps.target"><dt>목표</dt><dd class="mono-num">{{ ps.target }}</dd></div>
+                  <div v-if="ps.trade?.sizedQuantity != null">
+                    <dt>수량</dt><dd class="mono-num">{{ ps.trade.sizedQuantity }}주</dd>
+                  </div>
+                </dl>
+                <p v-if="ps.trade?.sizeNote" class="pos__rrbad">{{ ps.trade.sizeNote }}</p>
+                <p v-if="ps.scenarioUp" class="pos__sc pos__sc--up">▲ {{ ps.scenarioUp }}</p>
+                <p v-if="ps.scenarioDown" class="pos__sc pos__sc--dn">▼ {{ ps.scenarioDown }}</p>
+
                 <ul><li v-for="(e, i) in ps.evidence" :key="i">{{ e }}</li></ul>
                 <p class="pos__risk">⚠ {{ ps.risk }}</p>
               </article>

@@ -177,6 +177,8 @@ app.post('/api/analyst/run', async (req, res) => {
     const report = await analyst.analyze(dash, {
       userInstruction: settings.briefingPrompt,
       useWebSearch,
+      // ⚠️ 계좌는 원화, 종목은 달러일 수 있다 — 수량 계산에 환율이 필요하다
+      fx: rate ? { rate } : null,
     });
     return res.json({ ...report, dashFailed: dash.failedCount, parts: dash.parts });
   } catch (error) {
@@ -196,6 +198,7 @@ app.post('/api/watchlist/presets', async (req, res) => {
   const added = [];
   const skipped = [];
   const failedTickers = [];
+  const quoteless = [];
   try {
     for (const preset of THEME_PRESETS) {
       const state = getWatchlistState();
@@ -213,13 +216,27 @@ app.post('/api/watchlist/presets', async (req, res) => {
           failedTickers.push(`${preset.name}/${t.symbol}: ${e.message}`);
         }
       }
+      /**
+       * 🔴 **"추가됐다" 와 "시세가 붙었다" 는 다르다** (2026-09-21 실측).
+       *    `BRK-B` 는 추가는 됐는데 토스가 티커를 몰라 `quote: null` 이었고,
+       *    `failedTickers: 0` 이라 **전부 성공한 것처럼** 보였다.
+       *    ★ *"대상이 0건인가" 가 아니라 "재려던 것이 대상에 들었나"* — 여기서 또 걸렸다.
+       * ⚠️ 시세는 비동기로 채워지므로 **지금 null 이라고 죽은 티커는 아니다** ⇒ 실패가 아니라
+       *    `quoteless` 로 따로 보고한다(사람이 보고 판단할 수 있게).
+       */
+      const after = (getWatchlistState().groups || []).find((x) => x.id === gid);
+      for (const t of after?.tickers || []) {
+        if (!t.quote) quoteless.push(`${preset.name}/${t.symbol}`);
+      }
       added.push(preset.name);
     }
-    logInfo('watchlist.presets', { added: added.length, skipped: skipped.length, failed: failedTickers.length });
-    return res.json({ ok: true, added, skipped, failedTickers });
+    logInfo('watchlist.presets', {
+      added: added.length, skipped: skipped.length, failed: failedTickers.length, quoteless: quoteless.length,
+    });
+    return res.json({ ok: true, added, skipped, failedTickers, quoteless });
   } catch (e) {
     logError('watchlist.presets_failed', e, { requestId: req.requestId });
-    return res.status(500).json({ error: e.message, added, skipped, failedTickers });
+    return res.status(500).json({ error: e.message, added, skipped, failedTickers, quoteless });
   }
 });
 
@@ -915,7 +932,7 @@ async function startAiSchedule() {
           rankingTypes: st.rankingTypes,
           rankingCountries: st.rankingCountries,
         });
-        const r = await analyst.analyze(dash, { userInstruction: st.briefingPrompt });
+        const r = await analyst.analyze(dash, { userInstruction: st.briefingPrompt, fx: rate ? { rate } : null });
         logInfo('analyst.auto', { positions: r.positions?.length || 0, created: r.created?.length || 0 });
       } catch (e) {
         // 자동 실행이 실패해도 앱은 돈다. 다만 **조용하지 않다**
