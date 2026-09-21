@@ -15,12 +15,9 @@ export function apiUrl(path) {
 
 export function getAccessToken() {
   try {
-    const injected =
-      typeof window !== 'undefined' && window.__SIMPLESTOCK_ACCESS_TOKEN__
-        ? String(window.__SIMPLESTOCK_ACCESS_TOKEN__)
-        : '';
+    // 🔴 2026-09-21: window.__SIMPLESTOCK_ACCESS_TOKEN__ 주입을 없앴다(서버가 더 안 심는다).
+    //    이제 토큰은 **로그인 1회 교환용**이고, 그 뒤에는 httpOnly 쿠키가 인증을 맡는다.
     return (
-      injected ||
       sessionStorage.getItem(STORAGE_KEY) ||
       import.meta.env.VITE_ACCESS_TOKEN ||
       ''
@@ -55,6 +52,8 @@ export function bootstrapAccessTokenFromUrl() {
 
 function withAuthHeaders(options = {}) {
   const headers = new Headers(options.headers || {});
+  // ⚠️ 쿠키 세션이 주 경로다. same-origin 이라도 명시해 둔다(프록시/서브패스에서 빠지는 일이 있다).
+  options = { credentials: 'same-origin', ...options };
   const token = getAccessToken();
   // 앱 토큰은 X-Access-Token 으로 전송(Authorization 은 게이트웨이 HTTP Basic 인증용으로 비움).
   // 외부(게이트웨이 Basic) 접근 시 브라우저가 Authorization: Basic 을 자동 첨부하므로,
@@ -93,4 +92,38 @@ export function apiStreamUrl(path = '/api/stream') {
   const token = getAccessToken();
   if (token) url.searchParams.set('token', token);
   return url.toString();
+}
+
+/**
+ * 토큰을 **한 번** 제출해 httpOnly 쿠키로 바꾼다.
+ * 성공하면 sessionStorage 의 토큰을 지운다 — 토큰이 브라우저에 남아 있을 이유가 없다.
+ */
+export async function loginWithToken(token) {
+  const res = await fetch(apiUrl('/auth/login'), {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: String(token || '').trim() }),
+  });
+  if (res.ok) {
+    setAccessToken('');
+    return { ok: true };
+  }
+  let message = '로그인에 실패했습니다.';
+  try {
+    message = (await res.json())?.error || message;
+  } catch {
+    // ignore
+  }
+  return { ok: false, status: res.status, message };
+}
+
+export async function fetchAuthStatus() {
+  try {
+    const res = await fetch(apiUrl('/auth/status'), { credentials: 'same-origin' });
+    if (!res.ok) return false;
+    return Boolean((await res.json())?.authenticated);
+  } catch {
+    return false;
+  }
 }

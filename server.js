@@ -32,7 +32,24 @@ const {
 } = require('./server/watchlistService');
 
 const PORT = Number(process.env.PORT) || 50000;
-const APP_ACCESS_TOKEN = String(process.env.APP_ACCESS_TOKEN || '').trim();
+const SESSION = require('./server/session');
+
+// 🔴 2026-09-21: 종전에는 토큰이 없으면 `requireAccessToken` 이 그냥 next() 했다(fail-open).
+//    설정 실수 한 번이 곧 전면 개방이었다. 이제 **없으면 무작위로 만들어 잠근다** —
+//    운영자는 기동 로그에서 값을 보고, 아무도 모르는 채 열려 있는 상태는 만들지 않는다.
+//    (선례: Probius 가 비밀번호 미설정 시 무작위 생성 후 기동 로그에 출력)
+const APP_ACCESS_TOKEN = (() => {
+  const configured = String(process.env.APP_ACCESS_TOKEN || '').trim();
+  if (configured) return configured;
+  const generated = crypto.randomBytes(24).toString('hex');
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[auth] APP_ACCESS_TOKEN 미설정 — 무작위 토큰으로 잠급니다(재기동하면 바뀝니다).\n'
+      + `[auth] 이번 기동 토큰: ${generated}\n`
+      + '[auth] 고정하려면 /etc/simplestock.env 등에 APP_ACCESS_TOKEN 을 설정하세요.'
+  );
+  return generated;
+})();
 const LOG_REQUEST_BODY = String(process.env.LOG_REQUEST_BODY || 'false').trim().toLowerCase() === 'true';
 const app = express();
 
@@ -47,10 +64,12 @@ function extractAccessToken(req) {
 }
 
 function requireAccessToken(req, res, next) {
-  if (!APP_ACCESS_TOKEN) return next();
+  // ① 브라우저 = httpOnly 세션 쿠키 (토큰이 JS 에 노출되지 않는다)
+  if (SESSION.isValidSession(SESSION.readCookie(req))) return next();
+  // ② 서버-대-서버(HARU 등) = 헤더 토큰. 이 경로는 남긴다.
   const token = extractAccessToken(req);
-  if (token && token === APP_ACCESS_TOKEN) return next();
-  return res.status(401).json({ error: '인증이 필요합니다. APP_ACCESS_TOKEN을 확인하세요.' });
+  if (token && SESSION.safeEqual(token, APP_ACCESS_TOKEN)) return next();
+  return res.status(401).json({ error: '인증이 필요합니다.' });
 }
 
 function summarizeBody(req) {
@@ -85,6 +104,62 @@ app.use((req, res, next) => {
 });
 
 app.use('/api', requireAccessToken);
+
+// ── 인증 ─────────────────────────────────────────────────────────
+// 토큰을 **한 번만** 제출하고 이후에는 httpOnly 쿠키로 다닌다.
+// ⚠️ /api 밖에 둔다 — 로그인하려면 인증을 통과해야 하는 순환을 만들지 않기 위해서다.
+const LOGIN_WINDOW_MS = 5 * 60_000;
+const LOGIN_MAX_FAILS = 5;
+const loginFails = new Map(); // ip → { count, until }
+
+function loginBlocked(ip) {
+  const rec = loginFails.get(ip);
+  if (!rec) return false;
+  if (rec.until <= Date.now()) {
+    loginFails.delete(ip);
+    return false;
+  }
+  return rec.count >= LOGIN_MAX_FAILS;
+}
+
+function noteLoginFail(ip) {
+  const now = Date.now();
+  const rec = loginFails.get(ip);
+  if (!rec || rec.until <= now) loginFails.set(ip, { count: 1, until: now + LOGIN_WINDOW_MS });
+  else rec.count += 1;
+}
+
+app.post('/auth/login', (req, res) => {
+  const ip = req.ip || 'unknown';
+  if (loginBlocked(ip)) {
+    // ⚠️ 계정 잠금이 아니라 **그 출처만** 잠시 막는다(선례: Probius).
+    logInfo('auth.login.blocked', { requestId: req.requestId });
+    return res.status(429).json({ error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' });
+  }
+  const token = String(req.body?.token || '').trim();
+  if (!token || !SESSION.safeEqual(token, APP_ACCESS_TOKEN)) {
+    noteLoginFail(ip);
+    logInfo('auth.login.failed', { requestId: req.requestId });
+    return res.status(401).json({ error: '토큰이 올바르지 않습니다.' });
+  }
+  loginFails.delete(ip);
+  const id = SESSION.createSession();
+  res.setHeader('Set-Cookie', SESSION.buildSetCookie(id, { secure: req.secure }));
+  logInfo('auth.login.ok', { requestId: req.requestId });
+  return res.json({ ok: true, expiresInMs: SESSION.SESSION_TTL_MS });
+});
+
+app.post('/auth/logout', (req, res) => {
+  SESSION.destroySession(SESSION.readCookie(req));
+  res.setHeader('Set-Cookie', SESSION.buildClearCookie());
+  return res.json({ ok: true });
+});
+
+// 🔴 무인증으로 열려 있다. **인증 여부(불리언)만** 답하고 토큰·설정·규모를 담지 않는다
+//    (무인증 /health 가 토큰을 흘린 2026-09-21 사고와 같은 자리다).
+app.get('/auth/status', (req, res) => {
+  res.json({ authenticated: SESSION.isValidSession(SESSION.readCookie(req)) });
+});
 
 // ── 시세 ─────────────────────────────────────────────────────────
 app.get('/api/market/status', (req, res) => {
@@ -242,7 +317,9 @@ app.put('/api/system/settings', async (req, res) => {
 // 게이트웨이(nginx)가 `location = /simpleStock/health` 를 **gwauth 없이 무인증으로**
 // 노출한다(허브 상태점검이 401 팝업을 띄우지 않게 하려고 만든 자리).
 // 그런데 이 라우트가 없으면 요청이 아래 catch-all 로 떨어져 `index.html` 이 나가고,
-// 그 HTML 에는 **접근 토큰이 주입된다**(`window.__SIMPLESTOCK_ACCESS_TOKEN__`).
+// 그 HTML 에는 **접근 토큰이 주입됐었다**(`window.__SIMPLESTOCK_ACCESS_TOKEN__`).
+// ⚠️ 2026-09-21 오후에 그 주입을 없앴다(세션 쿠키로 대체). 이 주석은 사고 경위 기록이다 —
+//    현재형으로 읽으면 안 된다.
 //
 // 2026-09-21 실측: 인터넷에서 `GET /simpleStock/health` 로 **토큰 31자를 그대로 받았다.**
 // (본체 `/simpleStock/` 는 401 로 막혀 있었으므로 이 경로 하나가 구멍이었다.)
@@ -267,12 +344,11 @@ app.get('*', (req, res, next) => {
   if (!fs.existsSync(indexPath)) {
     return res.status(503).send('프론트엔드 빌드가 없습니다. npm run build 실행 후 다시 시도하세요.');
   }
-  let html = fs.readFileSync(indexPath, 'utf8');
-  if (APP_ACCESS_TOKEN) {
-    const bootstrap = `<script>window.__SIMPLESTOCK_ACCESS_TOKEN__=${JSON.stringify(APP_ACCESS_TOKEN)};</script>`;
-    html = html.includes('</head>') ? html.replace('</head>', `${bootstrap}</head>`) : `${bootstrap}${html}`;
-  }
-  res.type('html').send(html);
+  // 🔴 2026-09-21: 여기서 `window.__SIMPLESTOCK_ACCESS_TOKEN__` 로 토큰을 주입했었다.
+  //    페이지를 받을 수 있는 누구나 토큰을 갖는 구조였고, 무인증 /health 가 이 catch-all 로
+  //    떨어지면서 **실제로 외부에 샜다**. 이제 아무것도 주입하지 않는다 —
+  //    프론트는 /auth/login 으로 한 번 제출하고 httpOnly 쿠키를 받는다.
+  res.type('html').send(fs.readFileSync(indexPath, 'utf8'));
 });
 
 async function startAiSchedule() {

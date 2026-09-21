@@ -21,9 +21,15 @@ const path = require('node:path');
  *
  * 네 축을 함께 본다 — 셋만 보면 과잉 수정을 놓친다
  *   ① /health 가 JSON 이다            ② /health 에 토큰이 없다
- *   ③ SPA 는 여전히 토큰을 주입한다     ④ /api 는 여전히 인증을 요구한다
- *   ③이 핵심이다: catch-all 을 망가뜨려 토큰 주입을 없애도 ①②④는 통과한다.
- *   그건 결함을 고친 게 아니라 **앱을 고장 낸 것**이다.
+ *   ③ SPA 는 **여전히 앱을 서빙한다**  ④ /api 는 여전히 인증을 요구한다
+ *
+ * ⚠️ 2026-09-21 오후 — ②③ 의 판정 방법이 바뀌었다
+ *   같은 날 인증을 세션 쿠키로 바꾸면서 **SPA 도 토큰을 주입하지 않게** 됐다. 그래서:
+ *   - ③ 은 "주입한다" → **"주입하지 않는다 + 그래도 앱은 나온다"** 로 뒤집었다
+ *   - 🔴 ② 의 탐지기를 바꿔야 했다. 종전에는 `__SIMPLESTOCK_ACCESS_TOKEN__` 문자열로
+ *     "catch-all 로 떨어졌다" 를 판정했는데, **이제 SPA 에도 그 문자열이 없어서
+ *     구분력이 0 이 된다** — /health 가 catch-all 로 떨어져도 조용히 통과했을 것이다.
+ *     ⇒ **HTML 인가**로 판정한다. *가드를 고칠 때는 그 가드가 무엇으로 가르는지 다시 본다.*
  */
 
 const TOKEN = 'TEST_TOKEN_DO_NOT_LEAK_0921';
@@ -80,17 +86,45 @@ test('/health 는 토큰을 흘리지 않는다 (라우트 순서 회귀 가드)
     '🔴 /health 응답에 접근 토큰이 들어 있다. 이 경로는 외부에 무인증으로 공개된다',
   );
   assert.ok(
-    !health.body.includes('__SIMPLESTOCK_ACCESS_TOKEN__'),
-    '🔴 /health 가 SPA catch-all 로 떨어졌다 — /health 라우트가 static 보다 뒤에 있는가?',
+    !/<html/i.test(health.body),
+    '🔴 /health 가 SPA catch-all 로 떨어졌다(HTML 이 나왔다) — /health 가 static 보다 뒤에 있는가?',
   );
 
-  // ③ 과잉 수정 방지 — SPA 는 여전히 토큰을 주입해야 한다
+  // ③ 과잉 수정 방지 — 토큰은 안 나가되 **앱은 여전히 나와야** 한다
   const spa = await get('/any-client-route');
   assert.equal(spa.status, 200);
   assert.ok(
-    spa.body.includes('__SIMPLESTOCK_ACCESS_TOKEN__'),
-    'SPA 경로에서 토큰 주입이 사라졌다 — 결함을 고친 게 아니라 앱을 고장 냈다',
+    /<div id="app"|<script/i.test(spa.body),
+    'SPA 가 안 나온다 — 토큰을 빼면서 앱을 고장 냈다',
   );
+  assert.ok(
+    !spa.body.includes(TOKEN) && !spa.body.includes('__SIMPLESTOCK_ACCESS_TOKEN__'),
+    '🔴 SPA 가 아직 토큰을 주입한다 — HTML 에 비밀을 심지 않기로 했다(2026-09-21)',
+  );
+
+  // ⑤ 로그인 한 번으로 쿠키를 받고, 그 쿠키로 API 가 열린다
+  const login = await fetch(`${BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: TOKEN }),
+  });
+  assert.equal(login.status, 200, '올바른 토큰인데 로그인이 안 된다');
+  const cookie = String(login.headers.get('set-cookie') || '');
+  assert.match(cookie, /HttpOnly/i, '세션 쿠키가 HttpOnly 가 아니다 — XSS 가 읽어 간다');
+  assert.match(cookie, /SameSite=Strict/i, '세션 쿠키에 SameSite=Strict 가 없다');
+
+  const withCookie = await fetch(`${BASE}/api/watchlist`, {
+    headers: { Cookie: cookie.split(';')[0] },
+  });
+  assert.equal(withCookie.status, 200, '쿠키 세션으로 API 가 안 열린다');
+
+  // ⑥ 틀린 토큰은 안 된다 (자의 판별력 — ⑤가 "아무거나 통과" 인지 가른다)
+  const bad = await fetch(`${BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: 'WRONG' }),
+  });
+  assert.equal(bad.status, 401, '틀린 토큰으로 로그인이 됐다');
 
   // ④ API 인증은 그대로다
   const api = await get('/api/watchlist');
