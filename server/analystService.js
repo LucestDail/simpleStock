@@ -225,7 +225,8 @@ function shapeReport(out) {
 
   const gaps = arrays.find((a) => a.length && a.every((x) => typeof x === 'string')) || [];
 
-  const view = pickString(o, ['marketView', 'market_view', 'marketSummary', 'summary', 'overview', 'view'])
+  // ⚠️ `conclusion`·`결론` 은 라이브에서 **실제로 온** 키다(2026-09-21 pm2 실측) — 빠뜨리면 시황이 빈다
+  const view = pickString(o, ['marketView', 'market_view', 'marketSummary', 'summary', 'overview', 'view', 'conclusion', '결론', '판단', '종합의견'])
     || longestProse(o, new Set(['momentumRead', 'momentum']));
   const mom = pickString(o, ['momentumRead', 'momentum_read', 'momentum', 'momentumSummary']);
 
@@ -344,7 +345,14 @@ const round2 = (n) => Math.round(Number(n) * 100) / 100;
  * 리포트를 만든다. 실패해도 **부분 결과를 돌려준다**(조각 실패를 전체 실패로 만들지 않는다).
  * @param {object} dash `/api/dashboard` 결과
  */
-async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = null } = {}) {
+/**
+ * @param {object} opts
+ * @param {boolean} [opts.dryRun] 🔴 **부작용 없이** 분석만 한다 — 텔레그램 발송도, 제안 생성도 안 한다.
+ *   pm2: *"검증이 곧 발송이다. 칠 때마다 사용자가 알림을 받는다."* 맞는 지적이고,
+ *   **검증할 수 없는 경로는 결국 검증 안 된 채로 배포된다.**
+ *   ⚠️ `lastSentDigest` 도 **건드리지 않는다** — 점검이 다음 진짜 발송을 삼키면 안 된다.
+ */
+async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = null, dryRun = false } = {}) {
   const items = dash?.portfolio?.items || [];
   const summary = dash?.portfolio?.summary || null;
 
@@ -442,6 +450,32 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       '**어긋나면 왜 어긋나는지 한 문장으로 밝히세요.**',
     );
   }
+  /**
+   * 🔴 **펀드 평가도 반드시 싣는다** — 총점이 없다고 빼면 "수집해 놓고 안 쓰는" 여덟 번째다.
+   *
+   * ETF 는 기업 채점을 하지 않으므로 `total` 이 `null` 인데, 위 필터가 `total != null` 이라
+   * **조용히 빠졌다.** 사용자 보유 2종이 **둘 다 ETF** 라 그러면 판단 근거가 통째로 사라진다.
+   * ⚠️ 레버리지·일일 리밸런싱은 매매 판단에 **직접적**이다(횡보장 가치 감쇠) — 맨 앞에 둔다.
+   */
+  const funds = Object.entries(ratings).filter(([, r]) => r && !r.error && r.isFund);
+  if (funds.length) {
+    lines.push('', '## 보유 ETF·펀드 (기업 채점 대상 아님 — 점수 없음)');
+    for (const [sym, r] of funds) {
+      lines.push(
+        `- ${r.name}(${sym}) — ${r.typeWhy}`
+        + (r.holdIt ? ` · 보유 적합성 **${r.holdIt}**${r.holdWhy ? ` (${String(r.holdWhy).slice(0, 120)})` : ''}` : '')
+        + (r.description ? `\n    추종: ${String(r.description).slice(0, 160)}` : '')
+        + (r.weaknesses ? `\n    약점: ${String(r.weaknesses).slice(0, 160)}` : '')
+        + (r.notes?.length ? `\n    ${r.notes.join('\n    ')}` : '')
+      );
+    }
+    lines.push(
+      '',
+      '🔴 레버리지·일일 리밸런싱 상품은 **방향이 맞아도 횡보하면 깎입니다.**',
+      '보유 기간과 손절선을 그 전제로 잡으세요. 기업 점수와 같은 잣대로 비교하지 마세요.',
+    );
+  }
+
   const failedRatings = Object.entries(ratings).filter(([, r]) => r?.error);
   if (failedRatings.length) {
     lines.push('', `⚠️ 평가하지 못한 종목: ${failedRatings.map(([s2]) => s2).join(', ')} — 질 평가 없이 판단해야 합니다.`);
@@ -499,15 +533,64 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   });
 
   // 🔴 키가 아니라 **모양**으로 읽는다(위 shapeReport 주석 참조)
-  const report = shapeReport(raw);
+  let report = shapeReport(raw);
   if (report._unreadable) {
     logWarn('analyst.unreadable_shape', { raw: report._unreadable });
+  }
+
+  /**
+   * 🔴 **종목 판단이 비면 한 번 되돌려 묻는다** (2026-09-21 — pm2 라이브 실측)
+   *
+   * 보유가 2종목인데 3회 중 **0·1·0 건**만 나왔다. 모델은 답하고 있었다 —
+   * `{"conclusion": "QLD는 보유 유지, RAM은 …"}` 처럼 **서술형 한 덩어리**로 줬을 뿐이다.
+   * 같은 지문에서 0 과 1 이 갈리므로 **확률적**이고, 모양 흡수만으로는 못 메운다
+   * (문장에서 BUY/SELL 을 긁는 건 **지어내기**다 — 그건 하지 않는다).
+   *
+   * ★ 처방은 이 워크스페이스가 이미 검증한 것이다: **프롬프트로 못 고치는 것을 프롬프트로 고치지 말고,
+   *   코드가 거부하고 이유를 다음 프롬프트에 돌려준다.** 규칙을 한 줄 더 얹는 쪽은 실패한 전례가 있다.
+   *
+   * ⚠️ **한 번만** 다시 묻는다 — 무한히 되물으면 분석 한 번이 예산을 다 태운다.
+   * ⚠️ 재요청이 더 나쁘게 나올 수도 있으므로 **판단이 더 많이 잡힌 쪽을** 쓴다(회귀 방지).
+   */
+  const heldSymbols = items.map((h) => String(h.symbol).toUpperCase());
+  if (heldSymbols.length && report.positions.length < heldSymbols.length) {
+    const missing = heldSymbols.filter(
+      (s) => !report.positions.some((p) => String(p.symbol).toUpperCase() === s)
+    );
+    logWarn('analyst.positions_short', { got: report.positions.length, need: heldSymbols.length, missing });
+    const retryRaw = await generateStructuredOutput({
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: [
+        lines.join('\n'),
+        '',
+        '## 🔴 직전 답변이 규격에 안 맞았습니다 — 다시 답하세요',
+        `보유 종목 **${heldSymbols.length}개 전부**에 대해 판단이 필요한데 ${missing.join(', ')} 이(가) 빠졌습니다.`,
+        '줄글 하나로 묶지 말고, **종목마다 한 건씩** 아래 항목을 채운 객체를 `positions` 배열에 넣으세요.',
+        '`symbol`(티커) · `stance`(BUY|SELL|HOLD) · `confidence`(HIGH|MEDIUM|LOW) · `rationale` · `risk`',
+        '판단이 "그대로 보유" 여도 `stance: "HOLD"` 로 **명시**하세요. 빠뜨리지 마세요.',
+      ].join('\n'),
+      schema: REPORT_SCHEMA,
+      logLabel: 'trade_analyst_retry',
+      fallback: { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] },
+    });
+    const retried = shapeReport(retryRaw);
+    logInfo('analyst.retry_done', { before: report.positions.length, after: retried.positions.length });
+    // 되물어서 더 잡혔을 때만 바꾼다. 시황은 **있는 쪽을** 남긴다(재요청이 시황을 비우기도 한다)
+    if (retried.positions.length > report.positions.length) {
+      report = {
+        ...retried,
+        marketView: retried.marketView || report.marketView,
+        momentumRead: retried.momentumRead || report.momentumRead,
+        dataGaps: retried.dataGaps.length ? retried.dataGaps : report.dataGaps,
+        proposals: retried.proposals.length ? retried.proposals : report.proposals,
+      };
+    }
   }
 
   // 제안을 orderService 로 넘긴다 — **빈칸이 있으면 거기서 거부된다**
   const created = [];
   const rejected = [];
-  for (const p of report.proposals || []) {
+  for (const p of dryRun ? [] : (report.proposals || [])) {
     const r = orderService.propose(
       { symbol: p.symbol, side: p.side, type: 'LIMIT', quantity: p.quantity, price: p.price, reason: p.reason },
       { source: 'analyst' }
@@ -544,6 +627,9 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   const gaps = [...(report.dataGaps || [])];
   for (const [sym, r] of Object.entries(ratings)) {
     if (r?.error) gaps.push(`${sym} 기업 평가 실패 — ${r.error}`);
+    // 🔴 "안 잰 것" 과 "재서 나쁜 것" 을 화면이 구분해야 한다 — ETF 는 점수가 **없다**
+    else if (r?.isFund) gaps.push(`${sym} 은 ETF·펀드 — 기업 100점 채점 대상이 아닙니다`);
+    else if (r && r.total == null) gaps.push(`${sym} 기업 평가 미완 — 항목이 다 안 채워졌습니다`);
   }
   if (useWebSearch) {
     if (!web?.ok) gaps.push(`웹 검색 사용 불가 — ${web?.error || '알 수 없음'}`);
@@ -583,7 +669,10 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     }))
     .digest('hex');
 
-  if (digest !== lastSentDigest) {
+  if (dryRun) {
+    // 🔴 점검이면 **아무것도 안 보내고 digest 도 안 남긴다** — 다음 진짜 발송을 삼키지 않게
+    logInfo('analyst.telegram_skipped', { why: 'dry_run' });
+  } else if (digest !== lastSentDigest) {
     lastSentDigest = digest;
     const lines = ['🧭 매매 분석'];
     if (report.marketView) lines.push('', report.marketView);

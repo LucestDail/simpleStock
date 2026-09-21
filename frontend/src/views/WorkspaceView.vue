@@ -675,6 +675,24 @@ function pct(v) {
   const n = Number(v);
   return `${n > 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
+
+/**
+ * 종목 계층 평가를 판단 옆에 붙인다 — 사용자: *"상세하게 점수 계층화 처리 후 판정이 가능하도록."*
+ * ⚠️ 평가에 실패한 종목은 **펼치지 않는다** — 빈 상세를 보여주면 "평가했는데 내용이 없다" 로 읽힌다.
+ *    그 사실은 아래 `dataGaps` 가 따로 말한다.
+ */
+function rated(symbol) {
+  const r = report.value?.ratings?.[symbol];
+  return r && !r.error ? r : null;
+}
+/** 점수 색 — ⚠️ `null`(미채점)은 **나쁜 점수가 아니다.** 빨갛게 칠하면 "0점" 으로 읽힌다 */
+function scoreTone(score) {
+  if (score == null) return 'rt__s--na';
+  const n = Number(score);
+  if (n >= 8.5) return 'rt__s--hi';
+  if (n <= 5) return 'rt__s--lo';
+  return 'rt__s--mid';
+}
 function signClass(v) {
   if (v == null) return 'flat';
   return Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : 'flat';
@@ -1070,6 +1088,53 @@ onUnmounted(() => {
 
                 <ul><li v-for="(e, i) in ps.evidence" :key="i">{{ e }}</li></ul>
                 <p class="pos__risk">⚠ {{ ps.risk }}</p>
+
+                <!--
+                  🔴 **점수 계층** — 사용자: *"상세하게 점수 계층화 처리 후 판정이 가능하도록."*
+                  ⚠️ `총점 없음` 과 `0점` 은 **다르다.** ETF 는 기업 채점 대상이 아니라 점수가 없고,
+                     항목이 덜 채워져도 총점을 만들지 않는다 — 둘 다 이유를 적어서 보여준다.
+                -->
+                <details v-if="rated(ps.symbol)" class="rt">
+                  <summary>
+                    <template v-if="rated(ps.symbol).total != null">
+                      기업 평가 <b class="mono-num">{{ rated(ps.symbol).total }}</b>/100
+                      · <b>{{ rated(ps.symbol).opinion }}</b>
+                    </template>
+                    <template v-else-if="rated(ps.symbol).isFund">
+                      {{ rated(ps.symbol).typeWhy }} — 기업 점수 없음
+                    </template>
+                    <template v-else>기업 평가 미완 — 점수 없음</template>
+                    <span class="rt__conf">확신도 {{ rated(ps.symbol).confidence }}</span>
+                  </summary>
+
+                  <p v-if="rated(ps.symbol).scoreNotApplicable" class="rt__na">
+                    {{ rated(ps.symbol).scoreNotApplicable }}
+                  </p>
+                  <p v-for="(n, i) in rated(ps.symbol).notes || []" :key="`n${i}`" class="rt__warn">{{ n }}</p>
+                  <p v-if="rated(ps.symbol).holdIt" class="rt__hold">
+                    보유 적합성 <b>{{ rated(ps.symbol).holdIt }}</b>
+                    <span v-if="rated(ps.symbol).holdWhy"> — {{ rated(ps.symbol).holdWhy }}</span>
+                  </p>
+
+                  <table v-if="rated(ps.symbol).items?.length" class="rt__t">
+                    <tbody>
+                      <tr v-for="it in rated(ps.symbol).items" :key="it.name">
+                        <th>{{ it.name }}</th>
+                        <td class="mono-num rt__s" :class="scoreTone(it.score)">
+                          {{ it.score == null ? '미채점' : it.score }}
+                        </td>
+                        <td class="rt__c">{{ it.comment }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  <p v-if="rated(ps.symbol).oneLiner" class="rt__one">{{ rated(ps.symbol).oneLiner }}</p>
+                  <p v-if="rated(ps.symbol).weaknesses" class="rt__wk">약점 · {{ rated(ps.symbol).weaknesses }}</p>
+                  <p v-if="rated(ps.symbol).confidenceWhy" class="rt__why">{{ rated(ps.symbol).confidenceWhy }}</p>
+                  <p v-if="rated(ps.symbol).unverified?.length" class="rt__why">
+                    확인 못 함 · {{ rated(ps.symbol).unverified.join(' / ') }}
+                  </p>
+                </details>
               </article>
             </div>
 
@@ -2231,6 +2296,30 @@ a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
 .pos__sc { margin: 2px 0 0; font-size: var(--text-2xs); }
 .pos__sc--up { color: var(--color-up); }
 .pos__sc--dn { color: var(--color-down); }
+
+/* 종목 계층 평가 — 접어 두고, 펼치면 10항목이 다 보인다 */
+.rt { margin: 4px 0 0; border-top: 1px solid var(--color-line); padding-top: 4px; }
+.rt summary { cursor: pointer; font-size: var(--text-2xs); color: var(--color-body); list-style: none; display: flex; gap: 4px; align-items: baseline; }
+.rt summary::-webkit-details-marker { display: none; }
+.rt summary::before { content: '▸'; color: var(--color-faint); }
+.rt[open] summary::before { content: '▾'; }
+.rt__conf { margin-left: auto; color: var(--color-faint); }
+.rt__na { margin: 3px 0 0; font-size: var(--text-2xs); color: var(--color-faint); }
+.rt__warn { margin: 3px 0 0; font-size: var(--text-2xs); color: var(--color-warn); }
+.rt__hold { margin: 3px 0 0; font-size: var(--text-2xs); color: var(--color-body); }
+.rt__t { width: 100%; border-collapse: collapse; margin: 4px 0 0; }
+.rt__t th { text-align: left; font-weight: 400; font-size: var(--text-2xs); color: var(--color-faint); padding: 1px 4px 1px 0; white-space: nowrap; }
+.rt__t td { padding: 1px 0; font-size: var(--text-2xs); vertical-align: baseline; }
+.rt__s { text-align: right; padding-right: 6px !important; white-space: nowrap; }
+.rt__s--hi { color: var(--color-up); font-weight: 700; }
+.rt__s--mid { color: var(--color-body); }
+.rt__s--lo { color: var(--color-down); }
+/* ⚠️ 미채점은 **나쁜 점수가 아니다** — 회색으로 둔다(빨갛게 칠하면 0점으로 읽힌다) */
+.rt__s--na { color: var(--color-faint); }
+.rt__c { color: var(--color-faint); }
+.rt__one { margin: 4px 0 0; font-size: var(--text-2xs); color: var(--color-body); }
+.rt__wk { margin: 2px 0 0; font-size: var(--text-2xs); color: var(--color-warn); }
+.rt__why { margin: 2px 0 0; font-size: var(--text-2xs); color: var(--color-faint); }
 .gaps { border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }
 
 /* ── 브리핑 (AI 레이어) ──────────────────────────── */

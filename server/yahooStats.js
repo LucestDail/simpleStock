@@ -124,6 +124,8 @@ async function getStats(symbol, { force = false } = {}) {
     symbol: key,
     name: px.longName || px.shortName || key,
     exchange: px.exchangeName || null,
+    // 🔴 **기업이냐 펀드냐** — 기업 채점표를 ETF 에 대면 지어낸 점수가 나온다(2026-09-21)
+    quoteType: px.quoteType || null,
     currency: px.currency || null,
     sector: r.summaryProfile?.sector || null,
     industry: r.summaryProfile?.industry || null,

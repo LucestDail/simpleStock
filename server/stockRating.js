@@ -32,6 +32,12 @@ const TYPES = {
   LARGE: '대형주',
   SMALL_GROWTH: '중소형 성장주',
   LARGE_DIV: '대형배당주',
+  /**
+   * 🔴 사양에 없는 **네 번째 유형** — 사용자 보유 2종이 둘 다 여기였다(2026-09-21).
+   * 사양의 10항목은 **기업** 을 재는 자다. ETF 에 대면 없는 것을 재게 되므로
+   * **100점 총점을 내지 않는다**(`opinion` 도 없다). 대신 펀드에서 실제로 판단 가능한 것만 쓴다.
+   */
+  FUND: 'ETF·펀드',
 };
 
 /**
@@ -39,7 +45,46 @@ const TYPES = {
  * (같은 종목이 회차마다 다른 잣대로 평가된다).
  * ⚠️ 시가총액을 못 받으면 유형을 **단정하지 않는다** — `대형주` 로 가정하면 기준이 후해진다.
  */
+/**
+ * 🔴 **레버리지·인버스 여부는 이름에서 읽는다** (2026-09-21)
+ *
+ * 사용자의 보유 2종이 **둘 다 2배 레버리지 ETF** 였다(`ProShares Ultra QQQ`,
+ * `Roundhill T-REX 2x Long DRAM Daily Target`). 이건 **매수·매도 판단에서 가장 중요한 사실**이다 —
+ * 일일 리밸런싱이라 **횡보장에서 가치가 깎인다**(변동성 감쇠). 장기 보유 전제가 성립하지 않는다.
+ *
+ * ⚠️ **이름으로 추정한 것**이라 그렇게 표시한다. 야후가 배수를 구조화해서 주지 않으므로
+ *    이게 지금 가진 유일한 단서다 — **추정임을 감추면 안 된다.**
+ */
+function leverageHint(name) {
+  const n = String(name || '');
+  const hits = [];
+  if (/\b(3x|ultrapro|triple)\b/i.test(n)) hits.push('3배');
+  else if (/\b(2x|ultra|double)\b/i.test(n)) hits.push('2배');
+  if (/\b(inverse|short|bear|-1x)\b/i.test(n)) hits.push('인버스(하락 베팅)');
+  if (/\bdaily\b/i.test(n)) hits.push('일일 리밸런싱');
+  return hits.length ? { leveraged: true, hints: hits, why: `이름에서 추정: "${n}"` } : { leveraged: false, hints: [], why: null };
+}
+
+/** 펀드·ETF 인가 — `quoteType` 이 있으면 그것을 믿는다(이름 추측보다 정확하다) */
+function isFund(stats) {
+  const t = String(stats?.quoteType || '').toUpperCase();
+  if (t) return t === 'ETF' || t === 'MUTUALFUND' || t === 'FUND';
+  return false;
+}
+
 function classify(stats) {
+  // 🔴 ETF 에 기업 채점표를 대지 않는다 — `구조적 우위`·`매출·이익 동반 성장` 은 펀드에 없는 축이다.
+  //    그대로 채점하면 **모델이 지어낸 숫자**가 "69점 비중축소" 처럼 매도 판단을 끈다.
+  if (isFund(stats)) {
+    const lv = leverageHint(stats?.name);
+    return {
+      type: TYPES.FUND,
+      assumed: false,
+      why: lv.leveraged ? `ETF·펀드 (${lv.hints.join(' · ')})` : 'ETF·펀드',
+      fund: true,
+      leverage: lv,
+    };
+  }
   const cap = Number(stats?.marketCap);
   const dy = Number(stats?.quality?.dividendYield);
   if (!Number.isFinite(cap) || cap <= 0) return { type: TYPES.LARGE, assumed: true, why: '시가총액 미확인 — 대형주 기준으로 가정' };
@@ -154,6 +199,117 @@ function systemPrompt(type) {
   ].join('\n');
 }
 
+/**
+ * 🔴 **항목 점수를 "모양" 으로 읽는다** (2026-09-21 — 같은 병의 **다섯 번째**)
+ *
+ * 라이브 첫 평가에서 **10개 항목이 전부 `None`** 으로 나왔다. 모델이 안 채운 게 아니라
+ * **내가 못 읽었다.** 로그의 실제 응답:
+ * ```
+ * 회차1  { "강한 기업 선호": 10, "구조적 우위": 10, … }    ← 평평한 객체(배열이 아니다)
+ * 회차2  { "강한_기업_선호": 10, "매출_이익_동반_성장": 10 } ← 공백이 밑줄, `·` 가 `_`
+ * ```
+ * 스키마에 `items: [{name,score,comment}]` 라고 적었는데 게이트웨이가 네이티브 function
+ * calling 을 안 써서 **스키마는 지시일 뿐 강제가 아니다.**
+ *
+ * ★ 이 저장소에서 같은 비대칭을 이미 네 번 밟았다(도구 호출 키·목록 키·**깊이**·리포트 모양).
+ *   그때 배운 처방이 *"키 이름을 열거하지 말고 모양으로 찾는다"* 인데 **여기에 안 퍼뜨렸다** —
+ *   *"규칙을 정하면 그 자리에서 적용 범위를 훑을 것"* 을 또 어긴 것이다.
+ *
+ * ## 무엇으로 가르나
+ *
+ * 항목 이름을 **정규화**(영숫자·한글만 남김)해 대조한다 ⇒ `강한 기업 선호`·`강한_기업_선호`·
+ * `강한기업선호` 가 모두 같은 항목이 된다.
+ * ⚠️ **아무 숫자나 줍지 않는다** — 정규화한 키가 **채점표에 있는 이름일 때만** 받는다.
+ *    그래서 `total: 88` 같은 걸 항목 점수로 오인하지 않는다.
+ */
+const normName = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
+
+const NAME_KEYS = ['name', 'item', 'title', 'label', '항목', '이름'];
+const SCORE_KEYS = ['score', 'points', 'value', '점수', '배점'];
+const COMMENT_KEYS = ['comment', 'reason', 'note', 'rationale', '코멘트', '근거', '설명', '평가'];
+
+const firstOf = (o, keys) => {
+  for (const k of keys) if (o[k] != null) return o[k];
+  return null;
+};
+const asScore = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * 출력 어디에 있든 항목 점수를 긁어모은다.
+ * @param {object} want 정규화이름 → 정식이름
+ * @param {Map} into 정식이름 → {score, comment}
+ */
+function collectScores(node, want, into, depth = 0) {
+  if (node == null || depth > 6) return;
+  if (Array.isArray(node)) {
+    for (const v of node) collectScores(v, want, into, depth + 1);
+    return;
+  }
+  if (typeof node !== 'object') return;
+
+  // ① `{name, score, comment}` 모양 — 이름이 채점표에 있으면 받는다
+  const nm = want.get(normName(firstOf(node, NAME_KEYS)));
+  const sc = asScore(firstOf(node, SCORE_KEYS));
+  if (nm && sc != null && !into.has(nm)) {
+    into.set(nm, { score: sc, comment: String(firstOf(node, COMMENT_KEYS) ?? '').trim() });
+  }
+
+  // ② `{ "항목명": 10 }` · `{ "항목명": {score, comment} }` 모양
+  for (const [key, v] of Object.entries(node)) {
+    const hit = want.get(normName(key));
+    if (hit && !into.has(hit)) {
+      const direct = asScore(v);
+      if (direct != null) {
+        into.set(hit, { score: direct, comment: '' });
+        continue;
+      }
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const nested = asScore(firstOf(v, SCORE_KEYS));
+        if (nested != null) {
+          into.set(hit, { score: nested, comment: String(firstOf(v, COMMENT_KEYS) ?? '').trim() });
+          continue;
+        }
+      }
+    }
+    collectScores(v, want, into, depth + 1);
+  }
+}
+
+/**
+ * 채점표 이름 순서대로 `{name, score, comment}` 10개를 만든다.
+ * ⚠️ **위치 폴백은 이름으로 하나도 못 찾았을 때만** 쓴다 — 이름이 일부 맞는데 위치로 메우면
+ *    엉뚱한 항목에 점수가 붙어 **틀린 총점이 조용히 나온다**(빈 것보다 나쁘다).
+ */
+function shapeScores(out, names) {
+  const want = new Map(names.map((n) => [normName(n), n]));
+  const found = new Map();
+  collectScores(out, want, found);
+
+  let positional = [];
+  if (found.size === 0) {
+    const arr = Array.isArray(out?.items) ? out.items
+      : Object.values(out || {}).find((v) => Array.isArray(v) && v.length === names.length) || [];
+    if (arr.length === names.length) positional = arr;
+  }
+
+  return names.map((name, i) => {
+    const got = found.get(name) || (positional[i] && {
+      score: asScore(firstOf(positional[i], SCORE_KEYS) ?? positional[i]),
+      comment: String(firstOf(positional[i], COMMENT_KEYS) ?? '').trim(),
+    }) || {};
+    const n = asScore(got.score);
+    return {
+      name,
+      // ⚠️ 범위를 벗어난 점수는 **자른다** — 12점을 그대로 더하면 100점을 넘는다
+      score: n == null ? null : Math.max(0, Math.min(10, n)),
+      comment: String(got.comment || '').trim(),
+    };
+  });
+}
+
 const fmtNum = (v, d = 2) => (v == null ? '확인 못 함' : Number(v).toFixed(d));
 const fmtBig = (v) => (v == null ? '확인 못 함' : `${(Number(v) / 1e9).toFixed(2)}B`);
 const fmtPct = (v) => (v == null ? '확인 못 함' : `${(Number(v) * 100).toFixed(2)}%`);
@@ -186,6 +342,107 @@ function statsBlock(s) {
   ].join('\n');
 }
 
+const FUND_SCHEMA = {
+  type: 'object',
+  properties: {
+    whatItTracks: { type: 'string' },
+    holdIt: { type: 'string', enum: ['장기 보유 가능', '중기까지', '단기 전용'] },
+    holdWhy: { type: 'string' },
+    strengths: { type: 'string' },
+    weaknesses: { type: 'string' },
+    oneLiner: { type: 'string' },
+    unverified: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['whatItTracks', 'oneLiner'],
+};
+
+/**
+ * ETF·펀드 읽기 — **100점 총점을 내지 않는다.**
+ *
+ * 사양의 10항목은 *기업* 을 재는 자다(`구조적 우위`·`매출·이익 동반 성장`).
+ * 펀드에 대면 모델은 **그럴듯한 숫자를 지어낸다** — 실측에서 QLD 가 `69점 / 비중축소` 를 받았는데
+ * 그건 판단이 아니라 **없는 것을 잰 결과**다. 매도를 끌 수 있으므로 내보내면 안 된다.
+ *
+ * ⇒ 대신 펀드에서 **실제로 판단 가능한 것**만 낸다: 무엇을 추종하는가 · 보유 기간 적합성 ·
+ *    레버리지·일일 리밸런싱 여부. 매수·매도 판단에는 이쪽이 오히려 직접적이다.
+ */
+async function rateFund(stats, cls, newsText) {
+  const lv = cls.leverage || { leveraged: false, hints: [], why: null };
+  const out = await generateStructuredOutput({
+    systemPrompt: [
+      '당신은 ETF·펀드 분석자입니다. **기업 분석을 하지 마세요** — 이 종목은 회사가 아니라 펀드입니다.',
+      '매출·영업이익·해자 같은 기업 항목을 논하지 말고, **무엇을 추종하고 어떻게 굴러가는지**만 봅니다.',
+      '',
+      '## 답할 것',
+      '- `whatItTracks`: 무엇을 추종하는가(지수·섹터·자산). **모르면 모른다고 쓰세요.**',
+      '- `holdIt`: `장기 보유 가능` / `중기까지` / `단기 전용` 중 하나 + `holdWhy` 근거',
+      '- `strengths` / `weaknesses` / `oneLiner`',
+      '',
+      '## 🔴 레버리지·인버스면 반드시 짚으세요',
+      '일일 리밸런싱 상품은 **횡보장에서 가치가 깎입니다**(변동성 감쇠). 방향이 맞아도 손실이 날 수 있습니다.',
+      '장기 보유 전제가 성립하지 않으므로 `holdIt` 을 후하게 주지 마세요.',
+      '',
+      '## 🔴 지어내지 마세요',
+      '보수율·추적오차·AUM·구성종목 비중은 **주어지지 않았습니다.** 추측하지 말고 `unverified` 에 적으세요.',
+      '총점·점수는 쓰지 않습니다. 한국어로, 과장 없이.',
+    ].join('\n'),
+    userPrompt: [
+      `# ${stats.name} (${stats.symbol})`,
+      `유형: ETF·펀드${lv.leveraged ? ` — ${lv.hints.join(' · ')} (${lv.why})` : ''}`,
+      `주가: ${fmtNum(stats.price)} ${stats.currency || ''}`,
+      stats.exchange ? `거래소: ${stats.exchange}` : '',
+      `베타: ${fmtNum(stats.quality?.beta)}`,
+      `배당수익률: ${fmtPct(stats.quality?.dividendYield)}`,
+      '',
+      '⚠️ 시가총액·PER·PBR 등 기업 지표는 **펀드에 존재하지 않습니다.** 없다고 지적하지 마세요.',
+      newsText ? `\n## 최근 뉴스\n${newsText.slice(0, 2000)}` : '',
+    ].filter(Boolean).join('\n'),
+    schema: FUND_SCHEMA,
+    logLabel: 'fund_rating',
+    fallback: { whatItTracks: '', oneLiner: '' },
+  });
+
+  const notes = [];
+  if (lv.leveraged) {
+    notes.push(`🔴 ${lv.hints.join(' · ')} 상품 — 일일 리밸런싱이면 **횡보장에서 가치가 깎입니다**(변동성 감쇠). 장기 보유 전제가 성립하지 않습니다.`);
+    notes.push(`⚠️ 배수는 **이름에서 추정**했습니다(${lv.why}). 운용사 문서로 확인하세요.`);
+  }
+
+  logInfo('rating.fund', { symbol: stats.symbol, leveraged: lv.leveraged, holdIt: out.holdIt || null });
+
+  return {
+    symbol: stats.symbol,
+    name: stats.name,
+    type: TYPES.FUND,
+    typeWhy: cls.why,
+    typeAssumed: false,
+    isFund: true,
+    leverage: lv,
+    // 🔴 **총점·투자의견을 내지 않는다** — 화면이 "평가 못 함" 과 "0점" 을 구분해야 한다
+    total: null,
+    maxTotal: null,
+    opinion: null,
+    scoreNotApplicable: '기업 채점표(10항목 100점)는 **회사** 를 재는 자입니다. ETF 에는 매출·이익·해자가 없어 점수를 내지 않습니다.',
+    items: [],
+    bandText: '',
+    description: out.whatItTracks || '',
+    holdIt: out.holdIt || null,
+    holdWhy: out.holdWhy || '',
+    strengths: out.strengths || '',
+    weaknesses: out.weaknesses || '',
+    interpretation: '',
+    confidence: '낮음',
+    confidenceWhy: ['펀드는 보수율·추적오차·구성종목을 이 시스템이 받지 못합니다.', ...notes].join(' '),
+    oneLiner: out.oneLiner || '',
+    unverified: out.unverified || ['보수율', '추적오차', 'AUM', '구성종목 비중'],
+    notes,
+    missingValueMetrics: [],
+    links: stats.links,
+    stats: { price: stats.price, beta: stats.quality?.beta ?? null, dividendYield: stats.quality?.dividendYield ?? null },
+    at: stats.at,
+  };
+}
+
 /**
  * 한 종목을 평가한다.
  * @returns {Promise<object>} 점수·투자의견·확신도 + 원자료
@@ -194,6 +451,9 @@ async function rate(symbol, { newsText = '' } = {}) {
   const stats = await getStats(symbol);
   const cls = classify(stats);
   const type = cls.type;
+
+  // 🔴 ETF·펀드는 **기업 채점을 하지 않는다** — 없는 축을 재면 지어낸 숫자가 나온다
+  if (type === TYPES.FUND) return rateFund(stats, cls, newsText);
 
   const out = await generateStructuredOutput({
     systemPrompt: systemPrompt(type),
@@ -211,16 +471,7 @@ async function rate(symbol, { newsText = '' } = {}) {
 
   // 🔴 **합계·의견은 코드가 낸다** — 사양: "점수와 투자의견 구간이 절대 어긋나면 안 된다"
   const names = RUBRICS[type];
-  const items = names.map((name, i) => {
-    const got = (out.items || []).find((x) => String(x.name || '').trim() === name) || (out.items || [])[i] || {};
-    const n = Number(got.score);
-    return {
-      name,
-      // ⚠️ 범위를 벗어난 점수는 **자른다** — 12점을 그대로 더하면 100점을 넘는다
-      score: Number.isFinite(n) ? Math.max(0, Math.min(10, n)) : null,
-      comment: String(got.comment || '').trim(),
-    };
-  });
+  const items = shapeScores(out, names);
 
   const scored = items.filter((x) => x.score != null);
   // 🔴 **항목이 비면 총점을 만들지 않는다.** 없는 것을 0 으로 치면 "매도 권고" 가 된다
@@ -275,4 +526,4 @@ async function rate(symbol, { newsText = '' } = {}) {
   return result;
 }
 
-module.exports = { rate, classify, opinionFor, bandText, RUBRICS, TYPES, BANDS };
+module.exports = { rate, classify, opinionFor, bandText, shapeScores, RUBRICS, TYPES, BANDS };

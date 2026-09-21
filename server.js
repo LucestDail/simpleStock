@@ -175,13 +175,21 @@ app.post('/api/analyst/run', async (req, res) => {
     });
     // 웹 검색은 **버튼을 눌렀을 때만**. 5분 타이머에 붙이면 자동으로 계속 검색하게 된다
     const useWebSearch = req.body?.useWebSearch !== false;
+    /**
+     * 🔴 **점검용 실행** — `{"dryRun": true}` 면 텔레그램도 안 가고 제안도 안 만든다.
+     *    pm2: *"검증이 곧 발송이라 이 경로를 앞으로 검증할 수 없다."*
+     *    **검증할 수 없는 경로는 결국 검증 안 된 채로 배포된다** ⇒ 부작용 없는 문을 낸다.
+     *    ⚠️ 기본은 `false` 다 — 사용자 지시 *"애널리스트가 판단하면 바로 쏴"* 를 바꾸지 않는다.
+     */
+    const dryRun = req.body?.dryRun === true;
     const report = await analyst.analyze(dash, {
       userInstruction: settings.briefingPrompt,
       useWebSearch,
       // ⚠️ 계좌는 원화, 종목은 달러일 수 있다 — 수량 계산에 환율이 필요하다
       fx: rate ? { rate } : null,
+      dryRun,
     });
-    return res.json({ ...report, dashFailed: dash.failedCount, parts: dash.parts });
+    return res.json({ ...report, dryRun, dashFailed: dash.failedCount, parts: dash.parts });
   } catch (error) {
     logError('analyst.failed', error, { requestId: req.requestId, kind: error.kind });
     return res.status(502).json({ error: error.message || '분석에 실패했습니다.', kind: error.kind || 'unknown' });
