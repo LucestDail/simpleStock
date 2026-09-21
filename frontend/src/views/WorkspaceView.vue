@@ -258,10 +258,52 @@ const chatError = ref('');
 const messages = ref([]);
 const chatBox = ref(null);
 
-function scrollChat() {
+/**
+ * 바닥으로 따라간다. ⚠️ 다만 **사용자가 위를 읽고 있으면 끌어내리지 않는다** —
+ * 조각이 올 때마다 강제로 내리면 지난 말을 읽을 수가 없다(반대 방향의 같은 불편).
+ * ⇒ 이미 바닥 근처일 때만 따라간다. 아니면 "새 답" 표시만 띄운다.
+ */
+const NEAR_BOTTOM_PX = 80;
+const stuckToBottom = ref(true);
+const hasUnseen = ref(false);
+
+function onChatScroll() {
+  const el = chatBox.value;
+  if (!el) return;
+  stuckToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+  if (stuckToBottom.value) hasUnseen.value = false;
+}
+
+function scrollChat({ force = false } = {}) {
   requestAnimationFrame(() => {
-    if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight;
+    const el = chatBox.value;
+    if (!el) return;
+    if (force || stuckToBottom.value) {
+      el.scrollTop = el.scrollHeight;
+      hasUnseen.value = false;
+    } else {
+      hasUnseen.value = true;
+    }
   });
+}
+
+/** 🔴 사용자: *"대화 초기화는 가능한건가?"* — 서버 이력까지 지운다(화면만 비우면 되살아난다) */
+const clearing = ref(false);
+async function clearChat() {
+  if (clearing.value) return;
+  clearing.value = true;
+  try {
+    const res = await apiFetch('/api/analyst/chat/history', { method: 'DELETE' });
+    if (!res.ok) throw new Error(`초기화 실패 (${res.status})`);
+    messages.value = [];
+    chatError.value = '';
+    hasUnseen.value = false;
+    stuckToBottom.value = true;
+  } catch (e) {
+    chatError.value = e.message || '초기화 실패';
+  } finally {
+    clearing.value = false;
+  }
 }
 
 async function loadChatHistory() {
@@ -287,7 +329,9 @@ async function sendChat() {
   // 답이 들어올 빈 말풍선을 **먼저** 만든다 — 조각이 이어붙을 자리다
   const reply = { role: 'assistant', text: '', thinking: '', tools: [], recall: 0, done: false, at: null };
   messages.value.push(reply);
-  scrollChat();
+  // 내가 방금 보냈으면 바닥으로 간다(읽던 중이었어도 이건 내 행동이다)
+  stuckToBottom.value = true;
+  scrollChat({ force: true });
 
   try {
     // 화면이 지금 무엇을 보고 있는지 한 줄로 — 모델이 "그 종목" 을 알아들을 수 있게
@@ -1072,10 +1116,18 @@ onUnmounted(() => {
         <section class="chat">
           <header class="chat__head">
             <h3 class="panel__h">애널리스트와 대화</h3>
-            <span class="chat__tools">도구 {{ 6 }}개</span>
+            <div class="chat__headacts">
+              <span class="chat__tools">도구 {{ 7 }}개</span>
+              <button
+                class="btn btn--xs btn--ghost"
+                :disabled="clearing || !messages.length"
+                title="대화 이력을 지웁니다(서버 기록도 함께)"
+                @click="clearChat"
+              >{{ clearing ? '…' : '초기화' }}</button>
+            </div>
           </header>
 
-          <div ref="chatBox" class="chat__log">
+          <div ref="chatBox" class="chat__log" @scroll="onChatScroll">
             <p v-if="!messages.length" class="panel__empty">
               보유 종목·시황을 물어보세요. 필요하면 시세·차트·뉴스를 <b>직접 찾아서</b> 답합니다.
             </p>
@@ -1103,6 +1155,11 @@ onUnmounted(() => {
               <p v-if="m.notice" class="msg__notice">{{ m.notice }}</p>
             </article>
           </div>
+
+          <!-- 위를 읽는 중에 새 답이 오면 **끌어내리지 않고** 알려만 준다 -->
+          <button v-if="hasUnseen" class="chat__jump" @click="scrollChat({ force: true })">
+            ↓ 새 답이 있습니다
+          </button>
 
           <p v-if="chatError" class="banner banner--error">{{ chatError }}</p>
 
@@ -1320,14 +1377,29 @@ onUnmounted(() => {
 @media (max-width: 1100px) {
   .layout { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
 }
-.layout__main,
-.layout__rail {
+.layout__main {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+}
+/*
+  🔴 2026-09-21 사용자: *"대화하면서 하단으로 고정해야하는데 사용자가 계속 스크롤 내려야해."*
+     원인은 **여기**였다. rail 이 `overflow-y: auto` 라 **rail 자체가 스크롤**을 가져갔고,
+     그러면 `.chat` 은 내용만큼 늘어나 `.chat__log` 가 **자기 스크롤을 못 만든다.**
+     결과: 입력창이 화면 밖으로 밀리고, 새 말이 올 때마다 사람이 내려야 했다.
+  ⇒ rail 은 **안 넘친다**(hidden). 남는 높이는 `.chat` 이 갖고, 스크롤은 `.chat__log` 안에서만.
+     그러면 입력창은 **항상 바닥에 붙어 있다.**
+*/
+.layout__rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .addgroup {
@@ -1780,8 +1852,10 @@ onUnmounted(() => {
   display: flex; flex-direction: column; gap: var(--space-sm);
   background: var(--color-surface); border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg); padding: var(--space-base);
-  /* 남는 높이를 채팅이 가져간다 — 대화가 주인공인 열이다 */
-  flex: 1; min-height: 280px;
+  /* 남는 높이를 채팅이 가져간다 — 대화가 주인공인 열이다.
+     ⚠️ `min-height` 는 **0** 이어야 한다. 280px 을 주면 내용이 많을 때 그만큼 **밀어내서**
+        rail 을 넘치게 만들고, 그러면 위의 문제가 그대로 돌아온다. */
+  flex: 1; min-height: 0;
 }
 .chat__head { display: flex; align-items: center; justify-content: space-between; }
 .chat__head .panel__h { margin: 0; }
@@ -1821,7 +1895,14 @@ onUnmounted(() => {
 .tool__name { font-weight: 700; color: var(--color-body); }
 .tool__args { color: var(--color-faint); }
 .tool__detail { flex-basis: 100%; color: var(--color-muted); word-break: break-all; }
-.chat__form { display: flex; gap: var(--space-xs); }
+.chat__headacts { display: flex; align-items: center; gap: var(--space-xs); }
+.chat__jump {
+  align-self: center; border: 1px solid var(--color-ai-line); background: var(--color-ai-soft);
+  color: var(--color-ai); font-size: var(--text-2xs); padding: 3px 10px;
+  border-radius: 999px; cursor: pointer;
+}
+/* 입력창은 **항상 바닥**이다 — 줄어들지 않게 못박는다 */
+.chat__form { display: flex; gap: var(--space-xs); flex: none; }
 .chat__form .input { flex: 1; }
 
 /* ── 선택 종목 뉴스 ──────────────────────────────── */

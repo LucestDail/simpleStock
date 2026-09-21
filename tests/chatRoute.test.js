@@ -126,4 +126,29 @@ test('대화 이력 조회는 REST 가 맞다 (전부 스트리밍으로 만들�
   assert.match(res.headers.get('content-type') || '', /application\/json/);
   const b = await res.json();
   assert.ok(Array.isArray(b.items));
+
+  /**
+   * 🔴 **`index.html` 을 캐시하면 배포해도 사용자가 못 본다** (2026-09-21 실결함).
+   *
+   * 사용자가 *"화면이 그대로인데?"* 라고 했고, 확인해 보니 **라이브 번들에는 새 코드가
+   * 다 들어 있었다**(마커 6종 확인). 바뀌지 않은 건 브라우저가 든 `index.html` 이었다 —
+   * 거기 적힌 옛 asset 해시만 계속 요청하니 새 파일을 **아예 안 받는다.**
+   * ⚠️ 종전엔 `Cache-Control` 이 **없었다**. 없으면 "캐시 금지" 가 아니라 **브라우저가 정한다**.
+   *
+   * ★ 이 부류는 **배포 검증으로 안 잡힌다** — 서버 번들엔 마커가 있어 전부 초록이다.
+   *   그래서 여기서 **헤더 자체**를 못박는다.
+   */
+  const html = await fetch(`http://127.0.0.1:${PORT_HISTORY}/`, { headers: { 'X-Access-Token': TOKEN } });
+  const cc = html.headers.get('cache-control') || '';
+  assert.match(cc, /no-(cache|store)/, `index.html 이 캐시된다: "${cc}" — 배포해도 사용자가 못 본다`);
+
+  // 반대편도 함께 본다: 해시가 박힌 자산은 **영구 캐시가 맞다**(매번 받으면 느리다)
+  const body = await html.text();
+  const assetPath = (/assets\/index-[A-Za-z0-9_-]+\.js/.exec(body) || [])[0];
+  assert.ok(assetPath, 'index.html 에서 자산 경로를 못 찾았다 — 이 검사가 헛돈다');
+  const asset = await fetch(`http://127.0.0.1:${PORT_HISTORY}/${assetPath}`);
+  assert.match(
+    asset.headers.get('cache-control') || '', /max-age=\d{5,}/,
+    '내용 해시가 붙은 자산인데 캐시를 안 한다 — 매 방문마다 다시 받는다',
+  );
 });

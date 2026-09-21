@@ -383,6 +383,23 @@ function readHistory({ limit = 400 } = {}) {
 }
 
 /**
+ * 이력을 통째로 지운다.
+ * ⚠️ 되돌릴 수 없다. 다만 **대화는 감사 기록이 아니다** — 주문 감사(`orders-audit.jsonl`)는
+ *    별도 파일이고 **여기서 안 건드린다**(그건 지우면 안 되는 것이다).
+ */
+function clearHistory() {
+  try {
+    const had = fs.existsSync(HISTORY_FILE);
+    if (had) fs.rmSync(HISTORY_FILE);
+    logInfo('chat.history_cleared', { had });
+    return { ok: true, cleared: had };
+  } catch (e) {
+    logError('chat.history_clear_failed', e, {});
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
  * recall — 과거 대화에서 관련 대목을 찾는다.
  *
  * ⚠️ 임베딩을 쓰지 않는다. **낱말 겹침**으로 고른다 — 이력이 수천 건 규모가 아니고,
@@ -757,6 +774,7 @@ module.exports = {
   sanitizeQuery,
   readHistory,
   appendHistory,
+  clearHistory,
   TOOL_DECLARATIONS,
   SYSTEM_PROMPT,
   parseToolCalls,

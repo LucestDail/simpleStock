@@ -293,6 +293,16 @@ app.post('/api/analyst/telegram', async (req, res) => {
   return res.json(out);
 });
 
+/**
+ * 🔴 대화 초기화 — **서버 이력까지** 지운다.
+ * ⚠️ 화면만 비우면 다음 접속에 되살아나고, 더 나쁘게는 **recall 이 계속 그걸 물어 온다.**
+ *    지우는 것이 맞는 자리다(대화는 감사 기록이 아니다).
+ */
+app.delete('/api/analyst/chat/history', (req, res) => {
+  const r = analystChat.clearHistory();
+  return res.json(r);
+});
+
 /** 대화 이력(화면 복원용). 스트리밍이 아니라 이건 REST 가 맞다 */
 app.get('/api/analyst/chat/history', (req, res) => {
   const rows = analystChat.readHistory({ limit: Number(req.query.limit) || 60 });
@@ -694,7 +704,35 @@ app.get('/health', (req, res) => {
 
 // ── 정적 프론트 ───────────────────────────────────────────────────
 const dist = path.join(__dirname, 'dist');
-app.use(express.static(dist, { index: false }));
+/**
+ * 🔴 **`index.html` 을 캐시하면 배포해도 사용자가 못 본다** (2026-09-21 실결함).
+ *
+ * 사용자: *"화면 개선 내가 준거 진행한거야? 화면이 그대로인데?"*
+ * 확인해 보니 라이브 번들에는 새 코드가 **다 들어 있었다**(마커 6종 js·css 각 1건).
+ * 바뀌지 않은 것은 **브라우저가 들고 있는 `index.html`** 이었다 — 거기에 옛 asset 해시가
+ * 적혀 있으니 새 파일을 아예 요청하지 않는다.
+ * ⚠️ 종전에는 `Cache-Control` 이 **없었다**. 없으면 "캐시하지 마라" 가 아니라
+ *    **브라우저가 알아서 정한다**(휴리스틱 캐싱). 그게 이 증상의 원인이다.
+ *
+ * ⇒ 갈라서 다룬다:
+ *   · `assets/*` — 파일명에 **내용 해시**가 있다. 내용이 바뀌면 이름이 바뀌므로 **영구 캐시**가 안전하다
+ *   · `index.html` — 그 해시를 가리키는 **지도**다. 절대 캐시하면 안 된다
+ *
+ * ★ 이건 "배포했는데 사용자는 못 본다" 는 부류라 **배포 검증으로도 안 잡힌다** —
+ *   서버 번들에는 마커가 있으니 전부 초록으로 보인다. 사용자가 말해 줘야 안다.
+ */
+app.use(
+  express.static(dist, {
+    index: false,
+    setHeaders(res, filePath) {
+      if (/[\\/]assets[\\/]/.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  })
+);
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) return next();
   const indexPath = path.join(dist, 'index.html');
@@ -705,6 +743,8 @@ app.get('*', (req, res, next) => {
   //    페이지를 받을 수 있는 누구나 토큰을 갖는 구조였고, 무인증 /health 가 이 catch-all 로
   //    떨어지면서 **실제로 외부에 샜다**. 이제 아무것도 주입하지 않는다 —
   //    프론트는 /auth/login 으로 한 번 제출하고 httpOnly 쿠키를 받는다.
+  // 🔴 지도는 캐시하지 않는다 — 여기서 캐시되면 새 번들을 영영 안 받는다
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.type('html').send(fs.readFileSync(indexPath, 'utf8'));
 });
 
