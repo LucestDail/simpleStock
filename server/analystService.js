@@ -2,6 +2,7 @@ const { generateStructuredOutput, getAiSettings } = require('./aiService');
 const { getDashboardSettings } = require('./settingsService');
 const orderService = require('./orderService');
 const toss = require('./tossClient');
+const mcp = require('./mcpClient');
 const { logInfo, logWarn } = require('./logger');
 
 /**
@@ -123,9 +124,21 @@ function summarizeCandles(rows) {
  * 리포트를 만든다. 실패해도 **부분 결과를 돌려준다**(조각 실패를 전체 실패로 만들지 않는다).
  * @param {object} dash `/api/dashboard` 결과
  */
-async function analyze(dash, { userInstruction = '' } = {}) {
+async function analyze(dash, { userInstruction = '', useWebSearch = true } = {}) {
   const items = dash?.portfolio?.items || [];
   const summary = dash?.portfolio?.summary || null;
+
+  /**
+   * 웹 검색(my-computer MCP). 🔴 **검색어에 수량·금액을 싣지 않는다** — 종목명·티커만 넘긴다.
+   * ⚠️ 실패해도 리포트는 난다. 검색은 곁가지이지 본체가 아니다.
+   */
+  let web = null;
+  if (useWebSearch) {
+    // ⚠️ **일부러 통째로 넘긴다.** 걸러서 넘기면 가드가 호출부에 있는 셈이고,
+    //    다음 사람이 이 줄을 고치는 순간 조용히 뚫린다. `buildQuery` 가 두 칸만 읽는다.
+    web = await mcp.searchMarketNews(items);
+    if (!web.ok) logWarn('analyst.web_unavailable', { kind: web.kind, error: web.error });
+  }
 
   // 보유 종목의 일봉을 모은다 — **계산으로 확인되는 값만** 프롬프트에 싣는다
   const tech = {};
@@ -180,11 +193,28 @@ async function analyze(dash, { userInstruction = '' } = {}) {
     lines.push(`- ${key}: ${top}`);
   }
 
-  lines.push(
-    '',
-    '## 이 시스템에 **없는** 데이터 (근거로 쓰지 마세요)',
-    '재무제표·매출/이익·PER/PBR/EV·DCF·애널리스트 목표가·기관/외국인 수급 상세·내부자 거래·옵션 IV·뉴스'
-  );
+  // 웹 검색 결과 — **성공한 것만** 근거로 싣고, 못 받은 것은 아래 "없는 데이터" 에 남긴다
+  const webHits = (web?.results || []).filter((r) => r.text);
+  if (webHits.length) {
+    lines.push('', '## 웹 검색 (my-computer 경유 · 최신 시장 정보)');
+    lines.push('⚠️ 아래는 외부 검색 결과입니다. **날짜와 출처를 확인하고** 인용하세요.');
+    for (const r of webHits) {
+      lines.push('', `### ${r.name || r.symbol}`, r.text.slice(0, 2500));
+    }
+  }
+
+  // 🔴 "없는 데이터" 는 **실제로 못 받은 것만** 적는다.
+  //    검색이 붙었는데도 "뉴스 없음" 이라 적으면 모델이 있는 근거를 안 쓴다.
+  const missingAxes = [
+    '재무제표·매출/이익',
+    'PER/PBR/EV·DCF',
+    '애널리스트 목표가',
+    '기관/외국인 수급 상세',
+    '내부자 거래',
+    '옵션 IV',
+  ];
+  if (!webHits.length) missingAxes.push('뉴스·최신 시장 정보');
+  lines.push('', '## 이 시스템에 **없는** 데이터 (근거로 쓰지 마세요)', missingAxes.join('·'));
   if (userInstruction) lines.push('', `## 사용자 추가 지시`, userInstruction);
 
   const started = Date.now();
@@ -209,12 +239,25 @@ async function analyze(dash, { userInstruction = '' } = {}) {
     else rejected.push({ symbol: p.symbol, side: p.side, error: r.error, missing: r.missing });
   }
 
+  // 🔴 웹검색 실패를 **코드가** dataGaps 에 적는다 — 모델에게 맡기면 빠뜨린다.
+  //    "검사하지 않은 것" 이 "통과한 것" 으로 보이면 안 되는 그 규칙의 이 프로젝트 판본이다.
+  const gaps = [...(report.dataGaps || [])];
+  if (useWebSearch) {
+    if (!web?.ok) gaps.push(`웹 검색 사용 불가 — ${web?.error || '알 수 없음'}`);
+    else if (web.failedCount) gaps.push(`웹 검색 일부 실패 (${web.failedCount}/${web.results.length}종목)`);
+  } else {
+    gaps.push('웹 검색을 끄고 분석했습니다.');
+  }
+
   logInfo('analyst.report', {
     positions: report.positions?.length || 0,
     proposed: report.proposals?.length || 0,
     created: created.length,
     rejected: rejected.length,
-    gaps: report.dataGaps?.length || 0,
+    gaps: gaps.length,
+    // ★ 새 기능이 **실제로 돌았다는 증거**를 지표에 함께 넣는다 — 0 이면 결과가 스스로 알려준다
+    webTool: web?.tool || null,
+    webHits: (web?.results || []).filter((r) => r.text).length,
     durationMs: Date.now() - started,
   });
 
@@ -222,11 +265,14 @@ async function analyze(dash, { userInstruction = '' } = {}) {
     at: new Date().toISOString(),
     marketView: report.marketView || '',
     momentumRead: report.momentumRead || '',
-    dataGaps: report.dataGaps || [],
+    dataGaps: gaps,
     positions: report.positions || [],
     created,
     rejected,
     tech,
+    web: web
+      ? { ok: web.ok, tool: web.tool, hits: (web.results || []).filter((r) => r.text).length, error: web.error || null }
+      : { ok: false, tool: null, hits: 0, error: '웹 검색을 끄고 실행했습니다.' },
   };
 }
 

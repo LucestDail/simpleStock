@@ -173,13 +173,32 @@ const report = ref(null);
 const proposals = ref([]);
 const analystLoading = ref(false);
 const analystError = ref('');
+/**
+ * my-computer MCP 웹검색 연계 상태.
+ * 🔴 **"안 붙었다" 와 "붙었는데 결과가 없다" 는 다르다** — 상태를 보여주지 않으면
+ *    둘 다 "뉴스 없음" 으로 똑같이 보인다(오늘 하루 종일 본 그 실패 모드).
+ */
+const mcpState = ref(null);
+const useWebSearch = ref(true);
+
+async function loadMcpStatus() {
+  try {
+    const res = await apiFetch('/api/mcp/status');
+    if (res.ok) mcpState.value = await res.json();
+  } catch {
+    mcpState.value = null;
+  }
+}
 
 /** 시황 → 모멘텀 → 매매 제안. 🔴 제안은 **승인해야** 진행된다 */
 async function runAnalyst() {
   analystLoading.value = true;
   analystError.value = '';
   try {
-    const res = await apiFetch('/api/analyst/run', { method: 'POST' });
+    const res = await apiFetch('/api/analyst/run', {
+      method: 'POST',
+      body: JSON.stringify({ useWebSearch: useWebSearch.value }),
+    });
     if (!res.ok) {
       const b = await res.json().catch(() => ({}));
       throw new Error(b.error || `분석 실패 (${res.status})`);
@@ -629,12 +648,34 @@ onUnmounted(() => {
             </button>
           </header>
 
+          <!--
+            🔴 웹검색이 **붙었는지**를 먼저 보여준다. 이게 없으면 "검색이 안 돈 것" 과
+               "검색했는데 별 게 없던 것" 이 화면에서 똑같아진다.
+            ⚠️ 5분 타이머에는 안 붙는다 — 버튼을 눌렀을 때만 검색한다
+          -->
+          <label class="websearch" :class="{ 'websearch--off': mcpState && mcpState.effective !== 'live' }">
+            <input v-model="useWebSearch" type="checkbox" :disabled="!mcpState || mcpState.effective !== 'live'" />
+            <span>웹 검색</span>
+            <span v-if="!mcpState" class="websearch__tag">확인 중…</span>
+            <span v-else-if="mcpState.effective === 'live'" class="websearch__tag websearch__tag--on">
+              my-computer · 도구 {{ mcpState.tools ? mcpState.tools.length : '?' }}
+            </span>
+            <span v-else class="websearch__tag">
+              미연결 ({{ mcpState.reason === 'url_or_token_missing' ? '주소·토큰 없음' : '꺼짐' }})
+            </span>
+          </label>
+
           <p v-if="analystError" class="banner banner--error">{{ analystError }}</p>
           <p v-else-if="!report" class="banner banner--empty">
             분석을 실행하면 시황·모멘텀 판단과 <b>매수/매도 제안</b>이 나옵니다.
           </p>
 
           <template v-else>
+            <!-- ★ 새 기능이 **실제로 돌았다는 증거**를 화면에 둔다 — 0 이면 스스로 알려준다 -->
+            <p v-if="report.web" class="analyst__src">
+              <template v-if="report.web.ok">웹 검색 {{ report.web.hits }}건 반영 · {{ report.web.tool }}</template>
+              <template v-else>웹 검색 미반영 — {{ report.web.error }}</template>
+            </p>
             <p class="analyst__view">{{ report.marketView }}</p>
             <p class="analyst__mom">{{ report.momentumRead }}</p>
 
@@ -1255,6 +1296,18 @@ onUnmounted(() => {
 .addticker__query { min-width: 0; }
 
 /* ── 매매 분석 ────────────────────────────────────── */
+.websearch {
+  display: flex; align-items: center; gap: var(--space-xs);
+  font-size: var(--text-xs); color: var(--color-body); cursor: pointer;
+}
+.websearch--off { cursor: not-allowed; color: var(--color-faint); }
+.websearch__tag {
+  margin-left: auto; padding: 2px 6px; border-radius: var(--rounded-sm);
+  background: var(--color-surface-sunken); color: var(--color-faint); font-size: var(--text-2xs);
+}
+.websearch__tag--on { background: var(--color-ai-soft); color: var(--color-ai); }
+.analyst__src { margin: 0; font-size: var(--text-2xs); color: var(--color-faint); }
+
 .analyst {
   background: var(--color-surface);
   border: 1px solid var(--color-hairline);

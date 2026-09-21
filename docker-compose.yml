@@ -49,6 +49,12 @@ services:
       GEMINI_RETRY_BASE_MS: "${GEMINI_RETRY_BASE_MS:-1500}"
       MANAGER_BRIEF_PRESET_SCHEDULE: "${MANAGER_BRIEF_PRESET_SCHEDULE:-true}"
       AI_DAILY_CRON: "${AI_DAILY_CRON:-}"
+      # ── my-computer MCP (시장 웹 검색) — **여기에 적지 않는다** ────
+      # 🔴 `environment:` 에 `${VAR:-}` 로 적으면 **`env_file` 값을 빈 값으로 덮어쓴다**
+      #    (실측: docker compose config 로 확인 — SECRET_A 가 "" 가 됐다).
+      #    MYCOMPUTER_MCP_{ENABLED,URL,TOKEN,TIMEOUT_MS} 는 TOSS_* 와 같이
+      #    **/etc/simplestock.env 에만** 둔다. 여기 적는 순간 토큰이 조용히 사라진다.
+      #    URL 은 `http://host.docker.internal:28080/my-computer/mcp` (위 extra_hosts 참조)
       MARKET_DATA_ENABLED: "${MARKET_DATA_ENABLED:-true}"
       MARKET_DATA_PROVIDER: "${MARKET_DATA_PROVIDER:-finnhub}"
       MARKET_US_PROVIDER: "${MARKET_US_PROVIDER:-finnhub}"

@@ -39,6 +39,7 @@ const dashboardService = require('./server/dashboardService');
 const orderService = require('./server/orderService');
 const telegram = require('./server/telegramService');
 const analyst = require('./server/analystService');
+const mcp = require('./server/mcpClient');
 
 // 🔴 2026-09-21: 종전에는 토큰이 없으면 `requireAccessToken` 이 그냥 next() 했다(fail-open).
 //    설정 실수 한 번이 곧 전면 개방이었다. 이제 **없으면 무작위로 만들어 잠근다** —
@@ -163,11 +164,32 @@ app.post('/api/analyst/run', async (req, res) => {
       rankingTypes: settings.rankingTypes,
       rankingCountries: settings.rankingCountries,
     });
-    const report = await analyst.analyze(dash, { userInstruction: settings.briefingPrompt });
+    // 웹 검색은 **버튼을 눌렀을 때만**. 5분 타이머에 붙이면 자동으로 계속 검색하게 된다
+    const useWebSearch = req.body?.useWebSearch !== false;
+    const report = await analyst.analyze(dash, {
+      userInstruction: settings.briefingPrompt,
+      useWebSearch,
+    });
     return res.json({ ...report, dashFailed: dash.failedCount, parts: dash.parts });
   } catch (error) {
     logError('analyst.failed', error, { requestId: req.requestId, kind: error.kind });
     return res.status(502).json({ error: error.message || '분석에 실패했습니다.', kind: error.kind || 'unknown' });
+  }
+});
+
+/**
+ * MCP 연계 상태·도구 목록.
+ * ⚠️ **화면이 "무엇이 붙어 있는지" 를 볼 수 있어야 한다** — 안 그러면 검색이 안 도는 것과
+ *    도구가 없는 것과 토큰이 틀린 것이 전부 "결과 없음" 으로 똑같이 보인다.
+ */
+app.get('/api/mcp/status', async (req, res) => {
+  const base = mcp.status();
+  if (!base.configured || !base.enabled) return res.json({ ...base, tools: null });
+  try {
+    const tools = await mcp.listTools({ refresh: req.query.refresh === 'true' });
+    return res.json({ ...mcp.status(), tools: tools.map((t) => t.name) });
+  } catch (e) {
+    return res.json({ ...base, tools: null, error: e.message, kind: e.kind || 'unknown' });
   }
 });
 
@@ -535,6 +557,8 @@ async function startAiSchedule() {
   logInfo('orders.mode', orderService.status());
   // 조용히 켜져 있지도, 조용히 꺼져 있지도 않게 — 어느 쪽이 막는지 이유까지 남긴다
   logInfo('telegram.mode', telegram.status());
+  // 어느 쪽이 막고 있는지(미설정/꺼짐)까지 기동 로그에 남긴다
+  logInfo('mcp.mode', mcp.status());
   logInfo('llm.fetch_probe', require('./server/geminiClient').describeFetchProbe());
   logInfo('auth.lan_trust', {
     enabled: SESSION.TRUST_LAN,
