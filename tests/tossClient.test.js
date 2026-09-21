@@ -275,3 +275,25 @@ test('🔴 상대를 못 알아내면 면제하지 않는다 (모르는 것을 L
   assert.equal(SESSION.isTrustedLanRequest({ socket: {}, headers: {} }), false);
   assert.equal(SESSION.isTrustedLanRequest({}), false);
 });
+
+test('🔴 표시되는 provider 가 **실제로 쓰는 것**을 따라간다 (2026-09-21 라이브에서 발견)', () => {
+  // 전환했는데 /api/market/status 가 계속 옛 값을 보였다. 실제 호출은 바뀌었는데
+  // 화면만 안 바뀌어서, "전환이 안 먹었다" 로 읽힌다 — 표시가 사실을 말해야 한다.
+  const settings = require('../server/settingsService');
+  const mds = require('../server/marketDataService');
+
+  const before = mds.getMarketProviderConfig();
+  assert.equal(typeof before.provider, 'string');
+  // 기본값도 따로 보여 준다 — 무엇이 덮였는지 알 수 있어야 한다
+  assert.ok('providerDefault' in before, 'providerDefault 가 없다 — 무엇이 덮였는지 못 본다');
+
+  const applied = settings.updateSettings({ market: { krProvider: 'toss', usProvider: 'toss' } });
+  assert.ok(applied, '설정 저장 실패');
+  const after = mds.getMarketProviderConfig();
+  assert.equal(after.provider, 'toss', '프로바이더를 바꿨는데 표시가 안 따라온다');
+  assert.equal(after.providers.kr, 'toss');
+
+  // 원복 — 테스트가 로컬 설정을 바꾼 채 끝나면 안 된다
+  settings.updateSettings({ market: { krProvider: null, usProvider: null } });
+  assert.notEqual(mds.getMarketProviderConfig().providers.kr, 'toss');
+});

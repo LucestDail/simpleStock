@@ -99,7 +99,11 @@ function getMarketProviderConfig() {
   const providers = getResolvedProviders();
   return {
     timezone: APP_TIMEZONE,
-    provider: DEFAULT_PROVIDER,
+    // 🔴 2026-09-21: 여기가 **모듈 기본값**을 그대로 내보내고 있었다. 설정으로 프로바이더를
+    //    바꿔도(예: toss) 화면에는 계속 옛 값이 보였다 — 실제 호출은 바뀌었는데
+    //    "안 바뀐 것처럼 보이는" 상태다. 표시는 **해석된 값**이어야 한다.
+    provider: providers.kr || providers.us || DEFAULT_PROVIDER,
+    providerDefault: DEFAULT_PROVIDER,
     enabled: MARKET_DATA_ENABLED,
     providers,
     effectiveProviders: providers,
@@ -935,8 +939,11 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
       const existingQuotes = market.quotes && typeof market.quotes === 'object' ? market.quotes : {};
       // v3: 개인 보유(holdings)에 시세를 역적용하던 v2 로직 제거 — 관심종목 트래커는 holdings 를 사용하지 않는다.
       const prevStats = market.stats && typeof market.stats === 'object' ? market.stats : {};
+      const activeProviders = getResolvedProviders();
       store.memory.market = {
-        provider: DEFAULT_PROVIDER,
+        // 표시·기록 모두 **이번 갱신에 실제로 쓴** 프로바이더여야 한다(위 주석 참고)
+        provider: activeProviders.kr || activeProviders.us || DEFAULT_PROVIDER,
+        providers: activeProviders,
         refreshStatus: errors.length && !Object.keys(nextQuotes).length && !nextFx ? 'error' : 'ready',
         lastRefreshAt: refreshedAt,
         lastSuccessAt:
@@ -1052,7 +1059,8 @@ function startMarketDataPolling() {
   logInfo('market.polling.started', {
     intervalMs: MARKET_REFRESH_INTERVAL_MS,
     quoteTtlMs: MARKET_QUOTE_TTL_MS,
-    provider: DEFAULT_PROVIDER,
+    provider: getResolvedProviders(),
+    providerDefault: DEFAULT_PROVIDER,
   });
 }
 
