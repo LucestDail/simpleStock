@@ -36,6 +36,7 @@ const SESSION = require('./server/session');
 const tossPortfolio = require('./server/tossPortfolio');
 const tossClient = require('./server/tossClient');
 const dashboardService = require('./server/dashboardService');
+const orderService = require('./server/orderService');
 
 // 🔴 2026-09-21: 종전에는 토큰이 없으면 `requireAccessToken` 이 그냥 next() 했다(fail-open).
 //    설정 실수 한 번이 곧 전면 개방이었다. 이제 **없으면 무작위로 만들어 잠근다** —
@@ -141,6 +142,32 @@ app.get('/api/portfolio', async (req, res) => {
       kind: error.kind || 'unknown',
     });
   }
+});
+
+// ── 주문 제안 (제안 → 승인 → 실행). 🔴 실행은 현재 no-op ────────
+app.get('/api/orders/proposals', (req, res) => {
+  res.json({ status: orderService.status(), proposals: orderService.list() });
+});
+
+app.post('/api/orders/proposals', (req, res) => {
+  const r = orderService.propose(req.body || {}, { source: String(req.body?.source || 'manual') });
+  // 빠진 값을 400 으로 돌려준다 — **승인 화면에서 채우게 두지 않는다**
+  return res.status(r.ok ? 201 : 400).json(r);
+});
+
+app.post('/api/orders/proposals/:id/approve', (req, res) => {
+  const r = orderService.approve(req.params.id);
+  return res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post('/api/orders/proposals/:id/reject', (req, res) => {
+  const r = orderService.reject(req.params.id, req.body?.reason);
+  return res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post('/api/orders/proposals/:id/execute', async (req, res) => {
+  const r = await orderService.execute(req.params.id);
+  return res.status(r.ok ? 200 : 400).json(r);
 });
 
 // ── 대시보드 (한 화면에 필요한 것을 한 번에) ──────────────────
@@ -457,6 +484,7 @@ async function startAiSchedule() {
   }
 
   // ⚠️ 조용한 우회를 만들지 않는다 — LAN 면제가 켜져 있으면 그 사실을 기동 때 말한다
+  logInfo('orders.mode', orderService.status());
   logInfo('llm.fetch_probe', require('./server/geminiClient').describeFetchProbe());
   logInfo('auth.lan_trust', {
     enabled: SESSION.TRUST_LAN,

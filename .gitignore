@@ -10,3 +10,5 @@ backups/
 data/*.json
 !data/.gitkeep
 !data/README.md
+# 주문 감사 로그 — 개인 금융 기록. 형상에 올리지 않는다
+data/orders-audit.jsonl
