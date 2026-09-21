@@ -1,5 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import PriceChart from '../components/PriceChart.vue';
+import SettingsPanel from '../components/SettingsPanel.vue';
 import { useWatchlist } from '../composables/useWatchlist';
 import { useUi } from '../composables/useUi';
 import { formatMarketClock } from '../lib/marketClock';
@@ -165,6 +167,55 @@ async function onRefreshMarket() {
   }
 }
 
+/**
+ * 대시보드 (2026-09-21) — 화면이 필요한 것을 `/api/dashboard` 한 번으로 받는다.
+ * 조각마다 요청하면 토스 한도를 태운다.
+ * ⚠️ 조각별 성패(`parts`)를 그대로 받아 **"없음" 과 "못 받음" 을 구분해 보여준다.**
+ */
+const dash = ref(null);
+const dashError = ref('');
+const selected = ref({ symbol: '', name: '' });
+const settingsOpen = ref(false);
+let dashTimer = null;
+
+async function loadDashboard() {
+  try {
+    const res = await apiFetch('/api/dashboard');
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      dash.value = null;
+      dashError.value = b.error || `대시보드를 불러오지 못했습니다 (${res.status})`;
+      return;
+    }
+    dash.value = await res.json();
+    dashError.value = '';
+    // 아직 고른 종목이 없으면 보유 첫 종목을 기본으로
+    if (!selected.value.symbol) {
+      const first = dash.value?.portfolio?.items?.[0];
+      if (first) selected.value = { symbol: first.symbol, name: first.name };
+    }
+  } catch (e) {
+    dash.value = null;
+    dashError.value = e.message || '대시보드 오류';
+  }
+}
+
+function pickSymbol(symbol, name) {
+  selected.value = { symbol, name: name || symbol };
+}
+
+/** 조각이 실패했으면 그 사실을 화면에 남긴다 */
+function partError(name) {
+  const p = dash.value?.parts?.[name];
+  return p && p.ok === false ? p : null;
+}
+
+function restartDashTimer() {
+  if (dashTimer) clearInterval(dashTimer);
+  const sec = Number(dash.value?.settings?.refreshSec) || 60;
+  dashTimer = setInterval(loadDashboard, Math.max(15, sec) * 1000);
+}
+
 const portfolio = ref(null);
 const portfolioError = ref('');
 const portfolioLoading = ref(false);
@@ -281,6 +332,8 @@ onMounted(async () => {
   await load();
   await loadLatestBriefing();
   await loadPortfolio();
+  await loadDashboard();
+  restartDashTimer();
   clockTimer = setInterval(() => {
     clock.value = formatMarketClock();
   }, 1000);
@@ -294,6 +347,7 @@ onMounted(async () => {
 onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer);
   if (pollTimer) clearInterval(pollTimer);
+  if (dashTimer) clearInterval(dashTimer);
   if (es) es.close();
 });
 </script>
@@ -333,6 +387,7 @@ onUnmounted(() => {
           <span class="metric__label">종목</span>
           <span class="metric__value mono-num">{{ totalTickers }}</span>
         </div>
+        <button class="btn btn--ghost" aria-label="운영 설정" title="운영 설정" @click="settingsOpen = true">⚙</button>
         <button class="btn btn--ghost" :disabled="refreshing" @click="onRefreshMarket">
           <span class="btn__spin" :class="{ 'btn__spin--on': refreshing }" aria-hidden="true"></span>
           {{ refreshing ? '갱신 중' : '시세 갱신' }}
@@ -404,7 +459,13 @@ onUnmounted(() => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="h in portfolio.items" :key="h.symbol">
+                <tr
+                  v-for="h in portfolio.items"
+                  :key="h.symbol"
+                  class="holdings__row"
+                  :class="{ 'holdings__row--on': selected.symbol === h.symbol }"
+                  @click="pickSymbol(h.symbol, h.name)"
+                >
                   <td>
                     <span class="holdings__name">{{ h.name }}</span>
                     <span class="holdings__meta">{{ h.market }} · {{ h.symbol }}</span>
@@ -421,6 +482,58 @@ onUnmounted(() => {
             </table>
           </template>
         </section>
+
+        <!-- ── 조각 실패를 숨기지 않는다 ─────────────────────── -->
+        <p v-if="dashError" class="banner banner--error">{{ dashError }}</p>
+        <p v-else-if="dash && dash.failedCount" class="banner banner--warn">
+          일부 데이터를 못 받았습니다 ({{ dash.failedCount }}건) —
+          <template v-for="(p, k) in dash.parts" :key="k">
+            <span v-if="p.ok === false">{{ k }}: {{ p.error }} ({{ p.kind }}) </span>
+          </template>
+        </p>
+
+        <!-- ── 차트 + 호가 ────────────────────────────────────── -->
+        <div class="hts">
+          <PriceChart :symbol="selected.symbol" :name="selected.name" />
+          <section class="side">
+            <div class="panel">
+              <h3 class="panel__h">모멘텀 <small>|{{ dash?.momentumPct ?? 3 }}%| 이상</small></h3>
+              <p v-if="!dash?.momentum?.length" class="panel__empty">기준을 넘는 종목이 없습니다.</p>
+              <ul v-else class="panel__list">
+                <li v-for="m in dash.momentum" :key="m.symbol">
+                  <button class="linkish" @click="pickSymbol(m.symbol, m.name)">{{ m.name }}</button>
+                  <b class="mono-num" :class="signClass(m.dailyRate)">{{ pct(m.dailyRate) }}</b>
+                </li>
+              </ul>
+            </div>
+
+            <div class="panel">
+              <h3 class="panel__h">종목 경고</h3>
+              <p v-if="partError('warnings')" class="panel__err">{{ partError('warnings').error }}</p>
+              <p v-else-if="!dash || !Object.keys(dash.warnings || {}).length" class="panel__empty">경고 없음</p>
+              <ul v-else class="panel__list">
+                <li v-for="(ws, sym) in dash.warnings" :key="sym">
+                  <span>{{ sym }}</span><b class="warnish">{{ ws.length }}건</b>
+                </li>
+              </ul>
+            </div>
+
+            <div class="panel">
+              <h3 class="panel__h">랭킹</h3>
+              <p v-if="partError('rankings')" class="panel__err">{{ partError('rankings').error }}</p>
+              <template v-else v-for="(r, type) in (dash?.rankings || {})" :key="type">
+                <div class="rank">
+                  <span class="rank__type">{{ type === 'TOP_GAINERS' ? '급등' : type === 'TOP_LOSERS' ? '급락' : type }}</span>
+                  <ol class="rank__list">
+                    <li v-for="row in (r.rows || []).slice(0, 5)" :key="row.symbol">
+                      <button class="linkish" @click="pickSymbol(row.symbol, row.symbol)">{{ row.symbol }}</button>
+                    </li>
+                  </ol>
+                </div>
+              </template>
+            </div>
+          </section>
+        </div>
 
         <div class="addgroup">
           <input
@@ -455,7 +568,7 @@ onUnmounted(() => {
 
             <ul class="tickers">
               <li v-for="t in group.tickers" :key="t.symbol + t.market" class="ticker">
-                <div class="ticker__id">
+                <div class="ticker__id" role="button" @click="pickSymbol(t.symbol, t.name)">
                   <span class="ticker__name">{{ t.name }}</span>
                   <span class="ticker__meta">{{ marketBadge(t) }} · {{ t.symbol }}</span>
                 </div>
@@ -561,6 +674,8 @@ onUnmounted(() => {
         </section>
       </aside>
     </div>
+
+    <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" @saved="loadDashboard(); restartDashTimer()" />
   </div>
 </template>
 
@@ -911,6 +1026,55 @@ onUnmounted(() => {
 .holdings__meta { display: block; font-size: var(--text-xs); color: var(--color-faint); }
 .holdings small { font-size: var(--text-xs); opacity: 0.85; margin-left: 4px; }
 .ta-r { text-align: right; }
+
+/* ── HTS: 차트 + 사이드 패널 ──────────────────────── */
+.hts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-md);
+}
+@media (min-width: 1100px) {
+  .hts { grid-template-columns: minmax(0, 1fr) 280px; }
+}
+.side { display: flex; flex-direction: column; gap: var(--space-sm); min-width: 0; }
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-base);
+  display: flex; flex-direction: column; gap: var(--space-sm);
+}
+.panel__h {
+  margin: 0; font-size: var(--text-xs); font-weight: 700;
+  letter-spacing: 0.06em; color: var(--color-muted);
+  display: flex; align-items: baseline; gap: 6px;
+}
+.panel__h small { font-weight: 500; color: var(--color-faint); }
+.panel__empty { margin: 0; font-size: var(--text-sm); color: var(--color-faint); }
+/* 🔴 "없음" 과 "못 받음" 은 다른 색이어야 한다 */
+.panel__err { margin: 0; font-size: var(--text-sm); color: var(--color-down); }
+.panel__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.panel__list li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); font-size: var(--text-md); }
+.linkish {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  color: var(--color-ink); font-size: var(--text-md); text-align: left;
+}
+.linkish:hover { color: var(--color-primary); }
+.warnish { color: var(--color-warn); font-size: var(--text-sm); }
+.rank { display: flex; flex-direction: column; gap: 4px; }
+.rank__type { font-size: var(--text-2xs); color: var(--color-faint); letter-spacing: 0.06em; }
+.rank__list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+.rank__list li { font-size: var(--text-sm); }
+
+.banner--warn {
+  background: var(--color-warn-soft);
+  border-color: transparent;
+  color: var(--color-warn);
+}
+.holdings__row { cursor: pointer; }
+.holdings__row:hover { background: var(--color-surface-hover); }
+.holdings__row--on { background: var(--color-primary-soft); }
+.ticker__id[role='button'] { cursor: pointer; }
 
 /* ── 보드 ─────────────────────────────────────────── */
 .board {

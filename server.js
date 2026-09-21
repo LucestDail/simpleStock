@@ -160,7 +160,7 @@ app.get('/api/dashboard', async (req, res) => {
     });
     // ⚠️ 조각이 하나라도 실패하면 **200 이지만 그 사실을 몸통에 담아** 보낸다.
     //    실패를 502 로 바꾸면 나머지 멀쩡한 조각까지 화면에서 사라진다.
-    return res.json({ ...data, market: mkt, watchlist: watch });
+    return res.json({ ...data, market: mkt, watchlist: watch, settings: getDashboardSettings() });
   } catch (error) {
     logError('dashboard.failed', error, { requestId: req.requestId, kind: error.kind });
     return res.status(502).json({ error: error.message || '대시보드를 만들지 못했습니다.', kind: error.kind || 'unknown' });
@@ -394,6 +394,8 @@ app.get('/api/system/status', (req, res) => {
     latestManagerReport: getLatestManagerReport(),
     aiPresets: AI_PRESETS,
     marketProviderOptions: MARKET_PROVIDER_OPTIONS,
+    // 화면 설정 패널이 읽는 곳. **기본값이 적용된 실효값**과 무엇이 기본값인지를 함께 준다.
+    dashboardSettings: getDashboardSettings(),
   });
 });
 

@@ -4,6 +4,8 @@
 
 const crypto = require('crypto');
 const { loadStore, mutateStore } = require('./dataStore');
+const tossPortfolio = require('./tossPortfolio');
+const { getDashboardSettings } = require('./settingsService');
 const { generateStructuredOutput, getAiSettings, isAiConfigured, getLastServedBy } = require('./aiService');
 const {
   getTokenUsageSummary,
@@ -15,7 +17,7 @@ const { getMemoryState } = require('./memoryService');
 const { getDateInTimezone } = require('./time');
 const { broadcast } = require('./realtimeService');
 const { getAiLatencySnapshot } = require('./aiLatencyMetrics');
-const { logInfo } = require('./logger');
+const { logInfo , logWarn } = require('./logger');
 // watchlistService 는 순환 의존(watchlist→market→payload→manager) 회피를 위해 지연 require.
 
 const BRIEFING_SCHEMA = {
@@ -80,19 +82,60 @@ async function runManagerReview(trigger = 'manual', options = {}) {
         ? options.scheduledTaskPrompt
         : '';
 
+  // 토스 보유·사용자 지시를 함께 넣는다. **실패해도 브리핑은 만든다**(자산 없는 브리핑으로).
+  let holdings = null;
+  try {
+    if (tossPortfolio.isEnabled()) holdings = await tossPortfolio.getHoldings();
+  } catch (e) {
+    logWarn('briefing.holdings_unavailable', { kind: e?.kind || 'unknown', message: e?.message });
+  }
+  const userInstruction = (getDashboardSettings().briefingPrompt || '').trim();
+
   const ai = getAiSettings();
   const today = getDateInTimezone(new Date(), ai.timezone);
   const watchlistContext = buildWatchlistContext(watchlist);
 
+  /**
+   * 🔴 2026-09-21: 이 프롬프트가 **제품과 정면으로 어긋나 있었다.**
+   *    v3 에서 개인 자산을 걷어냈을 때 *"개인 자산 정보는 없습니다 · 보유/수익률 표현은
+   *    절대 쓰지 마세요"* 라고 적었는데, 이제 **토스 실계좌 보유가 들어온다.**
+   *    그대로 두면 모델이 **자산을 보고도 못 본 척**한다 — 오늘 아침 `upsertHolding`
+   *    죽은 지시서의 **거울상**이다(그건 없는 걸 있다고 했고, 이건 있는 걸 없다고 했다).
+   * ⚠️ 보유가 없을 때는 종전 문장을 그대로 쓴다(없는 걸 있다고 말하게 하지 않는다).
+   */
+  const hasHoldings = Boolean(holdings?.items?.length);
   const systemPrompt = [
     '당신은 한국/미국 주식·ETF를 추적하는 종합 시장 애널리스트입니다.',
-    '개인 자산·보유수량·매수단가 정보는 없습니다. 오직 관심종목(watchlist)과 현재 시세만 근거로 삼습니다.',
-    '보유/수익률/매매지시 같은 개인 자산 표현은 절대 쓰지 마세요. 종목 추적·시장 관찰 관점으로만 서술합니다.',
+    hasHoldings
+      ? '사용자의 **실제 보유 종목과 평가손익**이 함께 제공됩니다. 보유 비중·손익·당일 변동을 근거로 삼으세요.'
+      : '개인 자산·보유수량·매수단가 정보는 없습니다. 오직 관심종목(watchlist)과 현재 시세만 근거로 삼습니다.',
+    hasHoldings
+      ? '다만 **매수/매도를 지시하지 마세요.** 관찰과 판단 근거까지만 쓰고, 실행 결정은 사람이 합니다.'
+      : '보유/수익률/매매지시 같은 개인 자산 표현은 절대 쓰지 마세요. 종목 추적·시장 관찰 관점으로만 서술합니다.',
     '반드시 한국어로, 제공된 시세 데이터에 근거해 간결하게 작성하세요. 근거 없는 수치를 지어내지 마세요.',
-  ].join('\n');
+    // 사용자가 설정 화면에서 넣은 지시 — **없으면 아무것도 붙이지 않는다**
+    userInstruction ? `추가 지시(사용자): ${userInstruction}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const holdingsContext = hasHoldings
+    ? [
+        '',
+        '## 실제 보유 (토스증권)',
+        `평가금액(원화환산): ${holdings.summary?.value?.krw ?? '-'} · 평가손익률: ${holdings.summary?.profitRate ?? '-'}%`,
+        `당일 손익률: ${holdings.summary?.dailyRate ?? '-'}%`,
+        ...holdings.items.map(
+          (h) =>
+            `- ${h.name}(${h.symbol}/${h.market}) 수량 ${h.quantity} · 평단 ${h.avgPrice} · 현재 ${h.lastPrice} · ` +
+            `평가손익 ${h.profitRate}% · 당일 ${h.dailyRate}%`
+        ),
+      ].join('\n')
+    : '';
 
   const userPrompt = [
     `기준일: ${today}`,
+    holdingsContext,
     '',
     '# 관심종목 현황(테마 그룹별 현재 시세)',
     watchlistContext || '(등록된 종목 없음)',

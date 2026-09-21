@@ -74,7 +74,15 @@ const DASHBOARD_DEFAULTS = Object.freeze({
  *    "알림이 왜 이렇게 많지" 로만 보인다.
  */
 function normalizeDashboard(d) {
-  const n = (v, lo, hi) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Number(v))) : null);
+  // 🔴 `Number(null)` 은 **0** 이고 `Number.isFinite(0)` 은 **true** 다.
+  //    그래서 처음 판에서 null 이 하한으로 클램프돼(3 → 0.1, 60 → 15) **기본값이 아예 안 먹었다.**
+  //    화면에 "모멘텀 |0.1%| 이상" 이 떠서 알았다 — 숫자가 그럴듯해서 코드만 봐선 안 보인다.
+  //    ⇒ **빈 값을 먼저 걸러낸다.** (`undefined`·`null`·`''` 는 전부 "설정 안 함")
+  const n = (v, lo, hi) => {
+    if (v === null || v === undefined || v === '') return null;
+    const x = Number(v);
+    return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : null;
+  };
   const types = Array.isArray(d?.rankingTypes)
     ? d.rankingTypes.filter((t) => RANKING_TYPES.includes(t))
     : null;
@@ -225,6 +233,16 @@ async function updateSettings(patch = {}) {
       fxProvider:
         patch.market?.fxProvider !== undefined ? patch.market.fxProvider : current.market.fxProvider,
     },
+    /**
+     * 🔴 이 함수는 필드를 **하나씩 조립**한다(허용목록). 여기 안 적으면 patch 가
+     *    **조용히 버려진다** — 화면에서 저장을 눌러도 아무 일도 안 일어난다.
+     *    ⚠️ 같은 날 dataStore 리포트 정규화에서 `servedBy` 로 똑같이 당했다.
+     *    ⇒ 설정에 섹션을 더하면 **여기도 같이** 더한다.
+     */
+    dashboard: {
+      ...current.dashboard,
+      ...(patch.dashboard && typeof patch.dashboard === 'object' ? patch.dashboard : {}),
+    }
   };
   saveSettings(next);
   return loadSettings();
