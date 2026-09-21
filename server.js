@@ -32,6 +32,7 @@ const {
 } = require('./server/watchlistService');
 const { resolveTickerByName } = require('./server/tickerLookupService');
 const { THEME_PRESETS } = require('./server/themePresets');
+const stockRating = require('./server/stockRating');
 
 const PORT = Number(process.env.PORT) || 50000;
 const SESSION = require('./server/session');
@@ -184,6 +185,22 @@ app.post('/api/analyst/run', async (req, res) => {
   } catch (error) {
     logError('analyst.failed', error, { requestId: req.requestId, kind: error.kind });
     return res.status(502).json({ error: error.message || '분석에 실패했습니다.', kind: error.kind || 'unknown' });
+  }
+});
+
+/**
+ * 종목 계층 평가 — 10항목 100점.
+ * ⚠️ LLM 을 쓰므로 느리다(10~20초). 화면은 로딩을 보여줘야 한다.
+ */
+app.get('/api/rate/:symbol', async (req, res) => {
+  try {
+    const raw2 = String(req.params.symbol || '').trim().toUpperCase();
+    // 한국 6자리 코드는 야후 형식으로
+    const sym = /^\d{6}$/.test(raw2) ? `${raw2}.KS` : raw2;
+    return res.json(await stockRating.rate(sym));
+  } catch (e) {
+    logError('rating.failed', e, { requestId: req.requestId, kind: e.kind });
+    return res.status(e.kind === 'not-found' ? 404 : 502).json({ error: e.message, kind: e.kind || 'unknown' });
   }
 });
 

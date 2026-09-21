@@ -370,6 +370,11 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
      그건 전부 **WorkspaceView 의 scoped 클래스**라 여기서는 **아무 스타일도 안 먹는다.**
      내가 오늘 만든 `noBorrowedScopedClass` 가드가 정확히 이걸 잡았다(입력칸이 맨몸으로 나왔을 것).
 */
+/* 🔴 가드가 찾은 고아 클래스 — 템플릿은 쓰는데 규칙이 없었다(맨몸으로 나갔다) */
+.sp__sec { margin-bottom: var(--space-base); }
+.sp__h { margin: 0 0 6px; font-size: var(--text-sm); font-weight: 700; color: var(--color-ink); }
+.sp__h small { margin-left: 6px; font-weight: 500; color: var(--color-faint); font-size: var(--text-2xs); }
+
 .sp__target { display: grid; grid-template-columns: 1.4fr 1fr 1fr 26px; gap: 4px; margin-bottom: 4px; align-items: center; }
 .sp__now { grid-column: 1 / -1; color: var(--color-faint); font-size: var(--text-2xs); }
 .sp__err { color: var(--color-down); font-size: var(--text-xs); margin: 0 0 4px; }

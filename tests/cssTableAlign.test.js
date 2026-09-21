@@ -114,3 +114,62 @@ test('표 헤더 정렬 유틸이 `X th` 규칙에 지지 않는다', () => {
   assert.ok(scanned > 0, '검사한 (표 × 정렬유틸) 조합이 0건이다 — 자가 헛돌고 있다');
   assert.deepEqual(problems, [], `\n${problems.join('\n')}`);
 });
+
+/**
+ * 🔴 **규칙이 없는 클래스** (2026-09-21, 피어가 배포 후 발견 → 가드 확장)
+ *
+ * 내가 만든 `.pos__rr`·`.pos__lv`·`.pos__sc` 가 **CSS 규칙 없이** 라이브에 나갔다.
+ * 스타일을 넣으려던 앵커가 그 사이 바뀌어 **치환이 조용히 no-op** 됐기 때문이다.
+ *
+ * ★ 기존 가드(`남의 scoped 스타일`)는 **빌려 쓴 것**만 봤다 — **아예 없는 것**은 못 잡았다.
+ *   피어 제안대로 넓힌다: *"템플릿이 쓰는 클래스 중 어디에도 규칙이 없는 것"*.
+ * ⚠️ 전역·유틸리티 클래스는 **면제**해야 오탐이 난다. 면제마다 **이유를 적는다** —
+ *   이유 없는 면제는 곧 구멍이다.
+ */
+
+/** 면제 — 각 항목에 **왜** 를 적는다 */
+const GLOBAL_CLASSES = new Map([
+  ['mono-num', '전역 타이포 유틸(styles/)'],
+  ['input', '전역 폼 스타일'],
+  ['btn', '전역 버튼 스타일'],
+  ['banner', '전역 안내 스타일'],
+  ['panel', '전역 패널 스타일'],
+  ['iconbtn', '전역 아이콘 버튼'],
+  ['md', '마크다운 컨테이너 — 자식 선택자(.md :where(...))로만 스타일된다'],
+  ['dot', '전역 상태 점'],
+  ['ta-r', '정렬 유틸'],
+]);
+
+test('템플릿이 쓰는 클래스에 **규칙이 있다** (맨몸으로 나가지 않는다)', () => {
+  const files = vueFiles(ROOT);
+  const problems = [];
+  let scanned = 0;
+
+  for (const f of files) {
+    const src = fs.readFileSync(f, 'utf8');
+    const css = styleOf(src);
+    const tpl = templateOf(src);
+
+    const used = new Set();
+    // 정적 class="a b" 만 본다 — :class 바인딩은 동적이라 이 자로 판정 불가
+    for (const m of tpl.matchAll(/\sclass="([^"{}]+)"/g)) {
+      for (const c of m[1].split(/\s+/)) if (c && !c.includes('$')) used.add(c);
+    }
+
+    for (const c of used) {
+      if (GLOBAL_CLASSES.has(c)) continue;
+      // 수식 클래스(`btn--ai`)는 **뿌리**가 전역이면 함께 면제한다
+      const root = c.split('--')[0];
+      if (GLOBAL_CLASSES.has(root) && c.includes('--')) continue;
+      scanned += 1;
+      // `.c` 가 선택자 어딘가에 나오면 규칙이 있는 것으로 본다(자식·복합 선택자 포함)
+      if (!new RegExp(`\\.${c.replace(/[-]/g, '\\-')}\\b`).test(css)) {
+        problems.push(`${path.relative(ROOT, f)}: .${c} — 템플릿은 쓰는데 **규칙이 없다**(맨몸으로 나간다)`);
+      }
+    }
+  }
+
+  // 🔴 대상이 0건이면 통과가 아니라 실패다
+  assert.ok(scanned > 20, `검사한 클래스가 ${scanned}개뿐이다 — 자가 헛돌고 있다`);
+  assert.deepEqual(problems, [], `\n${problems.join('\n')}`);
+});

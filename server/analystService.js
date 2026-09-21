@@ -3,6 +3,7 @@ const { getDashboardSettings } = require('./settingsService');
 const orderService = require('./orderService');
 const toss = require('./tossClient');
 const mcp = require('./mcpClient');
+const rating = require('./stockRating');
 const activity = require('./activityLog');
 const telegram = require('./telegramService');
 const crypto = require('node:crypto');
@@ -359,6 +360,27 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     if (!web.ok) logWarn('analyst.web_unavailable', { kind: web.kind, error: web.error });
   }
 
+  /**
+   * 🔴 **종목 평가를 도구처럼 내부 호출한다** (2026-09-21 사용자 지시).
+   *    *"해당 대상을 도구처럼 호출해서 내부 호출 평가 해서 상세하게 점수 계층화 처리 후
+   *      판정이 가능하도록 구성. **모든건 매수/매도가 최종 목표**임."*
+   *
+   * ⇒ 각 보유 종목을 10항목 100점으로 평가하고, 그 **점수·투자의견을 매매 판단의 입력**으로 준다.
+   * ⚠️ 평가는 LLM 을 한 번씩 더 쓴다 — **보유 종목만**, 그리고 **실패해도 리포트는 난다.**
+   * ⚠️ 한국 종목은 야후 티커가 `005930.KS` 다. 토스 코드 그대로 넣으면 404 다.
+   */
+  const ratings = {};
+  for (const it of items.slice(0, 6)) {
+    const ysym = it.market === 'KR' && /^\d{6}$/.test(it.symbol) ? `${it.symbol}.KS` : it.symbol;
+    try {
+      ratings[it.symbol] = await rating.rate(ysym);
+    } catch (e) {
+      // 조용히 넘기지 않는다 — 평가 없이 판단했다는 사실이 리포트에 남아야 한다
+      logWarn('analyst.rating_failed', { symbol: it.symbol, ysym, kind: e.kind, message: e.message });
+      ratings[it.symbol] = { error: e.message, kind: e.kind || 'unknown' };
+    }
+  }
+
   // 보유 종목의 일봉을 모은다 — **계산으로 확인되는 값만** 프롬프트에 싣는다
   const tech = {};
   for (const it of items.slice(0, 8)) {
@@ -396,6 +418,33 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
             + (t.atrPct != null ? ` · 하루폭 ${fmt(t.atrPct)}%` : '')
           : ' · (일봉 없음)')
     );
+  }
+
+  /**
+   * 🔴 평가 결과를 **판단의 입력**으로 싣는다. 점수가 매매 결론으로 이어져야 한다 —
+   *    사용자: *"모든건 매수/매도가 최종 목표임."*
+   */
+  const rated = Object.entries(ratings).filter(([, r]) => r && !r.error && r.total != null);
+  if (rated.length) {
+    lines.push('', '## 종목 계층 평가 (10항목 100점 · Yahoo Statistics 기준)');
+    for (const [sym, r] of rated) {
+      lines.push(
+        `- ${r.name}(${sym}) — **${r.total}/100 · ${r.opinion}** · 유형 ${r.type} · 확신도 ${r.confidence}`
+        + `\n    항목: ${r.items.map((x) => `${x.name} ${x.score}`).join(' / ')}`
+        + (r.weaknesses ? `\n    약점: ${String(r.weaknesses).slice(0, 200)}` : '')
+        + (r.unverified?.length ? `\n    확인 못 함: ${r.unverified.slice(0, 3).join(' · ')}` : '')
+      );
+    }
+    lines.push(
+      '',
+      '🔴 위 **투자의견은 기업의 질**에 대한 것이고, 당신이 낼 것은 **지금 사고팔 것인가**다.',
+      '둘이 갈릴 수 있다 — 좋은 회사인데 지금 비쌀 수 있고, 약한 회사인데 단기 반등 구간일 수 있다.',
+      '**어긋나면 왜 어긋나는지 한 문장으로 밝히세요.**',
+    );
+  }
+  const failedRatings = Object.entries(ratings).filter(([, r]) => r?.error);
+  if (failedRatings.length) {
+    lines.push('', `⚠️ 평가하지 못한 종목: ${failedRatings.map(([s2]) => s2).join(', ')} — 질 평가 없이 판단해야 합니다.`);
   }
 
   const mom = dash?.momentum || [];
@@ -493,6 +542,9 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   // 🔴 웹검색 실패를 **코드가** dataGaps 에 적는다 — 모델에게 맡기면 빠뜨린다.
   //    "검사하지 않은 것" 이 "통과한 것" 으로 보이면 안 되는 그 규칙의 이 프로젝트 판본이다.
   const gaps = [...(report.dataGaps || [])];
+  for (const [sym, r] of Object.entries(ratings)) {
+    if (r?.error) gaps.push(`${sym} 기업 평가 실패 — ${r.error}`);
+  }
   if (useWebSearch) {
     if (!web?.ok) gaps.push(`웹 검색 사용 불가 — ${web?.error || '알 수 없음'}`);
     else if (web.failedCount) gaps.push(`웹 검색 일부 실패 (${web.failedCount}/${web.results.length}종목)`);
@@ -578,6 +630,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     created,
     rejected,
     tech,
+    ratings,
     web: web
       ? { ok: web.ok, tool: web.tool, hits: (web.results || []).filter((r) => r.text).length, error: web.error || null }
       : { ok: false, tool: null, hits: 0, error: '웹 검색을 끄고 실행했습니다.' },

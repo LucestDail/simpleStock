@@ -9,6 +9,7 @@ const toss = require('./tossClient');
 const tossPortfolio = require('./tossPortfolio');
 const mcp = require('./mcpClient');
 const orderService = require('./orderService');
+const rating = require('./stockRating');
 
 /**
  * 애널리스트 채팅 — 스트리밍 + 툴 콜링 (2026-09-21)
@@ -101,6 +102,21 @@ const TOOL_DECLARATIONS = [
       type: 'object',
       properties: { query: { type: 'string', description: '검색어. 보유 수량·금액은 절대 넣지 않는다.' } },
       required: ['query'],
+    },
+  },
+  {
+    /**
+     * 🔴 사용자 지시로 만든 **계층 평가** 도구 — 10항목 100점 + 투자의견 + 확신도.
+     * ⚠️ 이건 **기업의 질**을 재는 것이지 "지금 사라" 가 아니다.
+     */
+    name: 'rate_stock',
+    description:
+      '종목을 10개 항목 100점으로 평가한다(Yahoo Statistics Current 값 기준). 유형(대형주/중소형 성장주/'
+      + '대형배당주)을 자동 판정하고 총점·투자의견·확신도를 낸다. **기업의 질** 평가이며 매매 타이밍이 아니다.',
+    parameters: {
+      type: 'object',
+      properties: { symbol: { type: 'string', description: '종목 티커. 한국 종목은 6자리 코드' } },
+      required: ['symbol'],
     },
   },
   {
@@ -246,6 +262,7 @@ function decidePrompt() {
     '    · 뉴스·최근 소식·전망 → web_search',
     '    · 예전에 한 얘기 → recall',
     '    · 매수/매도를 **하자고 정했을 때** → propose_order (주문이 아니라 제안 등록이다)',
+    '    · 기업의 질·밸류·점수 → rate_stock (10항목 100점 · 유형별 기준)',
     '- 🔴 잡담·인사·감사이거나 **이미 `[도구 결과]` 로 받은 것**이면 `tools` 를 **빈 배열**로 둡니다.',
   ].join('\n');
 }
@@ -487,6 +504,21 @@ async function runTool(name, args = {}, ctx = {}) {
       const hit = r.results[0] || {};
       if (hit.error) return { ok: false, error: hit.error, kind: hit.kind };
       return { query: safe, text: String(hit.text || '').slice(0, 3000) };
+    }
+    case 'rate_stock': {
+      // ⚠️ 한국 종목은 야후 티커가 `.KS` 다 — 6자리 숫자면 붙여 준다(모델이 자주 빠뜨린다)
+      const sym = String(args.symbol || '').trim().toUpperCase();
+      const ysym = /^\d{6}$/.test(sym) ? `${sym}.KS` : sym;
+      const r = await rating.rate(ysym);
+      return {
+        symbol: r.symbol, name: r.name, type: r.type, total: r.total, opinion: r.opinion,
+        confidence: r.confidence, items: r.items,
+        strengths: r.strengths, weaknesses: r.weaknesses, oneLiner: r.oneLiner,
+        unverified: r.unverified, missingValueMetrics: r.missingValueMetrics,
+        stats: r.stats, links: r.links,
+        // 🔴 판단이 갈릴 수 있음을 도구 결과에 적어 둔다 — 모델이 혼동하지 않게
+        note: '이 점수는 **기업의 질**이다. 지금 사고팔 것인가는 가격·추세와 함께 별도로 판단하라.',
+      };
     }
     case 'propose_order': {
       // 🔴 빈칸이 있으면 `orderService` 가 거부한다 — 승인 화면이 주문 화면이 되면 안 된다

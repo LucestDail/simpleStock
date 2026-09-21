@@ -2021,6 +2021,7 @@ onUnmounted(() => {
 .tl { margin-top: var(--space-sm); border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }
 .tl__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .tl__row { display: grid; grid-template-columns: 16px 74px 1fr; gap: 6px; align-items: baseline; font-size: var(--text-2xs); }
+.tl__icon { text-align: center; line-height: 1.4; }
 .tl__at { color: var(--color-faint); }
 .tl__text { color: var(--color-body); overflow-wrap: anywhere; }
 
@@ -2092,6 +2093,7 @@ onUnmounted(() => {
 .tool--fail { border-left-color: var(--color-down); }
 .tool__name { font-weight: 700; color: var(--color-body); }
 .tool__args { color: var(--color-faint); }
+.tool__state { margin-left: auto; font-weight: 700; }
 .tool__detail { flex-basis: 100%; color: var(--color-muted); word-break: break-all; }
 .chat__headacts { display: flex; align-items: center; gap: var(--space-xs); }
 .chat__jump {
@@ -2213,6 +2215,22 @@ a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
 .pos ul, .gaps ul { margin: 2px 0; padding-left: 16px; }
 .pos li, .gaps li { font-size: var(--text-xs); color: var(--color-muted); line-height: 1.5; }
 .pos__risk { color: var(--color-warn) !important; }
+
+/*
+  🔴 **규칙을 안 써서 맨몸으로 나왔다** (2026-09-21, 피어가 배포 후 발견).
+     내가 스타일을 넣으려던 앵커가 그 사이 바뀌어 **치환이 조용히 no-op** 됐다.
+  ★ `noBorrowedScopedClass` 는 *남의 클래스를 빌려 쓴 것*만 본다 — **아예 규칙이 없는 것**은
+    못 잡았다. 그래서 그 가드를 넓혔다(`orphanClass`).
+*/
+.pos__rr { font-size: var(--text-2xs); color: var(--color-up); font-weight: 700; }
+.pos__rrbad { font-size: var(--text-2xs); color: var(--color-down); margin: 2px 0 0; }
+.pos__lv { display: flex; flex-wrap: wrap; gap: 8px; margin: 3px 0 0; }
+.pos__lv div { display: flex; gap: 3px; align-items: baseline; }
+.pos__lv dt { font-size: var(--text-2xs); color: var(--color-faint); }
+.pos__lv dd { margin: 0; font-size: var(--text-xs); color: var(--color-body); }
+.pos__sc { margin: 2px 0 0; font-size: var(--text-2xs); }
+.pos__sc--up { color: var(--color-up); }
+.pos__sc--dn { color: var(--color-down); }
 .gaps { border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }
 
 /* ── 브리핑 (AI 레이어) ──────────────────────────── */
