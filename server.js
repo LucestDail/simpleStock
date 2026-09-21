@@ -31,6 +31,7 @@ const {
   removeTicker,
 } = require('./server/watchlistService');
 const { resolveTickerByName } = require('./server/tickerLookupService');
+const { THEME_PRESETS } = require('./server/themePresets');
 
 const PORT = Number(process.env.PORT) || 50000;
 const SESSION = require('./server/session');
@@ -181,6 +182,44 @@ app.post('/api/analyst/run', async (req, res) => {
   } catch (error) {
     logError('analyst.failed', error, { requestId: req.requestId, kind: error.kind });
     return res.status(502).json({ error: error.message || '분석에 실패했습니다.', kind: error.kind || 'unknown' });
+  }
+});
+
+/**
+ * 대표 테마 프리셋을 넣는다 (2026-09-21 사용자 지시: *"8가지 넣어서 10가지 테마로"*).
+ *
+ * 🔴 **멱등이다** — 이미 같은 이름의 테마가 있으면 **건너뛴다**. 두 번 눌러도 안 늘어난다.
+ * ⚠️ 종목 추가가 실패해도(상장폐지·티커 변경) **그 종목만 건너뛰고** 몇 개를 못 넣었는지
+ *    돌려준다. 조용히 빠지면 "원래 4개짜리 테마" 로 보인다.
+ */
+app.post('/api/watchlist/presets', async (req, res) => {
+  const added = [];
+  const skipped = [];
+  const failedTickers = [];
+  try {
+    for (const preset of THEME_PRESETS) {
+      const state = getWatchlistState();
+      if ((state.groups || []).some((g) => g.name === preset.name)) {
+        skipped.push(preset.name);
+        continue;
+      }
+      const g = await createGroup(preset.name);
+      const gid = g?.id || g?.group?.id || (getWatchlistState().groups || []).find((x) => x.name === preset.name)?.id;
+      if (!gid) { failedTickers.push(`${preset.name}: 그룹 생성 실패`); continue; }
+      for (const t of preset.tickers) {
+        try {
+          await addTicker(gid, { symbol: t.symbol, name: t.name, market: t.market });
+        } catch (e) {
+          failedTickers.push(`${preset.name}/${t.symbol}: ${e.message}`);
+        }
+      }
+      added.push(preset.name);
+    }
+    logInfo('watchlist.presets', { added: added.length, skipped: skipped.length, failed: failedTickers.length });
+    return res.json({ ok: true, added, skipped, failedTickers });
+  } catch (e) {
+    logError('watchlist.presets_failed', e, { requestId: req.requestId });
+    return res.status(500).json({ error: e.message, added, skipped, failedTickers });
   }
 });
 

@@ -727,6 +727,13 @@ onMounted(async () => {
   tapeTimer = setInterval(loadTape, 60000);
   loadActivity();
   activityTimer = setInterval(loadActivity, 30000);
+  /**
+   * 🔴 사용자: *"매매 분석은 바로 실행 시작해."*
+   * ⚠️ **한 번만** 돈다(주기 실행 아님) — 매 렌더마다 돌면 LLM 비용이 계속 는다.
+   *    주기 실행은 서버 `ANALYST_AUTO_CRON` 이 담당한다.
+   * ⚠️ 보유를 먼저 받아야 분석할 것이 있다 — 그래서 조금 늦춘다.
+   */
+  setTimeout(() => { if (!report.value && !analystLoading.value) runAnalyst(); }, 1500);
   await load();
   await loadPortfolio();
   await loadDashboard();
@@ -934,9 +941,18 @@ onUnmounted(() => {
         ⚠️ 카드가 한 페이지 분량 이하면 **쪽 번호를 숨긴다** — 1/1 은 아무 정보가 아니다.
       -->
       <article v-for="group in pagedGroups" :key="group.id" class="wcard">
+        <!--
+          🔴 사용자: *"카테고리 명 있고 **우상단에 페이징 버튼/페이지** 붙여."*
+          ★ 쪽 이동을 카드 **밖** 아래에 두니 어느 카드의 쪽인지 멀었다 — 제목 옆이 맞다.
+        -->
         <header class="wcard__head">
           <span class="wcard__name">{{ group.name }}</span>
           <span class="wcard__count mono-num">{{ group.tickers.length }}</span>
+          <nav v-if="groupPages > 1" class="pager">
+            <button class="iconbtn" :disabled="groupPage === 0" aria-label="이전 테마" @click="groupPage -= 1">‹</button>
+            <span class="pager__at mono-num">{{ groupPage + 1 }}/{{ groupPages }}</span>
+            <button class="iconbtn" :disabled="groupPage >= groupPages - 1" aria-label="다음 테마" @click="groupPage += 1">›</button>
+          </nav>
         </header>
         <ul class="wcard__list">
           <li
@@ -967,11 +983,6 @@ onUnmounted(() => {
           <button class="btn btn--xs btn--soft" :disabled="busy" @click="onAddTicker(group)">+</button>
         </div>
       </article>
-      <nav v-if="groupPages > 1" class="pager">
-        <button class="iconbtn" :disabled="groupPage === 0" aria-label="이전" @click="groupPage -= 1">‹</button>
-        <span class="pager__at mono-num">{{ groupPage + 1 }}/{{ groupPages }}</span>
-        <button class="iconbtn" :disabled="groupPage >= groupPages - 1" aria-label="다음" @click="groupPage += 1">›</button>
-      </nav>
     </section>
         <section class="analyst">
           <header class="analyst__head">
@@ -1140,18 +1151,6 @@ onUnmounted(() => {
               <h3 class="panel__h">랭킹</h3>
               <p v-if="partError('rankings')" class="panel__err">{{ partError('rankings').error }}</p>
               <template v-else>
-                <!--
-                  🔴 사용자: *"티커/한국 주식 검색창 제공 · 클릭시 좌측 차트 반응"*
-                  ⚠️ 이건 **거르는 칸이 아니라 찾는 칸**이다 — 랭킹에 없는 종목도
-                     코드를 넣으면 차트를 띄울 수 있어야 검색창의 뜻이 산다.
-                -->
-                <form class="rank__find" @submit.prevent="findSymbol">
-                  <input v-model="rankQuery" class="input input--xs" placeholder="종목명·티커 (예: 삼성전자)" />
-                  <button class="iconbtn" type="submit" :disabled="!rankQuery.trim() || findBusy" aria-label="조회" title="조회">
-                    {{ findBusy ? '…' : '🔍' }}
-                  </button>
-                </form>
-                <p v-if="findError" class="panel__err">{{ findError }}</p>
                 <div v-if="rankKeys.length" class="rank__tabs">
                   <button
                     v-for="k in rankKeys" :key="k"
@@ -1187,6 +1186,25 @@ onUnmounted(() => {
                   </div>
                 </template>
               </template>
+
+              <!--
+                🔴 사용자: *"검색은 최하단에 붙여줘."*
+                ★ 검색은 **결과를 본 뒤에** 쓰는 것이라 목록 아래가 맞다 —
+                  위에 있으면 매번 랭킹을 한 칸 밀어낸다.
+              -->
+
+              <!--
+                🔴 사용자: *"티커/한국 주식 검색창 제공 · 클릭시 좌측 차트 반응"*
+                ⚠️ 이건 **거르는 칸이 아니라 찾는 칸**이다 — 랭킹에 없는 종목도
+                   코드를 넣으면 차트를 띄울 수 있어야 검색창의 뜻이 산다.
+              -->
+              <form class="rank__find" @submit.prevent="findSymbol">
+                <input v-model="rankQuery" class="input input--xs" placeholder="종목명·티커 (예: 삼성전자)" />
+                <button class="iconbtn" type="submit" :disabled="!rankQuery.trim() || findBusy" aria-label="조회" title="조회">
+                  {{ findBusy ? '…' : '🔍' }}
+                </button>
+              </form>
+              <p v-if="findError" class="panel__err">{{ findError }}</p>
             </div>
           </div>
       </aside>
@@ -1776,7 +1794,9 @@ onUnmounted(() => {
   padding: var(--space-sm);
   display: flex; flex-direction: column; gap: 4px;
 }
-.wcard__head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.wcard__head {
+  /* 쪽 이동을 **오른쪽 끝**으로 민다 */
+  gap: 6px; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .wcard__name {
   font-size: var(--text-sm); font-weight: 700; color: var(--color-ink);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1991,7 +2011,7 @@ onUnmounted(() => {
 .iconbtn:hover:not(:disabled) { background: var(--color-surface-hover); }
 .iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.pager { display: flex; align-items: center; gap: 4px; justify-content: center; flex: none; }
+.pager { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
 .pager__at { font-size: var(--text-2xs); color: var(--color-faint); }
 
 .analyst__warn { margin: 0; font-size: var(--text-2xs); color: var(--color-down); }

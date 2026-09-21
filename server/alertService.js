@@ -6,7 +6,7 @@ const tape = require('./tickerTapeService');
 const toss = require('./tossClient');
 const tossPortfolio = require('./tossPortfolio');
 const { resolveSession } = require('./marketCalendar');
-const { getDashboardSettings } = require('./settingsService');
+const { getDashboardSettings, updateSettings } = require('./settingsService');
 const { APP_TIMEZONE } = require('./time');
 const activity = require('./activityLog');
 const { logInfo, logWarn, logError } = require('./logger');
@@ -315,6 +315,37 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
   } catch (e) {
     failed.push('holdings');
     logWarn('alerts.portfolio_failed', { kind: e.kind, message: e.message });
+  }
+
+  /**
+   * 🔴 **안 가진 종목의 목표선은 지운다** (2026-09-21 사용자 지시).
+   *
+   * ⚠️⚠️ **보유를 못 읽었으면 절대 지우지 않는다.** `items` 가 비었다고 지우면
+   *    토스가 잠깐 죽은 날 사용자가 설정한 기준선이 **통째로 사라진다.**
+   *    ★ 오늘 내내 쓴 *"0 은 '없다' 가 아니라 '못 봤다' 일 수 있다"* 가 **가장 비싸게** 걸리는 자리다.
+   *    ⇒ 보유 조회가 **성공했고 종목이 하나 이상**일 때만 정리한다.
+   */
+  if (!failed.includes('holdings') && items.length) {
+    try {
+      const cur = getDashboardSettings().targets || {};
+      const held = new Set(items.map((h) => String(h.symbol).toUpperCase()));
+      const stale = Object.keys(cur).filter((sym) => !held.has(sym));
+      if (stale.length) {
+        const kept = Object.fromEntries(Object.entries(cur).filter(([sym]) => held.has(sym)));
+        // ⚠️ 비동기다 — 기다리지 않으면 다음 틱이 옛 값을 읽어 **같은 것을 또 지운다**
+        await updateSettings({ dashboard: { targets: Object.keys(kept).length ? kept : null } });
+        // 조용히 지우지 않는다 — 사용자가 설정한 값이다
+        logWarn('alerts.targets_pruned', { removed: stale });
+        /**
+         * 🔴 **보통 알림과 같은 길로 보낸다** — 직접 `activity.record` 만 하면
+         *    타임라인에는 남는데 **텔레그램으로는 안 간다**(사용자 설정이 바뀐 일인데).
+         *    같은 길로 보내면 조용한 시간·발송 스위치도 **자동으로 같이 지켜진다.**
+         */
+        out.push({ text: `🧹 보유하지 않는 종목의 기준선을 정리했습니다: ${stale.join(', ')}`, kind: 'prune' });
+      }
+    } catch (e) {
+      logWarn('alerts.prune_failed', { message: e.message });
+    }
   }
 
   for (const [name, fn] of [

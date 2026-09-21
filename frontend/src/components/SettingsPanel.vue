@@ -27,6 +27,38 @@ const form = ref({
 });
 /** 테마 그룹 관리 — 사용자가 "새 테마 추가도 설정에서" 라고 했다(2026-09-21) */
 const groups = ref([]);
+/**
+ * 🔴 사용자: *"종목코드가 흰색인데 저거 누르면 **내가 가진 종목** 모달로 팝업 띄어서 넣게 해줘.
+ *    … **없는 종목 가지고 목표가/손절가 넣지는 않을테고**"*
+ * ⇒ 자유 입력을 없애고 **보유 종목에서만** 고르게 한다. 오타로 안 맞는 기준선을 만들 수 없다.
+ * ⚠️ 보유를 못 읽으면 **고를 수 없다** — 그때는 "왜 비어 있는지" 를 화면에 적는다.
+ */
+const holdings = ref([]);
+const holdingsError = ref('');
+const presetBusy = ref(false);
+const presetMsg = ref('');
+
+async function addPresets() {
+  presetBusy.value = true;
+  presetMsg.value = '';
+  try {
+    const res = await apiFetch('/api/watchlist/presets', { method: 'POST' });
+    const b = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(b.error || `추가 실패 (${res.status})`);
+    // 🔴 건너뛴 것·실패한 것을 **숨기지 않는다** — "왜 5개가 아니지" 를 겪지 않게
+    const parts = [];
+    if (b.added?.length) parts.push(`추가 ${b.added.length}개`);
+    if (b.skipped?.length) parts.push(`이미 있음 ${b.skipped.length}개`);
+    if (b.failedTickers?.length) parts.push(`종목 실패 ${b.failedTickers.length}건`);
+    presetMsg.value = parts.join(' · ') || '변경 없음';
+    await load();
+    emit('saved');
+  } catch (e) {
+    presetMsg.value = e.message;
+  } finally {
+    presetBusy.value = false;
+  }
+}
 const newGroup = ref('');
 const groupBusy = ref(false);
 const usingDefault = ref([]);
@@ -58,6 +90,15 @@ function targetsObject() {
   return out;
 }
 
+/** 이미 다른 행이 쓴 종목은 빼고 보여준다(한 종목에 기준선 두 벌을 만들지 않게) */
+function pickable(current) {
+  const used = new Set(form.value.targetRows.map((r) => r.symbol).filter((x) => x && x !== current));
+  return holdings.value.filter((h) => !used.has(h.symbol));
+}
+function priceOf(symbol) {
+  return holdings.value.find((h) => h.symbol === symbol)?.lastPrice ?? null;
+}
+
 async function load() {
   err.value = '';
   try {
@@ -81,6 +122,14 @@ async function load() {
     }
     const w = await apiFetch('/api/watchlist');
     if (w.ok) groups.value = (await w.json())?.groups || [];
+
+    try {
+      const h = await apiFetch('/api/portfolio');
+      if (h.ok) { holdings.value = (await h.json())?.items || []; holdingsError.value = ''; }
+      else holdingsError.value = (await h.json().catch(() => ({})))?.error || `보유를 불러오지 못했습니다 (${h.status})`;
+    } catch (e) {
+      holdingsError.value = e.message;
+    }
   } catch (e) {
     err.value = e.message;
   }
@@ -263,6 +312,18 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
 
         <section class="sp__sec">
           <h3 class="sp__h">
+            대표 테마
+            <small>반도체·AI·2차전지 등 8가지를 5종목씩 추가합니다</small>
+          </h3>
+          <!-- 🔴 **멱등이다** — 이미 있는 이름은 건너뛴다. 두 번 눌러도 안 늘어난다 -->
+          <button class="btn sp__add" :disabled="presetBusy" @click="addPresets">
+            {{ presetBusy ? '추가 중…' : '+ 대표 테마 8종 추가' }}
+          </button>
+          <p v-if="presetMsg" class="sp__hint">{{ presetMsg }}</p>
+        </section>
+
+        <section class="sp__sec">
+          <h3 class="sp__h">
             목표가 · 손절선
             <small>종목별 기준선을 넘으면 텔레그램으로 알립니다</small>
           </h3>
@@ -271,11 +332,24 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
             ⚠️ 통화를 환산하지 않는다 — 그 종목 화면에서 보는 단위 그대로 적는다
                (환산해 두면 환율이 움직일 때 **기준선이 조용히 이동한다**).
           -->
+          <p v-if="holdingsError" class="sp__err">{{ holdingsError }}</p>
+          <p v-else-if="!holdings.length" class="sp__hint">보유 종목이 없어 기준선을 걸 수 없습니다.</p>
+
           <div v-for="(row, i) in form.targetRows" :key="i" class="sp__target">
-            <input v-model="row.symbol" class="input sp__xs" placeholder="종목코드" />
+            <!-- 🔴 자유 입력이 아니라 **보유에서 고른다** — 없는 종목에 기준선을 걸 수 없다 -->
+            <select v-model="row.symbol" class="input sp__xs">
+              <option value="">종목 선택</option>
+              <option v-for="h in pickable(row.symbol)" :key="h.symbol" :value="h.symbol">
+                {{ h.name }} ({{ h.symbol }})
+              </option>
+            </select>
             <input v-model="row.target" class="input sp__xs" type="number" placeholder="목표가" />
             <input v-model="row.stop" class="input sp__xs" type="number" placeholder="손절가" />
             <button class="sp__icon" aria-label="삭제" title="삭제" @click="form.targetRows.splice(i, 1)">×</button>
+            <!-- ⚠️ 현재가를 옆에 적는다 — 없으면 기준선을 **감으로** 넣게 된다 -->
+            <small v-if="priceOf(row.symbol) != null" class="sp__now mono-num">
+              현재 {{ Number(priceOf(row.symbol)).toLocaleString('ko-KR') }}
+            </small>
           </div>
           <button class="btn sp__add" @click="form.targetRows.push({ symbol: '', target: '', stop: '' })">
             + 기준선 추가
@@ -296,7 +370,10 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
      그건 전부 **WorkspaceView 의 scoped 클래스**라 여기서는 **아무 스타일도 안 먹는다.**
      내가 오늘 만든 `noBorrowedScopedClass` 가드가 정확히 이걸 잡았다(입력칸이 맨몸으로 나왔을 것).
 */
-.sp__target { display: grid; grid-template-columns: 1fr 1fr 1fr 26px; gap: 4px; margin-bottom: 4px; }
+.sp__target { display: grid; grid-template-columns: 1.4fr 1fr 1fr 26px; gap: 4px; margin-bottom: 4px; align-items: center; }
+.sp__now { grid-column: 1 / -1; color: var(--color-faint); font-size: var(--text-2xs); }
+.sp__err { color: var(--color-down); font-size: var(--text-xs); margin: 0 0 4px; }
+.sp__hint { color: var(--color-faint); font-size: var(--text-xs); margin: 0 0 4px; }
 .sp__xs { height: 28px; font-size: var(--text-xs); padding: 0 8px; }
 .sp__icon {
   width: 26px; height: 28px; padding: 0; line-height: 1; cursor: pointer;

@@ -330,6 +330,44 @@ test('목표선이 설정 안 된 종목은 건드리지 않는다', async () =>
   delete process.env.ALERTS_ENABLED;
 });
 
+/**
+ * 🔴🔴 **보유를 못 읽었을 때 기준선을 지우면 안 된다** (2026-09-21 사용자 지시 구현분).
+ *
+ * 토스가 잠깐 죽은 날 사용자가 설정한 기준선이 **통째로 사라지는** 것이 최악이다.
+ * ★ 오늘 내내 쓴 *"0 은 '없다' 가 아니라 '못 봤다' 일 수 있다"* 가 **가장 비싸게** 걸리는 자리.
+ */
+test('🔴 보유 조회가 실패하면 기준선을 **지우지 않는다**', async () => {
+  let saved = null;
+  const a = freshAlerts(QUIET_OFF, () => {
+    require('../server/tossPortfolio').getHoldings = async () => { throw new Error('토스 죽음'); };
+    const ss = require('../server/settingsService');
+    ss.getDashboardSettings = () => ({ targets: { QLD: { target: 90, stop: null } } });
+    ss.updateSettings = async (patch) => { saved = patch; };
+  });
+  await a.tick();
+  assert.equal(saved, null, '🔴 보유를 못 읽었는데 기준선을 건드렸다 — 사용자 설정이 날아간다');
+  delete process.env.ALERTS_ENABLED;
+});
+
+test('안 가진 종목의 기준선은 정리한다 (보유를 **읽은 경우에만**)', async () => {
+  let saved = null;
+  const a = freshAlerts(QUIET_OFF, () => {
+    require('../server/tossPortfolio').getHoldings = async () => ({
+      items: [{ symbol: 'QLD', name: 'QLD', lastPrice: 50, profitRate: 1, dailyRate: 0 }],
+      summary: null,
+    });
+    const ss = require('../server/settingsService');
+    ss.getDashboardSettings = () => ({ targets: { QLD: { target: 90, stop: null }, GONE: { target: 10, stop: null } } });
+    ss.updateSettings = async (patch) => { saved = patch; };
+  });
+  await a.tick();
+  assert.ok(saved, '정리를 안 했다');
+  assert.deepEqual(Object.keys(saved.dashboard.targets), ['QLD'], '보유한 것까지 지웠거나 안 가진 것을 남겼다');
+  // 🔴 조용히 지우지 않는다 — 사용자가 설정한 값이다
+  assert.ok(sent.some((x) => /기준선을 정리/.test(x.body.text || '')), '지운 사실을 안 알렸다');
+  delete process.env.ALERTS_ENABLED;
+});
+
 // ── 장 마감 요약 ───────────────────────────────────────────
 
 test('🔔 폐장 알림에는 **오늘 요약**이 함께 간다', async () => {
