@@ -43,6 +43,8 @@ const mcp = require('./server/mcpClient');
 const analystChat = require('./server/analystChat');
 const analystDream = require('./server/analystDream');
 const tape = require('./server/tickerTapeService');
+const telegramBot = require('./server/telegramBot');
+const alerts = require('./server/alertService');
 
 // 🔴 2026-09-21: 종전에는 토큰이 없으면 `requireAccessToken` 이 그냥 next() 했다(fail-open).
 //    설정 실수 한 번이 곧 전면 개방이었다. 이제 **없으면 무작위로 만들어 잠근다** —
@@ -367,7 +369,28 @@ app.get('/api/mcp/status', async (req, res) => {
 });
 
 // ── 텔레그램 (밖에서 받는 창구) ────────────────────────────────
-app.get('/api/telegram/status', (req, res) => res.json(telegram.status()));
+app.get('/api/telegram/status', (req, res) =>
+  // 🔴 피어 요청: 폴링이 죽으면 **앱은 멀쩡한데 버튼만 안 먹는다** — 워치독이 볼 수 있게 낸다
+  res.json({
+    ...telegram.status(),
+    /**
+     * 🔴 피어 요청: **폴링이 죽으면 조용하다** — 앱은 멀쩡하고 버튼만 안 먹는다.
+     *    워치독이 한 칸만 보면 되게 **평평하게도** 낸다(`bot.running` 과 같은 값이다).
+     */
+    botPolling: telegramBot.status().running,
+    bot: telegramBot.status(),
+    alerts: alerts.status(),
+  }));
+
+/** 알림 한 바퀴를 손으로 돌린다(점검용). `force` 면 꺼져 있어도 돈다 */
+app.post('/api/alerts/tick', async (req, res) => {
+  try {
+    return res.json(await alerts.tick({ force: req.body?.force === true }));
+  } catch (e) {
+    logError('alerts.route_failed', e, { requestId: req.requestId });
+    return res.status(500).json({ error: e.message });
+  }
+});
 
 /** 지금 자산 현황을 한 통 보낸다. 🔴 기본은 dry-run 이라 실제로 안 나간다 */
 app.post('/api/telegram/portfolio', async (req, res) => {
@@ -764,6 +787,12 @@ async function startAiSchedule() {
   logInfo('mcp.mode', mcp.status());
   // 무인 반복은 켜졌는지·왜 안 도는지를 기동 때 말한다
   logInfo('dream.mode', analystDream.status());
+  logInfo('telegram.bot', telegramBot.status());
+  logInfo('alerts.mode', alerts.status());
+  // 🔴 제안 → 텔레그램(승인 버튼). 알림이 꺼져 있으면 onProposal 이 스스로 건너뛴다
+  orderService.onProposed((p) => alerts.onProposal(p));
+  telegramBot.start();
+  alerts.start();
   logInfo('llm.fetch_probe', require('./server/geminiClient').describeFetchProbe());
   logInfo('auth.lan_trust', {
     enabled: SESSION.TRUST_LAN,

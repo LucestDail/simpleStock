@@ -47,6 +47,15 @@ const PROPOSAL_TTL_MS = Math.max(30_000, Number(process.env.ORDER_PROPOSAL_TTL_M
 const SIDES = new Set(['BUY', 'SELL']);
 const TYPES = new Set(['LIMIT', 'MARKET']);
 
+/**
+ * 제안이 만들어졌을 때 부를 함수들(텔레그램 알림 등).
+ * ⚠️ 여기에 등록된 것은 **제안을 막지 못한다** — 알림은 곁가지다.
+ */
+const listeners = [];
+function onProposed(fn) {
+  if (typeof fn === 'function') listeners.push(fn);
+}
+
 /** id → proposal. 메모리에만 둔다 — 재기동하면 사라지는 게 맞다(옛 시세의 제안은 위험하다) */
 const proposals = new Map();
 
@@ -117,6 +126,19 @@ function propose(input = {}, { source = 'manual' } = {}) {
   };
   proposals.set(proposal.id, proposal);
   audit('proposed', { id: proposal.id, symbol, side, type, quantity, price, source });
+  /**
+   * 🔴 제안이 생기면 **밖으로 알린다**(텔레그램 승인 버튼).
+   * ⚠️ 여기서 `require` 를 위로 올리면 **순환 참조**가 된다
+   *    (alertService → telegramBot → orderService). 그래서 부를 때 가져온다.
+   * ⚠️ 알림이 실패해도 **제안은 이미 만들어졌다** — 삼켜서 제안을 되돌리지 않는다.
+   */
+  for (const fn of listeners) {
+    try {
+      Promise.resolve(fn(proposal)).catch((e) => logWarn('orders.notify_failed', { message: e.message }));
+    } catch (e) {
+      logWarn('orders.notify_failed', { message: e.message });
+    }
+  }
   return { ok: true, proposal };
 }
 
@@ -219,10 +241,12 @@ function status() {
 
 function _resetForTest() {
   proposals.clear();
+  listeners.length = 0;
 }
 
 module.exports = {
   propose,
+  onProposed,
   approve,
   reject,
   execute,

@@ -1,0 +1,274 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const telegram = require('./telegramService');
+const bot = require('./telegramBot');
+const tape = require('./tickerTapeService');
+const toss = require('./tossClient');
+const tossPortfolio = require('./tossPortfolio');
+const { resolveSession } = require('./marketCalendar');
+const { APP_TIMEZONE } = require('./time');
+const { logInfo, logWarn, logError } = require('./logger');
+
+/**
+ * 자동 알림 (2026-09-21)
+ *
+ * 사용자: *"매수매도제안, 시황, 시장 개장/폐장, 돌발 상황, 증시 관련 정보, 어닝콜,
+ * 이벤트 발생, 주가 급변, 모멘텀 발생 등 … aim-monitor 처럼 ntfy 말고 텔레그램으로."*
+ *
+ * ## 🔴 붙이기 전에 있던 사실
+ *
+ * 전수로 훑어 보니 **자동 발송이 0건**이었다. `notifyMomentum` 은 구현돼 있는데
+ * **호출부가 없어서** `TELEGRAM_SEND_ENABLED=true` 로 켜 놓고도 아무것도 안 나갔다.
+ * (*"스위치가 켜졌다" 와 "그 경로가 돈다" 는 다르다* — 오늘 여러 번 본 그 가족이다.)
+ * ⇒ 이 파일이 그 **호출부**다.
+ *
+ * ## 무엇을 보내고 무엇을 못 보내나 — **정직하게 가른다**
+ *
+ * ```
+ * ✅ 매수/매도 제안   orderService 에 제안이 생기면 **승인/취소 버튼과 함께**
+ * ✅ 시장 개장/폐장   marketCalendar 상태 **전이**에서만
+ * ✅ 주가 급변        보유·관심 종목 당일 등락 임계 초과
+ * ✅ 모멘텀           위와 같은 축이지만 **보유분 전용**(있던 함수를 이제 실제로 부른다)
+ * ✅ 증시 급변        지수·원자재·코인(테이프 29종) 임계 초과
+ * ✅ 돌발/이벤트      종목 경고(투자주의·거래정지 등) **신규 발생**
+ * ❌ 어닝콜           **데이터가 없다.** 토스 API 에도 야후 테이프에도 일정이 없다.
+ *                    지어내지 않는다 — 넣으려면 별도 출처가 필요하다
+ * ⚠️ 시황             `/api/analyst/run` 을 자동으로 돌리지 **않는다**. LLM 비용이
+ *                    주기적으로 발생하고, 사용자가 화면에서 누르면 텔레그램 버튼이 이미 있다.
+ *                    개장·폐장 알림에 **요약 수치**만 함께 싣는다
+ * ```
+ *
+ * ## 🔴 소음을 만들면 사람이 알림을 끈다
+ *
+ * 그러면 **정작 중요한 것도 안 보게 된다.** 그래서:
+ * ```
+ * 상태 전이에서만   개장/폐장은 "바뀐 순간" 한 번. 매 틱마다 "지금 장 중" 이 아니다
+ * 종목·방향·하루    같은 종목 같은 방향 급변은 하루 한 번
+ * 조용한 시간       기본 23:00~07:00 은 **제안 외에는** 보내지 않는다
+ * 기본 꺼짐         ALERTS_ENABLED 없으면 한 건도 안 나간다
+ * ```
+ */
+
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const STATE_FILE = process.env.ALERTS_STATE_FILE || path.join(DATA_DIR, 'alerts-state.json');
+
+/** 🔴 기본 꺼짐 */
+const ENABLED = String(process.env.ALERTS_ENABLED || '').trim().toLowerCase() === 'true';
+const TICK_MS = Math.max(60_000, Number(process.env.ALERTS_TICK_MS) || 5 * 60_000);
+/** 종목 당일 등락 임계(%) */
+const MOVE_PCT = Math.max(1, Number(process.env.ALERTS_MOVE_PCT) || 5);
+/** 지수·원자재 임계(%) — 종목보다 낮게 잡는다(지수가 3% 움직이면 큰 일이다) */
+const INDEX_PCT = Math.max(0.5, Number(process.env.ALERTS_INDEX_PCT) || 2.5);
+const QUIET_FROM = Number(process.env.ALERTS_QUIET_FROM ?? 23);
+const QUIET_TO = Number(process.env.ALERTS_QUIET_TO ?? 7);
+
+let timer = null;
+let lastTickAt = null;
+let lastError = null;
+let sentCount = 0;
+
+function readState() {
+  try {
+    if (!fs.existsSync(STATE_FILE)) return {};
+    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeState(s) {
+  try {
+    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
+    fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
+  } catch (e) {
+    logError('alerts.state_write_failed', e, {});
+  }
+}
+
+function kstHour(now = new Date()) {
+  return Number(new Intl.DateTimeFormat('en-GB', { timeZone: APP_TIMEZONE, hour: '2-digit', hour12: false }).format(now));
+}
+function kstDay(now = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE }).format(now);
+}
+
+/** 조용한 시간인가. ⚠️ **제안은 예외** — 사람이 기다리는 것이라 늦춰서는 안 된다 */
+function isQuiet(now = new Date()) {
+  const h = kstHour(now);
+  return QUIET_FROM > QUIET_TO ? h >= QUIET_FROM || h < QUIET_TO : h >= QUIET_FROM && h < QUIET_TO;
+}
+
+function status() {
+  const st = readState();
+  return {
+    enabled: ENABLED,
+    reason: ENABLED ? null : 'disabled',
+    running: Boolean(timer),
+    tickMs: TICK_MS,
+    lastTickAt,
+    lastError,
+    sentCount,
+    movePct: MOVE_PCT,
+    indexPct: INDEX_PCT,
+    quiet: `${QUIET_FROM}:00~${QUIET_TO}:00`,
+    // 🔴 무엇을 못 보내는지도 함께 — 사용자가 "왜 어닝콜은 안 오지" 를 겪지 않게
+    unsupported: ['어닝콜 — 일정 데이터 출처가 없다(토스·야후 모두 미제공)'],
+    marks: Object.keys(st).length,
+  };
+}
+
+// ── 규칙들 ───────────────────────────────────────────────────
+
+/** 🔔 시장 개장/폐장 — **상태가 바뀐 순간에만** */
+async function ruleSessions(st, now, out) {
+  for (const [key, label, s, e] of [['kr', 'KRX', 9, 16], ['us', '미국장', 22, 6]]) {
+    const cur = resolveSession(now, key, s, e, APP_TIMEZONE).state;
+    const mark = `session:${key}`;
+    if (st[mark] === cur) continue;
+    const was = st[mark];
+    st[mark] = cur;
+    // 첫 실행에는 안 보낸다 — 기준선이 없어서 "바뀐 것" 이 아니다
+    if (!was) continue;
+    const icon = cur === 'open' ? '🔔' : '🔕';
+    out.push({ text: `${icon} ${label} ${cur === 'open' ? '개장' : cur === 'pre' ? '장 전' : '폐장'}`, kind: 'session' });
+  }
+}
+
+/** 📈 지수·원자재·코인 급변 — 하루 한 번씩 */
+async function ruleIndices(st, now, out) {
+  const t = await tape.getTape();
+  const day = kstDay(now);
+  for (const i of t.items || []) {
+    if (i.changePct == null || Math.abs(i.changePct) < INDEX_PCT) continue;
+    const dir = i.changePct >= 0 ? 'up' : 'down';
+    const mark = `idx:${i.symbol}:${dir}:${day}`;
+    if (st[mark]) continue;
+    st[mark] = 1;
+    out.push({
+      text: `📈 ${i.label} ${i.changePct >= 0 ? '+' : ''}${i.changePct.toFixed(2)}% (${i.prefix || ''}${Number(i.price).toLocaleString('ko-KR')}${i.suffix || ''})`,
+      kind: 'index',
+    });
+  }
+}
+
+/** 📊 보유 종목 급변 + ⚠️ 종목 경고 신규 */
+async function rulePortfolio(st, now, out) {
+  let p;
+  try {
+    p = await tossPortfolio.getHoldings({});
+  } catch (e) {
+    // 🔴 조용히 넘기지 않는다 — 보유를 못 읽으면 급변 감시가 통째로 죽는다
+    logWarn('alerts.portfolio_failed', { kind: e.kind, message: e.message });
+    return;
+  }
+  const day = kstDay(now);
+  for (const h of p.items || []) {
+    if (h.dailyRate != null && Math.abs(h.dailyRate) >= MOVE_PCT) {
+      const dir = h.dailyRate >= 0 ? 'up' : 'down';
+      const mark = `move:${h.symbol}:${dir}:${day}`;
+      if (!st[mark]) {
+        st[mark] = 1;
+        out.push({
+          text: `📊 보유 ${h.name} ${h.dailyRate >= 0 ? '+' : ''}${h.dailyRate.toFixed(2)}%`
+            + ` · 평가손익 ${h.profitRate >= 0 ? '+' : ''}${Number(h.profitRate).toFixed(2)}%`,
+          kind: 'move',
+        });
+      }
+    }
+    // ⚠️ 종목 경고 — **신규 발생만**. 이미 지정된 것을 매 틱 알리면 소음이다
+    try {
+      const w = await toss.getWarnings(h.symbol);
+      const cur = (w || []).map((x) => x.type || x).sort().join(',');
+      const mark = `warn:${h.symbol}`;
+      if (cur && st[mark] !== cur) {
+        st[mark] = cur;
+        out.push({ text: `⚠️ ${h.name} 종목 경고: ${cur}`, kind: 'warning' });
+      } else if (!cur && st[mark]) {
+        delete st[mark];
+      }
+    } catch (e) {
+      logWarn('alerts.warnings_failed', { symbol: h.symbol, message: e.message });
+    }
+    await new Promise((r) => setTimeout(r, 120)); // 한도 5/s
+  }
+}
+
+/**
+ * 한 바퀴. 🔴 **부분 실패를 전체 실패로 만들지 않는다** — 규칙 하나가 죽어도 나머지는 돈다.
+ */
+async function tick({ force = false } = {}) {
+  if (!ENABLED && !force) return { ran: false, why: 'disabled' };
+  const now = new Date();
+  const st = readState();
+  const out = [];
+  const failed = [];
+
+  for (const [name, fn] of [['sessions', ruleSessions], ['indices', ruleIndices], ['portfolio', rulePortfolio]]) {
+    try {
+      await fn(st, now, out);
+    } catch (e) {
+      failed.push(name);
+      logWarn('alerts.rule_failed', { rule: name, message: e.message });
+    }
+  }
+
+  // 조용한 시간에는 **묶어서 미루지 않고 그냥 건너뛴다** — 아침에 어제 것이 쏟아지면 그게 더 나쁘다
+  const quiet = isQuiet(now);
+  let sent = 0;
+  for (const a of out) {
+    if (quiet) continue;
+    const r = await telegram.send(a.text, { reason: `alert:${a.kind}` });
+    if (r.ok) sent += 1;
+  }
+
+  writeState(st);
+  lastTickAt = now.toISOString();
+  lastError = failed.length ? `규칙 실패: ${failed.join(',')}` : null;
+  sentCount += sent;
+  // ★ 몇 건을 **찾았고** 몇 건을 **보냈는지** 따로 남긴다 — 조용한 시간에 걸러진 것을 구분한다
+  logInfo('alerts.tick', { found: out.length, sent, quiet, failedRules: failed });
+  return { ran: true, found: out.length, sent, quiet, failed };
+}
+
+function start() {
+  if (!ENABLED) {
+    logInfo('alerts.not_started', status());
+    return false;
+  }
+  if (timer) return true;
+  // 기동 직후 한 번 — 다만 **첫 틱은 기준선을 만드는 용도**라 개장/폐장은 안 나간다(ruleSessions 참조)
+  tick().catch((e) => logError('alerts.first_tick_failed', e, {}));
+  timer = setInterval(() => tick().catch((e) => logError('alerts.tick_failed', e, {})), TICK_MS);
+  logInfo('alerts.started', { tickMs: TICK_MS });
+  return true;
+}
+
+function stop() {
+  if (timer) clearInterval(timer);
+  timer = null;
+}
+
+/**
+ * 제안이 생기면 **즉시** 버튼과 함께 보낸다(주기 틱을 기다리지 않는다).
+ * ⚠️ 조용한 시간에도 보낸다 — 사람이 기다리는 것이고, 제안에는 **유효기간**이 있다.
+ */
+async function onProposal(p) {
+  if (!ENABLED) return { ok: false, why: 'disabled' };
+  try {
+    const r = await bot.sendProposal(p);
+    logInfo('alerts.proposal_sent', { id: p.id, symbol: p.symbol, sent: Boolean(r.sent) });
+    return r;
+  } catch (e) {
+    logError('alerts.proposal_failed', e, { id: p.id });
+    return { ok: false, error: e.message };
+  }
+}
+
+function _resetForTest() {
+  stop();
+  lastTickAt = null;
+  lastError = null;
+  sentCount = 0;
+}
+
+module.exports = { tick, start, stop, status, onProposal, isQuiet, STATE_FILE, _resetForTest };

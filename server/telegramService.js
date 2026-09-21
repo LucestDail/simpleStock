@@ -49,13 +49,13 @@ function status() {
 }
 
 /** 텔레그램 MarkdownV2 는 까다롭다 — 평문으로 보내고 escape 를 안 쓴다 */
-async function send(text, { reason = 'manual' } = {}) {
+async function send(text, { reason = 'manual', replyMarkup = null } = {}) {
   const body = String(text || '').trim();
   if (!body) return { ok: false, error: '빈 메시지' };
 
   if (!isConfigured() || !SEND_ENABLED) {
     // 🔴 조용히 성공으로 만들지 않는다. **안 보냈다는 사실**을 그대로 돌려준다
-    logInfo('telegram.dry_run', { reason, chars: body.length, why: status().reason });
+    logInfo('telegram.dry_run', { reason, chars: body.length, buttons: Boolean(replyMarkup), why: status().reason });
     return { ok: true, sent: false, dryRun: true, why: status().reason };
   }
 
@@ -63,7 +63,13 @@ async function send(text, { reason = 'manual' } = {}) {
     const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: CHAT_ID, text: body, disable_web_page_preview: true }),
+      body: JSON.stringify({
+        chat_id: CHAT_ID,
+        text: body,
+        disable_web_page_preview: true,
+        // 인라인 버튼(승인/취소). 없으면 보내지 않는다 — 텔레그램이 빈 키보드를 싫어한다
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const json = await res.json().catch(() => ({}));
@@ -72,8 +78,9 @@ async function send(text, { reason = 'manual' } = {}) {
       logWarn('telegram.send_failed', { reason, status: res.status, desc: json.description || null });
       return { ok: false, sent: false, error: json.description || `HTTP ${res.status}` };
     }
-    logInfo('telegram.sent', { reason, chars: body.length });
-    return { ok: true, sent: true };
+    logInfo('telegram.sent', { reason, chars: body.length, buttons: Boolean(replyMarkup) });
+    // ⚠️ 보낸 메시지 id 를 돌려준다 — 나중에 버튼을 지우려면 필요하다
+    return { ok: true, sent: true, messageId: json?.result?.message_id ?? null };
   } catch (e) {
     // 회사망에서는 여기로 온다(Zscaler 403/차단). **코드 문제가 아니다**
     logError('telegram.send_error', e, { reason });
