@@ -930,11 +930,33 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     gaps.push('웹 검색을 끄고 분석했습니다.');
   }
 
+  /**
+   * 🔴 **`proposed:0` 만으로는 "살 게 없었다" 와 "판단을 못 했다" 가 구분되지 않는다** (2026-09-22).
+   *
+   * 실거래 첫날 05시 마감 분석이 `positions:2 proposed:0 gaps:7` 로 끝났는데,
+   * 이 줄만 보면 **제안이 없는 이유를 알 수 없다** — 모델이 HOLD 라고 판단한 것인지,
+   * 데이터가 모자라 판단 자체를 못 한 것인지. 답은 `analyst-last.json` 안에 있었지만
+   * **요약 줄에는 개수만 실려** 운영 쪽에서 볼 수 없었다.
+   *
+   * ⚠️ 판정 장치 없이 사건(첫 자동 제안)을 기다릴 수는 없다 — **무엇을 기다리는지 모르게 된다.**
+   *    ⇒ 판단 분포와 저확신 건수를 함께 낸다. `{HOLD:2}` 면 "살 게 없었다" 가 **줄에서 바로 읽힌다.**
+   */
+  const stances = {};
+  let lowConfidence = 0;
+  for (const pos of report.positions || []) {
+    const k = String(pos?.stance || 'UNKNOWN').toUpperCase();
+    stances[k] = (stances[k] || 0) + 1;
+    if (String(pos?.confidence || '').toUpperCase() === 'LOW') lowConfidence += 1;
+  }
+
   logInfo('analyst.report', {
     positions: report.positions?.length || 0,
     proposed: report.proposals?.length || 0,
     created: created.length,
     rejected: rejected.length,
+    // ★ 제안이 0 인 **이유**가 여기서 갈린다(판단했는데 HOLD / 판단 자체가 없음)
+    stances,
+    lowConfidence,
     gaps: gaps.length,
     // ★ 새 기능이 **실제로 돌았다는 증거**를 지표에 함께 넣는다 — 0 이면 결과가 스스로 알려준다
     webTool: web?.tool || null,
@@ -1020,6 +1042,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     positions: report.positions?.length || 0,
     proposals: created.length,
     rejected: rejected.length,
+    stances,
+    lowConfidence,
     gaps: gaps.length,
     webHits: (web?.results || []).filter((r) => r.text).length,
   });
