@@ -686,19 +686,41 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="clocks">
-        <div class="clockchip">
-          <span class="clockchip__zone">KST</span>
-          <span class="clockchip__time mono-num">{{ clock.kst.time }}</span>
-          <span class="dot" :class="`dot--${sessions?.kr?.state || 'closed'}`" aria-hidden="true"></span>
-          <span class="clockchip__state">KRX {{ sessionLabel(sessions?.kr?.state) }}</span>
+
+      <!--
+        🔴 사용자 지시: *"**시간 및** 원/달러·…·wti 지수 표시 **좌→우 자동으로 흘러가게**"*
+           빨간 박스가 **헤더 행 자체**를 감싸고 있었다 — 앞판은 헤더 **아래** 별도 줄로
+           만들어 지시와 어긋났다. 시계도 이 흐름 안에 들어간다("시간 **및**").
+        ⚠️ 같은 목록을 **두 벌** 깔아야 이음매 없이 순환한다(한 벌이면 끝에서 뚝 끊긴다).
+           두 번째 벌은 `aria-hidden` — 화면낭독기가 같은 걸 두 번 읽으면 안 된다.
+      -->
+      <div class="tape" :class="{ 'tape--stale': tape.stale }">
+        <div class="tape__track">
+          <template v-for="pass in 2" :key="pass">
+            <span class="tape__item" :aria-hidden="pass === 2 ? 'true' : undefined">
+              <b class="tape__label">KST</b>
+              <span class="mono-num">{{ clock.kst.time }}</span>
+              <span class="tape__label">KRX {{ sessionLabel(sessions?.kr?.state) }}</span>
+            </span>
+            <span class="tape__item" :aria-hidden="pass === 2 ? 'true' : undefined">
+              <b class="tape__label">ET</b>
+              <span class="mono-num">{{ clock.us.time }}</span>
+              <span class="tape__label">US {{ sessionLabel(sessions?.us?.state) }}</span>
+            </span>
+            <span
+              v-for="i in tape.items"
+              :key="`${pass}-${i.symbol}`"
+              class="tape__item"
+              :aria-hidden="pass === 2 ? 'true' : undefined"
+            >
+              <b class="tape__label">{{ i.label }}</b>
+              <span class="mono-num">{{ tapeNum(i) }}</span>
+              <span v-if="i.changePct !== null" class="mono-num" :class="signClass(i.changePct)">{{ pct(i.changePct) }}</span>
+              <span v-else class="tape__unknown">등락 모름</span>
+            </span>
+          </template>
         </div>
-        <div class="clockchip">
-          <span class="clockchip__zone">ET</span>
-          <span class="clockchip__time mono-num">{{ clock.us.time }}</span>
-          <span class="dot" :class="`dot--${sessions?.us?.state || 'closed'}`" aria-hidden="true"></span>
-          <span class="clockchip__state">US {{ sessionLabel(sessions?.us?.state) }}</span>
-        </div>
+        <span v-if="tape.failed" class="tape__fail">{{ tape.failed }}개 못 받음</span>
       </div>
 
       <div class="topbar__meta">
@@ -718,30 +740,6 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <!--
-      ── 시세 테이프 (2026-09-21 사용자 지시: 좌→우 자동으로 흘러가게) ──
-      ⚠️ 같은 목록을 **두 벌** 깔아야 이음매 없이 순환한다(한 벌이면 끝에서 뚝 끊긴다).
-         두 번째 벌은 `aria-hidden` — 화면낭독기가 같은 걸 두 번 읽으면 안 된다.
-      🔴 못 받은 개수를 끝에 적는다 — 조용히 빠지면 "원래 없는 것" 으로 보인다.
-    -->
-    <div v-if="tape.items.length" class="tape" :class="{ 'tape--stale': tape.stale }">
-      <div class="tape__track">
-        <span
-          v-for="(i, n) in [...tape.items, ...tape.items]"
-          :key="`${n}-${i.symbol}`"
-          class="tape__item"
-          :aria-hidden="n >= tape.items.length ? 'true' : undefined"
-        >
-          <b class="tape__label">{{ i.label }}</b>
-          <span class="mono-num">{{ tapeNum(i) }}</span>
-          <span v-if="i.changePct !== null" class="mono-num" :class="signClass(i.changePct)">{{ pct(i.changePct) }}</span>
-          <!-- 전일종가가 없으면 0% 가 아니라 **모른다**고 적는다 -->
-          <span v-else class="tape__unknown">등락 모름</span>
-        </span>
-      </div>
-      <span v-if="tape.failed" class="tape__fail">{{ tape.failed }}개 못 받음</span>
-    </div>
-
     <p v-if="error" class="banner banner--error">{{ error }}</p>
 
     <!--
@@ -749,47 +747,18 @@ onUnmounted(() => {
          좌 = ETF 추가·관리(좌우 스크롤) · 우 = 내 자산
       🔴 자산을 본문에서 위로 올렸다. 본문 좌열은 **선택 종목**(뉴스·차트) 전용이 된다.
     -->
-    <div class="top">
-    <section class="strip">
-      <div v-if="!groups.length" class="strip__empty">
-        관심 테마가 없습니다. ⚙ 설정에서 추가하세요.
-      </div>
-      <article v-for="group in groups" :key="group.id" class="wcard">
-        <header class="wcard__head">
-          <span class="wcard__name">{{ group.name }}</span>
-          <span class="wcard__count mono-num">{{ group.tickers.length }}</span>
-        </header>
-        <ul class="wcard__list">
-          <li
-            v-for="t in group.tickers"
-            :key="t.symbol + t.market"
-            class="wrow"
-            :class="{ 'wrow--on': selected.symbol === t.symbol }"
-            @click="pickSymbol(t.symbol, t.name)"
-          >
-            <span class="wrow__name">{{ t.name }}</span>
-            <span class="wrow__price mono-num">{{ formatPrice(t) }}</span>
-            <span
-              v-if="t.quote && t.quote.changePct != null"
-              class="wrow__chg mono-num"
-              :style="heatmapStyleFromChangePct(t.quote.changePct)"
-            >{{ formatChangePct(t.quote.changePct) }}</span>
-            <button class="wrow__rm" title="삭제" @click.stop="onRemoveTicker(group, t)">×</button>
-          </li>
-          <li v-if="!group.tickers.length" class="wrow wrow--empty">비어 있음</li>
-        </ul>
-        <div class="wcard__add">
-          <input
-            v-model="ensureInput(group.id).query"
-            class="input input--xs"
-            placeholder="티커/종목명"
-            @keyup.enter="onAddTicker(group)"
-          />
-          <button class="btn btn--xs btn--soft" :disabled="busy" @click="onAddTicker(group)">+</button>
-        </div>
-      </article>
-    </section>
 
+    <!--
+      ── 보드: **3열 × 3행** (2026-09-21 가이드 — 빨간 선을 픽셀로 재서 확정) ──────
+        측정값: 세로 분할 x=711·905 가 **전 구간 관통**(3열: 700·194·424 ≈ 53:15:32)
+                가로 분할 y=221 은 **전 열 공통**, y=352 는 **좌열에만**
+      ┌ 내 자산 ─────────┬ 관심(소형) ┬ 매매분석·시황·텔레그램·HITL ┐  행1
+      ├ 뉴스 ────────────┤           │                            │  행2
+      ├ 차트 ────────────┤ 랭킹 **만** │ 애널리스트 채팅              │  행3
+      🔴 중·우열은 행2~3 을 **세로 병합**한다(좌열만 뉴스/차트로 갈린다).
+      🔴 중열은 "랭킹 **정보만** 표출" 이다 — 모멘텀·경고는 여기서 뺀다.
+    -->
+    <div class="deck">
       <!-- ── 내 자산 (토스 실계좌) ───────────────────────────── -->
       <section class="assets">
         <header class="assets__head">
@@ -875,136 +844,45 @@ onUnmounted(() => {
           </div>
         </template>
       </section>
-    </div>
-
-    <!-- ── 본문 3열: [선택종목 뉴스+차트] [옵셔널 정보] [애널리스트 채팅] ── -->
-    <div class="layout">
-      <div class="layout__main">
-        <!-- ── 선택한 종목 뉴스 (레이아웃 지시: 좌열 상단) ───── -->
-        <section class="news">
-          <header class="news__head">
-            <h3 class="panel__h">
-              뉴스
-              <small v-if="selected.symbol">{{ selected.name || selected.symbol }}</small>
-            </h3>
-            <button class="btn btn--xs btn--soft" :disabled="!selected.symbol || news.loading" @click="loadNews">
-              {{ news.loading ? '검색 중…' : '새로고침' }}
-            </button>
-          </header>
-          <p v-if="!selected.symbol" class="panel__empty">종목을 고르면 뉴스를 찾습니다.</p>
-          <p v-else-if="news.loading" class="panel__empty">검색 중…</p>
-          <!-- 🔴 "없다" 와 "못 받았다" 를 구분해 보여준다 -->
-          <p v-else-if="news.error" class="panel__err">{{ news.error }}</p>
-          <p v-else-if="!news.items.length" class="panel__empty">검색 결과가 없습니다.</p>
-          <ul v-else class="news__list">
-            <li v-for="n in news.items" :key="n.rank">
-              <a v-if="n.url" :href="n.url" target="_blank" rel="noopener" class="news__title">{{ n.title }}</a>
-              <span v-else class="news__title">{{ n.title }}</span>
-              <!-- ⚠️ 날짜를 반드시 보여준다 — 실측에서 **6개월 지난 기사**가 섞여 왔다 -->
-              <time v-if="n.when" class="news__when">{{ n.when }}</time>
-            </li>
-          </ul>
-        </section>
-
-        <!-- ── 조각 실패를 숨기지 않는다 ─────────────────────── -->
-        <p v-if="dashError" class="banner banner--error">{{ dashError }}</p>
-        <p v-else-if="dash && dash.failedCount" class="banner banner--warn">
-          일부 데이터를 못 받았습니다 ({{ dash.failedCount }}건) —
-          <template v-for="(p, k) in dash.parts" :key="k">
-            <span v-if="p.ok === false">{{ k }}: {{ p.error }} ({{ p.kind }}) </span>
-          </template>
-        </p>
-
-        <!-- ── 차트 + 호가 ────────────────────────────────────── -->
-        <PriceChart :symbol="selected.symbol" :name="selected.name" />
-
+    <section class="strip">
+      <div v-if="!groups.length" class="strip__empty">
+        관심 테마가 없습니다. ⚙ 설정에서 추가하세요.
       </div>
-
-      <!-- ── 신호 (모멘텀·경고·랭킹) ────────────────────── -->
-      <aside class="layout__signals">
-          <div class="signals">
-            <div class="panel">
-              <h3 class="panel__h">모멘텀 <small>|{{ dash?.momentumPct ?? 3 }}%| 이상</small></h3>
-              <p v-if="!dash?.momentum?.length" class="panel__empty">기준을 넘는 종목이 없습니다.</p>
-              <ul v-else class="panel__list">
-                <li v-for="m in dash.momentum" :key="m.symbol">
-                  <button class="linkish" @click="pickSymbol(m.symbol, m.name)">{{ m.name }}</button>
-                  <b class="mono-num" :class="signClass(m.dailyRate)">{{ pct(m.dailyRate) }}</b>
-                </li>
-              </ul>
-            </div>
-
-            <div class="panel">
-              <h3 class="panel__h">종목 경고</h3>
-              <p v-if="partError('warnings')" class="panel__err">{{ partError('warnings').error }}</p>
-              <p v-else-if="!dash || !Object.keys(dash.warnings || {}).length" class="panel__empty">경고 없음</p>
-              <ul v-else class="panel__list">
-                <li v-for="(ws, sym) in dash.warnings" :key="sym">
-                  <span>{{ sym }}</span><b class="warnish">{{ ws.length }}건</b>
-                </li>
-              </ul>
-            </div>
-
-            <!--
-              🔴 2026-09-21 사용자: *"타이틀이랑 하단 정보가 안 맞는데. 차라리 그냥 정형화된
-                 테이블로 라도 하지"* ⇒ 목록을 **표**로 바꿨다.
-              ★ 목록형은 **어느 제목에 속한 줄인지**가 들여쓰기로만 표현돼서, 그룹이 4개로
-                늘어나자 제목과 내용이 어긋나 보였다. 표는 **열이 뜻을 고정**한다.
-              ⚠️ 그룹을 한 번에 다 펼치지 않고 **탭으로 하나씩** 본다 — 네 덩어리를 세로로
-                 쌓으면 어느 것이 어느 제목 밑인지 다시 헷갈린다.
-            -->
-            <div class="panel">
-              <h3 class="panel__h">랭킹</h3>
-              <p v-if="partError('rankings')" class="panel__err">{{ partError('rankings').error }}</p>
-              <template v-else>
-                <!--
-                  🔴 사용자: *"티커/한국 주식 검색창 제공 · 클릭시 좌측 차트 반응"*
-                  ⚠️ 이건 **거르는 칸이 아니라 찾는 칸**이다 — 랭킹에 없는 종목도
-                     코드를 넣으면 차트를 띄울 수 있어야 검색창의 뜻이 산다.
-                -->
-                <form class="rank__find" @submit.prevent="findSymbol">
-                  <input v-model="rankQuery" class="input input--xs" placeholder="티커·종목코드 (예: 005930)" />
-                  <button class="btn btn--xs btn--soft" type="submit" :disabled="!rankQuery.trim()">조회</button>
-                </form>
-                <div v-if="rankKeys.length" class="rank__tabs">
-                  <button
-                    v-for="k in rankKeys" :key="k"
-                    class="rank__tab" :class="{ 'rank__tab--on': k === rankTab }"
-                    @click="rankTab = k"
-                  >{{ rankLabel(k) }}</button>
-                </div>
-                <p v-if="!rankKeys.length" class="panel__empty">랭킹을 불러오지 못했습니다.</p>
-                <template v-else-if="activeRank">
-                  <!-- 🔴 이 종류만 실패했으면 그렇게 말한다("없음" 과 다르다) -->
-                  <p v-if="activeRank.error" class="rank__err">{{ activeRank.error }}</p>
-                  <p v-else-if="!activeRank.rows?.length" class="panel__empty">해당 종목 없음</p>
-                  <table v-else class="rtable">
-                    <thead>
-                      <tr><th class="rtable__n">#</th><th>종목</th><th class="rtable__r">등락률</th></tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="row in visibleRankRows" :key="row.symbol">
-                        <td class="rtable__n mono-num">{{ row.rank }}</td>
-                        <td>
-                          <!-- ⚠️ 이름이 없으면 코드를 보여준다(빈칸보다 낫다) -->
-                          <button class="linkish" :title="row.symbol" @click="pickSymbol(row.symbol, row.name || row.symbol)">
-                            {{ row.name || row.symbol }}
-                          </button>
-                          <!-- 🔴 이름이 붙었을 때만 코드를 따로 보여준다(같은 값을 두 번 쓰지 않는다) -->
-                          <small v-if="row.name" class="rtable__sym mono-num">{{ row.symbol }}</small>
-                        </td>
-                        <td class="rtable__r mono-num" :class="signClass(row.changePct)">{{ pct(row.changePct) }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </template>
-              </template>
-            </div>
-          </div>
-      </aside>
-
-      <!-- ── 매매 분석 + 제안 (브리핑 대체) ─────────────────── -->
-      <aside class="layout__rail">
+      <article v-for="group in groups" :key="group.id" class="wcard">
+        <header class="wcard__head">
+          <span class="wcard__name">{{ group.name }}</span>
+          <span class="wcard__count mono-num">{{ group.tickers.length }}</span>
+        </header>
+        <ul class="wcard__list">
+          <li
+            v-for="t in group.tickers"
+            :key="t.symbol + t.market"
+            class="wrow"
+            :class="{ 'wrow--on': selected.symbol === t.symbol }"
+            @click="pickSymbol(t.symbol, t.name)"
+          >
+            <span class="wrow__name">{{ t.name }}</span>
+            <span class="wrow__price mono-num">{{ formatPrice(t) }}</span>
+            <span
+              v-if="t.quote && t.quote.changePct != null"
+              class="wrow__chg mono-num"
+              :style="heatmapStyleFromChangePct(t.quote.changePct)"
+            >{{ formatChangePct(t.quote.changePct) }}</span>
+            <button class="wrow__rm" title="삭제" @click.stop="onRemoveTicker(group, t)">×</button>
+          </li>
+          <li v-if="!group.tickers.length" class="wrow wrow--empty">비어 있음</li>
+        </ul>
+        <div class="wcard__add">
+          <input
+            v-model="ensureInput(group.id).query"
+            class="input input--xs"
+            placeholder="티커/종목명"
+            @keyup.enter="onAddTicker(group)"
+          />
+          <button class="btn btn--xs btn--soft" :disabled="busy" @click="onAddTicker(group)">+</button>
+        </div>
+      </article>
+    </section>
         <section class="analyst">
           <header class="analyst__head">
             <div class="analyst__title">
@@ -1112,6 +990,106 @@ onUnmounted(() => {
           </template>
         </section>
 
+        <section class="news">
+          <header class="news__head">
+            <h3 class="panel__h">
+              뉴스
+              <small v-if="selected.symbol">{{ selected.name || selected.symbol }}</small>
+            </h3>
+            <button class="btn btn--xs btn--soft" :disabled="!selected.symbol || news.loading" @click="loadNews">
+              {{ news.loading ? '검색 중…' : '새로고침' }}
+            </button>
+          </header>
+          <p v-if="!selected.symbol" class="panel__empty">종목을 고르면 뉴스를 찾습니다.</p>
+          <p v-else-if="news.loading" class="panel__empty">검색 중…</p>
+          <!-- 🔴 "없다" 와 "못 받았다" 를 구분해 보여준다 -->
+          <p v-else-if="news.error" class="panel__err">{{ news.error }}</p>
+          <p v-else-if="!news.items.length" class="panel__empty">검색 결과가 없습니다.</p>
+          <ul v-else class="news__list">
+            <li v-for="n in news.items" :key="n.rank">
+              <a v-if="n.url" :href="n.url" target="_blank" rel="noopener" class="news__title">{{ n.title }}</a>
+              <span v-else class="news__title">{{ n.title }}</span>
+              <!-- ⚠️ 날짜를 반드시 보여준다 — 실측에서 **6개월 지난 기사**가 섞여 왔다 -->
+              <time v-if="n.when" class="news__when">{{ n.when }}</time>
+            </li>
+          </ul>
+        </section>
+      <!-- 행3·1열 : 차트 -->
+      <div class="cell cell--chart">
+        <!-- ── 조각 실패를 숨기지 않는다 ─────────────────────── -->
+        <p v-if="dashError" class="banner banner--error">{{ dashError }}</p>
+        <p v-else-if="dash && dash.failedCount" class="banner banner--warn">
+          일부 데이터를 못 받았습니다 ({{ dash.failedCount }}건) —
+          <template v-for="(p, k) in dash.parts" :key="k">
+            <span v-if="p.ok === false">{{ k }}: {{ p.error }} ({{ p.kind }}) </span>
+          </template>
+        </p>
+        <!-- ── 차트 + 호가 ────────────────────────────────────── -->
+        <PriceChart :symbol="selected.symbol" :name="selected.name" />
+      </div>
+
+      <!-- 행2~3·2열 : 🔴 **랭킹만**(가이드: "랭킹 정보만 표출") -->
+      <aside class="layout__signals">
+          <div class="signals">
+
+
+            <!--
+              🔴 2026-09-21 사용자: *"타이틀이랑 하단 정보가 안 맞는데. 차라리 그냥 정형화된
+                 테이블로 라도 하지"* ⇒ 목록을 **표**로 바꿨다.
+              ★ 목록형은 **어느 제목에 속한 줄인지**가 들여쓰기로만 표현돼서, 그룹이 4개로
+                늘어나자 제목과 내용이 어긋나 보였다. 표는 **열이 뜻을 고정**한다.
+              ⚠️ 그룹을 한 번에 다 펼치지 않고 **탭으로 하나씩** 본다 — 네 덩어리를 세로로
+                 쌓으면 어느 것이 어느 제목 밑인지 다시 헷갈린다.
+            -->
+            <div class="panel">
+              <h3 class="panel__h">랭킹</h3>
+              <p v-if="partError('rankings')" class="panel__err">{{ partError('rankings').error }}</p>
+              <template v-else>
+                <!--
+                  🔴 사용자: *"티커/한국 주식 검색창 제공 · 클릭시 좌측 차트 반응"*
+                  ⚠️ 이건 **거르는 칸이 아니라 찾는 칸**이다 — 랭킹에 없는 종목도
+                     코드를 넣으면 차트를 띄울 수 있어야 검색창의 뜻이 산다.
+                -->
+                <form class="rank__find" @submit.prevent="findSymbol">
+                  <input v-model="rankQuery" class="input input--xs" placeholder="티커·종목코드 (예: 005930)" />
+                  <button class="btn btn--xs btn--soft" type="submit" :disabled="!rankQuery.trim()">조회</button>
+                </form>
+                <div v-if="rankKeys.length" class="rank__tabs">
+                  <button
+                    v-for="k in rankKeys" :key="k"
+                    class="rank__tab" :class="{ 'rank__tab--on': k === rankTab }"
+                    @click="rankTab = k"
+                  >{{ rankLabel(k) }}</button>
+                </div>
+                <p v-if="!rankKeys.length" class="panel__empty">랭킹을 불러오지 못했습니다.</p>
+                <template v-else-if="activeRank">
+                  <!-- 🔴 이 종류만 실패했으면 그렇게 말한다("없음" 과 다르다) -->
+                  <p v-if="activeRank.error" class="rank__err">{{ activeRank.error }}</p>
+                  <p v-else-if="!activeRank.rows?.length" class="panel__empty">해당 종목 없음</p>
+                  <table v-else class="rtable">
+                    <thead>
+                      <tr><th class="rtable__n">#</th><th>종목</th><th class="rtable__r">등락률</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in visibleRankRows" :key="row.symbol">
+                        <td class="rtable__n mono-num">{{ row.rank }}</td>
+                        <td>
+                          <!-- ⚠️ 이름이 없으면 코드를 보여준다(빈칸보다 낫다) -->
+                          <button class="linkish" :title="row.symbol" @click="pickSymbol(row.symbol, row.name || row.symbol)">
+                            {{ row.name || row.symbol }}
+                          </button>
+                          <!-- 🔴 이름이 붙었을 때만 코드를 따로 보여준다(같은 값을 두 번 쓰지 않는다) -->
+                          <small v-if="row.name" class="rtable__sym mono-num">{{ row.symbol }}</small>
+                        </td>
+                        <td class="rtable__r mono-num" :class="signClass(row.changePct)">{{ pct(row.changePct) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </template>
+              </template>
+            </div>
+          </div>
+      </aside>
         <!-- ── 애널리스트와 채팅 (레이아웃 지시: 우열) ─────────── -->
         <section class="chat">
           <header class="chat__head">
@@ -1175,7 +1153,6 @@ onUnmounted(() => {
             </button>
           </form>
         </section>
-      </aside>
     </div>
 
     <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" @saved="loadDashboard(); restartDashTimer()" />
@@ -1223,6 +1200,7 @@ onUnmounted(() => {
 /* ── 상단 ─────────────────────────────────────────── */
 .topbar {
   display: flex;
+  flex-wrap: nowrap;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
@@ -1326,11 +1304,17 @@ onUnmounted(() => {
 }
 
 /* ── 시세 테이프 ─────────────────────────────────── */
+/*
+  🔴 헤더 **안**에 들어간다(가이드: 빨간 박스가 헤더 행 자체를 감쌌다).
+  ⚠️ `flex: 1` + `min-width: 0` 이 **둘 다** 있어야 한다 — min-width 가 없으면
+     flex 항목이 내용 폭만큼 버텨서 헤더가 **세 줄로 접힌다**(실제로 그랬다).
+*/
 .tape {
+  flex: 1; min-width: 0;
   position: relative; overflow: hidden; white-space: nowrap;
-  border-bottom: 1px solid var(--color-hairline);
-  background: var(--color-surface-sunken);
-  padding: 4px 0; font-size: var(--text-xs);
+  border-left: 1px solid var(--color-hairline);
+  border-right: 1px solid var(--color-hairline);
+  padding: 2px var(--space-sm); font-size: var(--text-xs);
 }
 /* 값이 낡았으면 눈에 보이게 — 조용히 옛날 값을 보여주지 않는다 */
 .tape--stale { opacity: 0.55; }
@@ -1363,28 +1347,56 @@ onUnmounted(() => {
 
 /* ── 레이아웃 ─────────────────────────────────────── */
 /* 데스크탑 3열 — 자산·차트 / 신호 / 브리핑. 각 열은 **자기 안에서** 스크롤한다 */
-.layout {
-  /* 남는 높이는 여기가 전부 가져간다(위 .tracker 주석 참조) */
+/*
+  ── 보드: 3열 × 3행 (2026-09-21 가이드 — **빨간 선을 픽셀로 재서** 정한 비율) ──────
+     측정: 세로 분할 x=711·905 가 전 구간 관통 → 3열 700 : 194 : 424 ≈ **53 : 15 : 32**
+           가로 분할 y=221 은 전 열 공통 · y=352 는 **좌열에만** → 행 183 : 131 : 278
+     ┌ 내 자산 ────────┬ 관심(소형) ┬ 매매분석·시황·HITL ┐ 행1
+     ├ 뉴스 ───────────┤           │                    │ 행2
+     ├ 차트 ───────────┤ 랭킹만     │ 애널리스트 채팅      │ 행3
+  🔴 중·우열은 행2~3 을 **세로 병합**한다 — 좌열만 뉴스/차트로 갈린다.
+  ⚠️ 앞판은 상단을 2열로 두고 열 폭을 두 그리드로 나눠 **세로선이 안 맞았다.**
+     그리드 **하나**로 묶어야 맞출 수 있다.
+*/
+/*
+  🔴 클래스 이름을 `.board` 로 지었다가 **이미 있던 규칙에 졌다**
+     (기존 「보드」 절의 `.board { grid-template-columns: repeat(auto-fill, minmax(320px,1fr)) }`
+      가 파일 **뒤쪽**에 있어 내 것을 덮었다 — 열이 5개로 깨졌다).
+     ⚠️ 이 주석을 쓰다 `*` `/` 를 그대로 넣어 **CSS 주석이 조기 종료**돼 빌드가 깨졌다 —
+        주석 안에서는 그 두 글자를 붙여 쓰지 않는다.
+  ⚠️ 증상이 "그리드가 안 먹는다" 라 **CSS 가 안 들어간 줄** 알았다. 실제로는 들어갔고
+     **같은 이름이 하나 더** 있었다 ⇒ 새 구획에는 **쓰이지 않는 이름**을 쓴다.
+  ★ DOM 을 직접 조회해 `grid-template-columns` 가 5트랙인 것을 보고서야 갈렸다 —
+    소스만 보면 3트랙이라 영원히 못 찾는다.
+*/
+.deck {
   flex: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px 340px;
-  gap: var(--space-sm);
   min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-sm);
+  overflow-y: auto;
 }
+@media (min-width: 1180px) {
+  .deck {
+    grid-template-columns: minmax(0, 53fr) minmax(0, 15fr) minmax(0, 32fr);
+    grid-template-rows: minmax(0, 183fr) minmax(0, 131fr) minmax(0, 278fr);
+    overflow: hidden;
+  }
+  /* 중·우열이 행2~3 을 세로로 먹는다 */
+  .deck > .layout__signals { grid-column: 2; grid-row: 2 / span 2; }
+  .deck > .chat { grid-column: 3; grid-row: 2 / span 2; }
+}
+/* 칸을 넘기지 않는다 — 내용은 **각 카드 안에서** 스크롤한다 */
+.deck > * { min-width: 0; min-height: 0; }
+.cell--chart { display: flex; flex-direction: column; gap: var(--space-sm); min-height: 0; }
 @media (max-width: 1400px) {
   .layout { grid-template-columns: minmax(0, 1fr) 240px 300px; }
 }
 @media (max-width: 1100px) {
   .layout { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
 }
-.layout__main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-}
+
 /*
   🔴 2026-09-21 사용자: *"대화하면서 하단으로 고정해야하는데 사용자가 계속 스크롤 내려야해."*
      원인은 **여기**였다. rail 이 `overflow-y: auto` 라 **rail 자체가 스크롤**을 가져갔고,
@@ -1540,8 +1552,7 @@ onUnmounted(() => {
   ⚠️ 카드가 늘어나면 옆 칸(관심 테마)과 높이가 어긋나 상단 전체가 들쭉날쭉해진다.
 */
 .assets {
-  flex: none;
-  height: 340px;
+  /* 높이는 **그리드 행**이 정한다 — 여기서 또 박으면 두 곳이 다툰다 */
   min-height: 0;
   background: var(--color-surface);
   border: 1px solid var(--color-hairline);
@@ -1619,22 +1630,6 @@ onUnmounted(() => {
 .ta-r { text-align: right; }
 
 /* ── 관심 테마 스트립 (상단) ───────────────────────── */
-/*
-  ── 상단 2열 (2026-09-21 레이아웃 지시) ──────────────────
-  좌 = 관심 테마(좌우 스크롤) · 우 = 내 자산
-  ⚠️ 좌열은 **반드시 min-width:0** 이어야 한다 — 안 주면 grid 항목이 내용 폭만큼
-     벌어져 `overflow-x` 가 안 먹고 우열(내 자산)을 화면 밖으로 밀어낸다.
-*/
-.top {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-sm);
-  min-height: 0;
-}
-@media (min-width: 1180px) {
-  /* 자산이 더 넓다 — 숫자가 많고 잘리면 안 된다 */
-  .top { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
-}
 
 /* 🔴 사용자: *"관심 카테고리 / 관심 티커 **소형화** 제공"* — 상단은 자산이 주인공이다 */
 .strip {
@@ -1907,11 +1902,13 @@ onUnmounted(() => {
 
 /* ── 선택 종목 뉴스 ──────────────────────────────── */
 .news {
+  /* 행2 칸을 그대로 채운다(가이드에서 뉴스는 독립 행이다) */
+  min-height: 0;
   background: var(--color-surface); border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg); padding: var(--space-sm) var(--space-base);
   display: flex; flex-direction: column; gap: var(--space-xs);
   /* 뉴스가 길어도 차트를 밀어내지 않는다 — 차트가 주인공이다 */
-  max-height: 168px; overflow-y: auto;
+  overflow-y: auto;
 }
 .news__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
 .news__head .panel__h { margin: 0; }
@@ -1958,6 +1955,9 @@ a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
 .analyst__src { margin: 0; font-size: var(--text-2xs); color: var(--color-faint); }
 
 .analyst {
+  /* 행1 칸 안에서만 스크롤한다 — 내용이 길어도 행 높이를 밀지 않는다 */
+  min-height: 0;
+  overflow-y: auto;
   background: var(--color-surface);
   border: 1px solid var(--color-hairline);
   border-left: 2px solid var(--color-ai-line);

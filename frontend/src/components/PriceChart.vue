@@ -161,9 +161,10 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
   padding: var(--space-base);
-  /* 차트를 키운다(2026-09-21 지시) — 열이 남는 높이를 차트가 가져간다 */
+  /* 칸을 그대로 채운다 — 높이는 보드 그리드의 행이 정한다.
+     ⚠️ 여기서 min-height 를 크게 박으면 **그리드 행을 밀어내** 다른 칸이 찌그러진다. */
   flex: 1;
-  min-height: 420px;
+  min-height: 0;
 }
 .chart__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
 .chart__title { display: flex; align-items: baseline; gap: var(--space-sm); min-width: 0; }
@@ -176,7 +177,7 @@ onBeforeUnmount(() => {
   border-radius: var(--rounded-sm); cursor: pointer;
 }
 .chart__tab--on { background: var(--color-primary-soft); color: var(--color-primary); }
-.chart__canvas { flex: 1; min-height: 340px; }
+.chart__canvas { flex: 1; min-height: 160px; }
 .chart__empty, .chart__err {
   margin: auto; font-size: var(--text-md); color: var(--color-muted); text-align: center; padding: var(--space-lg);
 }
