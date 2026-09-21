@@ -27,7 +27,7 @@ const AI_PRESETS = [
   },
 ];
 
-const MARKET_PROVIDER_OPTIONS = ['yahoo-finance', 'finnhub', 'public-data-portal', 'myapi'];
+const MARKET_PROVIDER_OPTIONS = ['yahoo-finance', 'finnhub', 'public-data-portal', 'myapi', 'toss'];
 
 function createDefaultSettings() {
   return {

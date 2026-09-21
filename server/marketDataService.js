@@ -6,6 +6,16 @@ const { logInfo, logWarn, logError } = require('./logger');
 // USD/KRW 폴백 환율(structuredImportService 의존 제거, v3 인라인 상수).
 const USD_KRW_FALLBACK_RATE = Math.max(1000, Math.round(Number(process.env.USD_KRW_FALLBACK_RATE) || 1360));
 const { getEffectiveMarketProviders } = require('./settingsService');
+const tossProvider = require('./tossProvider');
+
+/**
+ * 토스 배치 버퍼 (2026-09-21)
+ * `/prices` 는 **200종목을 1콜**로 준다. 종목마다 부르면 그 장점이 사라지므로,
+ * 갱신 사이클 **시작에 한 번** 채우고 아래 루프는 여기서 읽기만 한다.
+ * ⚠️ 비어 있으면 "시세 없음" 이 아니라 **"아직 안 받음"** 이다 — 둘을 섞지 않는다.
+ */
+const TOSS_PROVIDER = 'toss';
+let tossBatch = { at: 0, map: new Map(), error: null };
 
 const MARKET_EVENT_TYPES = Object.freeze({
   QUOTE_UPDATED: 'market.quote.updated',
@@ -501,6 +511,10 @@ async function getCachedQuote(
 }
 
 async function fetchUsQuote(symbol, options = {}) {
+  {
+    const { us } = getResolvedProviders();
+    if (us === TOSS_PROVIDER && tossProvider.isEnabled()) return readTossBatch(symbol);
+  }
   const normalizedSymbol = normalizeTickerSymbol(symbol);
   const { us } = getResolvedProviders();
   // myapi 옵션 선택 시 myapi 우선(BASE_URL 미설정이면 무시하고 기존 소스 사용 = 하위호환).
@@ -766,8 +780,32 @@ async function fetchKrMyapiStockQuote(symbol, options = {}) {
 
 // KR 시세 디스패처: 해석된 provider 가 myapi(그리고 MYAPI_BASE_URL 설정)면 myapi 우선,
 // 아니면 기존 공공데이터포털 경로. MYAPI_BASE_URL 미설정 시 항상 기존 경로(하위호환).
+function readTossBatch(symbol) {
+  const hit = tossBatch.map.get(String(symbol));
+  if (!hit) {
+    // 조용히 null 을 주지 않는다 — 위에서 실패로 세어야 화면이 "대기" 로 남지 않는다
+    throw new Error(
+      tossBatch.error
+        ? `토스 배치 조회 실패: ${tossBatch.error}`
+        : `토스 배치에 ${symbol} 가 없습니다(상장폐지·잘못된 심볼일 수 있음)`
+    );
+  }
+  return {
+    symbol: String(symbol),
+    price: hit.price,
+    changePct: hit.changePct,
+    currency: hit.currency,
+    marketState: null,
+    source: 'toss',
+    fetchedAt: hit.at || new Date().toISOString(),
+  };
+}
+
 async function fetchKrQuote(symbol, options = {}) {
   const { kr } = getResolvedProviders();
+  if (kr === TOSS_PROVIDER && tossProvider.isEnabled()) {
+    return readTossBatch(symbol);
+  }
   if (kr === MYAPI_PROVIDER && MYAPI_BASE_URL) {
     return fetchKrMyapiStockQuote(symbol, options);
   }
@@ -821,6 +859,27 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
           message: error.message,
         });
         errors.push(`USD/KRW 환율 갱신 실패: ${error.message}`);
+      }
+    }
+
+    // 🔴 토스는 종목마다 부르면 안 된다 — 200종목이 1콜이다. 여기서 한 번 채운다.
+    {
+      const prov = getResolvedProviders();
+      const usesToss = prov.kr === TOSS_PROVIDER || prov.us === TOSS_PROVIDER;
+      if (usesToss && tossProvider.isEnabled() && trackedTickers.length) {
+        try {
+          tossBatch = {
+            at: Date.now(),
+            map: await tossProvider.fetchQuotes(trackedTickers.map((t) => t.symbol)),
+            error: null,
+          };
+          logInfo('market.toss.batch', { requested: trackedTickers.length, received: tossBatch.map.size });
+        } catch (error) {
+          // 실패를 삼키지 않는다. 아래 루프가 종목마다 같은 이유로 실패하고 그 이유가 보인다.
+          tossBatch = { at: Date.now(), map: new Map(), error: error.message };
+          logWarn('market.toss.batch_failed', { reason: error.kind || 'unknown', message: error.message });
+          errors.push(`토스 시세 조회 실패: ${error.message}`);
+        }
       }
     }
 
