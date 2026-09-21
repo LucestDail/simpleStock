@@ -27,7 +27,16 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 function spawnServer(env) {
   return spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: String(PORT), NODE_ENV: 'test', ...env },
+    // ⚠️ 2026-09-21: LAN 면제가 기본 켜짐이라 127.0.0.1 에서 오는 이 테스트들은
+    //    **전부 통과해 버린다**. 토큰 게이트 자체를 재려면 면제를 꺼야 한다.
+    //    (끄는 걸 잊으면 "인증이 동작한다" 는 초록불이 사실은 LAN 면제였다)
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      NODE_ENV: 'test',
+      SIMPLESTOCK_TRUST_LAN: 'false',
+      ...env,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
@@ -106,4 +115,90 @@ test('세션 쿠키가 없거나 위조되면 API 가 안 열린다', async (t) 
   // 헤더 토큰 경로는 남아 있어야 한다 (HARU 등 서버-대-서버 소비자가 쓴다)
   const header = await fetch(`${BASE}/api/watchlist`, { headers: { 'X-Access-Token': TOKEN } });
   assert.equal(header.status, 200, '헤더 토큰 경로가 죽었다 — HARU 주식 도구가 조용히 실패한다');
+});
+
+test('🔴 재기동해도 로그인이 유지된다 (배포마다 다시 묻지 않는다)', async (t) => {
+  /*
+   * 2026-09-21 사용자 지적: "집인데 왜 접근 토큰을 달라고 하는거지?"
+   * 원인은 인증이 아니라 **세션을 메모리에 둔 것**이었다 — 그날만 배포가 네 번이라
+   * 재기동마다 전부 로그아웃됐다. 서명 쿠키(무상태)로 바꿔 고쳤고, 이 테스트가 그것을 잠근다.
+   *
+   * ⚠️ 단위 테스트로는 **원리상** 못 잡는다. 프로세스를 실제로 죽였다 살려야 보이는 축이다.
+   */
+  const TOKEN = 'RESTART_TEST_TOKEN_0921';
+
+  const first = spawnServer({ APP_ACCESS_TOKEN: TOKEN });
+  first.stdout.on('data', () => {}); first.stderr.on('data', () => {});
+  assert.ok(await waitUntilUp(), '1차 기동 실패 — 검사하지 못했다');
+
+  const login = await fetch(`${BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: TOKEN }),
+  });
+  assert.equal(login.status, 200);
+  const cookie = String(login.headers.get('set-cookie') || '').split(';')[0];
+
+  // 그 쿠키가 지금은 통한다 (기준선 — 안 찍으면 "원래 안 됐나" 를 못 가른다)
+  const before = await fetch(`${BASE}/api/watchlist`, { headers: { Cookie: cookie } });
+  assert.equal(before.status, 200, '로그인 직후인데 쿠키가 안 먹는다');
+
+  // ── 재기동 ──
+  first.kill('SIGKILL');
+  await new Promise((r) => setTimeout(r, 400));
+  const second = spawnServer({ APP_ACCESS_TOKEN: TOKEN });
+  second.stdout.on('data', () => {}); second.stderr.on('data', () => {});
+  t.after(() => second.kill('SIGKILL'));
+  assert.ok(await waitUntilUp(), '2차 기동 실패');
+
+  const after = await fetch(`${BASE}/api/watchlist`, { headers: { Cookie: cookie } });
+  assert.equal(
+    after.status,
+    200,
+    '🔴 재기동 후 같은 쿠키가 거부됐다 — 배포할 때마다 사용자가 토큰을 다시 넣어야 한다'
+  );
+});
+
+test('★ 자의 판별력 — 토큰을 바꾸면 옛 쿠키는 무효가 된다 (전체 무효화 수단)', async (t) => {
+  const A = 'ROTATE_TEST_TOKEN_AAAA';
+  const B = 'ROTATE_TEST_TOKEN_BBBB';
+
+  const first = spawnServer({ APP_ACCESS_TOKEN: A });
+  first.stdout.on('data', () => {}); first.stderr.on('data', () => {});
+  assert.ok(await waitUntilUp(), '1차 기동 실패');
+  const login = await fetch(`${BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: A }),
+  });
+  const cookie = String(login.headers.get('set-cookie') || '').split(';')[0];
+  first.kill('SIGKILL');
+  await new Promise((r) => setTimeout(r, 400));
+
+  const second = spawnServer({ APP_ACCESS_TOKEN: B }); // 토큰 교체
+  second.stdout.on('data', () => {}); second.stderr.on('data', () => {});
+  t.after(() => second.kill('SIGKILL'));
+  assert.ok(await waitUntilUp(), '2차 기동 실패');
+
+  const after = await fetch(`${BASE}/api/watchlist`, { headers: { Cookie: cookie } });
+  assert.equal(after.status, 401, '🔴 토큰을 바꿨는데 옛 쿠키가 통한다 — 무효화 수단이 없다');
+});
+
+test('🔴 LAN 에서는 토큰을 묻지 않는다 (2026-09-21 사용자 결정)', async (t) => {
+  /*
+   * > "집에 있을때는 당연히 접근 토큰 안물어봐도 되지 lanonly 로 내부에서만 접근이 가능한데"
+   * nginx 가 외부를 403 으로 막았으므로 앱까지 두 번 묻는 건 마찰이다.
+   * ⚠️ 이 테스트는 **면제를 켠 채**(기본값) 돌린다 — 위의 다른 테스트들과 반대다.
+   */
+  const child = spawnServer({ APP_ACCESS_TOKEN: 'LAN_TEST_TOKEN', SIMPLESTOCK_TRUST_LAN: 'true' });
+  child.stdout.on('data', () => {}); child.stderr.on('data', () => {});
+  t.after(() => child.kill('SIGKILL'));
+  assert.ok(await waitUntilUp(), '서버가 안 떴다 — 검사하지 못했다');
+
+  const api = await fetch(`${BASE}/api/watchlist`); // 127.0.0.1 에서 = LAN
+  assert.equal(api.status, 200, 'LAN 인데 토큰을 요구한다');
+
+  const status = await (await fetch(`${BASE}/auth/status`)).json();
+  assert.equal(status.authenticated, true);
+  assert.equal(status.via, 'lan', '화면이 로그인창을 안 띄우려면 이유를 알아야 한다');
 });

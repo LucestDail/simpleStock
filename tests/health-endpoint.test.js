@@ -62,6 +62,9 @@ test('/health 는 토큰을 흘리지 않는다 (라우트 순서 회귀 가드)
       ...process.env,
       PORT: String(PORT),
       APP_ACCESS_TOKEN: TOKEN,
+      // ⚠️ 2026-09-21: LAN 면제(기본 켜짐)를 끈다. 127.0.0.1 에서 오는 이 테스트는
+      //    안 끄면 ④축(무인증 401)이 **면제 때문에 통과**해 아무것도 안 재게 된다.
+      SIMPLESTOCK_TRUST_LAN: 'false',
       // 테스트가 외부 호출·스케줄을 깨우지 않게 한다.
       MANAGER_BRIEF_PRESET_SCHEDULE: 'false',
     },

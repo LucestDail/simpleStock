@@ -64,6 +64,10 @@ function extractAccessToken(req) {
 }
 
 function requireAccessToken(req, res, next) {
+  // ⓪ LAN 에서 온 요청은 면제한다 (2026-09-21 사용자 결정).
+  //    nginx 가 이미 lanonly 로 외부를 403 으로 막았으므로 앱까지 두 번 묻는 건 마찰이다.
+  //    🔴 위조 방지는 SESSION.isTrustedLanRequest 안에 있다(헤더를 함부로 믿지 않는다).
+  if (SESSION.isTrustedLanRequest(req)) return next();
   // ① 브라우저 = httpOnly 세션 쿠키 (토큰이 JS 에 노출되지 않는다)
   if (SESSION.isValidSession(SESSION.readCookie(req))) return next();
   // ② 서버-대-서버(HARU 등) = 헤더 토큰. 이 경로는 남긴다.
@@ -158,7 +162,12 @@ app.post('/auth/logout', (req, res) => {
 // 🔴 무인증으로 열려 있다. **인증 여부(불리언)만** 답하고 토큰·설정·규모를 담지 않는다
 //    (무인증 /health 가 토큰을 흘린 2026-09-21 사고와 같은 자리다).
 app.get('/auth/status', (req, res) => {
-  res.json({ authenticated: SESSION.isValidSession(SESSION.readCookie(req)) });
+  const lan = SESSION.isTrustedLanRequest(req);
+  res.json({
+    authenticated: lan || SESSION.isValidSession(SESSION.readCookie(req)),
+    // 왜 통과했는지 화면이 알 수 있게 — 'lan' 이면 로그인 UI 를 아예 안 그린다
+    via: lan ? 'lan' : 'session',
+  });
 });
 
 // ── 시세 ─────────────────────────────────────────────────────────
@@ -359,6 +368,13 @@ async function startAiSchedule() {
     await ensureManagerBriefSchedule();
   }
 
+  // ⚠️ 조용한 우회를 만들지 않는다 — LAN 면제가 켜져 있으면 그 사실을 기동 때 말한다
+  logInfo('auth.lan_trust', {
+    enabled: SESSION.TRUST_LAN,
+    note: SESSION.TRUST_LAN
+      ? '사설 대역 요청은 앱 로그인을 면제합니다(nginx lanonly 전제). 끄려면 SIMPLESTOCK_TRUST_LAN=false'
+      : '모든 요청이 앱 로그인을 요구합니다',
+  });
   syncScheduledTasks();
   startMarketDataPolling();
   scheduleMarketRefresh('startup', { force: true, delayMs: 800 });

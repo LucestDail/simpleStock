@@ -233,3 +233,45 @@ test('IP 거부면 나머지 종목 일봉을 더 때리지 않는다 (한도만
   await provider.fetchQuotes(['A', 'B', 'C']);
   assert.equal(candleCalls, 1, `403 인데 ${candleCalls}번 때렸다 — 첫 실패에서 멈춰야 한다`);
 });
+
+// ── LAN 판정 (위조 방지) ─────────────────────────────────────
+const SESSION = require('../server/session');
+
+test('🔴 외부 IP 가 헤더로 LAN 인 척해도 통하지 않는다', () => {
+  // 소켓 상대가 루프백이 아니면 **헤더를 아예 안 본다**
+  const req = {
+    socket: { remoteAddress: '203.0.113.9' },
+    headers: { 'x-real-ip': '192.168.11.5', 'x-forwarded-for': '10.0.0.1' },
+  };
+  assert.equal(SESSION.clientIp(req), '203.0.113.9');
+  assert.equal(SESSION.isTrustedLanRequest(req), false, '헤더 위조로 LAN 면제를 얻었다');
+});
+
+test('nginx 경유(루프백)면 nginx 가 덮어쓰는 X-Real-IP 를 본다', () => {
+  const lan = { socket: { remoteAddress: '::1' }, headers: { 'x-real-ip': '192.168.11.18' } };
+  assert.equal(SESSION.isTrustedLanRequest(lan), true);
+
+  const ext = { socket: { remoteAddress: '::1' }, headers: { 'x-real-ip': '203.0.113.9' } };
+  assert.equal(SESSION.isTrustedLanRequest(ext), false, '외부에서 nginx 를 거쳐 온 것을 LAN 으로 봤다');
+});
+
+test('XFF 는 **마지막** 항목만 믿는다 (앞쪽은 클라이언트가 지어낸다)', () => {
+  const req = {
+    socket: { remoteAddress: '127.0.0.1' },
+    headers: { 'x-forwarded-for': '192.168.11.5, 203.0.113.9' }, // 앞이 위조, 뒤가 nginx 가 붙인 진짜
+  };
+  assert.equal(SESSION.clientIp(req), '203.0.113.9');
+  assert.equal(SESSION.isTrustedLanRequest(req), false);
+});
+
+test('★ 자의 판별력 — 사설 대역을 실제로 알아본다', () => {
+  for (const ip of ['10.1.2.3', '192.168.0.9', '172.16.0.1', '172.31.255.1', '127.0.0.1', '::1'])
+    assert.equal(SESSION.isPrivateIp(ip), true, `${ip} 를 사설로 못 봤다`);
+  for (const ip of ['8.8.8.8', '203.0.113.9', '172.32.0.1', '172.15.0.1', '180.70.85.99', ''])
+    assert.equal(SESSION.isPrivateIp(ip), false, `${ip} 를 사설로 잘못 봤다`);
+});
+
+test('🔴 상대를 못 알아내면 면제하지 않는다 (모르는 것을 LAN 으로 치지 않는다)', () => {
+  assert.equal(SESSION.isTrustedLanRequest({ socket: {}, headers: {} }), false);
+  assert.equal(SESSION.isTrustedLanRequest({}), false);
+});

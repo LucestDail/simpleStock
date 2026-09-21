@@ -15,6 +15,13 @@ services:
       - "${PORT:-50000}:${PORT:-50000}"
     volumes:
       - ./data:/app/data
+    # 🔐 토스증권 자격증명 — 저장소 밖(/etc, 640 root:seunghyun)에 둔다.
+    #    저장소 .env 에 넣으면 형상·백업으로 퍼진다(2026-09-21).
+    #    ⚠️ 파일이 없으면 compose 가 기동을 거부한다 — required:false 로 둬서
+    #       자격증명 없이도 기존 프로바이더로 돌 수 있게 한다(isEnabled()=false).
+    env_file:
+      - path: /etc/simplestock.env
+        required: false
     environment:
       PORT: "${PORT:-50000}"
       APP_ACCESS_TOKEN: "${APP_ACCESS_TOKEN:-}"
