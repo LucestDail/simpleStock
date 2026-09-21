@@ -36,8 +36,23 @@ const { logInfo, logWarn } = require('./logger');
  * 그리고 실행은 여전히 **사람 승인 + no-op** 이다(샌드박스가 없다).
  */
 
-/** 직전에 보낸 분석의 지문 — 같은 내용을 두 번 보내지 않는다 */
+/** 직전에 보낸 분석의 지문 — 같은 **판단**을 두 번 보내지 않는다(서술은 지문에 안 넣는다) */
 let lastSentDigest = null;
+/**
+ * 🔴 **둘째 방어선 — 최근에 보낸 판단으로 *되돌아온* 경우를 묶는다.**
+ *
+ * 지문(직전 1건)만으로는 부족하다: 모델이 `HOLD → SELL → HOLD` 로 오가면 **매번 새 판단**으로
+ * 보여 계속 발송된다. 화면 진입마다 분석이 도는 구조라 그 진동이 그대로 알림이 된다.
+ *
+ * ⚠️ 그렇다고 **일괄 최소 간격**을 걸면 안 된다 — 사용자 지시가 *"판단하면 **바로** 쏴"* 다.
+ *    `HOLD → SELL` 같은 **처음 보는 판단**은 즉시 가야 한다.
+ * ⇒ 창(window) 안에서 **이미 보낸 적 있는 판단**만 건너뛴다. 처음 보는 판단은 지연 0.
+ */
+const sentWindow = new Map(); // digest → 보낸 시각
+const SEND_WINDOW_MS = Math.max(0, Number(process.env.ANALYST_SEND_WINDOW_MS ?? 15 * 60_000));
+
+/** ⚠️ 테스트가 상태를 격리할 수 있어야 한다 — 안 그러면 회차 순서에 결과가 묶인다 */
+function _resetSendStateForTest() { lastSentDigest = null; sentWindow.clear(); }
 
 const REPORT_SCHEMA = {
   type: 'object',
@@ -661,21 +676,46 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    *    ★ "보내지 않는다" 가 아니라 "같은 말을 두 번 하지 않는다" 이다.
    * ⚠️ 발송 실패가 분석을 망치지 않는다 — 곁가지다.
    */
+  /**
+   * 🔴 **지문에 자유 서술을 넣으면 안 된다** (2026-09-21 — 내가 사용자 폰에 6건을 보냈다)
+   *
+   * 종전 지문은 `marketView`·`momentumRead` 를 포함했는데, 그건 **모델이 매번 다르게 쓰는 문장**이다.
+   * ⇒ 판단이 똑같아도 지문이 달라져 **화면을 열 때마다 발송**됐다. 화면 진입 시 자동 분석이 도니
+   *    사용자가 **새로고침만 해도** 알림이 온다. 중복 방지가 **자기 입력에 무력화**된 것이다.
+   *
+   * ★ 오늘 세 번째로 밟은 *"대리 지표를 불변식으로 착각"* 이다 — 내가 지키려던 불변식은
+   *   *"**판단**이 바뀌었는가"* 인데 잰 것은 *"리포트 **글자**가 바뀌었는가"* 였다.
+   *
+   * ⇒ **결정만** 넣는다: 종목·방향·확신도 + 실제로 만들어진 주문.
+   * ⚠️ 서술은 일부러 뺀다 — 같은 판단을 다르게 설명한 것은 **새 소식이 아니다.**
+   */
   const digest = crypto
     .createHash('sha1')
     .update(JSON.stringify({
-      v: report.marketView,
-      m: report.momentumRead,
-      p: (report.positions || []).map((x) => `${x.symbol}:${x.stance}`),
-      c: created.map((x) => `${x.symbol}:${x.side}:${x.quantity}`),
+      p: (report.positions || []).map((x) => `${x.symbol}:${x.stance}:${x.confidence}`).sort(),
+      c: created.map((x) => `${x.symbol}:${x.side}:${x.quantity}`).sort(),
     }))
     .digest('hex');
 
   if (dryRun) {
     // 🔴 점검이면 **아무것도 안 보내고 digest 도 안 남긴다** — 다음 진짜 발송을 삼키지 않게
     logInfo('analyst.telegram_skipped', { why: 'dry_run' });
-  } else if (digest !== lastSentDigest) {
+  } else if (digest === lastSentDigest) {
+    // 🔴 안 보낸 이유를 남긴다 — "왜 안 오지" 를 겪지 않게
+    logInfo('analyst.telegram_skipped', { why: 'same_decision' });
+  } else if (Date.now() - (sentWindow.get(digest) || 0) < SEND_WINDOW_MS) {
+    // ⚠️ 창 안에서 **이미 보낸 판단으로 되돌아왔다**(HOLD→SELL→HOLD) — 새 소식이 아니다
+    logInfo('analyst.telegram_skipped', {
+      why: 'recently_sent',
+      agoSec: Math.round((Date.now() - sentWindow.get(digest)) / 1000),
+    });
     lastSentDigest = digest;
+  } else {
+    const now = Date.now();
+    lastSentDigest = digest;
+    sentWindow.set(digest, now);
+    // 창을 벗어난 것은 버린다 — 안 그러면 무한히 자란다
+    for (const [k, t] of sentWindow) if (now - t > SEND_WINDOW_MS) sentWindow.delete(k);
     const lines = ['🧭 매매 분석'];
     if (report.marketView) lines.push('', report.marketView);
     if (report.momentumRead) lines.push('', `[모멘텀] ${report.momentumRead}`);
@@ -689,9 +729,6 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       .send(lines.join('\n'), { reason: 'analysis' })
       .then((r) => logInfo('analyst.telegram', { sent: Boolean(r.sent), why: r.why || null }))
       .catch((e) => logWarn('analyst.telegram_failed', { message: e.message }));
-  } else {
-    // 🔴 안 보낸 이유를 남긴다 — "왜 안 오지" 를 겪지 않게
-    logInfo('analyst.telegram_skipped', { why: 'same_as_last' });
   }
 
   // 🔴 분석 기록을 **시간축에 남긴다**(사용자: "모든 분석 기록들이 시간순으로")
@@ -728,4 +765,4 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   };
 }
 
-module.exports = { analyze, summarizeCandles, shapeReport, computeTrade, REPORT_SCHEMA, SYSTEM_PROMPT };
+module.exports = { analyze, _resetSendStateForTest, summarizeCandles, shapeReport, computeTrade, REPORT_SCHEMA, SYSTEM_PROMPT };
