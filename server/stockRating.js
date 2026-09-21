@@ -504,6 +504,60 @@ async function rate(symbol, { newsText = '' } = {}) {
   const names = RUBRICS[type];
   const items = shapeScores(out, names);
 
+  /**
+   * 🔴 **점수는 왔는데 서술이 통째로 없다** (2026-09-21 라이브 — 8회 전부)
+   *
+   * 모델이 평평한 모양으로 답할 때는 **점수만** 준다. 실측 응답이 190자쯤이고
+   * `strengths`·`weaknesses`·`oneLiner`·항목 코멘트가 **전부 빈 값**이었다.
+   * ⚠️ 그런데 화면에는 `89점 · 매수 · 확신도 중간` 이 찍혀 **완성된 판단처럼 보인다** —
+   *    사양이 요구한 강점·약점·해석·한 줄 요약이 절반 사라졌는데 아무도 모른다.
+   *    (오늘 계속 밟은 *"껍데기가 맞아서 정상으로 보이는 것"* 의 이 경로 판본이다.)
+   *
+   * ⇒ 점수가 다 왔는데 서술이 비면 **한 번만** 서술만 따로 받는다. 점수를 근거로 주므로
+   *    숫자와 어긋나지 않고, 짧아서 싸다.
+   * ⚠️ 점수를 다시 묻지 **않는다** — 이미 확정된 숫자를 흔들면 같은 종목이 회차마다 달라진다.
+   */
+  const scoredCount = items.filter((x) => x.score != null).length;
+  const proseEmpty = !asText(out.strengths) && !asText(out.weaknesses) && !asText(out.oneLiner);
+  let prose = out;
+  if (scoredCount === names.length && proseEmpty) {
+    logWarn('rating.prose_missing', { symbol: stats.symbol, scored: scoredCount });
+    const p = await generateStructuredOutput({
+      systemPrompt: [
+        '당신은 기업·주식 분석 평가자입니다. **점수는 이미 매겨졌습니다 — 다시 매기지 마세요.**',
+        '아래 점수를 **근거로** 서술만 채우세요. 점수와 어긋나는 말을 쓰면 안 됩니다.',
+        '한국어로, 숫자 중심으로, 과장 없이. 주어지지 않은 숫자는 `unverified` 에 적으세요.',
+      ].join('\n'),
+      userPrompt: [
+        `# ${stats.name} (${stats.symbol}) · ${type}`,
+        '',
+        '## 확정된 항목 점수',
+        ...items.map((x) => `- ${x.name}: ${x.score}/10`),
+        '',
+        statsBlock(stats),
+      ].join('\n'),
+      schema: {
+        type: 'object',
+        properties: {
+          description: { type: 'string' },
+          strengths: { type: 'string' },
+          weaknesses: { type: 'string' },
+          interpretation: { type: 'string' },
+          oneLiner: { type: 'string' },
+          confidence: { type: 'string', enum: ['매우 높음', '높음', '중간~높음', '중간', '낮음'] },
+          confidenceWhy: { type: 'string' },
+          unverified: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['oneLiner'],
+      },
+      logLabel: 'stock_rating_prose',
+      fallback: {},
+    });
+    // ⚠️ 서술만 합친다. `items` 는 위에서 확정됐고 여기서 안 건드린다
+    prose = { ...out, ...p };
+    logInfo('rating.prose_done', { symbol: stats.symbol, got: Boolean(asText(p.oneLiner)) });
+  }
+
   const scored = items.filter((x) => x.score != null);
   // 🔴 **항목이 비면 총점을 만들지 않는다.** 없는 것을 0 으로 치면 "매도 권고" 가 된다
   const total = scored.length === names.length
@@ -516,10 +570,18 @@ async function rate(symbol, { newsText = '' } = {}) {
    * ⚠️ 밸류 지표를 절반도 못 받았는데 "매우 높음" 이면 그건 자신감이 아니라 착각이다.
    */
   const order = ['낮음', '중간', '중간~높음', '높음', '매우 높음'];
-  let confIdx = Math.max(0, order.indexOf(out.confidence || '중간'));
+  /**
+   * 🔴 **모델이 확신도를 안 주면 지어내지 않는다** (2026-09-21).
+   *    종전엔 `|| '중간'` 이라 라이브가 8회 내내 `확신도 중간` 을 보여줬는데
+   *    **모델은 그 말을 한 적이 없다.** 기본값을 판단처럼 내보내는 건 숫자를 지어내는 것과 같다.
+   *    ⇒ 없으면 `낮음` 에서 시작하고 **그 이유를 적는다.**
+   */
+  const saidConf = order.includes(prose.confidence) ? prose.confidence : null;
+  let confIdx = saidConf ? order.indexOf(saidConf) : 0;
   const downgrades = [];
+  if (!saidConf) downgrades.push('모델이 확신도를 답하지 않음');
   if (stats.missing.length >= 3) { confIdx = Math.min(confIdx, 1); downgrades.push(`밸류 지표 ${stats.missing.length}개 미수신`); }
-  if ((out.unverified || []).length >= 3) { confIdx = Math.min(confIdx, 2); downgrades.push(`확인 못 한 항목 ${out.unverified.length}건`); }
+  if ((prose.unverified || []).length >= 3) { confIdx = Math.min(confIdx, 2); downgrades.push(`확인 못 한 항목 ${prose.unverified.length}건`); }
   if (scored.length < names.length) { confIdx = 0; downgrades.push(`항목 ${names.length - scored.length}개 미채점`); }
 
   const result = {
@@ -528,19 +590,19 @@ async function rate(symbol, { newsText = '' } = {}) {
     type,
     typeWhy: cls.why,
     typeAssumed: cls.assumed,
-    description: asText(out.description),
+    description: asText(prose.description),
     items,
     total,
     maxTotal: 100,
     opinion,
     bandText: bandText(type),
-    strengths: asText(out.strengths),
-    weaknesses: asText(out.weaknesses),
-    interpretation: asText(out.interpretation),
+    strengths: asText(prose.strengths),
+    weaknesses: asText(prose.weaknesses),
+    interpretation: asText(prose.interpretation),
     confidence: order[confIdx],
-    confidenceWhy: [asText(out.confidenceWhy), downgrades.length ? `(자동 하향: ${downgrades.join(' · ')})` : ''].filter(Boolean).join(' '),
-    oneLiner: asText(out.oneLiner),
-    unverified: out.unverified || [],
+    confidenceWhy: [asText(prose.confidenceWhy), downgrades.length ? `(자동 하향: ${downgrades.join(' · ')})` : ''].filter(Boolean).join(' '),
+    oneLiner: asText(prose.oneLiner),
+    unverified: prose.unverified || [],
     missingValueMetrics: stats.missing,
     links: stats.links,
     stats: {

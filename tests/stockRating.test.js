@@ -137,3 +137,92 @@ test('3배·인버스도 짚는다', () => {
 test('quoteType 이 없으면 펀드로 단정하지 않는다', () => {
   assert.notEqual(F('Something Ultra Corp', null, 20e9).type, TYPES.FUND);
 });
+
+/**
+ * 🔴 **점수는 왔는데 서술이 통째로 없다** (2026-09-21 라이브 · 8회 전부)
+ *
+ * 모델이 평평한 모양으로 답할 때는 **점수만** 준다. 실측 응답이 190자쯤이고
+ * `strengths`·`weaknesses`·`oneLiner`·항목 코멘트가 전부 빈 값이었다.
+ * 그런데 화면엔 `89점 · 매수 · 확신도 중간` 이 찍혀 **완성된 판단처럼 보였다.**
+ *
+ * 🔴 더 나쁜 건 `확신도 중간` 이 **내 기본값**이었다는 것 — 모델은 그 말을 한 적이 없다.
+ *    숫자를 지어내지 않겠다고 해 놓고 **확신도는 지어내고 있었다.**
+ * ⚠️ pm2 의 검증은 *"weaknesses 에 `[` 가 없다"* 로 통과했는데, 빈 문자열에도 `[` 는 없다 —
+ *    **"검사하지 않은 것" 이 "통과한 것" 으로 보이는** 그 실패 모드다.
+ */
+const os = require('node:os');
+const path = require('node:path');
+
+function freshRating(replies) {
+  for (const k of Object.keys(require.cache)) {
+    if (/stockRating|aiService|yahooStats/.test(k)) delete require.cache[k];
+  }
+  const calls = [];
+  const aiPath = require.resolve('../server/aiService');
+  require.cache[aiPath] = {
+    id: aiPath, filename: aiPath, loaded: true,
+    exports: {
+      generateStructuredOutput: async (o) => { calls.push(o.logLabel); return replies.shift() ?? {}; },
+      getAiSettings: () => ({}),
+    },
+  };
+  const yPath = require.resolve('../server/yahooStats');
+  const realY = require(yPath);
+  require.cache[yPath] = {
+    id: yPath, filename: yPath, loaded: true,
+    exports: {
+      ...realY,
+      getStats: async () => ({
+        symbol: 'NVDA', name: 'NVIDIA Corporation', quoteType: 'EQUITY', marketCap: 5.36e12,
+        price: 180, currency: 'USD', quality: {}, links: {}, missing: [], at: 'now',
+      }),
+    },
+  };
+  return { rating: require('../server/stockRating'), calls };
+}
+
+/** 라이브 실측 응답 — 점수만, 서술 0 */
+const FLAT = Object.fromEntries(RUBRICS[TYPES.LARGE].map((n, i) => [n, i < 4 ? 10 : 9]));
+
+test('🔴 점수만 오고 서술이 비면 서술만 한 번 더 받는다', async () => {
+  const { rating, calls } = freshRating([FLAT, { oneLiner: '대장주', strengths: '해자', weaknesses: '밸류 부담', confidence: '높음' }]);
+  const r = await rating.rate('NVDA');
+  assert.deepEqual(calls, ['stock_rating', 'stock_rating_prose'], '서술 보충을 안 불렀다');
+  assert.equal(r.oneLiner, '대장주');
+  assert.equal(r.weaknesses, '밸류 부담');
+  // 🔴 점수는 **첫 응답 것**이어야 한다 — 두 번째 호출이 숫자를 흔들면 안 된다
+  assert.equal(r.total, 94);
+  assert.equal(r.confidence, '높음');
+});
+
+test('서술이 이미 있으면 다시 묻지 않는다 (멀쩡한 경로에 비용을 더하지 않는다)', async () => {
+  const { rating, calls } = freshRating([{ ...FLAT, strengths: '이미 있다', oneLiner: '있다', confidence: '높음' }]);
+  await rating.rate('NVDA');
+  assert.deepEqual(calls, ['stock_rating'], '🔴 서술이 있는데 또 물었다');
+});
+
+test('점수가 덜 채워졌으면 서술을 묻지 않는다 (총점부터 못 낸다)', async () => {
+  const { rating, calls } = freshRating([{ '강한 기업 선호': 9 }]);
+  const r = await rating.rate('NVDA');
+  assert.deepEqual(calls, ['stock_rating']);
+  assert.equal(r.total, null);
+});
+
+/**
+ * 🔴 **확신도를 지어내지 않는다.**
+ * 모델이 안 주면 `낮음` 에서 시작하고 **그 이유를 적는다** — 기본값을 판단처럼 내보내면
+ * 사용자는 시스템이 판단한 줄 안다.
+ */
+test('🔴 모델이 확신도를 안 주면 낮음 + 이유를 남긴다 (중간으로 지어내지 않는다)', async () => {
+  const { rating } = freshRating([FLAT, { oneLiner: 'x', strengths: 'y', weaknesses: 'z' }]);
+  const r = await rating.rate('NVDA');
+  assert.equal(r.confidence, '낮음', '🔴 모델이 말한 적 없는 확신도를 만들어냈다');
+  assert.match(r.confidenceWhy, /확신도를 답하지 않음/, '🔴 지어낸 게 아니라는 근거가 없다');
+});
+
+test('모델이 확신도를 주면 그걸 쓴다 (판별력)', async () => {
+  const { rating } = freshRating([{ ...FLAT, strengths: 'a', oneLiner: 'b', confidence: '중간~높음' }]);
+  const r = await rating.rate('NVDA');
+  assert.equal(r.confidence, '중간~높음');
+  assert.ok(!/답하지 않음/.test(r.confidenceWhy), '준 값인데 "안 줬다" 를 적었다');
+});
