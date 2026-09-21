@@ -40,6 +40,24 @@ function fresh() {
     id: aiPath, filename: aiPath, loaded: true,
     exports: { generateStructuredOutput: async () => reportToReturn, getAiSettings: () => ({}) },
   };
+  /** ⚠️ 테이프·토스는 **네트워크를 탄다** — 테스트에서 실제로 부르면 느리고 결과가 흔들린다 */
+  const tapePath = require.resolve('../server/tickerTapeService');
+  const realTape = require(tapePath);
+  require.cache[tapePath] = {
+    id: tapePath, filename: tapePath, loaded: true,
+    exports: { ...realTape, getTape: async () => ({ items: [], fixed: [], failed: [] }) },
+  };
+  const tossPath2 = require.resolve('../server/tossClient');
+  const realToss2 = require(tossPath2);
+  require.cache[tossPath2] = {
+    id: tossPath2, filename: tossPath2, loaded: true,
+    exports: {
+      ...realToss2,
+      getCommissions: async () => [],
+      getInvestorTrading: async () => [],
+      getCandles: async () => ({ rows: [] }),
+    },
+  };
   const mcpPath = require.resolve('../server/mcpClient');
   const realMcp = require(mcpPath);
   require.cache[mcpPath] = {
@@ -54,6 +72,14 @@ const DASH = { portfolio: { items: [], summary: null }, momentum: [], warnings: 
 beforeEach(() => {
   sent = [];
   global.fetch = async (url, init) => {
+    /**
+     * 🔴 **텔레그램 호출만 센다.** 종전엔 `fetch` 를 **전부** 발송으로 셌는데,
+     *    분석이 시세(테이프)를 받기 시작하자 그게 발송으로 잡혀
+     *    *"점검인데 사용자 폰으로 갔다"* 라는 **거짓 빨간불**이 났다.
+     * ★ 자가 무엇에 민감한지 안 물으면, 제품이 커질 때 자가 먼저 거짓말한다.
+     */
+    const u = String(url || '');
+    if (!/api\.telegram\.org/.test(u)) return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
     sent.push(JSON.parse(init?.body || '{}'));
     return { ok: true, json: async () => ({ ok: true, result: { message_id: 1 } }) };
   };
