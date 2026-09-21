@@ -430,6 +430,18 @@ async function loadMcpStatus() {
 }
 
 /** 시황 → 모멘텀 → 매매 제안. 🔴 제안은 **승인해야** 진행된다 */
+/** 마지막 분석을 불러온다 — **실행하지 않는다**(LLM 비용 0) */
+async function loadLastReport() {
+  try {
+    const res = await apiFetch('/api/analyst/last');
+    if (!res.ok) return;
+    const body = await res.json();
+    if (body?.report) report.value = body.report;
+  } catch {
+    // ⚠️ 못 불러와도 화면은 뜬다 — "아직 분석 전" 안내가 그 자리를 채운다
+  }
+}
+
 async function runAnalyst() {
   analystLoading.value = true;
   analystError.value = '';
@@ -743,7 +755,17 @@ onMounted(async () => {
    *    주기 실행은 서버 `ANALYST_AUTO_CRON` 이 담당한다.
    * ⚠️ 보유를 먼저 받아야 분석할 것이 있다 — 그래서 조금 늦춘다.
    */
-  setTimeout(() => { if (!report.value && !analystLoading.value) runAnalyst(); }, 1500);
+  /**
+   * 🔴 **화면 진입 자동 실행을 껐다** (2026-09-21 사용자 지시)
+   *
+   * *"제안이 너무 빈번한데 … 장마감 + 모멘텀 발생시점에만 작동해야 LLM 토큰 비용을 아낄 수 있을 거 같은데."*
+   * 실측: 분석 **24회 / 2시간 40분** — 대부분이 여기서 나왔다(1회당 LLM 3~4회 · 88초).
+   *
+   * ⚠️ 대신 **마지막 분석을 불러온다.** 안 그러면 사건이 날 때까지 빈 화면이라
+   *    *"안 돌린 것"* 과 *"고장난 것"* 이 구분되지 않는다.
+   * ⚠️ 낮에 주신 *"매매 분석은 바로 실행 시작해"* 를 되돌리는 것이라 **승인받고** 바꿨다.
+   */
+  loadLastReport();
   await load();
   await loadPortfolio();
   await loadDashboard();
@@ -1020,7 +1042,8 @@ onUnmounted(() => {
           </p>
           <p v-if="analystError" class="banner banner--error">{{ analystError }}</p>
           <p v-else-if="!report" class="banner banner--empty">
-            분석을 실행하면 시황·모멘텀 판단과 <b>매수/매도 제안</b>이 나옵니다.
+            아직 분석 기록이 없습니다. <b>장 마감</b>과 <b>모멘텀 발생</b> 시 자동으로 돌고,
+            지금 보려면 <b>분석 실행</b>을 누르세요.
           </p>
 
           <template v-else>
@@ -1028,6 +1051,11 @@ onUnmounted(() => {
             <p v-if="report.web" class="analyst__src">
               <template v-if="report.web.ok">웹 검색 {{ report.web.hits }}건 반영 · {{ report.web.tool }}</template>
               <template v-else>웹 검색 미반영 — {{ report.web.error }}</template>
+            </p>
+            <!-- 🔴 **언제·왜 돌았는지** 보여준다 — 자동 실행으로 바뀌었으니 안 그러면 언제 것인지 모른다 -->
+            <p v-if="report.at || report.trigger?.why" class="analyst__when">
+              <template v-if="report.at">{{ new Date(report.at).toLocaleString('ko-KR') }}</template>
+              <template v-if="report.trigger?.why"> · {{ report.trigger.why }}</template>
             </p>
             <p class="analyst__view">{{ report.marketView }}</p>
             <p class="analyst__mom">{{ report.momentumRead }}</p>
@@ -2273,6 +2301,7 @@ a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
   padding: 2px 6px; border-radius: var(--rounded-xs);
   background: var(--color-ai-soft); color: var(--color-ai);
 }
+.analyst__when { margin: 0 0 4px; font-size: var(--text-2xs); color: var(--color-faint); }
 .analyst__view { margin: 0; font-size: var(--text-md); line-height: 1.65; color: var(--color-body); }
 .analyst__mom {
   margin: 0; padding: var(--space-sm) var(--space-base);

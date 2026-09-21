@@ -1,0 +1,187 @@
+/**
+ * 분석을 **언제** 돌릴지 정한다 (2026-09-21 사용자 지시)
+ *
+ * 사용자: *"제안이 너무 빈번한데 **모멘텀 발생 시점에만** 제안이 발생해야 해.
+ * **장마감 + 모멘텀 발생시점에만** 작동해야 LLM 토큰 비용을 아낄 수 있을 거 같은데."*
+ *
+ * ## 실측 — 빈도의 범인은 크론이 아니라 **화면 진입**이었다
+ *
+ * ```
+ * 분석 24회 / 2시간 40분   (활동 기록 기준)   · 1회당 LLM 3~4회 · 88초
+ * ANALYST_AUTO_CRON        하루 2회 — 문제 아님
+ * WorkspaceView 진입 자동실행 ← 대부분이 여기서 나왔다
+ * ```
+ *
+ * ## 🔴 고정 %는 **잘못된 자다** (6개월 실측)
+ *
+ * | 자 | QLD | RAM | SPY | NVDA |
+ * |---|---|---|---|---|
+ * | 고정 3% | 6.4 | **15.4** | **0.0** | 4.8 |
+ * | **2σ**  | 1.4 | 1.0 | 1.8 | 1.6 |
+ *
+ * (월 환산 횟수) 고정 %는 종목마다 **30배** 차이가 난다 — 그건 "이상 움직임" 이 아니라
+ * **그 종목의 변동성**을 재는 것이다. RAM 은 2배 레버리지라 3% 가 평상시고(61일 중 46일),
+ * SPY 는 단 하루도 안 넘는다. **2σ 는 종목이 달라도 월 1~2회로 고르다** —
+ * *"이 종목치고 이상한가"* 를 재기 때문이다.
+ * ★ *"자를 만들면 자의 판별력을 재라"* 의 이 프로젝트 판본이다.
+ *
+ * ## 🔴 보유만 보면 **매도 뒤 재진입을 영영 못 본다** (사용자 지적)
+ *
+ * *"매도한다고 판정한 경우 다음날이나 다음 매수 시점의 부분매수 진입 시점 같은 게
+ * 애매할 거 같은데, 보유종목만 판정해버리면."* — 맞다. 팔면 포트폴리오에서 사라지고
+ * 그 순간 **감시 대상에서도 빠진다.** 되살 자리를 판단할 기회가 없어진다.
+ *
+ * ⇒ 감시 대상(universe)을 셋으로 둔다:
+ * ```
+ * 보유 중            들고 있을 것인가
+ * 최근 보유했다 사라짐  **되살 자리인가**(기본 20일 추적)
+ * 목표·손절 지정      사용자가 지켜보겠다고 표시한 것
+ * ```
+ * ⚠️ 관심목록 전체(테마 10개 × 10종목)를 넣지 않는다 — 감시는 싸도 **분석은 비싸다.**
+ * ⚠️ 사라진 것을 감지하는 기준은 **보유 목록의 변화**다. 주문 체결 기록이 아니다 —
+ *    사용자가 토스 앱에서 직접 팔 수도 있고, 지금 우리 실행 경로는 no-op 이다.
+ *
+ * ## 이 모듈은 **순수**하다
+ *
+ * LLM·네트워크·파일을 모르게 짰다. 입력(시세·세션·직전 상태) → 출력(돌릴까·왜·다음 상태).
+ * 그래야 *"장마감에 도는가"* 를 **장 마감을 기다리지 않고** 검증할 수 있다.
+ */
+
+/** 기본 문턱 — `이 종목치고` 얼마나 이상해야 부를 것인가 */
+const DEFAULT_Z = Number(process.env.ANALYST_MOMENTUM_Z) || 2;
+/**
+ * 🔴 **되돌아오는 기준은 더 낮게 둔다**(히스테리시스).
+ * 문턱 하나로 켜고 끄면 z 가 1.99↔2.01 을 오갈 때마다 **매번 새 사건**이 된다 —
+ * 오늘 텔레그램에서 겪은 진동과 같은 모양이다.
+ */
+const CLEAR_RATIO = 0.7;
+/** 팔고 나서 며칠이나 되살 자리를 봐 줄 것인가 */
+const REENTRY_DAYS = Math.max(1, Number(process.env.ANALYST_REENTRY_DAYS) || 20);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 표본의 평균·표준편차. ⚠️ 표본이 적으면 **판정하지 않는다**(null) —
+ * 3일치로 낸 σ 는 "이 종목치고" 를 말해 주지 못한다.
+ */
+function stats(changes, min = 10) {
+  const xs = (changes || []).map(Number).filter(Number.isFinite);
+  if (xs.length < min) return null;
+  const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const variance = xs.reduce((a, b) => a + (b - mean) ** 2, 0) / xs.length;
+  const sd = Math.sqrt(variance);
+  // σ 가 0 이면 나눌 수 없다(가격이 안 움직인 종목)
+  return sd > 0 ? { mean, sd, n: xs.length } : null;
+}
+
+/**
+ * 오늘 움직임이 **이 종목치고** 몇 σ 인가.
+ * @returns {number|null} 판정 불가면 null — **0 이 아니다**(0 은 "평범하다" 는 판정이다)
+ */
+function zScore(dailyChangePct, history) {
+  const s = stats(history);
+  if (s == null || !Number.isFinite(Number(dailyChangePct))) return null;
+  return Math.abs(Number(dailyChangePct) - s.mean) / s.sd;
+}
+
+/**
+ * 감시 대상을 갱신한다 — 보유가 사라지면 **되살 후보로 남긴다.**
+ * @param {object} prev 직전 상태의 `universe`
+ * @param {string[]} held 지금 보유 중인 심볼
+ * @param {string[]} targeted 목표·손절을 지정한 심볼
+ * @param {number} now
+ */
+function trackUniverse(prev, held, targeted, now) {
+  const heldSet = new Set((held || []).map((s) => String(s).toUpperCase()));
+  const targetSet = new Set((targeted || []).map((s) => String(s).toUpperCase()));
+  const next = {};
+
+  for (const sym of heldSet) next[sym] = { role: 'held', since: prev?.[sym]?.since ?? now };
+
+  // 🔴 직전엔 있었는데 지금 없다 = 판 것이다 ⇒ **되살 자리를 봐 줄 대상**으로 남긴다
+  for (const [sym, v] of Object.entries(prev || {})) {
+    if (heldSet.has(sym)) continue;
+    const exitedAt = v.role === 'held' ? now : v.exitedAt;
+    /**
+     * 기한이 지나면 잊는다 — 영원히 들고 있으면 감시 대상이 계속 자란다.
+     * ⚠️ 경계는 **`>=`** 다: `REENTRY_DAYS=20` 이면 **매도 20일째에 빠진다**(21일째가 아니라).
+     *    `>` 로 두면 "20일 추적" 이라 적어 놓고 21일을 추적한다 — 문서와 코드가 어긋난다.
+     */
+    if (exitedAt != null && now - exitedAt >= REENTRY_DAYS * DAY_MS) continue;
+    next[sym] = { role: 'reentry', exitedAt: exitedAt ?? now, since: v.since };
+  }
+
+  // 사용자가 목표·손절을 찍은 것은 보유가 아니어도 본다
+  for (const sym of targetSet) if (!next[sym]) next[sym] = { role: 'targeted', since: now };
+
+  return next;
+}
+
+/**
+ * 돌릴 것인가.
+ *
+ * @param {object} input
+ * @param {number} input.now
+ * @param {Array}  input.sessions `[{key,label,state}]` — 지금 장 상태
+ * @param {Array}  input.symbols  `[{symbol, dailyChangePct, history}]` 감시 대상의 시세
+ * @param {object} input.state    직전 상태(영속화된 것)
+ * @param {number} [input.z]      모멘텀 문턱(σ)
+ * @returns {{run:boolean, reasons:Array, state:object}}
+ */
+function decide({ now, sessions = [], symbols = [], state = {}, z = DEFAULT_Z } = {}) {
+  const st = { ...(state || {}) };
+  st.sessions = { ...(st.sessions || {}) };
+  st.momentum = { ...(st.momentum || {}) };
+  const reasons = [];
+
+  // ① 장마감 — **상태 전이**일 때만. 닫혀 있는 내내 부르면 안 된다
+  for (const s of sessions) {
+    const key = String(s?.key || '');
+    if (!key) continue;
+    const cur = String(s.state || '');
+    const was = st.sessions[key];
+    st.sessions[key] = cur;
+    // 🔴 첫 실행은 기준선일 뿐 "바뀐 것" 이 아니다(alertService.ruleSessions 와 같은 규율)
+    if (!was || was === cur) continue;
+    if (cur === 'closed') reasons.push({ kind: 'close', key, label: s.label || key });
+  }
+
+  // ② 모멘텀 — **통과하는 순간** 한 번. 넘어 있는 내내가 아니다
+  for (const row of symbols) {
+    const sym = String(row?.symbol || '').toUpperCase();
+    if (!sym) continue;
+    const zv = zScore(row.dailyChangePct, row.history);
+    const mark = st.momentum[sym];
+    if (zv == null) {
+      // ⚠️ **판정 불가를 "평범함" 으로 읽지 않는다** — 표시를 지우면 다음에 새 사건이 된다
+      continue;
+    }
+    if (zv >= z) {
+      if (!mark) {
+        st.momentum[sym] = { at: now, z: Number(zv.toFixed(2)) };
+        reasons.push({
+          kind: 'momentum', symbol: sym, z: Number(zv.toFixed(2)),
+          changePct: Number(row.dailyChangePct), role: row.role || 'held',
+        });
+      }
+    } else if (mark && zv < z * CLEAR_RATIO) {
+      // 충분히 내려왔으면 표시를 지운다 — 다음 돌파는 **새 사건**이다
+      delete st.momentum[sym];
+    }
+  }
+
+  // 감시 대상에서 빠진 종목의 표시는 정리한다(상태가 무한히 자라지 않게)
+  const alive = new Set(symbols.map((r) => String(r?.symbol || '').toUpperCase()));
+  for (const sym of Object.keys(st.momentum)) if (!alive.has(sym)) delete st.momentum[sym];
+
+  return { run: reasons.length > 0, reasons, state: st };
+}
+
+/** 사람이 읽는 한 줄 — 활동 기록·로그에 그대로 쓴다 */
+function describe(reasons) {
+  return (reasons || []).map((r) => (r.kind === 'close'
+    ? `${r.label} 마감`
+    : `${r.symbol} 모멘텀 ${r.z}σ (${r.changePct > 0 ? '+' : ''}${r.changePct}%)`)).join(' · ');
+}
+
+module.exports = { decide, trackUniverse, zScore, stats, describe, DEFAULT_Z, REENTRY_DAYS, CLEAR_RATIO };

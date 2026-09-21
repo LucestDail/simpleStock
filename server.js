@@ -157,6 +157,13 @@ app.get('/api/portfolio', async (req, res) => {
 });
 
 // ── 매매 애널리스트 (시황 → 판단 → 제안) ──────────────────────
+/**
+ * 🔴 **마지막 분석** — 화면 진입 자동 실행을 껐으므로(사용자 지시) 화면은 이걸 먼저 읽는다.
+ *    없으면 `null` 을 준다 — 화면이 *"아직 분석 전"* 으로 그린다.
+ *    ⚠️ **"안 돌린 것" 과 "고장난 것" 을 화면에서 구분할 수 있어야 한다.**
+ */
+app.get('/api/analyst/last', (req, res) => res.json({ report: analyst.readLast() }));
+
 app.post('/api/analyst/run', async (req, res) => {
   if (!tossPortfolio.isEnabled()) {
     return res.status(503).json({ error: '토스 연동이 설정되지 않았습니다.', configured: false });
@@ -951,23 +958,42 @@ async function startAiSchedule() {
    *    `ANALYST_AUTO_CRON` 에 cron 을 주면 그때만 돈다(예: 장 시작·마감).
    * ★ 결과는 화면이 아니라 **활동 기록**에 남는다 — 그래서 새로고침해도 시간순으로 보인다.
    */
+  /**
+   * 🔴 **분석 실행기** — 언제 돌릴지는 `alertService` 가 정하고(장마감·모멘텀),
+   *    무엇을 조립할지는 여기가 안다. 둘을 나눠야 판정을 **LLM 없이 검증**할 수 있다.
+   */
+  async function runAnalysisNow(meta = {}) {
+    const mkt = getMarketSnapshot();
+    const rate = Number(mkt?.fx?.USDKRW?.rate) || 0;
+    const st = getDashboardSettings();
+    const watch = getWatchlistState();
+    const dash = await dashboardService.build({
+      watchSymbols: (watch?.groups || []).flatMap((g) => (g.tickers || []).map((t) => t.symbol)),
+      fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || null } : null,
+      momentumPct: st.momentumPct,
+      rankingTypes: st.rankingTypes,
+      rankingCountries: st.rankingCountries,
+    });
+    const r = await analyst.analyze(dash, {
+      userInstruction: st.briefingPrompt,
+      fx: rate ? { rate } : null,
+      trigger: meta,
+    });
+    // 🔴 **마지막 분석을 저장한다** — 화면 진입 자동 실행을 껐으므로, 저장하지 않으면
+    //    사용자는 사건이 날 때까지 **빈 화면**을 본다(껐다는 사실보다 고장으로 보인다).
+    analyst.saveLast({ ...r, trigger: meta, at: new Date().toISOString() });
+    logInfo('analyst.auto', { why: meta.why || null, positions: r.positions?.length || 0, created: r.created?.length || 0 });
+    return r;
+  }
+  alerts.setAnalystRunner(runAnalysisNow);
+
   const autoCron = String(process.env.ANALYST_AUTO_CRON || '').trim();
   if (autoCron && cron.validate(autoCron)) {
     cron.schedule(autoCron, async () => {
+      // ⚠️ 이제 **장마감 전이**가 따로 부른다 — 크론은 보조 수단이고 기본은 비워 둔다
+      //    (둘 다 켜면 마감 무렵에 두 번 돈다)
       try {
-        const mkt = getMarketSnapshot();
-        const rate = Number(mkt?.fx?.USDKRW?.rate) || 0;
-        const st = getDashboardSettings();
-        const watch = getWatchlistState();
-        const dash = await dashboardService.build({
-          watchSymbols: (watch?.groups || []).flatMap((g) => (g.tickers || []).map((t) => t.symbol)),
-          fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || null } : null,
-          momentumPct: st.momentumPct,
-          rankingTypes: st.rankingTypes,
-          rankingCountries: st.rankingCountries,
-        });
-        const r = await analyst.analyze(dash, { userInstruction: st.briefingPrompt, fx: rate ? { rate } : null });
-        logInfo('analyst.auto', { positions: r.positions?.length || 0, created: r.created?.length || 0 });
+        await runAnalysisNow({ why: `cron ${autoCron}` });
       } catch (e) {
         // 자동 실행이 실패해도 앱은 돈다. 다만 **조용하지 않다**
         logError('analyst.auto_failed', e, {});

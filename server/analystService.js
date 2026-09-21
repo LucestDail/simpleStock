@@ -36,6 +36,38 @@ const { logInfo, logWarn } = require('./logger');
  * 그리고 실행은 여전히 **사람 승인 + no-op** 이다(샌드박스가 없다).
  */
 
+/**
+ * 🔴 **마지막 분석을 파일로 남긴다** (2026-09-21).
+ *
+ * 화면 진입 자동 실행을 껐다(사용자 지시: *"장마감 + 모멘텀 발생시점에만"*).
+ * 저장하지 않으면 사용자는 **사건이 날 때까지 빈 화면**을 본다 —
+ * *"안 돌린 것"* 과 *"고장난 것"* 이 화면에서 같아 보이는 건 오늘 내내 본 실패 모드다.
+ * ⚠️ 감사 로그와 다르다 — 이건 **'지금 상태'** 라 통째로 덮어쓴다(원자적 쓰기).
+ */
+const LAST_FILE = process.env.ANALYST_LAST_FILE
+  || require('node:path').join(__dirname, '..', 'data', 'analyst-last.json');
+
+function saveLast(report) {
+  try {
+    const fs = require('node:fs');
+    fs.mkdirSync(require('node:path').dirname(LAST_FILE), { recursive: true });
+    const tmp = `${LAST_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(report));
+    fs.renameSync(tmp, LAST_FILE);
+  } catch (e) {
+    logWarn('analyst.save_last_failed', { message: e.message });
+  }
+}
+
+/** ⚠️ 못 읽어도 **null 을 준다** — 화면이 그걸 "아직 없음" 으로 그린다(에러로 죽지 않는다) */
+function readLast() {
+  try {
+    return JSON.parse(require('node:fs').readFileSync(LAST_FILE, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
 /** 직전에 보낸 분석의 지문 — 같은 **판단**을 두 번 보내지 않는다(서술은 지문에 안 넣는다) */
 let lastSentDigest = null;
 /**
@@ -367,7 +399,7 @@ const round2 = (n) => Math.round(Number(n) * 100) / 100;
  *   **검증할 수 없는 경로는 결국 검증 안 된 채로 배포된다.**
  *   ⚠️ `lastSentDigest` 도 **건드리지 않는다** — 점검이 다음 진짜 발송을 삼키면 안 된다.
  */
-async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = null, dryRun = false } = {}) {
+async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = null, dryRun = false, trigger = null } = {}) {
   const items = dash?.portfolio?.items || [];
   const summary = dash?.portfolio?.summary || null;
 
@@ -496,6 +528,59 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   const failedRatings = Object.entries(ratings).filter(([, r]) => r?.error);
   if (failedRatings.length) {
     lines.push('', `⚠️ 평가하지 못한 종목: ${failedRatings.map(([s2]) => s2).join(', ')} — 질 평가 없이 판단해야 합니다.`);
+  }
+
+  /**
+   * ⚠️ **위치가 중요하다** — 이 절은 `lines` 가 만들어진 **뒤에** 와야 한다.
+   *    처음에 시세 조회 근처(위쪽)에 뒀다가 `Cannot access 'lines' before initialization` 로
+   *    터졌다. 🔴 하필 **사용자가 요청한 되살 경로에서만** 터지는 자리였다 —
+   *    보유 종목만 있는 회차에서는 이 블록을 건너뛰어 **조용히 통과**했다.
+   *    자를 먼저 쓴 덕에 배포 전에 잡혔다.
+   */
+  /**
+   * 🔴 **판 종목의 되살 자리도 본다** (2026-09-21 사용자 지적)
+   *
+   * *"매도한다고 판정한 경우 다음날이나 다음 매수 시점의 부분매수 진입 시점 같은 게
+   * 애매할 거 같은데, **보유종목만 판정해버리면**."* — 맞다. 팔면 포트폴리오에서 사라지고
+   * 그 순간 판단 대상에서도 빠져 **되살 자리를 영영 못 본다.**
+   *
+   * ⇒ 트리거가 `role:'reentry'`(최근까지 들고 있던 것) 또는 `'targeted'`(목표·손절 지정)로
+   *    깨운 종목은 **다른 질문**으로 다룬다: *들고 있을 것인가* 가 아니라 **지금 되살 자리인가**.
+   * ⚠️ 보유가 아니므로 **수량·평단이 없다** — 분할 매수 레벨을 물어야지 손익을 물으면 안 된다.
+   */
+  const heldSet = new Set(items.map((i) => String(i.symbol).toUpperCase()));
+  const reentry = [...new Map(
+    (trigger?.reasons || [])
+      .filter((r) => r.kind === 'momentum' && r.symbol && !heldSet.has(String(r.symbol).toUpperCase()))
+      .map((r) => [String(r.symbol).toUpperCase(), r])
+  ).values()].slice(0, 3);
+
+  if (reentry.length) {
+    lines.push('', '## 되살/신규 진입 후보 (보유 아님 — 다른 질문이다)');
+    for (const r of reentry) {
+      let tech = null;
+      try {
+        const c = await toss.getCandles(r.symbol, { interval: '1d', count: 120 });
+        tech = summarizeCandles(c.rows || []);
+      } catch (e) {
+        logWarn('analyst.reentry_candles_failed', { symbol: r.symbol, message: e?.message });
+      }
+      lines.push(
+        `- **${r.symbol}** (${r.role === 'reentry' ? '최근까지 보유했다 매도' : '목표·손절 지정'})`
+        + ` · 오늘 ${r.changePct > 0 ? '+' : ''}${r.changePct}% (이 종목 기준 ${r.z}σ)`
+        + (tech ? `\n    현재가 ${fmt(tech.last)} · 20일선 ${fmt(tech.ma20)} · 60일선 ${fmt(tech.ma60)}`
+          + ` · 20일 스윙 ${fmt(tech.swingLow)}~${fmt(tech.swingHigh)} · 일변동성 ${fmt(tech.volPct)}%` : '')
+      );
+    }
+    lines.push(
+      '',
+      '🔴 이 종목들은 **보유가 아니다.** 수량·평단·평가손익이 없으니 그걸 근거로 쓰지 마세요.',
+      '물을 것은 **"지금 되살(신규) 진입 자리인가"** 이고, 답은 `positions` 에 담되',
+      '`stance` 는 `BUY`(지금 산다) 또는 `HOLD`(아직 아니다) 만 씁니다 — **`SELL` 은 쓸 수 없습니다**(없는 걸 팔 수 없다).',
+      '⚠️ **한 번에 다 사는 것을 전제하지 마세요.** 분할이면 `entry` 에 **1차 진입가**를 쓰고',
+      '   `rationale` 에 나머지 회차 조건을 한 문장으로 적으세요(예: "1차 92, 89 이탈 없이 반등 확인 후 2차").',
+      '⚠️ 되살 이유가 **"전에 들고 있었으니까" 가 되면 안 됩니다** — 판 이유가 해소됐는지로 판단하세요.',
+    );
   }
 
   const mom = dash?.momentum || [];
@@ -765,4 +850,4 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   };
 }
 
-module.exports = { analyze, _resetSendStateForTest, summarizeCandles, shapeReport, computeTrade, REPORT_SCHEMA, SYSTEM_PROMPT };
+module.exports = { analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport, computeTrade, REPORT_SCHEMA, SYSTEM_PROMPT };

@@ -6,6 +6,7 @@ const tape = require('./tickerTapeService');
 const toss = require('./tossClient');
 const tossPortfolio = require('./tossPortfolio');
 const { resolveSession } = require('./marketCalendar');
+const trigger = require('./analystTrigger');
 const { getDashboardSettings, updateSettings } = require('./settingsService');
 const { APP_TIMEZONE } = require('./time');
 const activity = require('./activityLog');
@@ -95,6 +96,67 @@ function kstDay(now = new Date()) {
 }
 
 /** 조용한 시간인가. ⚠️ **제안은 예외** — 사람이 기다리는 것이라 늦춰서는 안 된다 */
+/**
+ * 🔴 **분석을 언제 돌릴지** (2026-09-21 사용자 지시: *"장마감 + 모멘텀 발생시점에만"*)
+ *
+ * 실행 자체는 여기서 안 한다 — 대시보드 조립·LLM 은 `server.js` 가 쥐고 있고
+ * 여기서 직접 부르면 순환 참조가 된다(`onProposed` 와 같은 이유). **판정만** 하고 넘긴다.
+ */
+let analystRunner = null;
+/** 분석은 88초쯤 걸린다 — 틱이 5분이라 **겹칠 수 있다.** 겹치면 건너뛴다 */
+let analystRunning = false;
+function setAnalystRunner(fn) { analystRunner = typeof fn === 'function' ? fn : null; }
+
+/**
+ * 감시 대상의 **일간 변동 + 과거 분포**를 모은다.
+ * ⚠️ 과거 일봉은 **하루 한 번만** 받아 상태에 캐시한다 — 틱마다 받으면 5분에 한 번씩
+ *    토스 한도를 태운다(그 종목의 어제까지 분포는 오늘 안 바뀐다).
+ */
+async function collectMomentumRows(st, universe, items, now) {
+  const bySymbol = new Map((items || []).map((it) => [String(it.symbol).toUpperCase(), it]));
+  const day = new Date(now).toISOString().slice(0, 10);
+  st.candleCache = st.candleCache || {};
+  const rows = [];
+
+  for (const [sym, meta] of Object.entries(universe || {})) {
+    let hist = st.candleCache[sym]?.day === day ? st.candleCache[sym].changes : null;
+    if (!hist) {
+      try {
+        const c = await toss.getCandles(sym, { interval: '1d', count: 60 });
+        const closes = (c.rows || []).map((r) => r.c).filter(Number.isFinite);
+        hist = [];
+        for (let i = 1; i < closes.length; i += 1) hist.push(((closes[i] - closes[i - 1]) / closes[i - 1]) * 100);
+        st.candleCache[sym] = { day, changes: hist.slice(-40) };
+        hist = st.candleCache[sym].changes;
+      } catch (e) {
+        // 🔴 못 받으면 **판정하지 않는다** — 빈 분포로 z 를 내면 아무 날이나 이상해 보인다
+        logWarn('analyst.trigger_history_failed', { symbol: sym, kind: e?.kind, message: e?.message });
+        continue;
+      }
+    }
+    const held = bySymbol.get(sym);
+    // 보유 중이면 **실시간 등락**, 아니면 어제 종가 대비(일 단위) — 되살 후보는 그 정도면 된다
+    const change = held?.dailyRate != null ? Number(held.dailyRate) : hist[hist.length - 1];
+    if (!Number.isFinite(change)) continue;
+    // ⚠️ 오늘 값은 분포에서 뺀다 — 자기 자신을 포함해 재면 z 가 줄어든다
+    rows.push({ symbol: sym, dailyChangePct: change, history: hist.slice(0, -1), role: meta.role });
+  }
+  // 캐시에서 감시 대상 밖은 버린다
+  for (const k of Object.keys(st.candleCache)) if (!universe[k]) delete st.candleCache[k];
+  return rows;
+}
+
+/**
+ * 장마감 판정 대상 — **보유·감시 중인 시장만** 본다(사용자 승인 ③).
+ * 지금은 둘 다 미국이라 **05시 한 번**이고, 국내 종목을 사면 15:30 이 자동으로 붙는다.
+ */
+function sessionsFor(universe, now) {
+  const markets = new Set();
+  for (const sym of Object.keys(universe || {})) markets.add(/^\d{6}$/.test(sym) ? 'kr' : 'us');
+  const spec = { kr: ['KRX', 9, 16], us: ['미국장', 22, 6] };
+  return [...markets].map((k) => ({ key: k, label: spec[k][0], state: resolveSession(now, k, spec[k][1], spec[k][2], APP_TIMEZONE).state }));
+}
+
 function isQuiet(now = new Date()) {
   const h = kstHour(now);
   return QUIET_FROM > QUIET_TO ? h >= QUIET_FROM || h < QUIET_TO : h >= QUIET_FROM && h < QUIET_TO;
@@ -362,6 +424,44 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
     }
   }
 
+  /**
+   * 🔴 **분석을 돌릴 때인가** (2026-09-21 사용자 지시: *"장마감 + 모멘텀 발생시점에만"*)
+   *
+   * ⚠️ **보유를 못 읽었으면 감시 대상을 갱신하지 않는다** — 토스가 잠깐 죽은 걸
+   *    "다 팔았다" 로 읽으면 보유 종목이 통째로 **되살 후보**로 바뀐다.
+   *    ★ 목표선을 지우지 않는 것과 **같은 이유**이고, 오늘 내내 쓴
+   *      *"0 은 '없다' 가 아니라 '못 봤다' 일 수 있다"* 가 여기서도 제일 비싸다.
+   */
+  if (!failed.includes('holdings')) {
+    try {
+      const targeted = Object.keys(getDashboardSettings().targets || {});
+      st.universe = trigger.trackUniverse(st.universe, items.map((i) => i.symbol), targeted, now);
+      const rows = await collectMomentumRows(st, st.universe, items, now);
+      const d = trigger.decide({ now, sessions: sessionsFor(st.universe, now), symbols: rows, state: st.analyst || {} });
+      st.analyst = d.state;
+      if (d.run && analystRunner) {
+        if (analystRunning) {
+          // 분석은 88초쯤 걸리고 틱은 5분이다 — 겹치면 **건너뛴다**(쌓아 두지 않는다)
+          logWarn('analyst.trigger_skipped', { why: 'already_running', reasons: trigger.describe(d.reasons) });
+        } else {
+          analystRunning = true;
+          const why = trigger.describe(d.reasons);
+          logInfo('analyst.triggered', { why, reasons: d.reasons });
+          // 🔴 **틱을 막지 않는다** — 분석이 느리다고 알림이 밀리면 안 된다
+          Promise.resolve(analystRunner({ reasons: d.reasons, why }))
+            .catch((e) => logError('analyst.trigger_run_failed', e, { why }))
+            .finally(() => { analystRunning = false; });
+        }
+      } else if (d.run) {
+        // 🔴 판정은 났는데 실행기가 없다 — 조용히 넘기면 "왜 안 돌지" 를 겪는다
+        logWarn('analyst.trigger_no_runner', { why: trigger.describe(d.reasons) });
+      }
+    } catch (e) {
+      failed.push('analyst_trigger');
+      logWarn('analyst.trigger_failed', { message: e.message });
+    }
+  }
+
   // 조용한 시간에는 **묶어서 미루지 않고 그냥 건너뛴다** — 아침에 어제 것이 쏟아지면 그게 더 나쁘다
   const quiet = isQuiet(now);
   let sent = 0;
@@ -465,4 +565,4 @@ function _resetForTest() {
 }
 
 module.exports = {
-  onProposalSettled, tick, start, stop, status, onProposal, isQuiet, STATE_FILE, _resetForTest };
+  onProposalSettled, setAnalystRunner, tick, start, stop, status, onProposal, isQuiet, STATE_FILE, _resetForTest };
