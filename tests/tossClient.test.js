@@ -455,7 +455,13 @@ test('🔴 손익률은 소수비율로 온다 — 퍼센트로 바꿔야 한다
   assert.equal(summary.value.usd, 15267.18);
 });
 
-test('보유가 USD 뿐이면 krw 는 0 이다 (화면이 ₩0 으로 보이던 원인)', async () => {
+test('🔴 보유가 USD 뿐일 때 — 환율이 있으면 환산하고, 없으면 **null**(0 아님)', async () => {
+  /*
+   * 사용자가 스크린샷으로 잡은 증상: 평가금액 **₩0**.
+   * 보유가 전부 미국 종목이라 API 의 krw 가 0 이었는데 화면이 그걸 그대로 찍었다.
+   * ⇒ 환산을 **서버에서** 끝낸다(소비자가 화면 하나가 아니다 — 텔레그램·API 직접조회).
+   * ⚠️ 환율을 모르면 0 으로 채우지 않는다. **0 은 "0원이다" 로 읽힌다.**
+   */
   routes.set('/oauth2/token', () => okToken());
   accountRoute();
   routes.set('/api/v1/holdings', () =>
@@ -466,8 +472,50 @@ test('보유가 USD 뿐이면 krw 는 0 이다 (화면이 ₩0 으로 보이던 
       dailyProfitLoss: { amount: { krw: '0', usd: '1' }, rate: '0.01' },
       items: [] } })
   );
+
+  // ① 환율 없음 → null · converted:false · 사실을 밝힌다
   portfolio._resetForTest();
-  const { summary } = await portfolio.getHoldings();
-  assert.equal(summary.value.krw, 0);
-  assert.equal(summary.value.usd, 110, '화면은 krw 만 보면 안 된다 — usd 쪽에 값이 있다');
+  const noFx = (await portfolio.getHoldings()).summary;
+  assert.equal(noFx.value.krw, null, '환율을 모르는데 0 을 채웠다 — "0원" 으로 읽힌다');
+  assert.equal(noFx.value.converted, false);
+  assert.equal(noFx.fx, null);
+
+  // ② 환율 있음 → 환산 + **언제·어디 환율인지** 함께
+  portfolio._resetForTest();
+  const withFx = (await portfolio.getHoldings({
+    fx: { rate: 1380, asOf: '2026-09-21T06:00:00Z', source: 'yahoo-finance' },
+  })).summary;
+  assert.equal(withFx.value.krw, 151800, `110 USD × 1380 = 151,800 인데 ${withFx.value.krw}`);
+  assert.equal(withFx.value.usd, 110, 'usd 원본도 남아야 한다');
+  assert.equal(withFx.value.converted, true, '환산했다는 사실을 안 밝혔다(화면이 ≈ 를 못 붙인다)');
+  assert.equal(withFx.fx.rate, 1380);
+  assert.equal(withFx.fx.source, 'yahoo-finance');
+});
+
+
+test('🔴 본문 있는 요청에 Content-Type 을 붙인다 (없으면 서버가 본문을 못 읽는다)', () => {
+  /*
+   * 2026-09-21: 사용자가 "삼성전자" 를 넣었는데 **"symbol 또는 종목명(query)이 필요합니다"** 가 떴다.
+   * 원인은 프론트가 **Content-Type 을 안 붙인 것**(처음부터 그랬다).
+   * fetch 는 문자열 본문에 text/plain 을 붙이고 express.json() 은 그걸 파싱하지 않는다.
+   * ★ 증상이 원인을 가린다 — "분명히 넣었는데 필요하다고 한다".
+   */
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'frontend/src/lib/apiClient.js'), 'utf8');
+  const i = src.indexOf('function withAuthHeaders');
+  assert.ok(i > 0, 'withAuthHeaders 를 못 찾았다 — 가드가 대상을 잃었다(통과 아님)');
+  const block = src.slice(i, i + 1400);
+  assert.ok(/Content-Type/.test(block), '본문 요청에 Content-Type 을 안 붙인다');
+  assert.ok(/options\.body !== undefined/.test(block), '본문 유무를 보지 않고 무조건 붙인다(GET 까지)');
+});
+
+test('서버 오류 문구가 원인을 가리지 않는다 (본문이 빈 경우)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server/watchlistService.js'), 'utf8');
+  assert.ok(
+    /요청 본문이 비어 있습니다/.test(src),
+    '본문 자체가 비었을 때와 필드가 빠졌을 때를 같은 문구로 말하고 있다'
+  );
 });

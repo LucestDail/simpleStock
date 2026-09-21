@@ -50,9 +50,24 @@ function ratePct(v) {
   return n == null ? null : Math.round(n * 100 * 10000) / 10000;
 }
 
-/** {krw, usd} 쌍을 숫자로. 없는 쪽은 null 로 둔다(0 으로 만들지 않는다) */
-function pair(o) {
-  return { krw: num(o?.krw), usd: num(o?.usd) };
+/**
+ * {krw, usd} 쌍을 숫자로 + **원화 환산을 여기서 끝낸다**.
+ *
+ * 🔴 토스는 통화별로 갈라서 준다. 미국 종목만 있으면 `krw` 는 **0** 이다.
+ *    처음엔 프론트에서 환산했는데, **소비자가 화면 하나가 아니다** —
+ *    텔레그램 발송·API 직접 조회는 그대로 **₩0 을 본다**(사용자가 스크린샷으로 잡은 그 증상).
+ *    ⇒ 표시 로직이 여러 소비자를 가지면 **뒤쪽(서버)으로 내린다.**
+ *
+ * ⚠️ 환율을 모르면 `krw` 를 **0 으로 채우지 않는다.** 0 은 "0원이다" 로 읽힌다.
+ *    `null` + `converted:false` 로 두고 **모른다는 사실을 그대로 내보낸다.**
+ */
+function pair(o, fxRate) {
+  const krw = num(o?.krw);
+  const usd = num(o?.usd);
+  const base = krw || 0;
+  if (!usd) return { krw: krw, usd: usd, converted: false };
+  if (!fxRate) return { krw: krw || null, usd, converted: false, fxMissing: true };
+  return { krw: Math.round(base + usd * fxRate), usd, converted: true };
 }
 
 async function getAccount({ force = false } = {}) {
@@ -72,8 +87,14 @@ async function getAccount({ force = false } = {}) {
  * 보유 현황. **저장하지 않고 매번 읽는다.**
  * @returns {Promise<{summary:object, items:object[], asOf:string}>}
  */
-async function getHoldings() {
+/**
+ * @param {object} [opts]
+ * @param {{rate:number, asOf?:string, source?:string}} [opts.fx] 원화 환산에 쓸 환율.
+ *   없으면 환산하지 않는다(krw 는 null 로 남는다).
+ */
+async function getHoldings({ fx = null } = {}) {
   const acc = await getAccount();
+  const fxRate = Number(fx?.rate) || 0;
   const r = await toss.apiGet('/api/v1/holdings', { accountSeq: acc.seq });
 
   const items = (Array.isArray(r?.items) ? r.items : []).map((it) => ({
@@ -94,13 +115,18 @@ async function getHoldings() {
   }));
 
   const summary = {
-    purchase: pair(r?.totalPurchaseAmount),
-    value: pair(r?.marketValue?.amount),
-    profit: pair(r?.profitLoss?.amount),
+    purchase: pair(r?.totalPurchaseAmount, fxRate),
+    value: pair(r?.marketValue?.amount, fxRate),
+    profit: pair(r?.profitLoss?.amount, fxRate),
     profitRate: ratePct(r?.profitLoss?.rate),
-    dailyProfit: pair(r?.dailyProfitLoss?.amount),
+    dailyProfit: pair(r?.dailyProfitLoss?.amount, fxRate),
     dailyRate: ratePct(r?.dailyProfitLoss?.rate),
     accountType: acc.type,
+    // 🔴 **언제·어디 환율로 계산했는지**를 값과 함께 내보낸다.
+    //    없으면 "어제 환율로 계산된 금액" 을 사용자가 구분할 수 없다.
+    fx: fxRate
+      ? { rate: fxRate, asOf: fx?.asOf || null, source: fx?.source || null }
+      : null,
   };
 
   // 금액·수량은 로그에 남기지 않는다. 건수와 성패만.

@@ -106,7 +106,24 @@ function getAiTransportLabel() {
   return 'direct';
 }
 
+/**
+ * 포착이 **어느 경로로 도는지** 밝힌다 (2026-09-21, 피어 요청).
+ * 🔴 안 되면 `servedBy` 가 조용히 비고 화면은 "확인 불가" 로 **정상처럼 보인다.**
+ *    그래서 기동 때 한 줄 남긴다 — 배포 직후에 바로 보이게.
+ *
+ * ⚠️ SDK 주입(`GoogleGenAIOptions` 에 fetch 를 넘기는 방식)은 **불가능하다.**
+ *    필드가 8개인데(vertexai·project·location·apiKey·apiVersion·googleAuthOptions·
+ *    httpOptions·authConfig) fetch 관련이 없다. 번들의 `fetch(` 호출은 **한 곳, 전역 호출**이라
+ *    전역 래핑이 유일한 경로다. (피어가 본 `this.fetch` 2건은 `fetchUploadUrl` 같은
+ *    **메서드 이름**이었다 — 주입 신호가 아니다.)
+ */
+function describeFetchProbe() {
+  if (!GEMINI_GATEWAY_BASE_URL) return { mode: 'none', reason: 'gateway_base_url_unset' };
+  return { mode: installedWrapper ? 'global' : 'pending', base: GEMINI_GATEWAY_BASE_URL };
+}
+
 module.exports = {
+  describeFetchProbe,
   runWithLlmMeta,
   _resetFetchProbe,
   isGatewayMode,

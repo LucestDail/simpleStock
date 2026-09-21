@@ -121,7 +121,12 @@ app.get('/api/portfolio', async (req, res) => {
     });
   }
   try {
-    const data = await tossPortfolio.getHoldings();
+    // 환산은 서버에서 끝낸다 — 소비자가 화면 하나가 아니다(텔레그램·API 직접조회)
+    const mkt = getMarketSnapshot();
+    const rate = Number(mkt?.fx?.USDKRW?.rate) || 0;
+    const data = await tossPortfolio.getHoldings({
+      fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || mkt?.provider || null } : null,
+    });
     return res.json({
       ...data,
       momentum: tossPortfolio.pickMomentum(data.items, Number(req.query.momentum) || 3),
@@ -396,6 +401,7 @@ async function startAiSchedule() {
   }
 
   // ⚠️ 조용한 우회를 만들지 않는다 — LAN 면제가 켜져 있으면 그 사실을 기동 때 말한다
+  logInfo('llm.fetch_probe', require('./server/geminiClient').describeFetchProbe());
   logInfo('auth.lan_trust', {
     enabled: SESSION.TRUST_LAN,
     note: SESSION.TRUST_LAN

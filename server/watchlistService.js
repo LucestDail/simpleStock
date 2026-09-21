@@ -176,7 +176,15 @@ async function addTicker(groupId, input = {}) {
       currency: String(candidate.currency || '').trim().toUpperCase(),
     };
   } else {
-    throw new Error('symbol 또는 종목명(query)이 필요합니다.');
+    // 🔴 문구가 원인을 가리면 안 된다. 사용자는 종목명을 **분명히 입력**했는데
+    //    본문이 서버에 안 닿으면(Content-Type 누락 등) 이 자리로 떨어진다.
+    //    ⇒ 본문 자체가 비었으면 그렇게 말한다.
+    const gotAnyField = Object.keys(input || {}).length > 0;
+    throw new Error(
+      gotAnyField
+        ? 'symbol 또는 종목명(query)이 필요합니다.'
+        : '요청 본문이 비어 있습니다. (Content-Type: application/json 인지 확인하세요)'
+    );
   }
 
   if (!resolved.currency) resolved.currency = resolved.market === 'US' ? 'USD' : 'KRW';

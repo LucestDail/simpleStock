@@ -95,3 +95,20 @@ test('🔴 저장 정규화가 servedBy 를 버리지 않는다 (화면은 저�
   const block = src.slice(i, i + 1200);
   assert.ok(/servedBy:/.test(block), '정규화에 servedBy 가 없다 — 저장하면 사라진다');
 });
+
+test('포착 경로를 기동 때 밝힌다 (조용히 안 되는 것을 막는다)', () => {
+  const gc = require('../server/geminiClient');
+  const d = gc.describeFetchProbe();
+  assert.ok(['global', 'pending', 'none'].includes(d.mode), `mode 가 ${d.mode}`);
+  // ⚠️ SDK 주입은 불가능하다 — 옵션에 fetch 필드가 없다. 그 사실을 여기 박아 둔다.
+  const dts = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'node_modules/@google/genai/dist/genai.d.ts'), 'utf8');
+  const i = dts.indexOf('declare interface GoogleGenAIOptions');
+  const fields = [...dts.slice(i, i + 2600).matchAll(/^\s{4}(\w+)\??:/gm)].map((m) => m[1]);
+  assert.ok(fields.length > 0, '옵션 필드를 못 읽었다 — 가드가 대상을 잃었다');
+  assert.equal(
+    fields.filter((f) => /fetch/i.test(f)).length,
+    0,
+    'SDK 옵션에 fetch 가 생겼다 — 이제 전역 래핑 대신 **주입**으로 바꿔라(더 안전하다)'
+  );
+});

@@ -192,22 +192,15 @@ async function loadPortfolio() {
 }
 
 /**
- * 🔴 보유가 전부 미국 종목이면 `krw` 는 0 이고 값은 `usd` 쪽에 있다.
- *    처음에 krw 만 찍어서 **평가금액이 ₩0 으로 보였다**(2026-09-21 사용자 지적).
- * ⇒ 원화 환산 합계를 만든다. 환산이면 `≈` 를 붙여 **계산값임을 밝힌다**.
+ * 🔴 환산은 **서버가 끝냈다**(2026-09-21). 프론트는 받은 값을 그리기만 한다 —
+ *    소비자가 화면 하나가 아니라서(텔레그램·API 직접조회) 표시 로직을 뒤로 내렸다.
+ *  - `converted:true` 면 계산값이므로 `≈` 를 붙인다
+ *  - `krw:null` 이면 **환율을 모른다**는 뜻이다. 0 으로 보여주지 않는다("0원" 으로 읽힌다)
  */
-function krwTotal(pairValue) {
-  if (!pairValue) return { value: null, converted: false };
-  const krw = Number(pairValue.krw || 0);
-  const usd = Number(pairValue.usd || 0);
-  const rate = Number(fx.value?.USDKRW?.rate || 0);
-  if (usd && !rate) return { value: krw || null, converted: false, missingFx: true };
-  return { value: krw + usd * rate, converted: Boolean(usd) && Boolean(rate) };
-}
-function krwCell(pairValue) {
-  const t = krwTotal(pairValue);
-  if (t.value == null) return '—';
-  return `${t.converted ? '≈' : ''}${money(t.value, 'KRW')}`;
+function krwCell(p) {
+  if (!p) return '—';
+  if (p.krw == null) return p.usd != null ? `$${Number(p.usd).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—';
+  return `${p.converted ? '≈' : ''}${money(p.krw, 'KRW')}`;
 }
 
 function money(v, cur) {
@@ -361,6 +354,9 @@ onUnmounted(() => {
               <span v-if="portfolio?.items?.length" class="group__count mono-num">{{ portfolio.items.length }}</span>
             </div>
             <span v-if="portfolioLoading" class="assets__note">불러오는 중…</span>
+            <span v-else-if="portfolio?.summary?.fx" class="assets__note">
+              ≈ USD/KRW {{ Number(portfolio.summary.fx.rate).toLocaleString('ko-KR') }} 환산
+            </span>
           </header>
 
           <p v-if="portfolioError" class="banner banner--error">{{ portfolioError }}</p>
@@ -378,14 +374,14 @@ onUnmounted(() => {
               </div>
               <div class="kpi">
                 <span class="kpi__label">평가손익</span>
-                <span class="kpi__value mono-num" :class="signClass(krwTotal(portfolio.summary.profit).value)">
+                <span class="kpi__value mono-num" :class="signClass(portfolio.summary.profit.krw ?? portfolio.summary.profit.usd)">
                   {{ krwCell(portfolio.summary.profit) }}
                   <small>{{ pct(portfolio.summary.profitRate) }}</small>
                 </span>
               </div>
               <div class="kpi">
                 <span class="kpi__label">오늘</span>
-                <span class="kpi__value mono-num" :class="signClass(krwTotal(portfolio.summary.dailyProfit).value)">
+                <span class="kpi__value mono-num" :class="signClass(portfolio.summary.dailyProfit.krw ?? portfolio.summary.dailyProfit.usd)">
                   {{ krwCell(portfolio.summary.dailyProfit) }}
                   <small>{{ pct(portfolio.summary.dailyRate) }}</small>
                 </span>

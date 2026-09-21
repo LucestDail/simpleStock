@@ -54,6 +54,14 @@ function withAuthHeaders(options = {}) {
   const headers = new Headers(options.headers || {});
   // ⚠️ 쿠키 세션이 주 경로다. same-origin 이라도 명시해 둔다(프록시/서브패스에서 빠지는 일이 있다).
   options = { credentials: 'same-origin', ...options };
+
+  // 🔴 2026-09-21: 본문이 있는데 **Content-Type 을 아무도 안 붙이고 있었다**(처음부터).
+  //    fetch 는 문자열 본문에 `text/plain` 을 붙이고, `express.json()` 은 그걸 **파싱하지 않는다**
+  //    ⇒ 서버의 req.body 가 빈 객체가 되어 "symbol 또는 종목명(query)이 필요합니다" 가 떴다.
+  //    ★ 증상이 원인을 가린다 — 사용자는 종목명을 분명히 넣었는데 "필요합니다" 를 본다.
+  if (options.body !== undefined && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   const token = getAccessToken();
   // 앱 토큰은 X-Access-Token 으로 전송(Authorization 은 게이트웨이 HTTP Basic 인증용으로 비움).
   // 외부(게이트웨이 Basic) 접근 시 브라우저가 Authorization: Basic 을 자동 첨부하므로,
