@@ -47,6 +47,9 @@ let tokenInflight = null;
 const backoff = new Map();
 /** 실측된 한도를 담아 둔다 — 상위 계층이 갱신 주기를 정할 때 쓴다 */
 const observedLimits = new Map();
+/** 429 원인 추적용 — 프로세스 시작 이후 호출 수와 경로별 호출 수 */
+let callCount = 0;
+const pathCounts = new Map();
 
 function isConfigured() {
   return Boolean(CLIENT_ID && CLIENT_SECRET);
@@ -83,7 +86,18 @@ function noteRateLimited(path) {
   const streak = (prev?.streak || 0) + 1;
   const wait = Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** (streak - 1));
   backoff.set(key, { until: Date.now() + wait, streak });
-  logWarn('toss.rate_limited', { path: key, streak, waitMs: wait });
+  // 🔴 429 는 증상이 "화면 일부만 빈다" 로 나타나 **원인이 안 보인다.**
+  //    어느 경로가 **몇 번째 호출에서** 걸렸는지, 그 경로의 관측 한도가 얼마였는지 함께 남긴다.
+  const seen = observedLimits.get(key);
+  logWarn('toss.rate_limited', {
+    path: key,
+    streak,
+    waitMs: wait,
+    callSeq: callCount,
+    callsOnThisPath: pathCounts.get(key) || 0,
+    observedLimit: seen?.limit ?? null,
+    lastRemaining: seen?.remaining ?? null,
+  });
 }
 
 function noteSuccess(path, res) {
@@ -177,6 +191,8 @@ async function apiGet(path, { retriedAuth = false, accountSeq = null } = {}) {
     });
   }
 
+  callCount += 1;
+  pathCounts.set(bucketOf(path), (pathCounts.get(bucketOf(path)) || 0) + 1);
   const accessToken = await getToken();
   let res;
   try {
@@ -273,7 +289,109 @@ async function getExchangeRate(base = 'USD', quote = 'KRW') {
   };
 }
 
+
+// ── 읽기 전용 시장 데이터 (2026-09-21 대시보드용) ──────────────
+// 실측 한도: rankings 5/s · warnings 5/s · orderbook 15/s · investor-trading 10/s
+//            price-limits 15/s · stocks 5/s · candles 20/s
+// ⚠️ 응답 값이 **전부 문자열**이다. 숫자로 바꾸는 건 소비하는 쪽(provider/대시보드)에서 한다.
+
+/** 랭킹. type=TOP_GAINERS|TOP_LOSERS|tradingVolume|tradingAmount … */
+async function getRankings({ type = 'TOP_GAINERS', country = 'KR', duration = '1d', count = 10 } = {}) {
+  const q = new URLSearchParams({
+    type,
+    marketCountry: String(country).toUpperCase(),
+    duration,
+    count: String(Math.min(100, Math.max(1, Number(count) || 10))),
+  });
+  const r = await apiGet(`/api/v1/rankings?${q}`);
+  return {
+    rankedAt: r?.rankedAt || null,
+    rows: (Array.isArray(r?.rankings) ? r.rankings : []).map((x) => ({
+      rank: Number(x.rank) || null,
+      symbol: String(x.symbol || ''),
+      currency: x.currency || null,
+      // price 는 객체다(실측) — 소비하는 쪽에서 쓰기 쉽게 그대로 넘긴다
+      price: x.price ?? null,
+      volume: x.tradingVolume ?? null,
+      amount: x.tradingAmount ?? null,
+    })),
+  };
+}
+
+/** 종목 투자경고·거래정지 등. **빈 배열이 정상**이다(경고 없음) */
+async function getWarnings(symbol) {
+  const r = await apiGet(`/api/v1/stocks/${encodeURIComponent(symbol)}/warnings`);
+  return Array.isArray(r) ? r : [];
+}
+
+/** 호가 10단계 */
+async function getOrderbook(symbol) {
+  const r = await apiGet(`/api/v1/orderbook?symbol=${encodeURIComponent(symbol)}`);
+  const side = (arr) =>
+    (Array.isArray(arr) ? arr : []).map((x) => ({ price: Number(x.price), volume: Number(x.volume) }));
+  return { at: r?.timestamp || null, currency: r?.currency || null, asks: side(r?.asks), bids: side(r?.bids) };
+}
+
+/** 캔들. interval=1m|1d, 최대 200개. **최신순**으로 온다 */
+async function getCandles(symbol, { interval = '1d', count = 120 } = {}) {
+  const q = new URLSearchParams({
+    symbol,
+    interval,
+    count: String(Math.min(200, Math.max(2, Number(count) || 120))),
+  });
+  const r = await apiGet(`/api/v1/candles?${q}`);
+  const rows = (Array.isArray(r?.candles) ? r.candles : []).map((c) => ({
+    t: c.timestamp,
+    o: Number(c.openPrice),
+    h: Number(c.highPrice),
+    l: Number(c.lowPrice),
+    c: Number(c.closePrice),
+    v: Number(c.volume),
+  }));
+  // 차트는 오래된 것부터가 자연스럽다. **여기서 한 번만 뒤집는다**(소비처마다 뒤집으면 어긋난다)
+  return { symbol, interval, currency: r?.candles?.[0]?.currency || null, rows: rows.reverse() };
+}
+
+/** 투자자별 매매동향(개인·외국인·기관) */
+async function getInvestorTrading(symbol) {
+  const r = await apiGet(`/api/v1/stocks/${encodeURIComponent(symbol)}/investor-trading`);
+  return Array.isArray(r?.records) ? r.records : [];
+}
+
+/** 상·하한가. 미국 등 가격제한 없는 시장은 null 이 온다 */
+async function getPriceLimits(symbol) {
+  const r = await apiGet(`/api/v1/price-limits?symbol=${encodeURIComponent(symbol)}`);
+  return {
+    upper: r?.upperLimitPrice != null ? Number(r.upperLimitPrice) : null,
+    lower: r?.lowerLimitPrice != null ? Number(r.lowerLimitPrice) : null,
+    currency: r?.currency || null,
+  };
+}
+
+/** 종목 기본정보(최대 200건 다건) */
+async function getStockInfo(symbols) {
+  const list = [...new Set((symbols || []).map((x) => String(x || '').trim()).filter(Boolean))].slice(0, 200);
+  if (!list.length) return new Map();
+  const rows = await apiGet(`/api/v1/stocks?symbols=${encodeURIComponent(list.join(','))}`);
+  const out = new Map();
+  for (const x of Array.isArray(rows) ? rows : []) {
+    if (!x?.symbol) continue;
+    out.set(String(x.symbol), {
+      name: x.name || null,
+      market: x.market || null,
+      currency: x.currency || null,
+      status: x.status || null,
+      securityType: x.securityType || null,
+      // 거래정지는 화면에서 빨간 표시가 필요하다
+      suspended: Boolean(x.koreanMarketDetail?.krxTradingSuspended),
+    });
+  }
+  return out;
+}
+
 function _resetForTest() {
+  callCount = 0;
+  pathCounts.clear();
   token = null;
   tokenInflight = null;
   backoff.clear();
@@ -289,6 +407,13 @@ module.exports = {
   getPrices,
   getMarketCalendar,
   getExchangeRate,
+  getRankings,
+  getWarnings,
+  getOrderbook,
+  getCandles,
+  getInvestorTrading,
+  getPriceLimits,
+  getStockInfo,
   getObservedLimits,
   _resetForTest,
 };

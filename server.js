@@ -20,7 +20,7 @@ const {
   startMarketDataPolling,
   getMarketSnapshot,
 } = require('./server/marketDataService');
-const { updateSettings, AI_PRESETS, MARKET_PROVIDER_OPTIONS } = require('./server/settingsService');
+const { updateSettings, AI_PRESETS, MARKET_PROVIDER_OPTIONS, getDashboardSettings } = require('./server/settingsService');
 const {
   getWatchlistState,
   createGroup,
@@ -34,6 +34,8 @@ const {
 const PORT = Number(process.env.PORT) || 50000;
 const SESSION = require('./server/session');
 const tossPortfolio = require('./server/tossPortfolio');
+const tossClient = require('./server/tossClient');
+const dashboardService = require('./server/dashboardService');
 
 // 🔴 2026-09-21: 종전에는 토큰이 없으면 `requireAccessToken` 이 그냥 next() 했다(fail-open).
 //    설정 실수 한 번이 곧 전면 개방이었다. 이제 **없으면 무작위로 만들어 잠근다** —
@@ -138,6 +140,58 @@ app.get('/api/portfolio', async (req, res) => {
       error: error.message || '보유 현황을 불러오지 못했습니다.',
       kind: error.kind || 'unknown',
     });
+  }
+});
+
+// ── 대시보드 (한 화면에 필요한 것을 한 번에) ──────────────────
+app.get('/api/dashboard', async (req, res) => {
+  if (!tossPortfolio.isEnabled()) {
+    return res.status(503).json({ error: '토스 연동이 설정되지 않았습니다.', configured: false });
+  }
+  try {
+    const mkt = getMarketSnapshot();
+    const rate = Number(mkt?.fx?.USDKRW?.rate) || 0;
+    const watch = getWatchlistState();
+    const watchSymbols = (watch?.groups || []).flatMap((g) => (g.tickers || []).map((t) => t.symbol));
+    const data = await dashboardService.build({
+      watchSymbols,
+      fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || null } : null,
+      momentumPct: Number(req.query.momentum) || getDashboardSettings().momentumPct,
+    });
+    // ⚠️ 조각이 하나라도 실패하면 **200 이지만 그 사실을 몸통에 담아** 보낸다.
+    //    실패를 502 로 바꾸면 나머지 멀쩡한 조각까지 화면에서 사라진다.
+    return res.json({ ...data, market: mkt, watchlist: watch });
+  } catch (error) {
+    logError('dashboard.failed', error, { requestId: req.requestId, kind: error.kind });
+    return res.status(502).json({ error: error.message || '대시보드를 만들지 못했습니다.', kind: error.kind || 'unknown' });
+  }
+});
+
+// 개별 조회 — 화면에서 종목을 고를 때만 부른다(한도를 아낀다)
+app.get('/api/toss/candles', async (req, res) => {
+  try {
+    res.json(await tossClient.getCandles(String(req.query.symbol || ''), {
+      interval: req.query.interval === '1m' ? '1m' : '1d',
+      count: Number(req.query.count) || 120,
+    }));
+  } catch (e) {
+    res.status(502).json({ error: e.message, kind: e.kind || 'unknown' });
+  }
+});
+
+app.get('/api/toss/orderbook', async (req, res) => {
+  try {
+    res.json(await tossClient.getOrderbook(String(req.query.symbol || '')));
+  } catch (e) {
+    res.status(502).json({ error: e.message, kind: e.kind || 'unknown' });
+  }
+});
+
+app.get('/api/toss/investor-trading', async (req, res) => {
+  try {
+    res.json({ records: await tossClient.getInvestorTrading(String(req.query.symbol || '')) });
+  } catch (e) {
+    res.status(502).json({ error: e.message, kind: e.kind || 'unknown' });
   }
 });
 
