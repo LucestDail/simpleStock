@@ -232,24 +232,6 @@ function actTime(at) {
   } catch { return at; }
 }
 
-const tgState = ref('');
-async function sendReportToTelegram() {
-  if (!report.value) return;
-  tgState.value = '보내는 중…';
-  try {
-    const res = await apiFetch('/api/analyst/telegram', {
-      method: 'POST',
-      body: JSON.stringify({ report: report.value }),
-    });
-    const b = await res.json().catch(() => ({}));
-    // 🔴 dry-run 을 "보냈다" 로 만들지 않는다 — 안 갔으면 안 갔다고 적는다
-    if (b.sent) tgState.value = '보냈습니다';
-    else if (b.dryRun) tgState.value = `보내지 않음 (${b.why || 'dry-run'})`;
-    else tgState.value = `실패: ${b.error || '알 수 없음'}`;
-  } catch (e) {
-    tgState.value = `실패: ${e.message}`;
-  }
-}
 const analystError = ref('');
 /**
  * my-computer MCP 웹검색 연계 상태.
@@ -451,7 +433,6 @@ async function loadMcpStatus() {
 async function runAnalyst() {
   analystLoading.value = true;
   analystError.value = '';
-  tgState.value = '';
   startStages();
   try {
     const res = await apiFetch('/api/analyst/run', { method: 'POST' });
@@ -1019,10 +1000,6 @@ onUnmounted(() => {
               <template v-if="report.web.ok">웹 검색 {{ report.web.hits }}건 반영 · {{ report.web.tool }}</template>
               <template v-else>웹 검색 미반영 — {{ report.web.error }}</template>
             </p>
-            <div class="analyst__acts">
-              <button class="iconbtn" aria-label="텔레그램 발송" title="텔레그램 발송" @click="sendReportToTelegram">✈️</button>
-              <span v-if="tgState" class="analyst__tg">{{ tgState }}</span>
-            </div>
             <p class="analyst__view">{{ report.marketView }}</p>
             <p class="analyst__mom">{{ report.momentumRead }}</p>
 
@@ -1818,7 +1795,13 @@ onUnmounted(() => {
 .wrow__chg { font-size: var(--text-3xs, 9px); padding: 1px 4px; border-radius: var(--rounded-xs); font-weight: 700; }
 .wrow__rm { border: 0; background: none; color: var(--color-faint); cursor: pointer; font-size: 12px; padding: 0; opacity: 0; }
 .wrow:hover .wrow__rm { opacity: 1; }
-.wcard__add { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 4px; }
+/*
+  🔴 사용자: *"input 을 카드 **최하단**에 두라고 이렇게 중간에 두지 말고."*
+  ⚠️ `.wcard__list { flex: 1 }` 만으로는 부족했다 — 목록이 짧으면 flex 가 남는 공간을
+     나눠 갖지 않고 **내용 높이로 멈춘다.** `margin-top: auto` 가 확실하다.
+*/
+.wcard__add {
+  margin-top: auto; display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 4px; }
 .input--xs { height: 26px; font-size: var(--text-xs); padding: 0 6px; }
 .btn--xs { height: 26px; padding: 0; font-size: var(--text-sm); }
 
@@ -1993,8 +1976,6 @@ onUnmounted(() => {
 }
 @keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .analyst__dot { animation: none; } }
-.analyst__acts { display: flex; align-items: center; gap: var(--space-xs); }
-.analyst__tg { font-size: var(--text-2xs); color: var(--color-faint); }
 
 /* ── 아이콘 버튼 · 페이저 · 타임라인 · 마크다운 ──────── */
 /* 🔴 사용자: 조회·갱신·초기화·새로고침을 **아이콘으로** · 설정 버튼은 **크게** */
@@ -2023,9 +2004,16 @@ onUnmounted(() => {
 .tl__text { color: var(--color-body); overflow-wrap: anywhere; }
 
 /* 마크다운 — 채팅 폭이 좁으므로 여백을 줄이고 표는 **가로 스크롤**시킨다 */
-.md :where(p, ul, ol, pre, blockquote, table) { margin: 0 0 6px; }
-.md :where(h1, h2, h3, h4) { margin: 8px 0 4px; font-size: var(--text-sm); font-weight: 700; color: var(--color-ink); }
-.md ul, .md ol { padding-left: 18px; }
+/* 🔴 사용자: *"마크다운 파서 줄바꿈 간격이 너무커 좀 줄여."* — 채팅 폭이 좁아 여백이 크게 느껴진다 */
+.md { line-height: 1.45; }
+.md :where(p, ul, ol, pre, blockquote, table) { margin: 0 0 3px; }
+.md :where(h1, h2, h3, h4) { margin: 5px 0 2px; font-size: var(--text-sm); font-weight: 700; color: var(--color-ink); }
+.md ul, .md ol { padding-left: 15px; }
+.md li { margin: 0; }
+.md li + li { margin-top: 1px; }
+/* ⚠️ `marked` 의 `breaks: true` 가 줄바꿈마다 <br> 를 넣는다 — 연속 <br> 은 간격을 두 배로 만든다 */
+.md br + br { display: none; }
+.md > :last-child { margin-bottom: 0; }
 .md code { background: var(--color-surface-sunken); padding: 1px 4px; border-radius: 3px; font-size: 0.92em; }
 .md pre { background: var(--color-surface-sunken); padding: 8px; border-radius: var(--rounded-sm); overflow-x: auto; }
 .md pre code { background: none; padding: 0; }

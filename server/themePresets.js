@@ -1,7 +1,7 @@
 /**
  * 대표 관심 테마 프리셋 (2026-09-21)
  *
- * 사용자: *"관심테마도 추가로 한 8가지 넣어서 10가지 테마로 5가지씩 추가로 대표종목들로 넣어줘."*
+ * 사용자: *"각 테마에 대표주 **10개씩** 넣어두도록 해."* (앞판은 5개였다)
  *
  * ## 🔴 종목 선정 기준 — **내가 고른 것이고 추천이 아니다**
  *
@@ -22,9 +22,14 @@ const THEME_PRESETS = [
     tickers: [
       { symbol: '005930', name: '삼성전자', market: 'KR' },
       { symbol: '000660', name: 'SK하이닉스', market: 'KR' },
+      { symbol: '042700', name: '한미반도체', market: 'KR' },
+      { symbol: '403870', name: 'HPSP', market: 'KR' },
       { symbol: 'NVDA', name: 'NVIDIA', market: 'US' },
       { symbol: 'TSM', name: 'TSMC', market: 'US' },
       { symbol: 'AMD', name: 'AMD', market: 'US' },
+      { symbol: 'AVGO', name: 'Broadcom', market: 'US' },
+      { symbol: 'ASML', name: 'ASML', market: 'US' },
+      { symbol: 'MU', name: 'Micron', market: 'US' },
     ],
   },
   {
@@ -34,7 +39,12 @@ const THEME_PRESETS = [
       { symbol: 'GOOGL', name: 'Alphabet', market: 'US' },
       { symbol: 'META', name: 'Meta', market: 'US' },
       { symbol: 'AMZN', name: 'Amazon', market: 'US' },
+      { symbol: 'AAPL', name: 'Apple', market: 'US' },
       { symbol: 'PLTR', name: 'Palantir', market: 'US' },
+      { symbol: 'ORCL', name: 'Oracle', market: 'US' },
+      { symbol: 'CRM', name: 'Salesforce', market: 'US' },
+      { symbol: 'NOW', name: 'ServiceNow', market: 'US' },
+      { symbol: '035420', name: 'NAVER', market: 'KR' },
     ],
   },
   {
@@ -42,9 +52,14 @@ const THEME_PRESETS = [
     tickers: [
       { symbol: '373220', name: 'LG에너지솔루션', market: 'KR' },
       { symbol: '006400', name: '삼성SDI', market: 'KR' },
-      { symbol: '247540', name: '에코프로비엠', market: 'KR' },
       { symbol: '096770', name: 'SK이노베이션', market: 'KR' },
+      { symbol: '247540', name: '에코프로비엠', market: 'KR' },
+      { symbol: '086520', name: '에코프로', market: 'KR' },
+      { symbol: '066970', name: '엘앤에프', market: 'KR' },
+      { symbol: '003670', name: '포스코퓨처엠', market: 'KR' },
       { symbol: 'TSLA', name: 'Tesla', market: 'US' },
+      { symbol: 'ALB', name: 'Albemarle', market: 'US' },
+      { symbol: 'LIT', name: 'Global X Lithium ETF', market: 'US' },
     ],
   },
   {
@@ -53,8 +68,13 @@ const THEME_PRESETS = [
       { symbol: '012450', name: '한화에어로스페이스', market: 'KR' },
       { symbol: '047810', name: '한국항공우주', market: 'KR' },
       { symbol: '064350', name: '현대로템', market: 'KR' },
+      { symbol: '079550', name: 'LIG넥스원', market: 'KR' },
+      { symbol: '272210', name: '한화시스템', market: 'KR' },
       { symbol: 'LMT', name: 'Lockheed Martin', market: 'US' },
       { symbol: 'RTX', name: 'RTX', market: 'US' },
+      { symbol: 'NOC', name: 'Northrop Grumman', market: 'US' },
+      { symbol: 'GD', name: 'General Dynamics', market: 'US' },
+      { symbol: 'RKLB', name: 'Rocket Lab', market: 'US' },
     ],
   },
   {
@@ -62,9 +82,14 @@ const THEME_PRESETS = [
     tickers: [
       { symbol: '207940', name: '삼성바이오로직스', market: 'KR' },
       { symbol: '068270', name: '셀트리온', market: 'KR' },
+      { symbol: '128940', name: '한미약품', market: 'KR' },
+      { symbol: '326030', name: 'SK바이오팜', market: 'KR' },
       { symbol: 'LLY', name: 'Eli Lilly', market: 'US' },
       { symbol: 'NVO', name: 'Novo Nordisk', market: 'US' },
       { symbol: 'UNH', name: 'UnitedHealth', market: 'US' },
+      { symbol: 'JNJ', name: 'Johnson & Johnson', market: 'US' },
+      { symbol: 'MRK', name: 'Merck', market: 'US' },
+      { symbol: 'VRTX', name: 'Vertex', market: 'US' },
     ],
   },
   {
@@ -73,18 +98,28 @@ const THEME_PRESETS = [
       { symbol: '105560', name: 'KB금융', market: 'KR' },
       { symbol: '055550', name: '신한지주', market: 'KR' },
       { symbol: '086790', name: '하나금융지주', market: 'KR' },
+      { symbol: '316140', name: '우리금융지주', market: 'KR' },
+      { symbol: '032830', name: '삼성생명', market: 'KR' },
       { symbol: 'JPM', name: 'JPMorgan', market: 'US' },
+      { symbol: 'BAC', name: 'Bank of America', market: 'US' },
+      { symbol: 'GS', name: 'Goldman Sachs', market: 'US' },
       { symbol: 'BRK-B', name: 'Berkshire Hathaway B', market: 'US' },
+      { symbol: 'V', name: 'Visa', market: 'US' },
     ],
   },
   {
     name: '에너지·원자재',
     tickers: [
+      { symbol: '010950', name: 'S-Oil', market: 'KR' },
+      { symbol: '096770', name: 'SK이노베이션', market: 'KR' },
+      { symbol: '006260', name: 'LS', market: 'KR' },
+      { symbol: '005490', name: 'POSCO홀딩스', market: 'KR' },
       { symbol: 'XOM', name: 'Exxon Mobil', market: 'US' },
       { symbol: 'CVX', name: 'Chevron', market: 'US' },
+      { symbol: 'COP', name: 'ConocoPhillips', market: 'US' },
       { symbol: 'FCX', name: 'Freeport-McMoRan', market: 'US' },
-      { symbol: '010950', name: 'S-Oil', market: 'KR' },
-      { symbol: '006260', name: 'LS', market: 'KR' },
+      { symbol: 'NEM', name: 'Newmont', market: 'US' },
+      { symbol: 'SLB', name: 'SLB', market: 'US' },
     ],
   },
   {
@@ -93,6 +128,11 @@ const THEME_PRESETS = [
       { symbol: 'SPY', name: 'S&P 500 ETF', market: 'US' },
       { symbol: 'QQQ', name: 'Nasdaq 100 ETF', market: 'US' },
       { symbol: 'IWM', name: 'Russell 2000 ETF', market: 'US' },
+      { symbol: 'DIA', name: 'Dow Jones ETF', market: 'US' },
+      { symbol: 'VTI', name: 'Total Market ETF', market: 'US' },
+      { symbol: 'SOXX', name: 'Semiconductor ETF', market: 'US' },
+      { symbol: 'TLT', name: '20Y+ Treasury ETF', market: 'US' },
+      { symbol: 'GLD', name: 'Gold ETF', market: 'US' },
       { symbol: '069500', name: 'KODEX 200', market: 'KR' },
       { symbol: '229200', name: 'KODEX 코스닥150', market: 'KR' },
     ],

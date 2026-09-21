@@ -4,6 +4,8 @@ const orderService = require('./orderService');
 const toss = require('./tossClient');
 const mcp = require('./mcpClient');
 const activity = require('./activityLog');
+const telegram = require('./telegramService');
+const crypto = require('node:crypto');
 const { logInfo, logWarn } = require('./logger');
 
 /**
@@ -32,6 +34,9 @@ const { logInfo, logWarn } = require('./logger');
  * `orderService` 가 거부한다 — **승인 화면이 주문 화면이 되면 안 된다.**
  * 그리고 실행은 여전히 **사람 승인 + no-op** 이다(샌드박스가 없다).
  */
+
+/** 직전에 보낸 분석의 지문 — 같은 내용을 두 번 보내지 않는다 */
+let lastSentDigest = null;
 
 const REPORT_SCHEMA = {
   type: 'object',
@@ -92,6 +97,121 @@ const SYSTEM_PROMPT = [
   '- price 는 지정가입니다. 현재가에서 **터무니없이 먼 값을 쓰지 않습니다**.',
   '- 🔴 이 제안은 **사람이 승인해야만** 실행됩니다. 당신은 실행하지 않습니다.',
 ].join('\n');
+
+/**
+ * 🔴 **모델이 스키마를 무시하고 모양을 바꾼다 — 세 번째 층이다** (2026-09-21 실측).
+ *
+ * 라이브에서 받은 것:
+ * ```
+ * {"dataGaps":[…], "stance":"HOLD", "stanceConfidence":…}     ← **평평하다**
+ * ```
+ * `marketView`·`positions`·`proposals` 가 통째로 없고 종목 판단이 **최상위**에 올라왔다.
+ * 그 결과 화면·텔레그램·타임라인이 전부 **"(시황 요약 없음)"** 이 됐다 —
+ * 모델은 답했는데 **내 파서가 버린 것**이다. 도구 판단기에서 겪은 그 비대칭이 여기서 재발했다.
+ *
+ * ⇒ 도구 때와 같은 처방: **키가 아니라 모양으로 읽는다.**
+ *   · 종목 판단 = `stance` 값이 BUY/SELL/HOLD 인 객체 (배열이든 최상위든)
+ *   · 제안     = side + quantity + price 가 **다 있는** 객체
+ *   · 시황     = 알려진 이름 → 없으면 **가장 긴 산문 문자열**
+ * ⚠️ 제안은 **네 칸이 다 있을 때만** 줍는다 — 반쪽을 주우면 `orderService` 가 거부하고
+ *    사용자는 "왜 제안이 사라졌지" 를 겪는다.
+ */
+const STANCES = new Set(['BUY', 'SELL', 'HOLD']);
+
+function pickString(obj, names) {
+  for (const n of names) {
+    const v = obj?.[n];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
+/** 값들 중 **가장 긴 산문** — 이름을 모를 때의 마지막 수단 */
+function longestProse(obj, exclude = new Set()) {
+  let best = '';
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (exclude.has(k)) continue;
+    if (typeof v === 'string' && v.trim().length > best.length && v.trim().length > 20) best = v.trim();
+  }
+  return best;
+}
+
+function asPosition(o) {
+  if (!o || typeof o !== 'object') return null;
+  /**
+   * ⚠️ **주문을 판단으로 오인하면 안 된다.** `{side:'SELL', quantity, price}` 는 `side` 값이
+   *    STANCES 에 걸려 판단으로 읽혔다(자체 점검에서 잡았다). 수량·가격이 있으면 **제안**이다.
+   */
+  const looksLikeOrder = ['quantity', 'qty', 'shares'].some((k) => Number(o[k]) > 0)
+    && ['price', 'limitPrice'].some((k) => Number(o[k]) > 0);
+  if (looksLikeOrder) return null;
+  let stance = null;
+  let symbol = null;
+  for (const v of Object.values(o)) {
+    if (typeof v !== 'string') continue;
+    const up = v.trim().toUpperCase();
+    if (!stance && STANCES.has(up)) stance = up;
+  }
+  symbol = pickString(o, ['symbol', 'ticker', 'code', 'stock']);
+  if (!stance) return null;
+  return {
+    symbol: symbol || '(종목 미상)',
+    stance,
+    confidence: (pickString(o, ['confidence', 'stanceConfidence', 'conviction']) || 'LOW').toUpperCase(),
+    rationale: pickString(o, ['rationale', 'reason', 'why', 'comment']) || longestProse(o, new Set(['symbol'])),
+    evidence: Array.isArray(o.evidence) ? o.evidence : [],
+    risk: pickString(o, ['risk', 'downside']) || '',
+  };
+}
+
+function asProposal(o) {
+  if (!o || typeof o !== 'object') return null;
+  const side = (pickString(o, ['side', 'action', 'direction']) || '').toUpperCase();
+  if (side !== 'BUY' && side !== 'SELL') return null;
+  const num = (names) => {
+    for (const n of names) {
+      const v = Number(o?.[n]);
+      if (Number.isFinite(v) && v > 0) return v;
+    }
+    return null;
+  };
+  const quantity = num(['quantity', 'qty', 'shares', 'amount']);
+  const price = num(['price', 'limitPrice', 'targetPrice']);
+  // 🔴 네 칸이 다 있어야 제안이다 — 반쪽은 버린다(거부될 것을 만들지 않는다)
+  const symbol = pickString(o, ['symbol', 'ticker', 'code']);
+  if (!symbol || !quantity || !price) return null;
+  return { symbol, side, quantity, price, reason: pickString(o, ['reason', 'rationale', 'why']) };
+}
+
+/** 어떤 모양으로 오든 리포트로 만든다 */
+function shapeReport(out) {
+  const o = out && typeof out === 'object' ? out : {};
+  const arrays = Object.values(o).filter(Array.isArray);
+
+  const positions = [];
+  for (const arr of arrays) for (const it of arr) { const p = asPosition(it); if (p) positions.push(p); }
+  // ⚠️ **평평하게** 온 경우 — 최상위 객체 자체가 한 건의 판단이다(실측된 모양)
+  if (!positions.length) { const p = asPosition(o); if (p) positions.push(p); }
+
+  const proposals = [];
+  for (const arr of arrays) for (const it of arr) { const q = asProposal(it); if (q) proposals.push(q); }
+
+  const gaps = arrays.find((a) => a.length && a.every((x) => typeof x === 'string')) || [];
+
+  const view = pickString(o, ['marketView', 'market_view', 'marketSummary', 'summary', 'overview', 'view'])
+    || longestProse(o, new Set(['momentumRead', 'momentum']));
+  const mom = pickString(o, ['momentumRead', 'momentum_read', 'momentum', 'momentumSummary']);
+
+  return {
+    marketView: view,
+    momentumRead: mom,
+    dataGaps: gaps.slice(0, 12),
+    positions,
+    proposals,
+    // 🔴 아무것도 못 읽었으면 **그 사실을 남긴다** — 조용히 빈 리포트를 내지 않는다
+    _unreadable: !view && !positions.length && !gaps.length ? JSON.stringify(o).slice(0, 300) : null,
+  };
+}
 
 function fmt(n, d = 2) {
   return n == null ? '-' : Number(n).toFixed(d);
@@ -219,13 +339,19 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true } = {})
   if (userInstruction) lines.push('', `## 사용자 추가 지시`, userInstruction);
 
   const started = Date.now();
-  const report = await generateStructuredOutput({
+  const raw = await generateStructuredOutput({
     systemPrompt: SYSTEM_PROMPT,
     userPrompt: lines.join('\n'),
     schema: REPORT_SCHEMA,
     logLabel: 'trade_analyst',
     fallback: { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] },
   });
+
+  // 🔴 키가 아니라 **모양**으로 읽는다(위 shapeReport 주석 참조)
+  const report = shapeReport(raw);
+  if (report._unreadable) {
+    logWarn('analyst.unreadable_shape', { raw: report._unreadable });
+  }
 
   // 제안을 orderService 로 넘긴다 — **빈칸이 있으면 거기서 거부된다**
   const created = [];
@@ -262,8 +388,56 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true } = {})
     durationMs: Date.now() - started,
   });
 
+  /**
+   * 🔴 사용자: *"텔레그램 발송을 별도로 버튼으로 하지말고 … 애널리스트가 판단하면 바로 쏴."*
+   *
+   * ⚠️ 그런데 **화면에 들어올 때마다 분석이 자동으로 돈다**(사용자 요청). 그대로 쏘면
+   *    새로고침 세 번에 **같은 글이 세 번** 간다 — 그건 사용자가 원한 "바로" 가 아니다.
+   * ⇒ **내용이 같으면 안 보낸다.** 판단이 바뀌면 그때 바로 나간다.
+   *    ★ "보내지 않는다" 가 아니라 "같은 말을 두 번 하지 않는다" 이다.
+   * ⚠️ 발송 실패가 분석을 망치지 않는다 — 곁가지다.
+   */
+  const digest = crypto
+    .createHash('sha1')
+    .update(JSON.stringify({
+      v: report.marketView,
+      m: report.momentumRead,
+      p: (report.positions || []).map((x) => `${x.symbol}:${x.stance}`),
+      c: created.map((x) => `${x.symbol}:${x.side}:${x.quantity}`),
+    }))
+    .digest('hex');
+
+  if (digest !== lastSentDigest) {
+    lastSentDigest = digest;
+    const lines = ['🧭 매매 분석'];
+    if (report.marketView) lines.push('', report.marketView);
+    if (report.momentumRead) lines.push('', `[모멘텀] ${report.momentumRead}`);
+    for (const ps of report.positions || []) {
+      lines.push('', `· ${ps.symbol} ${ps.stance}/${ps.confidence} — ${ps.rationale}`);
+    }
+    // 제안은 `orderService` 가 **승인 버튼과 함께** 따로 쏘므로 여기서는 건수만 적는다
+    if (created.length) lines.push('', `🟡 매매 제안 ${created.length}건 — 승인 버튼이 곧 옵니다`);
+    if (gaps.length) lines.push('', `못 본 것: ${gaps.join(' · ')}`);
+    telegram
+      .send(lines.join('\n'), { reason: 'analysis' })
+      .then((r) => logInfo('analyst.telegram', { sent: Boolean(r.sent), why: r.why || null }))
+      .catch((e) => logWarn('analyst.telegram_failed', { message: e.message }));
+  } else {
+    // 🔴 안 보낸 이유를 남긴다 — "왜 안 오지" 를 겪지 않게
+    logInfo('analyst.telegram_skipped', { why: 'same_as_last' });
+  }
+
   // 🔴 분석 기록을 **시간축에 남긴다**(사용자: "모든 분석 기록들이 시간순으로")
-  activity.record('analysis', report.marketView || '(시황 요약 없음)', {
+  /**
+   * ⚠️ 타임라인 제목이 **"(시황 요약 없음)"** 이면 사용자는 *"분석이 안 됐다"* 로 읽는다.
+   *    시황 문장이 없어도 **종목 판단은 있을 수 있다** — 그걸 제목으로 쓴다.
+   */
+  const title = report.marketView
+    || (report.positions.length
+      ? report.positions.map((p) => `${p.symbol} ${p.stance}`).join(' · ')
+      : report._unreadable ? '⚠️ 모델 응답을 읽지 못했습니다' : '(판단 없음)');
+
+  activity.record('analysis', title, {
     positions: report.positions?.length || 0,
     proposals: created.length,
     rejected: rejected.length,
@@ -286,4 +460,4 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true } = {})
   };
 }
 
-module.exports = { analyze, summarizeCandles, REPORT_SCHEMA, SYSTEM_PROMPT };
+module.exports = { analyze, summarizeCandles, shapeReport, REPORT_SCHEMA, SYSTEM_PROMPT };
