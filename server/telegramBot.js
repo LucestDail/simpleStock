@@ -228,11 +228,18 @@ async function handleCallback(cb) {
      *    이제 실제로 보낼 수 있으니, **보내기 전에 한 번 더 묻는다.**
      */
     const amount = (Number(p.quantity) * Number(p.price)).toLocaleString('ko-KR');
+    /**
+     * ⚠️ **나이를 적는다** — 제안은 산출 시점의 시세로 낸 지정가다.
+     *    TTL 이 10분이라 최대 그만큼 낡을 수 있고, **낡았다는 사실 자체가 안 보이면**
+     *    사람이 "방금 나온 판단" 으로 읽는다.
+     */
+    const ageSec = Math.max(0, Math.round((Date.now() - new Date(p.createdAt).getTime()) / 1000));
+    const age = ageSec < 60 ? `${ageSec}초 전 산출` : `${Math.floor(ageSec / 60)}분 ${ageSec % 60}초 전 산출`;
     await answer(cb.id, '승인했습니다');
     await replaceButtons(cb.message.chat.id, cb.message.message_id,
       live
         ? `✅ 승인됨 — ${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주 @ ${p.price}\n`
-          + `평가금액 약 ${amount}\n\n🔴 **아직 안 보냈습니다.** 아래 «전송» 을 눌러야 실제 주문이 나갑니다.`
+          + `평가금액 약 ${amount} · ${age}\n\n🔴 **아직 안 보냈습니다.** 아래 «전송» 을 눌러야 실제 주문이 나갑니다.`
         : `✅ 승인됨 — ${p.symbol}\n⚠️ 실거래가 꺼져 있어 «전송» 을 눌러도 실제 주문은 나가지 않습니다.`,
       [[
         { text: live ? '🔴 전송(실주문)' : '전송(모의)', callback_data: `go:${p.id}` },

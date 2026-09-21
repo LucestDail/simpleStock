@@ -43,7 +43,29 @@ const ORDERS_ENABLED = String(process.env.ORDERS_ENABLED || '').trim().toLowerCa
 /** 실행을 실제 API 로 보낼지. ORDERS_ENABLED 와 **둘 다** 켜져야 한다(두 겹) */
 const ORDERS_LIVE = String(process.env.ORDERS_LIVE || '').trim().toLowerCase() === 'true';
 
-const PROPOSAL_TTL_MS = Math.max(30_000, Number(process.env.ORDER_PROPOSAL_TTL_MS) || 5 * 60_000);
+/**
+ * 제안 유효기간. **10분**(2026-09-22 사용자 지시 — 5분은 폰을 늦게 보면 놓친다).
+ *
+ * 🔴 **왜 하필 10분에서 멈추는가** — 토스 멱등키(`clientOrderId`)의 유효기간이 **10분**이다.
+ *    이중발주를 막는 층이 둘인데, 둘째 층이 여기에 걸려 있다:
+ *
+ *      ① 상태기계 — `execute()` 는 `APPROVED` 에서만 돈다. 한 번 보내면 `SENT`/`UNKNOWN` 이 돼
+ *         다시 못 돈다. `APPROVED` 로 남는 유일한 실패는 `not-sent`(연결조차 못 맺음)이고,
+ *         그건 **주문이 존재하지 않는다**는 뜻이라 재시도가 중복이 될 수 없다.
+ *      ② 멱등키 — ①이 어딘가에서 뚫려도 같은 키로 들어간 둘째 주문을 토스가 막는다.
+ *
+ *    두 번의 전송은 반드시 `[createdAt, createdAt+TTL]` 안에서 일어나므로 **간격이 TTL 을 못 넘는다.**
+ *    ⇒ `TTL ≤ 멱등창` 이면 ②가 항상 유효하다. **TTL 을 10분 위로 올리면 ②가 사라지고**
+ *      ① 하나만 남는다. 그래도 즉시 위험해지지는 않지만 **층이 하나 없어진 것**이다.
+ *    ⇒ `orderTtlRule.test.js` 가 이 관계를 강제한다(올리면 빨간불로 알려 준다).
+ *
+ * ⚠️ 중복과 별개로 **옛 시세** 위험이 남는다 — 10분 전 값으로 낸 지정가다.
+ *    그래서 폰 전송 확인에 **제안 나이**를 적는다.
+ */
+const PROPOSAL_TTL_MS = Math.max(30_000, Number(process.env.ORDER_PROPOSAL_TTL_MS) || 10 * 60_000);
+
+/** 토스 `clientOrderId` 멱등키 유효기간(명세 v1.2.17). 위 관계를 테스트가 본다. */
+const IDEMPOTENCY_WINDOW_MS = 10 * 60_000;
 const SIDES = new Set(['BUY', 'SELL']);
 const TYPES = new Set(['LIMIT', 'MARKET']);
 
@@ -489,7 +511,8 @@ async function execute(id) {
        *    연결조차 못 맺었으면 주문이 들어갔을 리 없다 ⇒ **승인을 태우지 않는다.**
        *    사람이 «전송» 을 다시 누르면 된다.
        * ⚠️ 그래도 안전망은 그대로다 — 멱등키가 **제안 id** 라서, 만에 하나 실제로는
-       *    나갔더라도 같은 키로 두 번째가 들어가면 토스가 막는다(키 유효 10분 > 제안 TTL 5분).
+       *    나갔더라도 두 번째가 막힌다 — **TTL 이 멱등키 유효기간(10분)보다 길어진 뒤로는
+       *    근거가 멱등키가 아니라 상태기계다**(보낸 제안은 APPROVED 가 아니라 재실행 자체가 안 된다).
        */
       p.result = { mode: 'not_sent', error: e.message, kind: e.kind, at: new Date().toISOString() };
       persist();
@@ -546,6 +569,7 @@ function status() {
     // 둘 다 켜져야 실제로 나간다. 하나만 켜진 상태를 화면이 구분할 수 있어야 한다
     effective: ORDERS_ENABLED && ORDERS_LIVE ? 'live' : 'dry-run',
     proposalTtlMs: PROPOSAL_TTL_MS,
+    idempotencyWindowMs: IDEMPOTENCY_WINDOW_MS,
     pending: [...proposals.values()].filter((p) => p.status === 'PENDING').length,
   };
 }

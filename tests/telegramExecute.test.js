@@ -31,7 +31,7 @@ function fresh(stub = {}) {
   orderStub = {
     ...real,
     status: () => ({ effective: stub.live === false ? 'dry-run' : 'live' }),
-    approve: (id) => ({ ok: true, proposal: { id, symbol: 'RAM', side: 'SELL', quantity: 1, price: 20 } }),
+    approve: (id) => ({ ok: true, proposal: { id, symbol: 'RAM', side: 'SELL', quantity: 1, price: 20, createdAt: new Date(Date.now() - 125_000).toISOString() } }),
     reject: (id) => ({ ok: true, proposal: { id, symbol: 'RAM' } }),
     execute: async (id) => { calls.push(id); return stub.execute ? stub.execute(id) : { ok: true, orderId: 'ord-1', proposal: { id, symbol: 'RAM', side: 'SELL', quantity: 1, price: 20 } }; },
   };
@@ -152,4 +152,33 @@ test('🔴 반대로 **모름**이면 버튼을 뗀다 (다시 누르면 두 번
   const stripped = sent.some((x) => Array.isArray(x.body?.reply_markup?.inline_keyboard)
     && x.body.reply_markup.inline_keyboard.length === 0);
   assert.equal(stripped, true, '🔴 모름인데 버튼이 남아 있다 — 다시 누르면 두 번 산다');
+});
+
+/**
+ * ⚠️ 제안이 얼마나 낡았는지 보여야 한다 — 안 보이면 "방금 나온 판단" 으로 읽는다.
+ *
+ * 🔴 **첫 판의 자가 쓰레기를 통과시켰다** — 스텁에 `createdAt` 이 없어 실제 출력이
+ *    `NaN분 NaN초 전 산출` 이었는데 `/전 산출/` 에 걸려 초록불이 났다.
+ *    ⇒ **모양이 아니라 값**을 본다.
+ */
+test('⚠️ 승인 확인에 **제안 나이**가 적힌다 (실제 값으로)', async () => {
+  const bot = fresh();
+  await bot.handleCallback(cb('ok:p1'));
+  const t = texts();
+  assert.ok(!/NaN/.test(t), `🔴 나이가 NaN 이다 — 자가 모양만 보고 통과시켰다: ${t}`);
+  assert.match(t, /2분 5초 전 산출/, `🔴 나이가 틀렸다: ${t}`);
+});
+
+test('1분 미만은 초로 적는다', async () => {
+  for (const k of Object.keys(require.cache)) if (/telegramBot|orderService/.test(k)) delete require.cache[k];
+  const op = require.resolve('../server/orderService');
+  require.cache[op] = { id: op, filename: op, loaded: true, exports: {
+    status: () => ({ effective: 'live' }),
+    approve: (id) => ({ ok: true, proposal: { id, symbol: 'RAM', side: 'SELL', quantity: 1, price: 20, createdAt: new Date(Date.now() - 8_000).toISOString() } }),
+    reject: () => ({ ok: true, proposal: { symbol: 'RAM' } }),
+    execute: async () => ({ ok: true, orderId: 'x', proposal: { symbol: 'RAM', side: 'SELL', quantity: 1, price: 20 } }),
+  } };
+  const bot = require('../server/telegramBot');
+  await bot.handleCallback(cb('ok:p1'));
+  assert.match(texts(), /8초 전 산출/);
 });
