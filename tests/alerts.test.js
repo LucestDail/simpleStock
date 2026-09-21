@@ -234,6 +234,23 @@ test('켜져 있어도 dryRun 이면 안 보낸다', async () => {
   delete process.env.TELEGRAM_SEND_ENABLED;
 });
 
+/**
+ * 🔴 피어 지적: `found: 0` 만으로는 *"알릴 게 없다"* 와 *"이미 알려서 걸렀다"* 가 **안 갈린다.**
+ *    두 번째 틱은 중복 방지 때문에 0 이 되는데, 그게 정상인지 고장인지 화면이 모른다.
+ */
+test('두 번째 틱의 0 은 "걸렀다" 라고 말한다', async () => {
+  const a = freshAlerts({ ALERTS_ENABLED: 'true' });
+  const first = await a.tick();
+  assert.ok(first.found > 0, '첫 틱이 0이면 이 테스트가 아무것도 검사하지 못한다');
+
+  const second = await a.tick();
+  assert.equal(second.found, 0, '중복 방지가 안 먹었다');
+  // ★ 0 의 **이유**가 있어야 한다
+  assert.ok(second.suppressed > 0, '걸러진 건수를 안 세면 0 이 "없다" 로만 보인다');
+  assert.ok(second.suppressedWhy.some((w) => /이미 알림/.test(w)), '왜 걸렀는지 말하지 않았다');
+  delete process.env.ALERTS_ENABLED;
+});
+
 /** 🔴 못 하는 것을 **조용히 빼지 않는다** — 사용자가 "왜 어닝콜은 안 오지" 를 겪지 않게 */
 test('지원하지 않는 항목을 상태에 적어 둔다', () => {
   const a = freshAlerts();

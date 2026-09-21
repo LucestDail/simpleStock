@@ -121,7 +121,7 @@ function status() {
 // ── 규칙들 ───────────────────────────────────────────────────
 
 /** 🔔 시장 개장/폐장 — **상태가 바뀐 순간에만** */
-async function ruleSessions(st, now, out) {
+async function ruleSessions(st, now, out, sup) {
   for (const [key, label, s, e] of [['kr', 'KRX', 9, 16], ['us', '미국장', 22, 6]]) {
     const cur = resolveSession(now, key, s, e, APP_TIMEZONE).state;
     const mark = `session:${key}`;
@@ -129,21 +129,22 @@ async function ruleSessions(st, now, out) {
     const was = st[mark];
     st[mark] = cur;
     // 첫 실행에는 안 보낸다 — 기준선이 없어서 "바뀐 것" 이 아니다
-    if (!was) continue;
+    if (!was) { sup.push(`${label} 상태 기준선 설정(${cur})`); continue; }
     const icon = cur === 'open' ? '🔔' : '🔕';
     out.push({ text: `${icon} ${label} ${cur === 'open' ? '개장' : cur === 'pre' ? '장 전' : '폐장'}`, kind: 'session' });
   }
 }
 
 /** 📈 지수·원자재·코인 급변 — 하루 한 번씩 */
-async function ruleIndices(st, now, out) {
+async function ruleIndices(st, now, out, sup) {
   const t = await tape.getTape();
   const day = kstDay(now);
   for (const i of t.items || []) {
     if (i.changePct == null || Math.abs(i.changePct) < INDEX_PCT) continue;
     const dir = i.changePct >= 0 ? 'up' : 'down';
     const mark = `idx:${i.symbol}:${dir}:${day}`;
-    if (st[mark]) continue;
+    // 🔴 이미 알린 것을 **세어 둔다** — 안 세면 `found:0` 이 "없다" 인지 "걸렀다" 인지 모른다
+    if (st[mark]) { sup.push(`${i.label} (오늘 이미 알림)`); continue; }
     st[mark] = 1;
     out.push({
       text: `📈 ${i.label} ${i.changePct >= 0 ? '+' : ''}${i.changePct.toFixed(2)}% (${i.prefix || ''}${Number(i.price).toLocaleString('ko-KR')}${i.suffix || ''})`,
@@ -153,7 +154,7 @@ async function ruleIndices(st, now, out) {
 }
 
 /** 📊 보유 종목 급변 + ⚠️ 종목 경고 신규 */
-async function rulePortfolio(st, now, out) {
+async function rulePortfolio(st, now, out, sup) {
   let p;
   try {
     p = await tossPortfolio.getHoldings({});
@@ -167,6 +168,7 @@ async function rulePortfolio(st, now, out) {
     if (h.dailyRate != null && Math.abs(h.dailyRate) >= MOVE_PCT) {
       const dir = h.dailyRate >= 0 ? 'up' : 'down';
       const mark = `move:${h.symbol}:${dir}:${day}`;
+      if (st[mark]) sup.push(`${h.name} (오늘 이미 알림)`);
       if (!st[mark]) {
         st[mark] = 1;
         out.push({
@@ -228,11 +230,17 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
   const now = new Date();
   const st = readState();
   const out = [];
+  /**
+   * 🔴 **걸러진 것을 센다.** 피어 지적: `found: 0` 만 보면
+   *    *"알릴 게 없다"* 인지 *"이미 알려서 걸렀다"* 인지 **구분이 안 된다.**
+   *    오늘 내내 쓴 *"0 은 '없다' 가 아니라 '못 봤다' 일 수 있다"* 가 여기도 걸린다.
+   */
+  const suppressed = [];
   const failed = [];
 
   for (const [name, fn] of [['sessions', ruleSessions], ['indices', ruleIndices], ['portfolio', rulePortfolio]]) {
     try {
-      await fn(st, now, out);
+      await fn(st, now, out, suppressed);
     } catch (e) {
       failed.push(name);
       logWarn('alerts.rule_failed', { rule: name, message: e.message });
@@ -256,10 +264,13 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
   lastError = failed.length ? `규칙 실패: ${failed.join(',')}` : null;
   sentCount += sent;
   // ★ 몇 건을 **찾았고** 몇 건을 **보냈는지** 따로 남긴다 — 조용한 시간에 걸러진 것을 구분한다
-  logInfo('alerts.tick', { found: out.length, sent, willSend, quiet, failedRules: failed });
+  logInfo('alerts.tick', { found: out.length, suppressed: suppressed.length, sent, willSend, quiet, failedRules: failed });
   return {
     ran: true,
     found: out.length,
+    // ★ 왜 0 인지 말해 준다 — 걸러진 것과 없는 것은 다르다
+    suppressed: suppressed.length,
+    suppressedWhy: suppressed.slice(0, 10),
     sent,
     // 🔴 **보냈는지**와 **왜 안 보냈는지**를 함께 낸다 — 점검하는 사람이 착각하지 않게
     willSend,
