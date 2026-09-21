@@ -89,57 +89,15 @@ const ACTION_SCHEMA = {
   properties: {
     type: {
       type: 'string',
-      enum: ['upsertHolding', 'removeHolding', 'updateProfile', 'scheduleTask', 'cancelScheduledTask'],
+      // 🔴 2026-09-21: 이 액션들에는 **실행부가 없다**(제안만 만들고 아무것도 쓰지 않는다).
+      // upsertHolding·removeHolding·updateProfile 은 제거했다 — 실행부도 없고
+      // context.portfolio 도 v3 에서 로딩이 빠져 **항상 비어** 있어 제안 자체가 쓰레기였다.
+      // 남은 둘도 '제안' 이다. 승인·실행은 HITL 설계에서 따로 붙인다.
+      // 가드: tests/actionRegistry.test.js (모든 항목을 실행부 있음/제안전용 중 하나로 계정)
+      enum: ['scheduleTask', 'cancelScheduledTask'],
     },
     rationale: {
       type: 'string',
-    },
-    holding: {
-      type: 'object',
-      properties: {
-        id: { type: 'string' },
-        name: { type: 'string' },
-        category: {
-          type: 'string',
-          enum: ['deposit', 'installment', 'stock', 'fund', 'pension'],
-        },
-        amount: { type: 'number' },
-        mode: {
-          type: 'string',
-          enum: ['set', 'delta'],
-        },
-        details: {
-          type: 'object',
-          properties: {
-            account: { type: 'string' },
-            currency: { type: 'string' },
-            ticker: { type: 'string' },
-            market: { type: 'string' },
-            quantity: { type: 'number' },
-            averagePrice: { type: 'number' },
-            currentPrice: { type: 'number' },
-            summary: { type: 'string' },
-            orders: {
-              type: 'array',
-              items: { type: 'string' },
-            },
-          },
-        },
-      },
-    },
-    profileChanges: {
-      type: 'object',
-      properties: {
-        displayName: { type: 'string' },
-        investorType: { type: 'string' },
-        investmentGoal: { type: 'string' },
-        riskTolerance: { type: 'string' },
-        timeHorizon: { type: 'string' },
-        liquidityNeeds: { type: 'string' },
-        responseStyle: { type: 'string' },
-        focusAreas: { type: 'string' },
-        notes: { type: 'string' },
-      },
     },
     scheduleTask: {
       type: 'object',
@@ -1192,20 +1150,11 @@ async function buildSupervisorPlan(userInput, context) {
         '전문화된 agent 는 고정된 집합이 아니라 이번 질의에 맞게 동적으로 구성한다.',
         '외부 조사가 필요한 경우 research task 를 포함하고 searchQuery 를 한국어 또는 영어 혼합으로 더 검색 친화적으로 재작성한다.',
         'task 는 portfolio, memory, manager, research 타입만 사용한다.',
-        '사용자 요청이 자산 입력/수정/삭제, 설정 변경, 반복 작업 예약/취소에 해당하면 actions 배열에 실제 변경 계획을 넣는다.',
-        '자산 입력은 holding 정보, 설정 변경은 profileChanges, 반복 작업은 scheduleTask, 취소는 cancelTarget에 담는다.',
-        '⚠ 사용자 메시지에 금액(원/$)이 명시되어 자산 가격/평가액 갱신을 요청한 경우, upsertHolding.holding.amount 필드에 반드시 해당 숫자(정수, 원 단위)를 그대로 채운다. 절대 null·생략하지 말 것. 예: "5,516,165원으로 갱신" → amount: 5516165.',
-        '티커·종목코드·수량 등 세부 정보만 바꾸고 금액 변경이 전혀 없을 때만 amount 필드를 생략하고 details 에 변경 필드만 넣는다.',
-        '주식/ETF 매수·보유 등록: category=stock, details.quantity=보유 주수, details.averagePrice=평단가(원). amount 필드에 평단가를 넣지 말 것(평가액은 시스템이 시세×수량으로 계산).',
-        'holding.name 은 종목명만(예: 미래에셋 증권). "35주 샀고", "평단" 같은 구매 설명은 name에 넣지 말 것.',
-        'deposit 카테고리는 현금·예금·적금 등 현금성 자산만. 주식 매수/보유는 절대 deposit 가 아니다.',
-        '가격 관찰용 0주 종목은 category=stock, holding.details.ticker·quantity=0 를 반드시 채운다. deposit 카테고리에 넣지 않는다.',
-        '⚠⚠ 사용자가 "추가해줘/등록해줘/관제해줘"라고 명시적으로 요청한 종목이 context.portfolio.holdings 의 name 목록에 없으면, 반드시 actions 배열에 upsertHolding 을 포함한다. memory(threadSummary, longTermMemory)에 "이미 추가됨" 같은 기록이 있어도 portfolio.holdings 에 실제로 없으면 그 기록을 무시하고 upsertHolding 을 발행한다. portfolio.holdings 가 단일 진실의 원천(source of truth)이다.',
-        '⚠ ticker 가 확실하지 않으면 holding.details.ticker 와 market 을 빈 문자열로 두고 holding.name 만 채운다 — 시스템이 검색·검증으로 자동 채워준다. 절대 추측한 ticker(예: 임의의 6자리 코드)를 넣지 않는다.',
-        '한국 종목(삼성전자 005930): details.currency=KRW, market=KR. 미국 종목(NVDA): details.currency=USD, market=US.',
-        'holding.name 은 종목명만(예: 삼성전자, NVIDIA) 쓰고, 설명·괄호 문구는 name에 넣지 않는다.',
-        '가능하면 holding.id 로 대상 자산을 지정하고, 동일 이름이 여러 category에 있으면 holding.category(stock 등)를 반드시 넣는다.',
-        'removeHolding 시 holding.name은 필수이며, 같은 이름이 서로 다른 category(예: 주식·예금)에 중복될 수 있으면 holding.category에 deposit/installment/stock/fund/pension 중 하나를 반드시 넣는다.',
+        // 🔴 2026-09-21: 자산(holding)·설정(profileChanges) 지시 14줄을 제거했다.
+        //   실행부가 없어 아무것도 반영되지 않는데 프롬프트는 반영되는 것처럼 적혀 있었고,
+        //   근거로 삼던 context.portfolio 는 v3 에서 로딩이 빠져 **항상 비어** 있었다.
+        //   자산은 토스 /holdings 를 정본으로 다시 붙인다(증권사가 정본).
+        '사용자 요청이 반복 작업 예약/취소에 해당하면 actions 배열에 넣는다. 자산·설정 변경 액션은 지금 지원하지 않는다.',
         'cancelScheduledTask 는 가능하면 cancelTarget.taskId(예약 작업 id)로 지정하고, 모를 때만 title+taskType으로 지정한다.',
         '반복 작업은 가능하면 cronExpression, nextRunLabel, taskType 을 함께 채운다.',
         'workspacePatch 는 빈 객체에 가깝게 두고, 패널 재배치·generatedInsights 는 생성하지 않는다.',
@@ -1260,12 +1209,11 @@ async function buildMutationSupervisorPlan(userInput, context) {
   const partial = await generateStructuredOutput(
     {
       systemPrompt: [
-        '당신은 포트폴리오 변경(actions) 추출 전용 supervisor다.',
-        '사용자 요청에서 자산 입력/수정/삭제, 설정 변경, 반복 작업 예약/취소만 actions 배열로 추출한다.',
+        // 🔴 2026-09-21: 자산 추출 지시를 제거했다(실행부 없음 · context.portfolio 항상 빔).
+        '당신은 반복 작업 예약/취소(actions) 추출 전용 supervisor다.',
+        '사용자 요청에서 반복 작업 예약/취소만 actions 배열로 추출한다. 자산·설정 변경은 지원하지 않는다.',
         'research task, workspacePatch, persona 는 생성하지 않는다.',
-        '⚠ 금액(원/$)이 명시되면 upsertHolding.holding.amount 에 정수(원)로 채운다.',
-        '주식/ETF: category=stock, details.quantity·averagePrice 사용. deposit 은 현금성 자산만.',
-        'holding.name 은 종목명·계좌명만. actions 는 최대 12개.',
+        'actions 는 최대 12개.',
         '요청이 모호하면 actions 는 빈 배열.',
         '반드시 JSON 으로만 답한다.',
       ].join('\n'),
@@ -1499,7 +1447,9 @@ async function synthesizeFinalAnswer({ userInput, context, plan, specialistOutpu
       plan.synthesisInstructions,
       '최종 답변은 한국어로 작성하고, 필요한 경우 짧은 섹션 제목을 사용한다.',
       '숫자/우선순위/리스크/후속 행동을 최대한 구조적으로 정리한다.',
-      'plannedActions 가 있으면 실제로 반영될 자산/설정/예약 변경 사항을 답변 안에 분명히 언급한다.',
+      // 🔴 2026-09-21: 여기서 '실제로 반영될' 이라고 시켰는데 **실행부가 없다** — 모델이
+      //   "등록했습니다" 라고 답하고 아무것도 안 쓰였다. 제안임을 분명히 말하게 바꿨다.
+      'plannedActions 는 **아직 반영되지 않은 제안**이다. 언급할 때는 반드시 "제안"·"승인하면" 처럼 미실행임이 드러나게 쓰고, 완료·등록·반영됨 같은 표현은 쓰지 않는다.',
     ].join('\n'),
     userPrompt: JSON.stringify(
       {
@@ -1528,7 +1478,9 @@ async function synthesizeFinalAnswerStream({ userInput, context, plan, specialis
       plan.synthesisInstructions,
       '최종 답변은 한국어로 작성하고, 필요한 경우 짧은 섹션 제목을 사용한다.',
       '숫자/우선순위/리스크/후속 행동을 최대한 구조적으로 정리한다.',
-      'plannedActions 가 있으면 실제로 반영될 자산/설정/예약 변경 사항을 답변 안에 분명히 언급한다.',
+      // 🔴 2026-09-21: 여기서 '실제로 반영될' 이라고 시켰는데 **실행부가 없다** — 모델이
+      //   "등록했습니다" 라고 답하고 아무것도 안 쓰였다. 제안임을 분명히 말하게 바꿨다.
+      'plannedActions 는 **아직 반영되지 않은 제안**이다. 언급할 때는 반드시 "제안"·"승인하면" 처럼 미실행임이 드러나게 쓰고, 완료·등록·반영됨 같은 표현은 쓰지 않는다.',
     ].join('\n'),
     userPrompt: JSON.stringify(
       {
