@@ -341,6 +341,87 @@ function asText(v) {
   return String(v).trim();
 }
 
+/**
+ * 🔴 **서술도 "모양" 으로 읽는다** (2026-09-21 — 같은 병 **일곱 번째**)
+ *
+ * 서술 보충 호출을 넣었더니 **발동은 하는데 `got:false`** 였다. 모델은 잘 쓰고 있었고
+ * **키가 회차마다 전부 달랐다**(라이브 6회 실측, 하나도 안 겹친다):
+ * ```
+ * { "overall_score":…, "score_components": {…} }            ← 점수를 또 매겼다
+ * { "analysis": "NVDA를 평가한 결과, …" }
+ * { "extension": { "analysis": { "score_comment": … } } }    ← 두 겹 중첩
+ * { "확정점수_및_서술": { "강한_기업_선호_10": "…" } }         ← 항목별 서술
+ * { "핵심 요약": "…", "기업 펀더멘털": … }
+ * { "종목":…, "확정_점수_근거_요약": {…} }
+ * ```
+ * ★ **점수는 모양으로 읽게 고쳐 놓고 서술은 다시 키를 열거했다.** 한 시간 전에
+ *   *"키 이름을 열거하지 말고 모양으로 찾는다"* 를 적어 놓고 같은 파일에서 어겼다 —
+ *   *"규칙을 정하면 그 자리에서 적용 범위를 훑을 것"* 을 오늘만 두 번째로 어겼다.
+ *
+ * ## 설계: **아무것도 버리지 않는다**
+ *
+ * 분류할 수 있으면 분류하고(강점·약점·한 줄 요약·개요), **못 하면 `interpretation` 에 모은다.**
+ * 최악이라도 사용자는 분석 글을 **한 칸에 모아서** 본다 — 빈 화면보다 훨씬 낫다.
+ * ⚠️ 숫자는 **줍지 않는다** — 모델이 제멋대로 다시 매긴 점수(`overall_score: 8.9`)가
+ *    확정 점수를 덮으면 같은 종목이 회차마다 달라진다.
+ */
+const PROSE_HINTS = [
+  ['strengths', ['강점', '장점', 'strength', 'pros', '긍정']],
+  ['weaknesses', ['약점', '단점', 'weakness', 'risk', '리스크', '우려', 'cons', '주의']],
+  ['oneLiner', ['한줄', 'oneliner', '핵심', '요약', 'summary', '결론', 'conclusion', '총평']],
+  ['description', ['개요', 'description', '기업설명', '사업']],
+];
+/** 서술로 안 쓰는 것 — 확신도·미확인 목록은 따로 다룬다 */
+const PROSE_SKIP = ['confidence', '확신도', 'unverified', '확인못한', '확인못함'];
+/** ⚠️ 너무 짧은 문자열은 라벨·열거값이다(`매수`·`보수율`) — 서술로 치면 잡음이 섞인다 */
+const PROSE_MIN = 15;
+
+function shapeProse(out, names = []) {
+  const rubric = new Map(names.map((n) => [normName(n), n]));
+  const found = { strengths: [], weaknesses: [], oneLiner: [], description: [], interpretation: [] };
+  const comments = new Map();
+
+  const walk = (node, key, depth) => {
+    if (node == null || depth > 6) return;
+    if (Array.isArray(node)) { for (const v of node) walk(v, key, depth + 1); return; }
+    if (typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) walk(v, k, depth + 1);
+      return;
+    }
+    // 숫자·불리언은 서술이 아니다
+    if (typeof node !== 'string') return;
+    const text = node.trim();
+    if (text.length < PROSE_MIN) return;
+
+    const nk = normName(key);
+    const rawKey = String(key || '').toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
+    if (PROSE_SKIP.some((s) => rawKey.includes(s.replace(/[^a-z0-9가-힣]/g, '')))) return;
+
+    // ① 채점표 항목 이름이면 **그 항목의 코멘트**다(`"강한_기업_선호_10": "…"` 모양)
+    const item = rubric.get(nk);
+    if (item && !comments.has(item)) { comments.set(item, text); return; }
+
+    // ② 힌트로 분류
+    for (const [slot, hints] of PROSE_HINTS) {
+      if (hints.some((h) => nk.includes(normName(h)) || rawKey.includes(h))) { found[slot].push(text); return; }
+    }
+    // ③ 🔴 분류 못 해도 **버리지 않는다**
+    found.interpretation.push(text);
+  };
+  walk(out, '', 0);
+
+  const join = (a) => a.join('\n\n').trim();
+  return {
+    strengths: join(found.strengths),
+    weaknesses: join(found.weaknesses),
+    oneLiner: found.oneLiner[0] || '',
+    description: join(found.description),
+    // 한 줄 요약이 여러 개면 나머지도 살린다
+    interpretation: join([...found.oneLiner.slice(1), ...found.interpretation]),
+    comments,
+  };
+}
+
 const fmtNum = (v, d = 2) => (v == null ? '확인 못 함' : Number(v).toFixed(d));
 const fmtBig = (v) => (v == null ? '확인 못 함' : `${(Number(v) / 1e9).toFixed(2)}B`);
 const fmtPct = (v) => (v == null ? '확인 못 함' : `${(Number(v) * 100).toFixed(2)}%`);
@@ -476,9 +557,23 @@ async function rateFund(stats, cls, newsText) {
 
 /**
  * 한 종목을 평가한다.
+ *
+ * @param {object} opts
+ * @param {boolean} [opts.withProse] 서술(강점·약점·한 줄 요약)까지 받을지.
+ *
+ * 🔴 **경로에 따라 갈라야 한다** (2026-09-21 — pm2 가 비용을 실측해 알려줬다).
+ *    서술 보충은 호출당 **34~37초**라 평가가 7초 → 45초가 된다. 리포트는 **보유 종목마다**
+ *    평가를 부르고 **화면 진입 시 자동 분석**이 돌므로, 2종목이면 페이지를 열 때마다 +84초다.
+ *
+ *    ⇒ **매매 판단에 필요한 건 점수**고 서술은 사람이 펼쳐 볼 때 필요하다:
+ *       - 리포트 내부 호출 → `withProse: false` (빠르게, 점수만)
+ *       - `GET /api/rate/:symbol` → 기본 `true` (사용자가 상세를 보려고 부른 것)
+ *    ⚠️ 끄는 게 아니라 **가르는** 것이다 — 껐으면 사양의 절반이 영영 안 나온다.
+ *    ⚠️ `RATING_PROSE=off` 로 전면 차단도 가능하게 뒀다(느려지면 즉시 되돌릴 손잡이).
+ *
  * @returns {Promise<object>} 점수·투자의견·확신도 + 원자료
  */
-async function rate(symbol, { newsText = '' } = {}) {
+async function rate(symbol, { newsText = '', withProse = true } = {}) {
   const stats = await getStats(symbol);
   const cls = classify(stats);
   const type = cls.type;
@@ -520,7 +615,8 @@ async function rate(symbol, { newsText = '' } = {}) {
   const scoredCount = items.filter((x) => x.score != null).length;
   const proseEmpty = !asText(out.strengths) && !asText(out.weaknesses) && !asText(out.oneLiner);
   let prose = out;
-  if (scoredCount === names.length && proseEmpty) {
+  const proseAllowed = withProse && String(process.env.RATING_PROSE || '').toLowerCase() !== 'off';
+  if (scoredCount === names.length && proseEmpty && proseAllowed) {
     logWarn('rating.prose_missing', { symbol: stats.symbol, scored: scoredCount });
     const p = await generateStructuredOutput({
       systemPrompt: [
@@ -553,9 +649,32 @@ async function rate(symbol, { newsText = '' } = {}) {
       logLabel: 'stock_rating_prose',
       fallback: {},
     });
-    // ⚠️ 서술만 합친다. `items` 는 위에서 확정됐고 여기서 안 건드린다
-    prose = { ...out, ...p };
-    logInfo('rating.prose_done', { symbol: stats.symbol, got: Boolean(asText(p.oneLiner)) });
+    /**
+     * 🔴 보충 응답도 **모양으로 읽는다** — 키가 회차마다 다르다(라이브 6회 전부 달랐다).
+     * ⚠️ `items` 는 위에서 확정됐다. 여기서 **점수는 안 건드리고 코멘트만** 채운다 —
+     *    모델이 `overall_score: 8.9` 처럼 제멋대로 다시 매긴 것을 받으면 안 된다.
+     */
+    const sp = shapeProse(p, names);
+    for (const it of items) {
+      if (!it.comment && sp.comments.has(it.name)) it.comment = sp.comments.get(it.name);
+    }
+    prose = {
+      ...out,
+      ...p,
+      strengths: sp.strengths || asText(p.strengths),
+      weaknesses: sp.weaknesses || asText(p.weaknesses),
+      oneLiner: sp.oneLiner || asText(p.oneLiner),
+      description: sp.description || asText(p.description),
+      interpretation: sp.interpretation || asText(p.interpretation),
+    };
+    const gotProse = Boolean(prose.oneLiner || prose.strengths || prose.weaknesses || prose.interpretation);
+    logInfo('rating.prose_done', {
+      symbol: stats.symbol, got: gotProse,
+      comments: [...sp.comments.keys()].length,
+      // 🔴 **분류 못 해 통째로 담은 경우를 따로 센다** — 조용히 섞이면 힌트가 낡은 걸 모른다
+      unclassified: Boolean(!sp.oneLiner && !sp.strengths && !sp.weaknesses && sp.interpretation),
+    });
+    if (!gotProse) logWarn('rating.prose_empty', { symbol: stats.symbol, preview: JSON.stringify(p).slice(0, 200) });
   }
 
   const scored = items.filter((x) => x.score != null);
@@ -590,6 +709,8 @@ async function rate(symbol, { newsText = '' } = {}) {
     type,
     typeWhy: cls.why,
     typeAssumed: cls.assumed,
+    // 🔴 "비었다" 와 "안 물어봤다" 를 구분한다 — 화면이 "평가가 부실하다" 로 오해하면 안 된다
+    proseSkipped: !proseAllowed && proseEmpty ? '빠른 평가(점수 전용) — 상세를 열면 서술을 받아옵니다' : null,
     description: asText(prose.description),
     items,
     total,
@@ -619,4 +740,4 @@ async function rate(symbol, { newsText = '' } = {}) {
   return result;
 }
 
-module.exports = { rate, classify, opinionFor, bandText, shapeScores, asText, leverageHint, RUBRICS, TYPES, BANDS };
+module.exports = { rate, classify, opinionFor, bandText, shapeScores, shapeProse, asText, leverageHint, RUBRICS, TYPES, BANDS };

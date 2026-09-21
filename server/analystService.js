@@ -381,7 +381,9 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   for (const it of items.slice(0, 6)) {
     const ysym = it.market === 'KR' && /^\d{6}$/.test(it.symbol) ? `${it.symbol}.KS` : it.symbol;
     try {
-      ratings[it.symbol] = await rating.rate(ysym);
+      // ⚠️ 리포트는 **점수만** 필요하다. 서술 보충은 종목당 35초라 자동 분석을 못 쓰게 만든다
+      //    (pm2 실측: 2종목이면 +84초). 서술은 사용자가 상세를 펼칠 때 `/api/rate` 가 받아온다.
+      ratings[it.symbol] = await rating.rate(ysym, { withProse: false });
     } catch (e) {
       // 조용히 넘기지 않는다 — 평가 없이 판단했다는 사실이 리포트에 남아야 한다
       logWarn('analyst.rating_failed', { symbol: it.symbol, ysym, kind: e.kind, message: e.message });
