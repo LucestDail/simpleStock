@@ -547,8 +547,85 @@ function _resetForTest() {
 // 🔴 모듈이 로드될 때 **한 번** 복원한다(기동 시점)
 restore();
 
+/**
+ * 🔴 **나간 주문을 취소한다** (2026-09-22 신설)
+ *
+ * ## 왜 없었나 — 그게 사고를 만들었다
+ * 종전엔 `reject()` 가 **제안**을 거절할 뿐이고, **이미 나간 주문을 취소하는 함수가 없었다.**
+ * 그래서 첫 실주문을 취소할 때 `tossClient.cancelOrder` 를 **직접** 불렀고,
+ * 감사는 `orderService` 에만 있으니 **취소가 기록되지 않았다** —
+ * 감사만 보면 그 주문은 아직 `PENDING` 이다. **기록이 사실과 달랐다.**(pm2 발견)
+ * ★ 돈 경로에서 *"기록이 한 벌이 아니다"* 는 값이 크다. 우회 경로를 쓰면 그 대가가 여기서 나온다.
+ *
+ * ⚠️ 취소는 **멱등키가 없다**(명세) ⇒ **자동 재시도 금지.** 응답을 못 받으면 조회로 확정한다.
+ * ⚠️ 성공해도 **새 `orderId` 가 발급**된다(원 ID 와 다르다) — 둘 다 남긴다.
+ */
+async function cancelLiveOrder(proposalId, { orderId } = {}) {
+  const p = proposals.get(proposalId) || null;
+  const target = orderId || p?.orderId;
+  if (!target) return { ok: false, error: '취소할 주문 ID 가 없습니다.' };
+
+  const toss = require('./tossClient');
+  audit('cancel_requested', { id: proposalId ?? null, orderId: target });
+  let res;
+  try {
+    res = await toss.cancelOrder(target);
+  } catch (e) {
+    if (e.kind === 'unknown') {
+      // 🔴 보냈는데 답이 없다 — **재시도하지 않는다.** 조회로 확정해야 한다
+      audit('cancel_unknown', { id: proposalId ?? null, orderId: target, message: e.message });
+      return { ok: false, unknown: true, error: `${e.message} (취소가 됐는지 조회로 확정하세요)` };
+    }
+    audit('cancel_failed', { id: proposalId ?? null, orderId: target, kind: e.kind, message: e.message });
+    return { ok: false, error: e.message, kind: e.kind };
+  }
+
+  const newOrderId = res?.orderId || null;
+  if (p) {
+    p.status = 'CANCELED';
+    p.canceledAt = new Date().toISOString();
+    p.result = { ...(p.result || {}), canceledOrderId: newOrderId };
+    persist();
+    emitSettled(p, 'rejected');
+  }
+  audit('canceled', { id: proposalId ?? null, orderId: target, newOrderId });
+  return { ok: true, orderId: target, newOrderId, proposal: p };
+}
+
+/**
+ * 🔴 **밖에서 확인한 사실을 기록에 반영한다** (2026-09-22 신설)
+ *
+ * `UNKNOWN`(보냈는데 답을 못 받음)을 만들어 놓고 **그것을 해소할 함수가 없었다** —
+ * *"조회로 확정하세요"* 라고 적어 놓고 확정한 결과를 적을 자리가 없었던 것이다.
+ * 같은 구멍으로, 앱 밖(우회 프로세스·토스 앱)에서 일어난 일도 기록이 끊긴다.
+ *
+ * ⚠️ **시각을 소급하지 않는다.** `at` 은 **지금**이고 `observedAt` 에 관측 시각을 따로 적는다 —
+ *    감사는 *"일어난 일의 목록"* 이지 *"고쳐 쓴 과거"* 가 아니다.
+ */
+function reconcile(proposalId, { status, orderId, observedAt, why } = {}) {
+  const p = proposals.get(proposalId) || null;
+  const before = p?.status ?? null;
+  if (p && status) {
+    p.status = String(status).toUpperCase();
+    p.reconciledAt = new Date().toISOString();
+    persist();
+  }
+  audit('reconciled', {
+    id: proposalId ?? null,
+    orderId: orderId ?? p?.orderId ?? null,
+    from: before,
+    to: status ?? null,
+    observedAt: observedAt ?? null,
+    why: why || null,
+    note: '앱 밖에서 확인한 사실을 반영했습니다(소급 기록이 아니라 지금 시점의 보정입니다).',
+  });
+  return { ok: true, proposal: p };
+}
+
 module.exports = {
   propose,
+  cancelLiveOrder,
+  reconcile,
   checkAccountLimits,
   onSettled,
   attachNotice,

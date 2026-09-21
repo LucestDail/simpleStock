@@ -15,10 +15,29 @@ const { logInfo, logWarn } = require('./logger');
  * ⇒ 조각마다 `{ok, data, error}` 를 그대로 싣고, 상위에 `failed` 개수를 낸다.
  *   (워크스페이스 규율: *"검사 못 함 ≠ 통과"*, *"버려지는 경로는 반드시 warn"*)
  *
- * ## 한도
+ * ## 한도 — 🔴 **추정하지 말고 `X-RateLimit-*` 헤더를 본다** (2026-09-22 갱신)
  *
- * 실측(2026-09-21): rankings 5/s · warnings 5/s · orderbook 15/s · stocks 5/s ·
- * investor-trading 10/s · candles 20/s · holdings 5/s · accounts **1/s**
+ * 토스는 엔드포인트를 **Rate Limits Group 17개**로 묶고 한도·잔여를 **헤더로** 준다.
+ * 종전 이 주석은 경로 단위 추정이었고, 헤더 실측과 **두 군데가 달랐다**.
+ *
+ * ```
+ * 그룹                     한도   경로
+ * ACCOUNT                   1 🔴  /accounts            ← 호출 한 번에 소진된다
+ * ASSET                     5     /holdings
+ * ORDER_INFO                6     /buying-power · /sellable-quantity · /commissions
+ * MARKET_DATA              15     /prices · /orderbook · /price-limits · /trades
+ * MARKET_DATA_CHART        20     /candles
+ * MARKET_INFO               3     /market-calendar/* · /exchange-rate
+ * STOCK                     5     /stocks · /stocks/{s}/warnings
+ * ORDER                    10     /orders(생성) · /orders/{id}/cancel
+ * ORDER                     5 ⚠️  /orders/{id}(조회)   ← **같은 그룹인데 경로별로 다르다**
+ * STOCK_TRADING_TREND       —     /stocks/{s}/investor-trading 등 (아직 실측 0건 = 판정 불가)
+ * ```
+ * ★ **"그룹 한도" 가정에 반례가 있다** — `ORDER` 는 생성 10 / 조회 5 다.
+ *   ⇒ 표는 **그룹 + 경로** 두 축으로 읽어야 한다.
+ * ⚠️ **여기 적힌 숫자보다 헤더가 맞다.** 어긋나면 헤더를 따르고 이 표를 고친다
+ *    (`toss.ratelimit` · `toss.ratelimit_low` · `rateLimitSnapshot()`).
+ * ⚠️ `STOCK_TRADING_TREND` 는 **아직 안 불려서 모른다** — 0 은 "여유" 가 아니라 "판정 불가" 다.
  * ⇒ 조각을 **동시에 다 던지지 않는다.** 묶어서 순차로 돌리고, 429 는 클라이언트가 물러선다.
  */
 
