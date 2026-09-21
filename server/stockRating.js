@@ -439,6 +439,33 @@ function shapeProse(out, names = []) {
   };
 }
 
+/**
+ * 🔴 **목록 필드도 모양으로 받는다** (2026-09-21 — 같은 병 **여덟 번째**, 그리고 **가장 비쌌다**)
+ *
+ * 스키마에 `unverified: {type:'array'}` 라 적었는데 모델이 **문자열**을 줬다:
+ * ```
+ * "보수율, 추적오차, AUM, 구성종목 비중은 주어지지 않아 확인할 수 없습니다."
+ * ```
+ * `out.unverified || [...]` 는 **이걸 못 막는다** — 빈 문자열이 아니면 truthy 라 그대로 통과한다.
+ * 화면의 `v-if="…unverified?.length"` 도 **문자열 길이 62** 라 통과시키고, `.join()` 에서 죽는다.
+ *
+ * 🔴🔴 **Vue 는 렌더 중 예외가 나면 그 서브트리를 통째로 버린다** ⇒ 종목 판단은 물론
+ *      **패널 제목까지 사라졌다.** 즉 **내가 평가 기능을 붙이면서 매매 분석 패널을 죽였고**,
+ *      API 는 내내 200 이라 **밖에서는 정상으로 보였다.**
+ * ★ 서술·점수는 `asText`/`shapeScores` 로 잡아 놓고 **목록 필드는 아무도 안 보고 있었다** —
+ *   *"규칙을 정하면 적용 범위를 전수로 훑을 것"* 을 오늘만 세 번째로 어긴 것이다.
+ */
+function asList(v, { max = 12 } = {}) {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v.map((x) => asText(x)).filter(Boolean).slice(0, max);
+  if (typeof v === 'object') return asList(Object.values(v), { max });
+  const t = String(v).trim();
+  if (!t) return [];
+  // 문장으로 왔으면 구분자로 쪼갠다. 안 쪼개지면 **통째로 한 항목**으로 둔다(버리지 않는다)
+  const parts = t.split(/\s*[,·;\n]\s*|\s+·\s+/).map((x) => x.trim()).filter(Boolean);
+  return (parts.length > 1 ? parts : [t]).slice(0, max);
+}
+
 const fmtNum = (v, d = 2) => (v == null ? '확인 못 함' : Number(v).toFixed(d));
 const fmtBig = (v) => (v == null ? '확인 못 함' : `${(Number(v) / 1e9).toFixed(2)}B`);
 const fmtPct = (v) => (v == null ? '확인 못 함' : `${(Number(v) * 100).toFixed(2)}%`);
@@ -563,8 +590,8 @@ async function rateFund(stats, cls, newsText) {
     confidence: '낮음',
     confidenceWhy: ['펀드는 보수율·추적오차·구성종목을 이 시스템이 받지 못합니다.', ...notes].join(' '),
     oneLiner: asText(out.oneLiner),
-    unverified: out.unverified || ['보수율', '추적오차', 'AUM', '구성종목 비중'],
-    notes,
+    unverified: asList(out.unverified).length ? asList(out.unverified) : ['보수율', '추적오차', 'AUM', '구성종목 비중'],
+    notes: asList(notes, { max: 6 }),
     missingValueMetrics: [],
     links: stats.links,
     stats: { price: stats.price, beta: stats.quality?.beta ?? null, dividendYield: stats.quality?.dividendYield ?? null },
@@ -717,7 +744,7 @@ async function rate(symbol, { newsText = '', withProse = true } = {}) {
   const downgrades = [];
   if (!saidConf) downgrades.push('모델이 확신도를 답하지 않음');
   if (stats.missing.length >= 3) { confIdx = Math.min(confIdx, 1); downgrades.push(`밸류 지표 ${stats.missing.length}개 미수신`); }
-  if ((prose.unverified || []).length >= 3) { confIdx = Math.min(confIdx, 2); downgrades.push(`확인 못 한 항목 ${prose.unverified.length}건`); }
+  if (asList(prose.unverified).length >= 3) { confIdx = Math.min(confIdx, 2); downgrades.push(`확인 못 한 항목 ${asList(prose.unverified).length}건`); }
   if (scored.length < names.length) { confIdx = 0; downgrades.push(`항목 ${names.length - scored.length}개 미채점`); }
 
   const result = {
@@ -740,8 +767,8 @@ async function rate(symbol, { newsText = '', withProse = true } = {}) {
     confidence: order[confIdx],
     confidenceWhy: [asText(prose.confidenceWhy), downgrades.length ? `(자동 하향: ${downgrades.join(' · ')})` : ''].filter(Boolean).join(' '),
     oneLiner: asText(prose.oneLiner),
-    unverified: prose.unverified || [],
-    missingValueMetrics: stats.missing,
+    unverified: asList(prose.unverified),
+    missingValueMetrics: asList(stats.missing),
     links: stats.links,
     stats: {
       price: stats.price, marketCap: stats.marketCap, enterpriseValue: stats.enterpriseValue,
@@ -757,4 +784,4 @@ async function rate(symbol, { newsText = '', withProse = true } = {}) {
   return result;
 }
 
-module.exports = { rate, classify, opinionFor, bandText, shapeScores, shapeProse, asText, leverageHint, RUBRICS, TYPES, BANDS };
+module.exports = { rate, classify, opinionFor, bandText, shapeScores, shapeProse, asText, asList, leverageHint, RUBRICS, TYPES, BANDS };

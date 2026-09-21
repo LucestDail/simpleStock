@@ -685,6 +685,17 @@ function rated(symbol) {
   const r = report.value?.ratings?.[symbol];
   return r && !r.error ? r : null;
 }
+/**
+ * 목록을 사람이 읽는 한 줄로 — **배열이 아니어도 죽지 않는다.**
+ * 🔴 `unverified` 가 문자열로 와서 `.join()` 이 터졌고 **패널 전체가 사라졌다**(2026-09-21).
+ *    서버가 정규화하지만 화면도 스스로 지킨다 — 방어는 한 겹이면 다음 필드에서 또 뚫린다.
+ */
+function listText(v) {
+  if (v == null) return '';
+  if (Array.isArray(v)) return v.map((x) => String(x ?? '').trim()).filter(Boolean).join(' / ');
+  return String(v).trim();
+}
+
 /** 점수 색 — ⚠️ `null`(미채점)은 **나쁜 점수가 아니다.** 빨갛게 칠하면 "0점" 으로 읽힌다 */
 function scoreTone(score) {
   if (score == null) return 'rt__s--na';
@@ -1143,8 +1154,15 @@ onUnmounted(() => {
                   <!-- 🔴 "비었다" 와 "안 물어봤다" 를 구분해 보여준다 — 부실한 평가로 오해하면 안 된다 -->
                   <p v-if="rated(ps.symbol).proseSkipped" class="rt__why">{{ rated(ps.symbol).proseSkipped }}</p>
                   <p v-if="rated(ps.symbol).confidenceWhy" class="rt__why">{{ rated(ps.symbol).confidenceWhy }}</p>
-                  <p v-if="rated(ps.symbol).unverified?.length" class="rt__why">
-                    확인 못 함 · {{ rated(ps.symbol).unverified.join(' / ') }}
+                  <!--
+                    🔴 **서버가 무슨 모양을 주든 화면이 죽으면 안 된다** (2026-09-21).
+                    `unverified` 가 배열이 아니라 **문자열**로 와서 `.join()` 이 터졌고,
+                    Vue 가 서브트리를 통째로 버려 **매매 분석 패널 전체가 사라졌다**(제목까지).
+                    서버에서 `asList()` 로 정규화했지만, **다음 필드가 또 그럴 수 있으니**
+                    화면도 스스로 지킨다 — 한 겹만 고치면 같은 사고가 다른 필드에서 난다.
+                  -->
+                  <p v-if="listText(rated(ps.symbol).unverified)" class="rt__why">
+                    확인 못 함 · {{ listText(rated(ps.symbol).unverified) }}
                   </p>
                 </details>
               </article>

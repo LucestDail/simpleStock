@@ -66,6 +66,24 @@ function LoginGate(onDone) {
   };
 }
 
+/**
+ * 🔴 **렌더 예외를 조용히 버리지 않는다** (2026-09-21)
+ *
+ * `unverified.join is not a function` 이 **42회** 났는데 화면엔 아무 흔적이 없었다.
+ * Vue 는 렌더 중 예외가 나면 **그 서브트리를 통째로 버린다** — 매매 분석 패널이
+ * 제목까지 통째로 사라졌고, API 는 200 이라 **밖에서는 정상으로 보였다.**
+ *
+ * 여기서 막을 수는 없지만(버리는 건 Vue 의 동작) **무슨 일이 있었는지는 남긴다.**
+ * ⚠️ 흔적이 없으면 다음 사람은 "데이터가 안 왔나" 부터 의심하며 몇 시간을 쓴다.
+ */
+function installErrorTrap(app, tag) {
+  app.config.errorHandler = (err, _vm, info) => {
+    // eslint-disable-next-line no-console
+    console.error(`[simpleStock/${tag}] 렌더 오류 — 이 자리의 화면이 통째로 사라집니다:`, info, err);
+  };
+  return app;
+}
+
 async function boot() {
   bootstrapAccessTokenFromUrl();
 
@@ -75,15 +93,15 @@ async function boot() {
 
   const authed = await fetchAuthStatus();
   if (authed) {
-    createApp(App).mount('#app');
+    installErrorTrap(createApp(App), 'app').mount('#app');
     return;
   }
   // ⚠️ 인증 실패를 조용히 넘기지 않는다 — 안 그러면 화면이 빈 채로 API 401 만 쌓인다.
   const app = createApp(LoginGate(() => {
     app.unmount();
-    createApp(App).mount('#app');
+    installErrorTrap(createApp(App), 'app').mount('#app');
   }));
-  app.mount('#app');
+  installErrorTrap(app, 'login').mount('#app');
 }
 
 boot();
