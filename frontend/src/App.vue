@@ -150,7 +150,9 @@ const { dialog, toast, confirmDialog, cancelDialog, dismissToast } = useUi();
 }
 
 .toast-error {
-  background: #3a1418;
+  /* 하드코딩 색 제거 (2026-09-21) — 토큰으로 */
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 .toast-info {

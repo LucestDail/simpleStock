@@ -1,78 +1,147 @@
 /**
- * SimpleStock — 저자극 다크 테마 (눈 피로 완화)
+ * SimpleStock 디자인 토큰 (2026-09-21 전면 개정)
+ *
+ * ## 정체성 — 거래소가 아니라 **관측 도구**다
+ *
+ * 이 제품은 사고파는 곳이 아니라 **지켜보고 브리핑을 받는 곳**이다.
+ * 그래서 거래소식 고채도 경고색(바이낸스 옐로 같은)을 쓰지 않는다.
+ * 오래 켜 두고 보는 화면이므로 바탕은 **차분한 딥 슬레이트**, 전압은 **강조 하나**에만 준다.
+ *
+ *   인디고  #5B6EF5   행동(CTA·포커스·활성). 화면에서 "누를 수 있는 것" 은 전부 이 색이다
+ *   바이올렛 #A78BFA   **AI 레이어 전용**. 사람이 쓴 것과 모델이 쓴 것을 색으로 가른다
+ *   민트    #2FBF8F   상승
+ *   코랄    #F2545B   하락
+ *
+ * ★ 넷이 **서로 충분히 멀다**. 강조색이 초록·빨강과 가까우면 상승/하락 신호를 흐린다 —
+ *   그래서 초록 계열·노랑 계열 강조를 쓰지 않았다(그게 이 색을 고른 이유다).
+ *
+ * ## 🔴 직전 판이 무엇 때문에 "개판" 이었나 (2026-09-21 사용자 지적)
+ *
+ * 1. **주 버튼이 배경에 묻혔다** — `--color-primary: #7a9ab8`(탁한 청회색). "저자극" 을
+ *    밀다가 **행동을 못 찾는** 화면이 됐다. 저자극은 **바탕**에서 하고 **행동은 보여야** 한다
+ * 2. **카드가 바닥과 같은 색**이었다(`.group { background: var(--color-canvas) }`).
+ *    그래서 카드가 안 떠 보였다 ⇒ surface 사다리를 실제로 쓴다
+ * 3. **라이트 테마 잔재**가 섞여 있었다(#eef0f4 · #f7f8fa · #fdecec · #e7e9ee).
+ *    다크 위에 라이트 조각이 얹혀 배지·배너만 허옇게 떴다
+ *
+ * ⇒ 하드코딩 색을 쓰지 말 것. 새 색이 필요하면 **여기에 토큰을 추가**한다.
  */
 :root {
-  --color-primary: #7a9ab8;
-  --color-primary-active: #6889a6;
-  --color-primary-disabled: #2a3340;
-  --color-accent-yellow: #c9a24a;
+  /* ── 강조 ─────────────────────────────────────────── */
+  --color-primary: #5b6ef5;
+  --color-primary-hover: #6e7ef8;
+  --color-primary-active: #4a5ce0;
+  --color-primary-soft: rgba(91, 110, 245, 0.14);
+  --color-primary-line: rgba(91, 110, 245, 0.38);
+  --color-on-primary: #ffffff;
 
-  --color-canvas: #0c0e12;
-  --color-surface-soft: #111419;
-  --color-surface-strong: #161a21;
-  --color-surface-dark: #0a0c10;
-  --color-surface-dark-elevated: #141820;
+  /* AI 레이어 — 모델이 만든 것에만 쓴다 */
+  --color-ai: #a78bfa;
+  --color-ai-soft: rgba(167, 139, 250, 0.12);
+  --color-ai-line: rgba(167, 139, 250, 0.32);
 
-  --color-hairline: rgba(255, 255, 255, 0.06);
-  --color-hairline-soft: rgba(255, 255, 255, 0.04);
+  /* ── 바탕 사다리 ──────────────────────────────────── */
+  --color-canvas: #0b0d12;
+  --color-surface: #12151d;
+  --color-surface-raised: #171b25;
+  --color-surface-sunken: #0e1117;
+  --color-surface-hover: rgba(255, 255, 255, 0.045);
 
-  --color-ink: #d4dae3;
-  --color-body: #9aa4b2;
-  --color-body-strong: #e2e6ed;
-  --color-muted: #6f7888;
-  --color-muted-soft: #505862;
-  --color-on-primary: #f5f7fa;
-  --color-on-dark: #e2e6ed;
-  --color-on-dark-soft: #8a95a6;
+  --color-hairline: rgba(255, 255, 255, 0.075);
+  --color-hairline-soft: rgba(255, 255, 255, 0.045);
+  --color-hairline-strong: rgba(255, 255, 255, 0.13);
 
-  --color-semantic-up: #4a9e78;
-  --color-semantic-down: #b85a62;
+  /* ── 글자 ─────────────────────────────────────────── */
+  --color-ink: #eef1f6;
+  --color-body: #a3adbe;
+  --color-muted: #6f7a8d;
+  --color-faint: #4d5666;
 
-  --heatmap-neutral-bg: rgba(255, 255, 255, 0.04);
+  /* ── 시세 방향 ────────────────────────────────────── */
+  --color-up: #2fbf8f;
+  --color-up-soft: rgba(47, 191, 143, 0.13);
+  --color-down: #f2545b;
+  --color-down-soft: rgba(242, 84, 91, 0.13);
+  --color-flat: #6f7a8d;
+  --color-flat-soft: rgba(255, 255, 255, 0.055);
+
+  /* ── 상태 ─────────────────────────────────────────── */
+  --color-danger: #f2545b;
+  --color-danger-soft: rgba(242, 84, 91, 0.12);
+  --color-warn: #e0a54a;
+  --color-warn-soft: rgba(224, 165, 74, 0.13);
+  --color-open: #2fbf8f;
+  --color-open-soft: rgba(47, 191, 143, 0.13);
+  --color-closed-soft: rgba(255, 255, 255, 0.06);
+
+  --heatmap-neutral-bg: var(--color-flat-soft);
   --heatmap-neutral-fg: var(--color-body);
 
-  --font-display: 'Inter', -apple-system, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-sans: 'Inter', -apple-system, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  /* ── 하위호환 별칭 ───────────────────────────────────
+   * ⚠️ 2026-09-21: 개정 전 이름을 쓰던 곳이 남아 있어 **끊기지 않게** 이어 둔다.
+   *    (`--color-bg`·`--color-border` 는 **원래부터 정의가 없어** CSS 폴백으로 살던 것이다 —
+   *     그래서 다크 화면에 라이트 회색이 섞여 나왔다. 이제 진짜 값을 준다.)
+   *    새 코드는 위의 정식 이름을 쓸 것. 별칭은 참조가 0이 되면 지운다. */
+  --color-bg: var(--color-canvas);
+  --color-border: var(--color-hairline);
+  --color-surface-dark: var(--color-surface);
+  --color-surface-strong: var(--color-surface-raised);
+  --color-on-dark: var(--color-ink);
+  --color-on-dark-soft: var(--color-muted);
 
-  --text-3xs: 9px;
+  /* ── 글꼴 ─────────────────────────────────────────── */
+  /* Pretendard = 한글·라틴을 한 벌로 처리하고 tabular figures 를 지원한다.
+     ⚠️ 없으면 system-ui 로 떨어진다. 숫자는 아래 .mono-num 이 따로 잡는다. */
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
+    system-ui, 'Segoe UI', Roboto, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, 'Cascadia Mono', Menlo, monospace;
+
+  /* ── 크기 ─────────────────────────────────────────── */
   --text-2xs: 10px;
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-base: 16px;
-  --text-md: 14px;
-  --text-lg: 17px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
   --text-xl: 19px;
-  --text-2xl: 25px;
+  --text-2xl: 23px;
+  --text-3xl: 28px;
 
   --rounded-xs: 4px;
-  --rounded-sm: 7px;
-  --rounded-md: 9px;
+  --rounded-sm: 6px;
+  --rounded-md: 8px;
   --rounded-lg: 12px;
-  --rounded-xl: 15px;
-  --rounded-pill: 100px;
-  --rounded-full: 9999px;
+  --rounded-xl: 16px;
+  --rounded-pill: 999px;
 
-  --shadow-soft: 0 4px 14px rgba(0, 0, 0, 0.22);
+  /* 그림자는 거의 안 쓴다 — 깊이는 surface 사다리로 만든다(다크에서 그림자는 잘 안 보인다) */
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.45);
+  --ring: 0 0 0 3px var(--color-primary-soft);
 
+  /* ── 간격 (4의 배수) ─────────────────────────────── */
   --space-xxs: 2px;
-  --space-xs: 5px;
-  --space-sm: 7px;
-  --space-base: 9px;
-  --space-md: 11px;
-  --space-lg: 13px;
-  --space-xl: 15px;
-  --space-xxl: 24px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-base: 12px;
+  --space-md: 16px;
+  --space-lg: 20px;
+  --space-xl: 28px;
+  --space-xxl: 40px;
   --space-section: 56px;
 
   --nav-height: 64px;
-  --content-max: 1200px;
+  --content-max: 1440px;
 }
 
 html,
 body,
 #app {
   height: 100%;
+}
+
+body {
   overflow: hidden;
 }
 
@@ -87,10 +156,11 @@ body {
   font-family: var(--font-sans);
   font-size: var(--text-base);
   font-weight: 400;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--color-body);
   background: var(--color-canvas);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button,
@@ -98,14 +168,45 @@ input,
 select,
 textarea {
   font: inherit;
+  color: inherit;
 }
 
 a {
   color: inherit;
 }
 
+/* 키보드 포커스만 링을 준다 — 마우스 클릭마다 링이 뜨면 시끄럽다 */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/** 숫자는 폭이 흔들리면 안 된다 — 값이 바뀔 때 줄이 출렁인다 */
 .mono-num {
   font-family: var(--font-mono);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* 스크롤바도 화면의 일부다 — 기본 스크롤바는 다크에서 허옇게 뜬다 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-hairline-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-hairline-strong);
+  border-radius: var(--rounded-pill);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
