@@ -169,13 +169,17 @@ test('판단기가 고른 도구를 실행하고 결과를 근거로 답한다',
  *    (모델은 제대로 골랐는데 내 파서가 조용히 버렸다) 화면엔 단서가 없었다.
  *    ⇒ 키를 열거하지 않고 **값이 아는 도구 이름인가**로 판정한다. 아래는 **관측된 모양**이다.
  */
-test('모델이 키 이름을 바꿔도 도구를 찾아낸다 (관측된 네 가지)', async () => {
+test('모델이 키 이름·깊이를 바꿔도 도구를 찾아낸다 (관측된 여섯 가지)', async () => {
   const chat = require('../server/analystChat');
   const shapes = [
     { tools: [{ name: 'get_portfolio', argsJson: '{}' }] },
     { tools: [{ tool: 'get_portfolio', argsJson: '{}' }] },
     { tools: [{ id: 'get_portfolio', argsJson: '{}' }] },
     { tool_requests: [{ tool: 'get_portfolio', argsJson: '{}' }] },
+    // 🔴 **배열이 아예 없는 모양** — 최상위 객체 자체가 호출이다
+    { tool_name: 'get_portfolio', argsJson: '{}' },
+    // 🔴 OpenAI 형식 — 이름이 **한 겹 더 안쪽**에 있다
+    { tool_plan: '…', tool_calls: [{ id: 'call_x', type: 'function', function: { name: 'get_portfolio', arguments: '{}' } }] },
   ];
   for (const shape of shapes) {
     const got = await chat.decideTools('x', shape);
@@ -197,6 +201,8 @@ test('인자도 키가 아니라 모양으로 찾는다', async () => {
     { name: 'get_candles', args: want },
     { name: 'get_candles', arguments: JSON.stringify(want) },
     { name: 'get_candles', 아무키나: want },
+    // OpenAI 형식에서도 인자가 한 겹 안쪽이다
+    { function: { name: 'get_candles', arguments: JSON.stringify(want) } },
   ]) {
     const got = await chat.decideTools('x', { tools: [item] });
     assert.deepEqual(got.tools[0].args, want, `인자를 못 읽었다: ${JSON.stringify(item)}`);
@@ -229,14 +235,49 @@ test('판단기가 죽어도 대화는 계속되지만 조용하지 않다', asy
   assert.equal(r.toolCalls, 0);
   assert.match(r.decideFailed || '', /429/, '판단 실패를 요약에 남겨야 한다');
   assert.ok(events.some((x) => x.e === 'notice' && /도구 판단/.test(x.d.text)), '사용자에게 안 알렸다');
+  // 🔴 **답하는 모델에게도** 알려야 한다 — 안 알리면 도구가 없는 줄 모르고 지어낸다
+  //    (피어 실측: 라이브에서 판단이 10회 중 3회 실패했고 답은 그냥 서술로 나왔다)
+  assert.match(JSON.stringify(seenContents[0]), /어떤 도구도 실행되지 않았습니다/,
+    '판단 실패를 모델에게 안 알렸다 — 모델이 지어낼 수 있다');
   // 🔴 그래도 답은 나온다 — 판단기가 죽었다고 대화까지 죽이지 않는다
   assert.ok(events.some((x) => x.e === 'text_delta'));
 });
 
+/**
+ * ⚠️ 실측 5회 중 1회, 결과를 이미 줬는데도 판단기가 **같은 도구를 또** 불렀다.
+ *    외부 API 라 그대로 두면 돈과 시간이 두 배다. 프롬프트로 막지 않고 코드가 막는다.
+ * ★ 단 **인자가 다르면 정당하다**(종목 둘의 차트) — 그것까지 막으면 제품이 망가진다.
+ */
+test('같은 도구·같은 인자는 두 번 부르지 않는다 (인자가 다르면 부른다)', async () => {
+  const chat = require('../server/analystChat');
+  decideReplies = [
+    { tools: [{ name: 'recall', argsJson: '{"query":"삼성"}' }] },
+    { tools: [{ name: 'recall', argsJson: '{"query":"삼성"}' }] },   // 똑같다 → 건너뛴다
+    { tools: [] },
+  ];
+  scripted = [[chunk([{ text: '끝' }])]];
+  const { events, emit } = collect();
+  const r = await chat.chat({ message: 'x', emit });
+  assert.equal(r.toolCalls, 1, '같은 호출을 두 번 실행했다');
+
+  // 인자가 다르면 정당한 호출이다
+  decideReplies = [
+    { tools: [{ name: 'recall', argsJson: '{"query":"삼성"}' }] },
+    { tools: [{ name: 'recall', argsJson: '{"query":"하이닉스"}' }] },
+    { tools: [] },
+  ];
+  scripted = [[chunk([{ text: '끝' }])]];
+  const c2 = collect();
+  const r2 = await chat.chat({ message: 'y', emit: c2.emit });
+  assert.equal(r2.toolCalls, 2, '인자가 다른 호출까지 막으면 제품이 망가진다');
+});
+
 test('도구 바퀴 상한에 걸리면 조용히 넘기지 않는다', async () => {
   const chat = require('../server/analystChat');
-  decideReplies = Array.from({ length: chat.MAX_ROUNDS + 1 }, () => ({
-    tools: [{ name: 'recall', argsJson: '{"query":"무엇"}' }],
+  // ⚠️ **인자를 매번 다르게** 준다 — 같은 호출이면 중복 가드가 먼저 멈춰서
+  //    상한을 검사하지 못한다(자가 다른 것을 재게 된다).
+  decideReplies = Array.from({ length: chat.MAX_ROUNDS + 1 }, (_, i) => ({
+    tools: [{ name: 'recall', argsJson: `{"query":"질문${i}"}` }],
   }));
   scripted = [[chunk([{ text: '여기까지입니다.' }])]];
   const { events, emit } = collect();

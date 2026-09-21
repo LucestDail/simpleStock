@@ -205,9 +205,20 @@ function decidePrompt() {
     '## 쓸 수 있는 도구',
     toolCatalog(),
     '',
+    '',
+    '## 🔴 전제 — 답하는 쪽은 **아무 데이터도 없습니다**',
+    '보유 종목·시세·차트·뉴스는 **도구를 부르지 않으면 존재하지 않습니다.** 모델의 사전 지식으로',
+    '답할 수 없는 것들입니다. 사용자가 그런 것을 물었는데 도구를 안 부르면,',
+    '답하는 쪽은 **모른다고 하거나 지어냅니다.**',
+    '',
     '- 필요한 도구를 `tools` 에 담습니다. `argsJson` 은 인자를 담은 **JSON 문자열**입니다(없으면 "{}").',
-    '- 🔴 이미 정보가 충분하거나 잡담이면 `tools` 를 **빈 배열**로 둡니다. 억지로 부르지 마세요.',
-    '- 이미 `[도구 결과]` 로 받은 것을 **또 부르지 마세요.**',
+    '- `[도구 결과]` 가 **아직 없는데** 사용자가 아래를 물으면 반드시 도구를 부릅니다:',
+    '    · 보유·잔고·평가금액·손익 → get_portfolio',
+    '    · 주가·추세·이동평균·차트 → get_candles',
+    '    · 급등·급락·랭킹 → get_rankings',
+    '    · 뉴스·최근 소식·전망 → web_search',
+    '    · 예전에 한 얘기 → recall',
+    '- 🔴 잡담·인사·감사이거나 **이미 `[도구 결과]` 로 받은 것**이면 `tools` 를 **빈 배열**로 둡니다.',
   ].join('\n');
 }
 
@@ -234,59 +245,74 @@ async function decideTools(transcript, injected = null) {
   return shapeToolCalls(out);
 }
 
-/** 모델이 준 덩어리에서 도구 호출을 **모양으로** 읽어낸다(키 이름을 믿지 않는다) */
-function shapeToolCalls(out) {
-  const calls = [];
-  const known = new Set(TOOL_DECLARATIONS.map((d) => d.name));
-  /**
-   * 🔴 **같은 비대칭이 한 층 위에서 또 났다.** 4회차에 모델이 최상위 키를
-   *    `tools` → **`tool_requests`** 로 바꿔서, 아래 항목 파서를 아무리 튼튼히 해도
-   *    목록 자체가 안 잡혔다(증상은 똑같이 "도구를 안 부른다").
-   *    ⇒ 여기서도 **키가 아니라 모양**으로 찾는다 — 결과 안의 **첫 배열**이 목록이다.
-   * ★ 같은 실수를 층마다 반복했다. 규칙을 정했으면 **적용 범위를 그 자리에서 훑어야** 했다.
-   */
-  const list = Array.isArray(out)
-    ? out
-    : Array.isArray(out?.tools)
-      ? out.tools
-      : Object.values(out || {}).find(Array.isArray) || [];
-  for (const t of list) {
-    if (!t || typeof t !== 'object') continue;
-    /**
-     * 🔴 **키 이름을 열거해서는 못 이긴다 — 값으로 판정한다.**
-     *
-     * 실측(2026-09-21, 같은 스키마·같은 질문 3회): 모델이 도구 이름을
-     * **`name` · `tool` · `id`** 세 가지 키로 번갈아 줬다. `required:['name']` 도
-     * 강제되지 않는다(게이트웨이가 스키마 검증까지 하지는 않는다).
-     * 키를 더 추가하는 것은 **셸 가드 18/18 과 같은 비대칭**이다 — 나는 전부 열거해야 하고
-     * 모델은 새 이름 하나만 고르면 된다.
-     *
-     * ⇒ 뒤집는다: **어떤 키든 상관없이, 값이 우리가 아는 도구 이름이면 그것이다.**
-     *   도구 목록은 우리가 정하는 **닫힌 집합**이라 이쪽은 빠짐이 없다.
-     * ⚠️ 이걸 놓쳤을 때 증상은 **"도구를 안 부른다"** 였다 — 모델은 제대로 골랐는데
-     *    내 파서가 조용히 버렸고, 화면에는 아무 단서도 안 남았다.
-     */
-    let name = '';
-    for (const v of Object.values(t)) {
-      if (typeof v === 'string' && known.has(v.trim())) { name = v.trim(); break; }
-    }
-    if (!name) {
-      // 🔴 버려지는 경로를 조용히 두지 않는다 — 무엇을 못 읽었는지 남긴다
-      logWarn('chat.unknown_tool_shape', { item: JSON.stringify(t).slice(0, 200) });
-      continue;
-    }
+/**
+ * 모델이 준 덩어리에서 도구 호출을 **모양으로** 읽어낸다(키 이름을 믿지 않는다).
+ *
+ * 🔴 **층마다 땜질하다 세 번 놓쳤다.** 실측된 모양들:
+ * ```
+ * {"tools":[{"name":"get_portfolio"}]}                    1회차
+ * {"tools":[{"tool":"..."}]}  ·  {"tools":[{"id":"..."}]}  2·3회차 (항목 키가 바뀐다)
+ * {"tool_requests":[...]}                                  4회차 (목록 키가 바뀐다)
+ * {"tool_name":"get_portfolio","argsJson":"{}"}            **배열이 아예 없다**
+ * {"tool_calls":[{"function":{"name":"...","arguments":…}}]} OpenAI 형식 — **한 겹 더**
+ * ```
+ * 앞의 넷을 하나씩 막다가 뒤의 둘을 또 맞았다. ★ **깊이도 열거의 대상이 된다** —
+ * 그래서 이번엔 **재귀로 끝까지** 훑는다. 판정 근거는 여전히 하나뿐이다:
+ * **값이 우리가 아는 도구 이름인가**(도구 목록은 우리가 정하는 **닫힌 집합**이다).
+ *
+ * ⚠️ 도구 이름을 찾은 객체 **안쪽으로는 더 내려가지 않는다** — 같은 호출을 두 번 세지 않으려고.
+ */
+function collectCallNodes(node, known, out, depth = 0) {
+  if (depth > 6 || out.length >= MAX_CALLS_PER_ROUND * 2) return;
+  if (Array.isArray(node)) {
+    for (const n of node) collectCallNodes(n, known, out, depth + 1);
+    return;
+  }
+  if (!node || typeof node !== 'object') return;
 
-    // 인자도 같은 원칙 — 키가 아니라 **모양**으로 찾는다(객체이거나 JSON 문자열)
-    let args = {};
-    for (const [k, v] of Object.entries(t)) {
-      if (typeof v === 'string' && v.trim() === name) continue; // 이름 칸은 건너뛴다
-      if (v && typeof v === 'object' && !Array.isArray(v)) { args = v; break; }
-      if (typeof v === 'string' && /^\s*\{/.test(v)) {
-        try { args = JSON.parse(v); break; } catch {
-          logWarn('chat.bad_args', { name, key: k, raw: v.slice(0, 120) });
-        }
+  for (const v of Object.values(node)) {
+    if (typeof v === 'string' && known.has(v.trim())) {
+      out.push({ node, name: v.trim() });
+      return; // 이 객체가 호출이다 — 안으로 더 안 내려간다
+    }
+  }
+  for (const v of Object.values(node)) collectCallNodes(v, known, out, depth + 1);
+}
+
+/** 호출 객체에서 인자를 꺼낸다 — 키가 아니라 **모양**으로(객체이거나 JSON 문자열) */
+function argsOf(node, name) {
+  for (const [k, v] of Object.entries(node)) {
+    if (typeof v === 'string' && v.trim() === name) continue; // 이름 칸
+    if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+    if (typeof v === 'string' && /^\s*\{/.test(v)) {
+      try {
+        return JSON.parse(v);
+      } catch {
+        logWarn('chat.bad_args', { name, key: k, raw: v.slice(0, 120) });
       }
     }
+  }
+  return {};
+}
+
+function shapeToolCalls(out) {
+  const known = new Set(TOOL_DECLARATIONS.map((d) => d.name));
+  const found = [];
+  collectCallNodes(out, known, found);
+
+  if (!found.length && out && typeof out === 'object') {
+    // 🔴 "도구 없음" 과 "내가 못 읽음" 을 구분해 남긴다.
+    //    빈 배열은 정상(잡담)이므로, **뭔가 들어 있는데 못 읽은 경우만** 경고한다.
+    const hasContent = JSON.stringify(out).length > 20 && !/"tools"\s*:\s*\[\s*\]/.test(JSON.stringify(out));
+    if (hasContent) logWarn('chat.unknown_tool_shape', { raw: JSON.stringify(out).slice(0, 300) });
+  }
+
+  const calls = [];
+  const seenNames = new Set();
+  for (const { node, name } of found) {
+    if (seenNames.has(name)) continue; // 같은 도구를 한 바퀴에 두 번 부르지 않는다
+    seenNames.add(name);
+    const args = argsOf(node, name);
     calls.push({ name, args: args && typeof args === 'object' ? args : {} });
   }
   return { tools: calls };
@@ -520,14 +546,35 @@ async function chat({ message, emit, fx = null, contextNote = '' }) {
 
   /** 판단기에게 보여 줄 대화 사본 — 도구 결과가 쌓이면 여기에도 붙는다 */
   const seen = [`## 사용자 발화\n${text}`];
+  /**
+   * ⚠️ **같은 호출을 두 번 하지 않는다.** 결과를 이미 줬는데도 판단기가 또 부르는 일이
+   *    실측 5회 중 1회 있었다(같은 `get_portfolio`). 프롬프트로 막으려 하지 말고
+   *    코드가 막는다 — 외부 API 호출이라 그대로 두면 **돈과 시간이 두 배**다.
+   * ★ 인자까지 합쳐 구분한다 — `get_candles` 를 종목 둘에 부르는 것은 **정당하다.**
+   */
+  const calledKeys = new Set();
 
   // ── ① 도구 바퀴: **스키마로 강제된 판단기**가 정한다 ─────────
   for (let round = 1; round <= MAX_ROUNDS; round += 1) {
     const decision = await decideTools(seen.join('\n\n'));
     if (decision.error) {
-      // 🔴 판단기가 죽어도 대화는 계속한다. 다만 **조용히** 계속하지 않는다
+      /**
+       * 🔴 판단기가 죽어도 대화는 계속한다. 다만 **조용히** 계속하지 않는다 — 두 곳에 알린다:
+       *   ① 사용자에게 `notice`
+       *   ② **답하는 모델에게도** — 안 알리면 모델은 도구가 없는 줄 모르고 **지어낸다.**
+       *     (피어 실측: 라이브에서 판단 호출이 10회 중 3회 실패했는데, 그때 답이 그냥
+       *      서술로 나와서 **사용자는 도구가 안 돌았다는 걸 몰랐다.**)
+       */
       decideFailed = decision.error;
       emit('notice', { text: `도구 판단에 실패해 도구 없이 답합니다: ${decision.error}` });
+      contents.push({
+        role: 'user',
+        parts: [{
+          text: '[시스템] 도구 호출 판단이 실패해 **이번 답에는 어떤 도구도 실행되지 않았습니다.**'
+            + ' 보유·시세·차트·뉴스 데이터가 **없습니다.** 추측해서 채우지 말고,'
+            + ' 데이터를 가져오지 못했다고 밝히고 다시 시도해 달라고 하세요.',
+        }],
+      });
       break;
     }
     if (!decision.tools.length) break;
@@ -536,6 +583,13 @@ async function chat({ message, emit, fx = null, contextNote = '' }) {
     contents.push({ role: 'model', parts: [{ text: '(도구 호출)' }] });
     const resultParts = [];
     for (const call of decision.tools.slice(0, MAX_CALLS_PER_ROUND)) {
+      const key = `${call.name}(${JSON.stringify(call.args)})`;
+      if (calledKeys.has(key)) {
+        // 조용히 건너뛰지 않는다 — 판단기가 왜 또 불렀는지 알 수 있어야 한다
+        logWarn('chat.duplicate_tool_skipped', { key });
+        continue;
+      }
+      calledKeys.add(key);
       const callId = crypto.randomUUID().slice(0, 8);
       toolCalls += 1;
       emit('tool_call', { id: callId, name: call.name, args: call.args });
@@ -552,6 +606,11 @@ async function chat({ message, emit, fx = null, contextNote = '' }) {
       const line = `[도구 결과] ${call.name}(${JSON.stringify(call.args)})\n${JSON.stringify(result).slice(0, 4000)}`;
       resultParts.push({ text: line });
       seen.push(line);
+    }
+    if (!resultParts.length) {
+      // 전부 중복이라 실행할 게 없었다 — 같은 판단이 반복될 뿐이니 여기서 멈춘다
+      logWarn('chat.round_all_duplicates', { round });
+      break;
     }
     contents.push({ role: 'user', parts: resultParts });
 
