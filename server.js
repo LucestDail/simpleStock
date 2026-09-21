@@ -42,6 +42,7 @@ const analyst = require('./server/analystService');
 const mcp = require('./server/mcpClient');
 const analystChat = require('./server/analystChat');
 const analystDream = require('./server/analystDream');
+const tape = require('./server/tickerTapeService');
 
 // 🔴 2026-09-21: 종전에는 토큰이 없으면 `requireAccessToken` 이 그냥 next() 했다(fail-open).
 //    설정 실수 한 번이 곧 전면 개방이었다. 이제 **없으면 무작위로 만들어 잠근다** —
@@ -180,6 +181,21 @@ app.post('/api/analyst/run', async (req, res) => {
 });
 
 /**
+ * 헤더 시세 테이프 — 환율·지수·원자재·코인.
+ * ⚠️ 토스가 아니라 Yahoo 다(토스는 종목만 준다). 무인증이라 캐시로 아껴 쓴다.
+ */
+app.get('/api/tape', async (req, res) => {
+  try {
+    const t = await tape.getTape({ force: req.query.force === 'true' });
+    // 🔴 몇 개를 못 받았는지 함께 준다 — 화면이 "없다" 와 "못 받았다" 를 구분해야 한다
+    return res.json({ items: t.items, failed: t.failed, cached: Boolean(t.cached), stale: Boolean(t.stale) });
+  } catch (e) {
+    logError('tape.failed', e, { requestId: req.requestId });
+    return res.status(502).json({ error: e.message || '시세 테이프를 불러오지 못했습니다.', items: [] });
+  }
+});
+
+/**
  * 애널리스트 채팅 — **SSE 스트리밍**.
  *
  * 🔴 사용자 지시: *"스트리밍 형태로 출력되어야 함. REST 형태로 안 나오게 주의"*
@@ -251,6 +267,30 @@ app.post('/api/analyst/dream', async (req, res) => {
     logError('dream.route_failed', e, { requestId: req.requestId });
     return res.status(500).json({ error: e.message || 'dreaming 실패' });
   }
+});
+
+/**
+ * 매매 분석을 텔레그램으로 보낸다(사용자 지시: *"매매 분석 및 시황 분석 / 텔레그램 발송"*).
+ * ⚠️ 분석을 **다시 돌리지 않는다** — 화면이 들고 있는 리포트를 그대로 보낸다.
+ *    다시 돌리면 화면과 폰의 내용이 달라져 "어느 쪽이 맞나" 가 된다.
+ * 🔴 기본이 dry-run 이다(`TELEGRAM_SEND_ENABLED`). 안 갔으면 **안 갔다고** 돌려준다.
+ */
+app.post('/api/analyst/telegram', async (req, res) => {
+  const r = req.body?.report;
+  if (!r || typeof r !== 'object') return res.status(400).json({ error: '보낼 리포트가 없습니다.' });
+  const lines = ['📋 매매 분석'];
+  if (r.marketView) lines.push('', r.marketView);
+  if (r.momentumRead) lines.push('', `[모멘텀] ${r.momentumRead}`);
+  for (const p of r.positions || []) {
+    lines.push('', `· ${p.symbol} ${p.stance}/${p.confidence} — ${p.rationale}`);
+  }
+  for (const c of r.created || []) {
+    lines.push('', `🟡 제안 ${c.side} ${c.symbol} ${c.quantity}주 @ ${c.price} (승인 대기)`);
+  }
+  if (r.dataGaps?.length) lines.push('', `못 본 것: ${r.dataGaps.join(' · ')}`);
+
+  const out = await telegram.send(lines.join('\n'), { reason: 'analyst' });
+  return res.json(out);
 });
 
 /** 대화 이력(화면 복원용). 스트리밍이 아니라 이건 REST 가 맞다 */

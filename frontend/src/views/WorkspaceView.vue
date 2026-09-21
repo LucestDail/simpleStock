@@ -173,12 +173,75 @@ async function onRefreshMarket() {
 const report = ref(null);
 const proposals = ref([]);
 const analystLoading = ref(false);
+/**
+ * 🔴 사용자: *"내부 분석시 **분석 상태 표시**"*
+ *    분석은 20~30초 걸린다(도구·LLM). 버튼만 "분석 중…" 이면 멈춘 것처럼 보인다.
+ *    ⚠️ 서버가 단계를 스트리밍하지 않으므로 **여기서 예상 단계를 돌린다** —
+ *       그래서 진짜 진행률이 아니라 **무엇을 하는 중인지**만 알린다(척하지 않는다).
+ */
+const analystStage = ref('');
+let stageTimer = null;
+const ANALYST_STAGES = ['보유·시세 수집', '일봉 분석', '웹 검색', '모델 판단', '제안 정리'];
+
+function startStages() {
+  let i = 0;
+  analystStage.value = ANALYST_STAGES[0];
+  stageTimer = setInterval(() => {
+    i = Math.min(i + 1, ANALYST_STAGES.length - 1);
+    analystStage.value = ANALYST_STAGES[i];
+  }, 6000);
+}
+function stopStages() {
+  if (stageTimer) clearInterval(stageTimer);
+  stageTimer = null;
+  analystStage.value = '';
+}
+
+const tgState = ref('');
+async function sendReportToTelegram() {
+  if (!report.value) return;
+  tgState.value = '보내는 중…';
+  try {
+    const res = await apiFetch('/api/analyst/telegram', {
+      method: 'POST',
+      body: JSON.stringify({ report: report.value }),
+    });
+    const b = await res.json().catch(() => ({}));
+    // 🔴 dry-run 을 "보냈다" 로 만들지 않는다 — 안 갔으면 안 갔다고 적는다
+    if (b.sent) tgState.value = '보냈습니다';
+    else if (b.dryRun) tgState.value = `보내지 않음 (${b.why || 'dry-run'})`;
+    else tgState.value = `실패: ${b.error || '알 수 없음'}`;
+  } catch (e) {
+    tgState.value = `실패: ${e.message}`;
+  }
+}
 const analystError = ref('');
 /**
  * my-computer MCP 웹검색 연계 상태.
  * 🔴 **"안 붙었다" 와 "붙었는데 결과가 없다" 는 다르다** — 상태를 보여주지 않으면
  *    둘 다 "뉴스 없음" 으로 똑같이 보인다(오늘 하루 종일 본 그 실패 모드).
  */
+/**
+ * 헤더 시세 테이프 (2026-09-21 사용자 지시).
+ * ⚠️ 60초마다만 받는다 — 서버가 무인증 Yahoo 를 29회 치므로 아껴 쓴다.
+ */
+const tape = ref({ items: [], failed: 0, stale: false });
+let tapeTimer = null;
+
+async function loadTape() {
+  try {
+    const res = await apiFetch('/api/tape');
+    if (res.ok) tape.value = await res.json();
+  } catch { /* 테이프가 없어도 화면은 돈다 */ }
+}
+
+function tapeNum(i) {
+  const n = Number(i.price);
+  if (!Number.isFinite(n)) return '-';
+  const body = n.toLocaleString('ko-KR', { minimumFractionDigits: i.digits, maximumFractionDigits: i.digits });
+  return `${i.prefix || ''}${body}${i.suffix || ''}`;
+}
+
 const mcpState = ref(null);
 
 /**
@@ -244,6 +307,9 @@ async function sendChat() {
       else if (event === 'thinking_delta') reply.thinking += data.text || '';
       else if (event === 'tool_call') reply.tools.push({ id: data.id, name: data.name, args: data.args, state: 'running' });
       else if (event === 'tool_result') {
+        // 🔴 채팅이 제안을 등록하면 **상단 HITL 목록**에 바로 뜨게 한다
+        //    (사용자 지시: "상단 HITL 에 토픽으로 등록"). 새로고침을 사람이 하게 두지 않는다.
+        if (data.name === 'propose_order' && data.ok) loadProposals();
         const t = reply.tools.find((x) => x.id === data.id);
         // ⚠️ 실패를 조용히 성공으로 만들지 않는다 — 화면에 그대로 남긴다
         if (t) { t.state = data.ok ? 'ok' : 'fail'; t.detail = data.ok ? data.preview : data.error; }
@@ -307,6 +373,8 @@ async function loadMcpStatus() {
 async function runAnalyst() {
   analystLoading.value = true;
   analystError.value = '';
+  tgState.value = '';
+  startStages();
   try {
     const res = await apiFetch('/api/analyst/run', {
       method: 'POST',
@@ -322,6 +390,7 @@ async function runAnalyst() {
     analystError.value = e.message || '분석 실패';
   } finally {
     analystLoading.value = false;
+    stopStages();
   }
 }
 
@@ -410,6 +479,24 @@ function rankLabel(key) {
  * 랭킹 탭. 🔴 **키가 사라져도 빈 화면이 되지 않게** 현재 탭을 항상 유효한 값으로 맞춘다
  *    (설정에서 국가·종류를 빼면 고르던 탭이 없어진다).
  */
+const rankQuery = ref('');
+
+/**
+ * 랭킹 검색. **두 가지를 겸한다**:
+ *  ① 목록 안에 있으면 그 줄을 골라 차트를 띄운다
+ *  ② 없으면 입력값을 **종목 코드로 보고** 그대로 차트를 띄운다
+ * ⚠️ ②가 없으면 "랭킹에 없는 종목은 못 본다" 가 되어 검색창의 뜻이 사라진다.
+ */
+function findSymbol() {
+  const q = rankQuery.value.trim();
+  if (!q) return;
+  const rows = activeRank.value?.rows || [];
+  const hit = rows.find((r) => r.symbol?.toLowerCase() === q.toLowerCase() || (r.name || '').includes(q));
+  if (hit) pickSymbol(hit.symbol, hit.name || hit.symbol);
+  else pickSymbol(q.toUpperCase(), q.toUpperCase());
+  rankQuery.value = '';
+}
+
 const rankTab = ref('');
 const rankKeys = computed(() => Object.keys(dash.value?.rankings || {}));
 const activeRank = computed(() => {
@@ -417,6 +504,16 @@ const activeRank = computed(() => {
   if (!keys.length) return null;
   const key = keys.includes(rankTab.value) ? rankTab.value : keys[0];
   return dash.value.rankings[key];
+});
+
+/** 검색어가 있으면 목록도 같이 좁힌다(찾는 중에 눈이 편하게) */
+const visibleRankRows = computed(() => {
+  const rows = activeRank.value?.rows || [];
+  const q = rankQuery.value.trim().toLowerCase();
+  if (!q) return rows.slice(0, 8);
+  return rows
+    .filter((r) => r.symbol?.toLowerCase().includes(q) || (r.name || '').toLowerCase().includes(q))
+    .slice(0, 8);
 });
 
 function partError(name) {
@@ -508,6 +605,8 @@ function openStream() {
 onMounted(async () => {
   loadChatHistory();
   loadMcpStatus();
+  loadTape();
+  tapeTimer = setInterval(loadTape, 60000);
   await load();
   await loadPortfolio();
   await loadDashboard();
@@ -524,6 +623,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (tapeTimer) clearInterval(tapeTimer);
   if (clockTimer) clearInterval(clockTimer);
   if (pollTimer) clearInterval(pollTimer);
   if (dashTimer) clearInterval(dashTimer);
@@ -573,6 +673,30 @@ onUnmounted(() => {
         </button>
       </div>
     </header>
+
+    <!--
+      ── 시세 테이프 (2026-09-21 사용자 지시: 좌→우 자동으로 흘러가게) ──
+      ⚠️ 같은 목록을 **두 벌** 깔아야 이음매 없이 순환한다(한 벌이면 끝에서 뚝 끊긴다).
+         두 번째 벌은 `aria-hidden` — 화면낭독기가 같은 걸 두 번 읽으면 안 된다.
+      🔴 못 받은 개수를 끝에 적는다 — 조용히 빠지면 "원래 없는 것" 으로 보인다.
+    -->
+    <div v-if="tape.items.length" class="tape" :class="{ 'tape--stale': tape.stale }">
+      <div class="tape__track">
+        <span
+          v-for="(i, n) in [...tape.items, ...tape.items]"
+          :key="`${n}-${i.symbol}`"
+          class="tape__item"
+          :aria-hidden="n >= tape.items.length ? 'true' : undefined"
+        >
+          <b class="tape__label">{{ i.label }}</b>
+          <span class="mono-num">{{ tapeNum(i) }}</span>
+          <span v-if="i.changePct !== null" class="mono-num" :class="signClass(i.changePct)">{{ pct(i.changePct) }}</span>
+          <!-- 전일종가가 없으면 0% 가 아니라 **모른다**고 적는다 -->
+          <span v-else class="tape__unknown">등락 모름</span>
+        </span>
+      </div>
+      <span v-if="tape.failed" class="tape__fail">{{ tape.failed }}개 못 받음</span>
+    </div>
 
     <p v-if="error" class="banner banner--error">{{ error }}</p>
 
@@ -673,6 +797,8 @@ onUnmounted(() => {
             </span>
           </div>
 
+          <!-- 🔴 **표만** 스크롤한다 — 요약은 위에 남는다 -->
+          <div class="holdings__scroll">
           <table class="holdings">
             <thead>
               <tr>
@@ -702,6 +828,7 @@ onUnmounted(() => {
               </tr>
             </tbody>
           </table>
+          </div>
         </template>
       </section>
     </div>
@@ -786,6 +913,15 @@ onUnmounted(() => {
               <h3 class="panel__h">랭킹</h3>
               <p v-if="partError('rankings')" class="panel__err">{{ partError('rankings').error }}</p>
               <template v-else>
+                <!--
+                  🔴 사용자: *"티커/한국 주식 검색창 제공 · 클릭시 좌측 차트 반응"*
+                  ⚠️ 이건 **거르는 칸이 아니라 찾는 칸**이다 — 랭킹에 없는 종목도
+                     코드를 넣으면 차트를 띄울 수 있어야 검색창의 뜻이 산다.
+                -->
+                <form class="rank__find" @submit.prevent="findSymbol">
+                  <input v-model="rankQuery" class="input input--xs" placeholder="티커·종목코드 (예: 005930)" />
+                  <button class="btn btn--xs btn--soft" type="submit" :disabled="!rankQuery.trim()">조회</button>
+                </form>
                 <div v-if="rankKeys.length" class="rank__tabs">
                   <button
                     v-for="k in rankKeys" :key="k"
@@ -803,7 +939,7 @@ onUnmounted(() => {
                       <tr><th class="rtable__n">#</th><th>종목</th><th class="rtable__r">등락률</th></tr>
                     </thead>
                     <tbody>
-                      <tr v-for="row in activeRank.rows.slice(0, 8)" :key="row.symbol">
+                      <tr v-for="row in visibleRankRows" :key="row.symbol">
                         <td class="rtable__n mono-num">{{ row.rank }}</td>
                         <td>
                           <!-- ⚠️ 이름이 없으면 코드를 보여준다(빈칸보다 낫다) -->
@@ -853,6 +989,10 @@ onUnmounted(() => {
             </span>
           </label>
 
+          <!-- 🔴 무엇을 하는 중인지 알린다 — 20~30초 동안 아무 표시가 없으면 멈춘 줄 안다 -->
+          <p v-if="analystLoading && analystStage" class="analyst__stage">
+            <span class="analyst__dot" aria-hidden="true"></span>{{ analystStage }}…
+          </p>
           <p v-if="analystError" class="banner banner--error">{{ analystError }}</p>
           <p v-else-if="!report" class="banner banner--empty">
             분석을 실행하면 시황·모멘텀 판단과 <b>매수/매도 제안</b>이 나옵니다.
@@ -864,6 +1004,10 @@ onUnmounted(() => {
               <template v-if="report.web.ok">웹 검색 {{ report.web.hits }}건 반영 · {{ report.web.tool }}</template>
               <template v-else>웹 검색 미반영 — {{ report.web.error }}</template>
             </p>
+            <div class="analyst__acts">
+              <button class="btn btn--xs btn--soft" @click="sendReportToTelegram">텔레그램 발송</button>
+              <span v-if="tgState" class="analyst__tg">{{ tgState }}</span>
+            </div>
             <p class="analyst__view">{{ report.marketView }}</p>
             <p class="analyst__mom">{{ report.momentumRead }}</p>
 
@@ -1006,8 +1150,16 @@ onUnmounted(() => {
   padding: var(--space-sm) var(--space-base) var(--space-base);
   background: var(--color-canvas);
   color: var(--color-ink);
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  /*
+    🔴 **grid 행을 세어 두지 않는다.** 종전에는 `grid-template-rows: auto auto minmax(0,1fr)`
+       였는데, 시세 테이프를 한 줄 추가하자 행이 밀려 **`.top` 이 1fr 을 가져가고**
+       상단이 화면 절반을 먹었다(좌측 관심 테마가 470px 로 늘어났다).
+       조건부 오류 배너까지 있어서 **자식 수가 그때그때 달라진다** — 세는 방식 자체가 약하다.
+    ⇒ flex 열로 바꾸고 **남는 높이는 본문(.layout)이 가져간다**고 한 곳에만 적는다.
+       이제 위에 무엇을 더 넣어도 안 밀린다.
+  */
+  display: flex;
+  flex-direction: column;
   gap: var(--space-sm);
 }
 
@@ -1116,9 +1268,47 @@ onUnmounted(() => {
   color: var(--color-body);
 }
 
+/* ── 시세 테이프 ─────────────────────────────────── */
+.tape {
+  position: relative; overflow: hidden; white-space: nowrap;
+  border-bottom: 1px solid var(--color-hairline);
+  background: var(--color-surface-sunken);
+  padding: 4px 0; font-size: var(--text-xs);
+}
+/* 값이 낡았으면 눈에 보이게 — 조용히 옛날 값을 보여주지 않는다 */
+.tape--stale { opacity: 0.55; }
+.tape__track {
+  display: inline-flex; gap: var(--space-lg); align-items: baseline;
+  /* 🔴 사용자 지시가 **좌→우**다. 뒤집으려면 `reverse` 한 단어만 지우면 된다. */
+  animation: tape-flow 90s linear infinite reverse;
+  will-change: transform;
+}
+/* 마우스를 올리면 멈춘다 — 흐르는 글자는 읽으려는 순간 지나간다 */
+.tape:hover .tape__track { animation-play-state: paused; }
+@keyframes tape-flow {
+  from { transform: translateX(0); }
+  /* 두 벌 중 한 벌만큼 밀면 원위치라 이음매가 안 보인다 */
+  to { transform: translateX(-50%); }
+}
+/* ⚠️ 움직임에 어지러움을 느끼는 사용자를 위해 멈춘다(접근성) */
+@media (prefers-reduced-motion: reduce) {
+  .tape__track { animation: none; }
+  .tape { overflow-x: auto; }
+}
+.tape__item { display: inline-flex; align-items: baseline; gap: 6px; }
+.tape__label { color: var(--color-muted); font-weight: 600; }
+.tape__unknown { color: var(--color-faint); font-size: var(--text-2xs); }
+.tape__fail {
+  position: absolute; right: 0; top: 0; bottom: 0; display: flex; align-items: center;
+  padding: 0 var(--space-sm); background: var(--color-surface-sunken);
+  color: var(--color-down); font-size: var(--text-2xs);
+}
+
 /* ── 레이아웃 ─────────────────────────────────────── */
 /* 데스크탑 3열 — 자산·차트 / 신호 / 브리핑. 각 열은 **자기 안에서** 스크롤한다 */
 .layout {
+  /* 남는 높이는 여기가 전부 가져간다(위 .tracker 주석 참조) */
+  flex: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px 340px;
   gap: var(--space-sm);
@@ -1270,8 +1460,17 @@ onUnmounted(() => {
 }
 
 /* ── 내 자산 ──────────────────────────────────────── */
+/*
+  🔴 2026-09-21 사용자 지시:
+     *"내 자산 현황 (2개 초과할 경우 해당 카드 내부에서 스크롤) · 종목 테이블만 스크롤 되고
+       height 고정 · 상단 평가금액/매입금액/평가손익/오늘 상단 고정으로 유지"*
+  ⇒ 카드 높이를 못박고 **표만** 스크롤시킨다. 요약(kpis)은 스크롤 밖이라 늘 보인다.
+  ⚠️ 카드가 늘어나면 옆 칸(관심 테마)과 높이가 어긋나 상단 전체가 들쭉날쭉해진다.
+*/
 .assets {
   flex: none;
+  height: 340px;
+  min-height: 0;
   background: var(--color-surface);
   border: 1px solid var(--color-hairline);
   border-left: 2px solid var(--color-primary-line);
@@ -1322,7 +1521,10 @@ onUnmounted(() => {
 .momentum__chip.up { background: var(--color-up-soft); }
 .momentum__chip.down { background: var(--color-down-soft); }
 
+/* 표만 스크롤 · 머리글은 붙어 있는다(스크롤해도 어느 열인지 잃지 않게) */
+.holdings__scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .holdings { width: 100%; border-collapse: collapse; font-size: var(--text-md); }
+.holdings thead th { position: sticky; top: 0; z-index: 1; background: var(--color-surface); }
 .holdings th {
   text-align: left; font-size: var(--text-2xs); font-weight: 600; letter-spacing: 0.06em;
   color: var(--color-faint); padding: 0 var(--space-sm) var(--space-xs);
@@ -1362,8 +1564,10 @@ onUnmounted(() => {
   .top { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
 }
 
+/* 🔴 사용자: *"관심 카테고리 / 관심 티커 **소형화** 제공"* — 상단은 자산이 주인공이다 */
 .strip {
   display: flex;
+  font-size: var(--text-xs);
   /* 🔴 줄바꿈 금지 — 카드가 아래로 떨어지면 상단 높이가 들쭉날쭉해진다(2026-09-21 지시) */
   flex-wrap: nowrap;
   gap: var(--space-sm);
@@ -1561,6 +1765,16 @@ onUnmounted(() => {
 }
 .addticker__query { min-width: 0; }
 
+.analyst__stage { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--text-2xs); color: var(--color-ai); }
+.analyst__dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--color-ai);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .analyst__dot { animation: none; } }
+.analyst__acts { display: flex; align-items: center; gap: var(--space-xs); }
+.analyst__tg { font-size: var(--text-2xs); color: var(--color-faint); }
+
 /* ── 애널리스트 채팅 ─────────────────────────────── */
 .chat {
   display: flex; flex-direction: column; gap: var(--space-sm);
@@ -1627,6 +1841,8 @@ a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
 .news__when { display: block; font-size: var(--text-2xs); color: var(--color-faint); }
 
 /* ── 랭킹 표 ──────────────────────────────────────── */
+.rank__find { display: flex; gap: 4px; margin-bottom: var(--space-xs); }
+.rank__find .input { flex: 1; min-width: 0; }
 .rank__tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: var(--space-xs); }
 .rank__tab {
   border: 0; background: var(--color-surface-sunken); color: var(--color-muted);

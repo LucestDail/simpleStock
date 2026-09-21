@@ -8,6 +8,7 @@ const { logInfo, logWarn, logError } = require('./logger');
 const toss = require('./tossClient');
 const tossPortfolio = require('./tossPortfolio');
 const mcp = require('./mcpClient');
+const orderService = require('./orderService');
 
 /**
  * 애널리스트 채팅 — 스트리밍 + 툴 콜링 (2026-09-21)
@@ -103,6 +104,30 @@ const TOOL_DECLARATIONS = [
     },
   },
   {
+    /**
+     * 🔴 **유일하게 쓰기 비슷한 도구다.** 사용자 지시(스크린샷):
+     *    *"상단 매매 분석 및 주식 관련 내용 발생시 상단 HITL 에 토픽으로 등록 ·
+     *      사용자 승인시 매수/매도 실행"*
+     * ⚠️ 그래도 **주문이 아니다** — `PENDING` 제안을 하나 만들 뿐이고,
+     *    승인·실행은 여전히 사람이 화면에서 누른다. 이 도구는 승인도 실행도 못 한다.
+     */
+    name: 'propose_order',
+    description:
+      '매수/매도 제안을 상단 HITL 목록에 등록한다. 주문이 아니라 **제안**이며 사람이 승인해야 한다.'
+      + ' 종목·방향·수량·지정가를 전부 확신할 때만 쓴다. 하나라도 모르면 쓰지 말고 사람에게 물어라.',
+    parameters: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: '종목 코드 또는 티커' },
+        side: { type: 'string', description: 'BUY 또는 SELL' },
+        quantity: { type: 'number', description: '수량(주). 매도는 보유 수량 이내' },
+        price: { type: 'number', description: '지정가' },
+        reason: { type: 'string', description: '왜 이 제안인지 한두 문장' },
+      },
+      required: ['symbol', 'side', 'quantity', 'price', 'reason'],
+    },
+  },
+  {
     name: 'recall',
     description: '과거 대화에서 관련된 내용을 찾아온다. 사용자가 전에 한 말·판단을 확인할 때 쓴다.',
     parameters: {
@@ -154,7 +179,9 @@ const SYSTEM_PROMPT = [
   '- 한국어로, 과장 없이 씁니다.',
   '',
   '## 🔴 주문은 내지 않습니다',
-  '매수/매도는 **제안까지만** 합니다. 실행은 사람이 승인합니다. 당신은 주문을 넣을 수 없습니다.',
+  '매수/매도가 필요하다고 판단되면 **제안으로 등록**됩니다(상단 HITL 목록).',
+  '그건 주문이 아닙니다 — **사람이 승인해야** 진행되고, 당신은 승인도 실행도 할 수 없습니다.',
+  '제안을 등록했으면 사용자에게 **"상단에서 승인해 달라"** 고 안내하세요.',
 ].join('\n');
 
 /**
@@ -218,6 +245,7 @@ function decidePrompt() {
     '    · 급등·급락·랭킹 → get_rankings',
     '    · 뉴스·최근 소식·전망 → web_search',
     '    · 예전에 한 얘기 → recall',
+    '    · 매수/매도를 **하자고 정했을 때** → propose_order (주문이 아니라 제안 등록이다)',
     '- 🔴 잡담·인사·감사이거나 **이미 `[도구 결과]` 로 받은 것**이면 `tools` 를 **빈 배열**로 둡니다.',
   ].join('\n');
 }
@@ -442,6 +470,26 @@ async function runTool(name, args = {}, ctx = {}) {
       const hit = r.results[0] || {};
       if (hit.error) return { ok: false, error: hit.error, kind: hit.kind };
       return { query: safe, text: String(hit.text || '').slice(0, 3000) };
+    }
+    case 'propose_order': {
+      // 🔴 빈칸이 있으면 `orderService` 가 거부한다 — 승인 화면이 주문 화면이 되면 안 된다
+      const r = orderService.propose(
+        {
+          symbol: args.symbol,
+          side: String(args.side || '').toUpperCase(),
+          type: 'LIMIT',
+          quantity: args.quantity,
+          price: args.price,
+          reason: args.reason,
+        },
+        { source: 'chat' }
+      );
+      if (!r.ok) return { ok: false, error: r.error, missing: r.missing };
+      return {
+        ok: true,
+        proposalId: r.proposal.id,
+        note: '상단 HITL 목록에 등록했습니다. **아직 주문이 아닙니다** — 사람이 승인해야 진행됩니다.',
+      };
     }
     case 'recall': {
       const hits = recall(String(args.query || ''));
