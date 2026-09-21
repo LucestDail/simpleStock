@@ -143,6 +143,12 @@ const rateSeen = new Map();
 const RATE_WARN_RATIO = Math.min(1, Math.max(0, Number(process.env.TOSS_RATE_WARN_RATIO) || 0.2));
 
 /**
+ * 이 한도 이하 그룹은 여유 경고를 내지 않는다. `ACCOUNT`(1)·소형 그룹이 대상 —
+ * **분모가 작으면 비율이 뜻을 잃는다.** ⚠️ 실제 429 는 이것과 무관하게 따로 드러난다.
+ */
+const MIN_LIMIT_TO_WARN = Math.max(0, Number(process.env.TOSS_RATE_MIN_LIMIT) || 2);
+
+/**
  * `X-RateLimit-*` 를 읽어 남긴다.
  * ⚠️ **없으면 조용히 넘어간다** — 헤더가 없는 것과 한도가 없는 것은 다르지만,
  *    여기서 그걸 오류로 다루면 멀쩡한 호출이 실패한다. 대신 `seen:false` 로 구분한다.
@@ -163,9 +169,28 @@ function noteRateLimitHeaders(path, res) {
   const bucket = group || bucketOf(path);
   const prev = rateSeen.get(bucket);
   const ratio = remaining / limit;
-  const low = ratio <= RATE_WARN_RATIO;
-  // 처음 보는 버킷이거나, 여유가 적거나, 잔여가 크게 바뀌었을 때만 남긴다
-  if (prev === undefined || low || Math.abs((prev.remaining ?? 0) - remaining) >= Math.max(1, limit * 0.25)) {
+  /**
+   * 🔴 **한도가 아주 작은 그룹은 구조적으로 늘 "낮다"** (2026-09-22).
+   *    `ACCOUNT` 는 한도 **1** 이라 한 번만 불러도 `0/1`(=ratio 0) 이고, 정상 동작인데 매번 경고다.
+   *    비율 임계로는 못 거른다 — 분모가 1~2면 **표현할 수 있는 비율이 0 아니면 1** 뿐이다.
+   */
+  const tinyLimit = limit <= MIN_LIMIT_TO_WARN;
+  /**
+   * 🔴 **소음의 진짜 원인은 임계가 아니라 "계속 운다" 였다.**
+   *    실측(pm2 05시 관측): `ratelimit_low` **158건이 전부 RANKING**, 실제 429 는 **0건**.
+   *    `RANKING` 은 한도 5 라 여유 1(=0.2)이 상시 상태인데 **호출할 때마다** 경고가 나갔다.
+   *    ⇒ **상태 전이**에서만 운다(정상→낮음). 낮은 채로 머무는 동안은 조용하고,
+   *      회복(`ratio > 임계*1.5`)하면 표시를 지워 **다음 하강이 새 사건**이 된다.
+   *    ★ 이 저장소가 이미 두 곳에서 쓴 규율이다(장마감 전이 · 모멘텀 돌파 + 히스테리시스).
+   * ⚠️ **429 가 실제로 나면 그건 따로 시끄럽다**(`kind:'rate-limited'`) — 여기서 조용해도 안 가려진다.
+   */
+  const low = !tinyLimit && ratio <= RATE_WARN_RATIO;
+  const wasLow = Boolean(prev?.low);
+  const enteredLow = low && !wasLow;
+  const recovered = wasLow && ratio > Math.min(1, RATE_WARN_RATIO * 1.5);
+  // 처음 보는 버킷이거나, **낮음으로 떨어진 순간**이거나, 잔여가 크게 바뀌었을 때만 남긴다
+  if (prev === undefined || enteredLow || recovered
+      || Math.abs((prev.remaining ?? 0) - remaining) >= Math.max(1, limit * 0.25)) {
     const payload = {
       group: group || null, bucket, limit, remaining, ratio: Number(ratio.toFixed(2)),
       // 🔴 분모를 같이 실어 보낸다 — 이 줄 하나로 "여유" 와 "안 불렀다" 가 갈린다
@@ -173,10 +198,17 @@ function noteRateLimitHeaders(path, res) {
       path: bucketOf(path),
       reset: res.headers.get('X-RateLimit-Reset') || null,
     };
-    if (low) logWarn('toss.ratelimit_low', payload);
-    else logInfo('toss.ratelimit', payload);
+    if (enteredLow) logWarn('toss.ratelimit_low', payload);
+    else logInfo('toss.ratelimit', { ...payload, low, tinyLimit, recovered });
   }
-  rateSeen.set(bucket, { limit, remaining, at: Date.now() });
+  /**
+   * 🔴 **걸쇠(latch)를 기억한다 — `low` 를 그대로 남기면 히스테리시스가 깨진다.**
+   *    임계(0.2)와 회복선(0.3) **사이**에서는 `low=false` 라, 그걸 저장하면 걸쇠가 풀리고
+   *    다시 0.2 로 내려갈 때 **새 사건처럼 또 운다**. 0.2↔0.25 를 오가면 매번 경고다.
+   *    ⇒ 회복선을 **넘어야** 풀린다(그래서 `recovered` 일 때만 false).
+   *    ★ 내 첫 구현이 정확히 이 버그였고 테스트가 잡았다.
+   */
+  rateSeen.set(bucket, { limit, remaining, low: recovered ? false : (low || wasLow), at: Date.now() });
 }
 
 /** 지금까지 본 버킷별 여유 — 운영 점검이 한 번에 보게 */
@@ -816,6 +848,8 @@ function _resetForTest() {
 module.exports = {
   BASE_URL,
   rateLimitSnapshot,
+  // ⚠️ 검증용 노출 — 이 로직은 네트워크 없이 재야 한다(소음 규율은 헤더만으로 판정된다)
+  noteRateLimitHeaders,
   tossGroupOf,
   TossError,
   isConfigured,
