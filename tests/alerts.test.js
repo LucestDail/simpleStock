@@ -1,5 +1,8 @@
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
+
+// 🔴 테스트 파일은 **병렬로** 돈다 — 설정을 공유하면 서로의 값을 덮어쓴다(경합은 초록불도 만든다)
+process.env.SETTINGS_FILE = require('node:path').join(require('node:os').tmpdir(), `ss-set-alerts-${process.pid}.json`);
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -238,7 +241,8 @@ test('🔴 force 는 돌리기만 한다 — 보내지 않는다', async () => {
 
 test('일부러 보내려면 send 를 **명시**해야 한다', async () => {
   delete process.env.ALERTS_ENABLED;
-  const a = freshAlerts();
+  // ⚠️ 조용시간을 끄지 않으면 **밤에 돌릴 때만** 실패한다(시계에 묶인 자가 된다)
+  const a = freshAlerts({ ALERTS_QUIET_FROM: '3', ALERTS_QUIET_TO: '3' });
   const r = await a.tick({ force: true, send: true });
   assert.equal(r.willSend, true);
   assert.ok(r.sent > 0, '명시했는데도 안 보냈다');
@@ -272,7 +276,24 @@ test('두 번째 틱의 0 은 "걸렀다" 라고 말한다', async () => {
 
 // ── 목표가·손절선 ──────────────────────────────────────────
 
-const QUIET_OFF = { ALERTS_ENABLED: 'true', ALERTS_MOVE_PCT: '99', ALERTS_INDEX_PCT: '999' };
+/**
+ * 🔴 **이 상수가 이름값을 못 하고 있었다** (2026-09-21 23시에 발각)
+ *
+ * 이름은 `QUIET_OFF` 인데 **조용시간 설정을 하나도 안 건드렸다.** 낮에 돌리면 어차피
+ * 조용시간이 아니라 **우연히 통과**했고, 23시에 돌리자 5건이 한꺼번에 실패했다 —
+ * 제품이 아니라 **자가 시계에 묶여 있었다.**
+ * ★ *"근거 라벨이 주장을 되풀이하면 용의자"* 의 이 파일 판본이다. 이름이 주장하는 것을
+ *   **실제로 하는지** 아래 자기검증 테스트가 확인한다.
+ *
+ * ⚠️ `FROM === TO` 면 `h >= 3 && h < 3` 이라 **절대 조용시간이 아니다**(0~24 는 그 반대다).
+ */
+const QUIET_OFF = {
+  ALERTS_ENABLED: 'true',
+  ALERTS_MOVE_PCT: '99',
+  ALERTS_INDEX_PCT: '999',
+  ALERTS_QUIET_FROM: '3',
+  ALERTS_QUIET_TO: '3',
+};
 
 test('🎯 목표가는 **통과할 때 한 번만** 알린다', async () => {
   const a = freshAlerts(QUIET_OFF, stubs({
@@ -428,4 +449,29 @@ test('알림 훅이 터져도 제안은 살아 있다 (곁가지가 본체를 �
   orders.onProposed(() => { throw new Error('텔레그램 죽음'); });
   const r = orders.propose({ symbol: '005930', side: 'BUY', type: 'LIMIT', quantity: 1, price: 100 });
   assert.equal(r.ok, true, '알림 실패가 제안을 되돌렸다');
+});
+
+/**
+ * 🔴 **자기검증: `QUIET_OFF` 가 이름값을 하는가**
+ *
+ * 23시에 5건이 실패하고서야 이 상수가 **조용시간을 전혀 안 끈다**는 걸 알았다.
+ * 낮에는 우연히 통과했으므로 **초록불이 아무것도 보장하지 않았다.**
+ * ⇒ 이름이 주장하는 것을 **실제로 하는지** 자가 확인한다. 안 그러면 다음 사람이 또 밤에 당한다.
+ */
+test('🔴 자기검증: QUIET_OFF 가 실제로 조용시간을 끈다 (시계에 안 묶인다)', async () => {
+  const a = freshAlerts(QUIET_OFF, stubs({
+    indices: [{ label: '테스트지수', changePct: 50 }],
+  }));
+  const r = await a.tick({ force: true, send: true });
+  assert.equal(r.quiet, false, '🔴 QUIET_OFF 인데 조용시간이다 — 이 상수는 이름만 그렇다');
+});
+
+/** 🔴 판별력 — 끄지 않으면 **실제로 조용해지는** 시각이 있는지(자가 무력하지 않은지) */
+test('🔴 자기검증: 조용시간을 켜면 정말 막힌다', async () => {
+  const a = freshAlerts({ ...QUIET_OFF, ALERTS_QUIET_FROM: '0', ALERTS_QUIET_TO: '24' }, stubs({
+    indices: [{ label: '테스트지수', changePct: 50 }],
+  }));
+  const r = await a.tick({ force: true, send: true });
+  assert.equal(r.quiet, true, '항상 조용시간인데 안 막혔다 — 위 테스트가 무의미해진다');
+  assert.equal(r.sent, 0, '조용시간인데 보냈다');
 });

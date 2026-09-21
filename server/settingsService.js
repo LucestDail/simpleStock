@@ -1,7 +1,16 @@
 const { readJson, writeJson, mutateStore } = require('./dataStore');
 const path = require('path');
 
-const SETTINGS_FILE = path.join(__dirname, '..', 'data', 'settings.json');
+/**
+ * 🔴 **테스트는 다른 파일을 써야 한다** (2026-09-21)
+ *
+ * `node --test` 는 테스트 **파일을 병렬로** 돌린다. 6개 파일이 이 설정을 함께 쓰고 있어서
+ * **서로의 값을 덮어썼고**, 알림 테스트 5건이 회차에 따라 실패했다.
+ * ⚠️ 더 나쁜 건 **그 전 회차가 "300 GREEN" 이었다는 것** — 경합은 초록불도 만든다.
+ *    *"테스트가 조용히 0건이 되는 것"* 과 같은 가족이다: **초록불을 믿을 수 없게 된다.**
+ * ⚠️ 그리고 테스트가 **실제 운영 설정 파일**을 건드리고 있었다(오늘 세 번째 데이터 오염이다).
+ */
+const SETTINGS_FILE = process.env.SETTINGS_FILE || path.join(__dirname, '..', 'data', 'settings.json');
 
 const AI_PRESETS = [
   {

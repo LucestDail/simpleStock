@@ -56,8 +56,88 @@ function onProposed(fn) {
   if (typeof fn === 'function') listeners.push(fn);
 }
 
-/** id → proposal. 메모리에만 둔다 — 재기동하면 사라지는 게 맞다(옛 시세의 제안은 위험하다) */
+/**
+ * id → proposal. **파일로 영속화한다** (2026-09-21 사용자 결정).
+ *
+ * ## 왜 바꿨나 — 종전 주석은 *"메모리에만 둔다, 재기동하면 사라지는 게 맞다"* 였다
+ *
+ * 그 이유(**옛 시세의 제안은 위험하다**)는 지금도 맞다. 하지만 실제로 겪은 문제는 반대쪽이었다:
+ * 배포로 컨테이너가 재시작되자 **승인 대기 제안이 사라졌고**, 그때 사용자 폰에는
+ * `[✅ 승인]` 버튼이 **그대로 남아 있었다.** 나중에 누르면 `제안을 찾을 수 없습니다` 다 —
+ * 판단은 유효한데 **실행 경로만 조용히 죽은** 상태다.
+ *
+ * ⇒ 영속화하되 **옛 시세 우려는 TTL 로 그대로 지킨다**: 복원할 때 **만료를 다시 판정**해
+ *    시간이 지난 것은 `PENDING` 이 아니라 `EXPIRED` 로 되살린다. **승인해도 실행되지 않는다.**
+ *    즉 "되살리는 것" 이 아니라 **"무슨 일이 있었는지 잃지 않는 것"** 이다.
+ *
+ * ⚠️ **감사 로그와 역할이 다르다.** 감사는 append-only 이고 *'일어난 일의 목록'* 이다.
+ *    이 파일은 *'지금 상태'* 라 통째로 덮어쓴다 — 둘을 한 파일에 섞지 않는다.
+ * ⚠️ **정본은 하나다** — 이 파일이 제안의 정본이고 감사에서 재구성하지 않는다
+ *    (my-computer Quartz 선례: 정본이 둘이 되면 어느 쪽이 맞는지 알 수 없다).
+ */
 const proposals = new Map();
+
+/** ⚠️ 테스트는 **다른 파일**을 써야 한다 — 안 그러면 테스트가 라이브 대기열을 건드린다 */
+const STORE_FILE = process.env.ORDERS_FILE || path.join(DATA_DIR, 'orders-proposals.json');
+/** 아주 오래된 것은 안 들고 있는다 — 상태 파일이 무한히 자라면 안 된다 */
+const KEEP_MS = Math.max(PROPOSAL_TTL_MS, Number(process.env.ORDERS_KEEP_MS) || 24 * 60 * 60_000);
+
+/**
+ * 🔴 **원자적으로 쓴다** — 쓰는 도중에 죽으면 반쪽 JSON 이 남고, 다음 기동에서
+ *    대기열을 통째로 못 읽는다(승인 대기가 조용히 사라지는 것과 같은 결과다).
+ */
+function persist() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const now = Date.now();
+    const rows = [...proposals.values()].filter((p) => now - Date.parse(p.createdAt || 0) < KEEP_MS);
+    const tmp = `${STORE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ v: 1, at: new Date().toISOString(), proposals: rows }, null, 1));
+    fs.renameSync(tmp, STORE_FILE);
+  } catch (e) {
+    // 저장 실패가 제안 자체를 막지는 않지만 **조용하지도 않다** — 다음 재기동에 사라진다는 뜻이다
+    logError('orders.persist_failed', e, { file: STORE_FILE });
+  }
+}
+
+/** 기동 시 복원. ⚠️ **읽기 실패로 서비스가 죽으면 안 된다** — 비어 있는 채로 뜬다 */
+function restore() {
+  let raw;
+  try {
+    raw = fs.readFileSync(STORE_FILE, 'utf8');
+  } catch (e) {
+    if (e.code !== 'ENOENT') logWarn('orders.restore_unreadable', { file: STORE_FILE, message: e.message });
+    return;
+  }
+  let rows;
+  try {
+    rows = JSON.parse(raw)?.proposals;
+  } catch (e) {
+    logWarn('orders.restore_corrupt', { file: STORE_FILE, message: e.message });
+    return;
+  }
+  if (!Array.isArray(rows)) return;
+
+  const now = Date.now();
+  let expired = 0;
+  for (const p of rows) {
+    if (!p?.id) continue;
+    /**
+     * 🔴 **만료를 다시 판정한다** — 이게 옛 주석의 우려("옛 시세의 제안은 위험하다")를
+     *    지키는 자리다. 시간이 지난 PENDING 은 **되살리지 않고 EXPIRED 로** 올린다.
+     */
+    if (p.status === 'PENDING' && isExpired(p, now)) { p.status = 'EXPIRED'; expired += 1; }
+    proposals.set(p.id, p);
+  }
+  // 🔴 복원하며 EXPIRED 로 올린 것을 **저장한다** — 안 하면 다음 기동에 또 PENDING 으로 읽힌다
+  if (expired) persist();
+  logInfo('orders.restored', {
+    total: proposals.size,
+    pending: [...proposals.values()].filter((x) => x.status === 'PENDING').length,
+    // ★ **되살리지 않은 개수를 함께 남긴다** — 0 이면 "복원이 안 됐나" 를 스스로 구분하게
+    expiredOnRestore: expired,
+  });
+}
 
 function audit(event, payload) {
   const line = JSON.stringify({ at: new Date().toISOString(), event, ...payload });
@@ -125,6 +205,7 @@ function propose(input = {}, { source = 'manual' } = {}) {
     result: null,
   };
   proposals.set(proposal.id, proposal);
+  persist();
   audit('proposed', { id: proposal.id, symbol, side, type, quantity, price, source });
   /**
    * 🔴 제안이 생기면 **밖으로 알린다**(텔레그램 승인 버튼).
@@ -160,11 +241,13 @@ function approve(id) {
   if (p.status !== 'PENDING') return { ok: false, error: `이미 ${p.status} 상태입니다.` };
   if (isExpired(p)) {
     p.status = 'EXPIRED';
+    persist();
     audit('expired', { id, symbol: p.symbol });
     return { ok: false, error: '제안이 만료되었습니다. 시세가 움직였으니 다시 산출하세요.' };
   }
   p.status = 'APPROVED';
   p.approvedAt = new Date().toISOString();
+  persist();
   audit('approved', { id, symbol: p.symbol, side: p.side, quantity: p.quantity, price: p.price });
   return { ok: true, proposal: p };
 }
@@ -173,6 +256,7 @@ function reject(id, reason = '') {
   const p = proposals.get(id);
   if (!p) return { ok: false, error: '제안을 찾을 수 없습니다.' };
   p.status = 'REJECTED';
+  persist();
   audit('rejected', { id, symbol: p.symbol, reason: String(reason).slice(0, 200) });
   return { ok: true, proposal: p };
 }
@@ -195,12 +279,14 @@ async function execute(id) {
   }
   if (isExpired(p)) {
     p.status = 'EXPIRED';
+    persist();
     audit('execute_blocked', { id, reason: 'expired' });
     return { ok: false, error: '승인 후 만료되었습니다. 다시 산출하세요.' };
   }
 
   if (!ORDERS_ENABLED || !ORDERS_LIVE) {
     p.status = 'DRY_RUN';
+    persist();
     p.executedAt = new Date().toISOString();
     p.result = {
       mode: 'dry-run',
@@ -221,6 +307,7 @@ async function execute(id) {
   //        전송 직전/직후 조회로 중복을 막는다
   //      · 첫 실주문은 **소액 1주 · 사람이 직접 · 1회**
   p.status = 'BLOCKED';
+  persist();
   p.result = { mode: 'not-implemented', note: '실거래 연결은 아직 만들지 않았습니다.' };
   audit('execute_not_implemented', { id, symbol: p.symbol });
   logWarn('orders.live_path_missing', { id });
@@ -240,12 +327,19 @@ function status() {
 }
 
 function _resetForTest() {
+  // ⚠️ 파일도 함께 지운다 — 안 그러면 회차가 서로에게 샌다
+  try { fs.unlinkSync(STORE_FILE); } catch { /* 없으면 그만 */ }
   proposals.clear();
   listeners.length = 0;
 }
 
+// 🔴 모듈이 로드될 때 **한 번** 복원한다(기동 시점)
+restore();
+
 module.exports = {
   propose,
+  _restoreForTest: restore,
+  _persistForTest: persist,
   onProposed,
   approve,
   reject,
