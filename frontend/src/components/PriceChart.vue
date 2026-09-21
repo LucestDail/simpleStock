@@ -161,7 +161,9 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
   padding: var(--space-base);
-  min-height: 230px;
+  /* 차트를 키운다(2026-09-21 지시) — 열이 남는 높이를 차트가 가져간다 */
+  flex: 1;
+  min-height: 420px;
 }
 .chart__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
 .chart__title { display: flex; align-items: baseline; gap: var(--space-sm); min-width: 0; }
@@ -174,7 +176,7 @@ onBeforeUnmount(() => {
   border-radius: var(--rounded-sm); cursor: pointer;
 }
 .chart__tab--on { background: var(--color-primary-soft); color: var(--color-primary); }
-.chart__canvas { flex: 1; min-height: 170px; }
+.chart__canvas { flex: 1; min-height: 340px; }
 .chart__empty, .chart__err {
   margin: auto; font-size: var(--text-md); color: var(--color-muted); text-align: center; padding: var(--space-lg);
 }

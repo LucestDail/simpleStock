@@ -332,7 +332,20 @@ async function getRankings({ type = 'TOP_GAINERS', country = 'KR', duration = '1
       rank: Number(x.rank) || null,
       symbol: String(x.symbol || ''),
       currency: x.currency || null,
-      // price 는 객체다(실측) — 소비하는 쪽에서 쓰기 쉽게 그대로 넘긴다
+      /**
+       * 🔴 등락률이 **`price.changeRate` 안에** 있고 **소수비율**이다(실측 '1.4416' = +144.17%).
+       *    오후에 보유 손익률에서 고친 **같은 100배 함정**이 여기서 재발할 자리였다.
+       *    ★ 작아서 그럴듯해 보이는 종류라("+1.44%") **틀린 줄도 모른다.**
+       *    ⚠️ 최상위 `rate` 는 **없다** — 엉뚱한 자리를 보면 "등락률이 안 온다" 로 읽힌다.
+       *    ⇒ **경계에서 한 번만** 퍼센트로 바꾼다. price 원본도 함께 남긴다.
+       */
+      changePct: (() => {
+        const v = x.price?.changeRate;
+        if (v == null || v === '') return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? Math.round(n * 100 * 100) / 100 : null;
+      })(),
+      lastPrice: x.price?.lastPrice != null ? Number(x.price.lastPrice) : null,
       price: x.price ?? null,
       volume: x.tradingVolume ?? null,
       amount: x.tradingAmount ?? null,

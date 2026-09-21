@@ -264,3 +264,29 @@ test('🔴 지어낸 랭킹 종류를 **보내기 전에** 막는다 (400 은 �
   // ⚠️ 급등·급락은 realtime 을 지원하지 않는다(실측 400)
   await assert.rejects(() => toss.getRankings({ type: 'TOP_GAINERS', duration: 'realtime' }), /realtime/);
 });
+
+test('🔴 랭킹 등락률도 소수비율이다 — 같은 100배 함정의 재발 자리', async () => {
+  /*
+   * 피어 실측: `price.changeRate: '1.4416'` = **+144.17%** (2.93/1.2 로 검산).
+   * 그대로 쓰면 화면에 "+1.44%" 로 뜬다 — 오후에 보유 손익률에서 고친 그 함정이다.
+   * ⚠️ 최상위 `rate` 는 **없다**. 엉뚱한 자리를 보면 "등락률이 안 온다" 로 읽힌다.
+   */
+  const toss = require('../server/tossClient');
+  const realFetch2 = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes('/oauth2/token')) {
+      return { ok: true, status: 200, headers: new Map(), json: async () => ({ access_token: 'A', expires_in: 86399 }) };
+    }
+    return {
+      ok: true, status: 200, headers: new Map(),
+      json: async () => ({ result: { rankedAt: 'now', rankings: [
+        { rank: 1, symbol: 'GLND', currency: 'USD',
+          price: { lastPrice: '2.93', basePrice: '1.2', changeRate: '1.4416' } },
+      ] } }),
+    };
+  };
+  const r = await toss.getRankings({ type: 'TOP_GAINERS', country: 'US' });
+  global.fetch = realFetch2;
+  assert.equal(r.rows[0].changePct, 144.16, `등락률이 ${r.rows[0].changePct} — 144.16 이어야 한다`);
+  assert.equal(r.rows[0].lastPrice, 2.93);
+});

@@ -30,9 +30,6 @@ const tickerInputs = ref({}); // groupId -> { query, market }
 const busy = ref(false);
 const refreshing = ref(false);
 
-const briefing = ref(null);
-const briefingLoading = ref(false);
-const briefingError = ref('');
 
 let clockTimer = null;
 let pollTimer = null;
@@ -172,6 +169,66 @@ async function onRefreshMarket() {
  * 조각마다 요청하면 토스 한도를 태운다.
  * ⚠️ 조각별 성패(`parts`)를 그대로 받아 **"없음" 과 "못 받음" 을 구분해 보여준다.**
  */
+const report = ref(null);
+const proposals = ref([]);
+const analystLoading = ref(false);
+const analystError = ref('');
+
+/** 시황 → 모멘텀 → 매매 제안. 🔴 제안은 **승인해야** 진행된다 */
+async function runAnalyst() {
+  analystLoading.value = true;
+  analystError.value = '';
+  try {
+    const res = await apiFetch('/api/analyst/run', { method: 'POST' });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error(b.error || `분석 실패 (${res.status})`);
+    }
+    report.value = await res.json();
+    await loadProposals();
+  } catch (e) {
+    analystError.value = e.message || '분석 실패';
+  } finally {
+    analystLoading.value = false;
+  }
+}
+
+async function loadProposals() {
+  try {
+    const res = await apiFetch('/api/orders/proposals');
+    if (res.ok) proposals.value = (await res.json()).proposals || [];
+  } catch {
+    // 조용히 넘기지 않는다 — 실패하면 목록이 비는데, 그건 "제안 없음" 과 다르다
+    analystError.value = '제안 목록을 불러오지 못했습니다.';
+  }
+}
+
+const STATUS_LABEL = {
+  PENDING: '승인 대기', APPROVED: '승인됨', REJECTED: '거절',
+  DRY_RUN: '모의 실행됨', EXPIRED: '만료', BLOCKED: '차단',
+};
+function statusLabel(p) {
+  return p.expired && p.status === 'PENDING' ? '만료' : STATUS_LABEL[p.status] || p.status;
+}
+
+async function decide(p, action) {
+  try {
+    const res = await apiFetch(`/api/orders/proposals/${encodeURIComponent(p.id)}/${action}`, { method: 'POST' });
+    const b = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      notify({ message: b.error || '처리 실패', tone: 'error' });
+      return;
+    }
+    if (action === 'execute') {
+      // ⚠️ 실제로 안 나갔다는 것을 **그대로** 말한다
+      notify({ message: b.proposal?.result?.note || '모의 실행했습니다(실제 주문 아님).', tone: 'info' });
+    }
+    await loadProposals();
+  } catch (e) {
+    notify({ message: e.message || '처리 실패', tone: 'error' });
+  }
+}
+
 const dash = ref(null);
 const dashError = ref('');
 const selected = ref({ symbol: '', name: '' });
@@ -280,36 +337,7 @@ function signClass(v) {
   return Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : 'flat';
 }
 
-async function loadLatestBriefing() {
-  try {
-    const res = await apiFetch('/api/briefing/latest');
-    if (res.ok) {
-      const data = await res.json();
-      briefing.value = data.report || null;
-    }
-  } catch {
-    // 무시
-  }
-}
 
-async function runBriefing() {
-  briefingLoading.value = true;
-  briefingError.value = '';
-  try {
-    const res = await apiFetch('/api/briefing/run', { method: 'POST' });
-    if (!res.ok) {
-      briefingError.value = await readApiError(res, '브리핑 생성 실패');
-      return;
-    }
-    const data = await res.json();
-    briefing.value = data.report || null;
-    notify({ message: '시장 브리핑을 생성했습니다.', tone: 'success' });
-  } catch (e) {
-    briefingError.value = e.message || '브리핑 생성 실패';
-  } finally {
-    briefingLoading.value = false;
-  }
-}
 
 function openStream() {
   try {
@@ -318,14 +346,6 @@ function openStream() {
       try {
         const data = JSON.parse(ev.data);
         if (data.watchlist) applyState(data.watchlist);
-      } catch {
-        /* ignore */
-      }
-    });
-    es.addEventListener('manager.report.created', (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
-        if (data.manager?.latestReport) briefing.value = data.manager.latestReport;
       } catch {
         /* ignore */
       }
@@ -340,9 +360,9 @@ function openStream() {
 
 onMounted(async () => {
   await load();
-  await loadLatestBriefing();
   await loadPortfolio();
   await loadDashboard();
+  await loadProposals();
   restartDashTimer();
   clockTimer = setInterval(() => {
     clock.value = formatMarketClock();
@@ -596,68 +616,83 @@ onUnmounted(() => {
           </div>
       </aside>
 
-      <!-- ── 브리핑: AI 레이어는 색으로 구분한다 ───────── -->
+      <!-- ── 매매 분석 + 제안 (브리핑 대체) ─────────────────── -->
       <aside class="layout__rail">
-        <section class="briefing">
-          <header class="briefing__head">
-            <div class="briefing__title">
-              <span class="briefing__badge">AI</span>
-              <h2>시장 브리핑</h2>
+        <section class="analyst">
+          <header class="analyst__head">
+            <div class="analyst__title">
+              <span class="analyst__badge">AI</span>
+              <h2>매매 분석</h2>
             </div>
-            <button
-              class="btn btn--ai"
-              :disabled="briefingLoading || totalTickers === 0"
-              @click="runBriefing"
-            >
-              {{ briefingLoading ? '생성 중…' : '브리핑 생성' }}
+            <button class="btn btn--ai" :disabled="analystLoading" @click="runAnalyst">
+              {{ analystLoading ? '분석 중…' : '분석 실행' }}
             </button>
           </header>
 
-          <p v-if="briefingError" class="banner banner--error">{{ briefingError }}</p>
-          <p v-else-if="!briefing" class="banner banner--empty">
-            {{ totalTickers === 0 ? '종목을 추가하면 시장 브리핑을 생성할 수 있습니다.' : '아직 생성된 브리핑이 없습니다.' }}
+          <p v-if="analystError" class="banner banner--error">{{ analystError }}</p>
+          <p v-else-if="!report" class="banner banner--empty">
+            분석을 실행하면 시황·모멘텀 판단과 <b>매수/매도 제안</b>이 나옵니다.
           </p>
 
-          <article v-else class="report">
-            <div class="report__meta">
-              <span class="report__date mono-num">{{ briefing.targetDate }}</span>
-              <!-- 🔴 이 값은 **우리가 요청한 모델 이름**이지 실제로 답한 모델이 아니다.
-                   호출은 osh-ai-gateway → OpenRouter 로 나가고, 사업자가 그때그때 다르다
-                   (게이트웨이 기록으로 확인: simpleStock 은 전부 backend=openrouter). -->
-              <!-- 게이트웨이가 x-llm-model/x-llm-provider 를 주면 **실제로 답한 것**을 보여준다.
-                   안 주면 "확인 불가" 다 — 요청 이름으로 메우면 처음 문제로 돌아간다. -->
-              <span v-if="briefing.servedBy" class="report__model" :title="`요청: ${briefing.model}`">
-                {{ briefing.servedBy.model || '모델 미상' }}
-                <template v-if="briefing.servedBy.provider"> · {{ briefing.servedBy.provider }}</template>
-              </span>
-              <span v-else class="report__model report__model--unknown" :title="`요청한 이름: ${briefing.model}. 게이트웨이가 실제 모델을 알려주지 않았습니다.`">
-                응답 모델 확인 불가 · 요청 {{ briefing.model }}
-              </span>
+          <template v-else>
+            <p class="analyst__view">{{ report.marketView }}</p>
+            <p class="analyst__mom">{{ report.momentumRead }}</p>
+
+            <!-- 🔴 제안 — 승인해야만 진행된다. 실행은 아직 no-op 이다 -->
+            <div v-if="proposals.length" class="props">
+              <h3 class="panel__h">매매 제안 <small>승인해야 진행됩니다</small></h3>
+              <article v-for="p in proposals" :key="p.id" class="prop" :class="`prop--${p.side.toLowerCase()}`">
+                <header class="prop__head">
+                  <span class="prop__side">{{ p.side === 'BUY' ? '매수' : '매도' }}</span>
+                  <span class="prop__sym">{{ p.symbol }}</span>
+                  <span class="prop__status">{{ statusLabel(p) }}</span>
+                </header>
+                <dl class="prop__grid">
+                  <div><dt>수량</dt><dd class="mono-num">{{ p.quantity }}</dd></div>
+                  <div><dt>지정가</dt><dd class="mono-num">{{ p.price }}</dd></div>
+                  <div><dt>평가금액</dt><dd class="mono-num">{{ (p.quantity * p.price).toLocaleString() }}</dd></div>
+                </dl>
+                <p class="prop__why">{{ p.reason }}</p>
+                <div v-if="p.status === 'PENDING'" class="prop__act">
+                  <button class="btn btn--sm" @click="decide(p, 'reject')">거절</button>
+                  <button class="btn btn--sm btn--primary" @click="decide(p, 'approve')">승인</button>
+                </div>
+                <div v-else-if="p.status === 'APPROVED'" class="prop__act">
+                  <!-- ⚠️ 실행해도 실제로는 나가지 않는다(no-op). 그 사실을 버튼에 적는다 -->
+                  <button class="btn btn--sm btn--soft" @click="decide(p, 'execute')">실행(모의)</button>
+                </div>
+                <p v-else-if="p.result" class="prop__note">{{ p.result.note }}</p>
+              </article>
             </div>
 
-            <p class="report__summary">{{ briefing.summary }}</p>
+            <div v-if="report.rejected?.length" class="props">
+              <h3 class="panel__h">버려진 제안</h3>
+              <!-- 🔴 조용히 버리지 않는다 — 왜 안 만들어졌는지 보여준다 -->
+              <p v-for="(r, i) in report.rejected" :key="i" class="prop__rej">
+                {{ r.symbol }} {{ r.side }} — {{ r.error }}
+              </p>
+            </div>
 
-            <p v-if="briefing.dailyObjective" class="report__outlook">{{ briefing.dailyObjective }}</p>
+            <div v-if="report.positions?.length" class="props">
+              <h3 class="panel__h">종목 판단</h3>
+              <article v-for="ps in report.positions" :key="ps.symbol" class="pos">
+                <header>
+                  <b>{{ ps.symbol }}</b>
+                  <span class="pos__stance" :class="`pos--${ps.stance.toLowerCase()}`">{{ ps.stance }}</span>
+                  <span class="pos__conf">{{ ps.confidence }}</span>
+                </header>
+                <p>{{ ps.rationale }}</p>
+                <ul><li v-for="(e, i) in ps.evidence" :key="i">{{ e }}</li></ul>
+                <p class="pos__risk">⚠ {{ ps.risk }}</p>
+              </article>
+            </div>
 
-            <div v-if="briefing.actionItems?.length" class="report__block">
-              <h3 class="report__h">관심종목 시그널</h3>
-              <ul class="report__list">
-                <li v-for="(s, i) in briefing.actionItems" :key="i">{{ s }}</li>
-              </ul>
+            <!-- ⚠️ 무엇을 못 봤는지 밝힌다 — 안 밝히면 "다 보고 판단했다" 로 읽힌다 -->
+            <div v-if="report.dataGaps?.length" class="gaps">
+              <h3 class="panel__h">이 분석이 못 본 것</h3>
+              <ul><li v-for="(g, i) in report.dataGaps" :key="i">{{ g }}</li></ul>
             </div>
-            <div v-if="briefing.riskChecks?.length" class="report__block report__block--risk">
-              <h3 class="report__h">리스크 체크</h3>
-              <ul class="report__list">
-                <li v-for="(s, i) in briefing.riskChecks" :key="i">{{ s }}</li>
-              </ul>
-            </div>
-            <div v-if="briefing.allocationNotes?.length" class="report__block">
-              <h3 class="report__h">테마 · 섹터 노트</h3>
-              <ul class="report__list">
-                <li v-for="(s, i) in briefing.allocationNotes" :key="i">{{ s }}</li>
-              </ul>
-            </div>
-          </article>
+          </template>
         </section>
       </aside>
     </div>
@@ -1022,8 +1057,11 @@ onUnmounted(() => {
 /* ── 관심 테마 스트립 (상단) ───────────────────────── */
 .strip {
   display: flex;
+  /* 🔴 줄바꿈 금지 — 카드가 아래로 떨어지면 상단 높이가 들쭉날쭉해진다(2026-09-21 지시) */
+  flex-wrap: nowrap;
   gap: var(--space-sm);
   overflow-x: auto;
+  overflow-y: hidden;
   padding-bottom: 2px;
   flex: none;
 }
@@ -1216,96 +1254,63 @@ onUnmounted(() => {
 }
 .addticker__query { min-width: 0; }
 
-/* ── 브리핑 (AI 레이어) ──────────────────────────── */
-.briefing {
+/* ── 매매 분석 ────────────────────────────────────── */
+.analyst {
   background: var(--color-surface);
   border: 1px solid var(--color-hairline);
   border-left: 2px solid var(--color-ai-line);
   border-radius: var(--rounded-lg);
-  padding: var(--space-md);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-base);
+  padding: var(--space-base);
+  display: flex; flex-direction: column; gap: var(--space-sm);
 }
-.briefing__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-sm);
+.analyst__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.analyst__title { display: flex; align-items: center; gap: var(--space-sm); }
+.analyst__title h2 { margin: 0; font-size: var(--text-base); font-weight: 700; color: var(--color-ink); }
+.analyst__badge {
+  font-size: var(--text-2xs); font-weight: 700; letter-spacing: 0.1em;
+  padding: 2px 6px; border-radius: var(--rounded-xs);
+  background: var(--color-ai-soft); color: var(--color-ai);
 }
-.briefing__title { display: flex; align-items: center; gap: var(--space-sm); }
-.briefing__title h2 { margin: 0; font-size: var(--text-lg); font-weight: 700; color: var(--color-ink); }
-.briefing__badge {
-  font-size: var(--text-2xs);
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  padding: 2px 6px;
-  border-radius: var(--rounded-xs);
-  background: var(--color-ai-soft);
-  color: var(--color-ai);
-}
-
-.report { display: flex; flex-direction: column; gap: var(--space-base); }
-.report__meta { display: flex; align-items: center; gap: var(--space-sm); font-size: var(--text-xs); }
-.report__date { color: var(--color-muted); }
-.report__model { color: var(--color-faint); }
-.report__model--unknown { color: var(--color-warn); }
-
-.report__summary {
-  margin: 0;
-  font-size: var(--text-md);
-  line-height: 1.7;
-  color: var(--color-body);
-  white-space: pre-wrap;
-}
-/* 모델의 '전망' 은 한 단계 들여 인용처럼 — 사실과 해석을 눈으로 가른다 */
-.report__outlook {
-  margin: 0;
-  padding: var(--space-sm) var(--space-base);
-  border-left: 2px solid var(--color-ai-line);
-  background: var(--color-ai-soft);
+.analyst__view { margin: 0; font-size: var(--text-md); line-height: 1.65; color: var(--color-body); }
+.analyst__mom {
+  margin: 0; padding: var(--space-sm) var(--space-base);
+  border-left: 2px solid var(--color-ai-line); background: var(--color-ai-soft);
   border-radius: 0 var(--rounded-sm) var(--rounded-sm) 0;
-  font-size: var(--text-md);
-  line-height: 1.65;
-  color: var(--color-body);
+  font-size: var(--text-md); line-height: 1.6; color: var(--color-body);
 }
+.props { display: flex; flex-direction: column; gap: var(--space-sm); }
+.prop {
+  border: 1px solid var(--color-hairline); border-radius: var(--rounded-md);
+  padding: var(--space-sm); display: flex; flex-direction: column; gap: 6px;
+  background: var(--color-surface-sunken);
+}
+.prop--buy { border-left: 3px solid var(--color-up); }
+.prop--sell { border-left: 3px solid var(--color-down); }
+.prop__head { display: flex; align-items: center; gap: 8px; font-size: var(--text-md); }
+.prop__side { font-weight: 700; color: var(--color-ink); }
+.prop__sym { color: var(--color-body); }
+.prop__status { margin-left: auto; font-size: var(--text-xs); color: var(--color-muted); }
+.prop__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 0; }
+.prop__grid dt { font-size: var(--text-2xs); color: var(--color-faint); }
+.prop__grid dd { margin: 0; font-size: var(--text-md); font-weight: 600; color: var(--color-ink); }
+.prop__why { margin: 0; font-size: var(--text-xs); color: var(--color-muted); line-height: 1.5; }
+.prop__act { display: flex; gap: 6px; justify-content: flex-end; }
+.prop__note { margin: 0; font-size: var(--text-xs); color: var(--color-warn); }
+.prop__rej { margin: 0; font-size: var(--text-xs); color: var(--color-down); }
+.pos { border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }
+.pos header { display: flex; align-items: center; gap: 8px; font-size: var(--text-md); color: var(--color-ink); }
+.pos__stance { font-size: var(--text-2xs); font-weight: 700; padding: 1px 6px; border-radius: var(--rounded-pill); }
+.pos--buy { background: var(--color-up-soft); color: var(--color-up); }
+.pos--sell { background: var(--color-down-soft); color: var(--color-down); }
+.pos--hold { background: var(--color-flat-soft); color: var(--color-muted); }
+.pos__conf { margin-left: auto; font-size: var(--text-2xs); color: var(--color-faint); }
+.pos p { margin: 4px 0; font-size: var(--text-xs); color: var(--color-body); line-height: 1.5; }
+.pos ul, .gaps ul { margin: 2px 0; padding-left: 16px; }
+.pos li, .gaps li { font-size: var(--text-xs); color: var(--color-muted); line-height: 1.5; }
+.pos__risk { color: var(--color-warn) !important; }
+.gaps { border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }
 
-.report__block { display: flex; flex-direction: column; gap: var(--space-sm); }
-.report__h {
-  margin: 0;
-  font-size: var(--text-xs);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--color-muted);
-  text-transform: none;
-}
-.report__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-}
-.report__list li {
-  position: relative;
-  padding-left: var(--space-base);
-  font-size: var(--text-md);
-  line-height: 1.6;
-  color: var(--color-body);
-}
-.report__list li::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 8px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--color-primary);
-}
-.report__block--risk .report__list li::before { background: var(--color-warn); }
-
+/* ── 브리핑 (AI 레이어) ──────────────────────────── */
 @media (max-width: 640px) {
   .tracker { padding: var(--space-base) var(--space-base) var(--space-xl); }
   .topbar { gap: var(--space-sm); }

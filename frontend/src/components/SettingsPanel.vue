@@ -220,21 +220,21 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
 
       <label class="sp__row">
         <span class="sp__label">
-          브리핑 추가 지시 (프롬프트)
+          매매 분석 추가 지시 (프롬프트)
           <em v-if="usingDefault.includes('briefingPrompt')">없음</em>
         </span>
         <textarea v-model="form.briefingPrompt" class="sp__area" rows="5"
           placeholder="예: 보유 비중과 환율 영향을 먼저 보고, 단기 대응보다 리스크를 우선해서 써 줘." />
-        <small>AI 브리핑을 쓸 때 <b>이 문장을 그대로</b> 따릅니다. 비워도 됩니다.</small>
+        <small>매매 분석 AI 가 <b>이 문장을 그대로</b> 따릅니다. 비워도 됩니다.</small>
       </label>
 
       <label class="sp__row">
         <span class="sp__label">
-          브리핑 자동 생성 주기 (cron)
+          분석 자동 실행 주기 (cron)
           <em v-if="usingDefault.includes('briefingCron')">없음</em>
         </span>
         <input v-model="form.briefingCron" type="text" placeholder="예: 0 9,15 * * 1-5" />
-        <small>비워 두면 자동으로 만들지 않습니다(버튼으로 직접 생성).</small>
+        <small>비워 두면 자동 실행하지 않습니다(버튼으로 직접).</small>
       </label>
 
       <footer class="sp__foot">

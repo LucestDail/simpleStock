@@ -38,6 +38,7 @@ const tossClient = require('./server/tossClient');
 const dashboardService = require('./server/dashboardService');
 const orderService = require('./server/orderService');
 const telegram = require('./server/telegramService');
+const analyst = require('./server/analystService');
 
 // 🔴 2026-09-21: 종전에는 토큰이 없으면 `requireAccessToken` 이 그냥 next() 했다(fail-open).
 //    설정 실수 한 번이 곧 전면 개방이었다. 이제 **없으면 무작위로 만들어 잠근다** —
@@ -142,6 +143,31 @@ app.get('/api/portfolio', async (req, res) => {
       error: error.message || '보유 현황을 불러오지 못했습니다.',
       kind: error.kind || 'unknown',
     });
+  }
+});
+
+// ── 매매 애널리스트 (시황 → 판단 → 제안) ──────────────────────
+app.post('/api/analyst/run', async (req, res) => {
+  if (!tossPortfolio.isEnabled()) {
+    return res.status(503).json({ error: '토스 연동이 설정되지 않았습니다.', configured: false });
+  }
+  try {
+    const mkt = getMarketSnapshot();
+    const rate = Number(mkt?.fx?.USDKRW?.rate) || 0;
+    const settings = getDashboardSettings();
+    const watch = getWatchlistState();
+    const dash = await dashboardService.build({
+      watchSymbols: (watch?.groups || []).flatMap((g) => (g.tickers || []).map((t) => t.symbol)),
+      fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || null } : null,
+      momentumPct: settings.momentumPct,
+      rankingTypes: settings.rankingTypes,
+      rankingCountries: settings.rankingCountries,
+    });
+    const report = await analyst.analyze(dash, { userInstruction: settings.briefingPrompt });
+    return res.json({ ...report, dashFailed: dash.failedCount, parts: dash.parts });
+  } catch (error) {
+    logError('analyst.failed', error, { requestId: req.requestId, kind: error.kind });
+    return res.status(502).json({ error: error.message || '분석에 실패했습니다.', kind: error.kind || 'unknown' });
   }
 });
 
