@@ -161,7 +161,13 @@ async function getToken({ force = false } = {}) {
 /**
  * @returns {Promise<any>} `result` 안쪽을 돌려준다
  */
-async function apiGet(path, { retriedAuth = false } = {}) {
+/**
+ * @param {object} opts
+ * @param {number} [opts.accountSeq] 계좌별 엔드포인트(보유·매수여력 등)에 필요한 헤더.
+ *   🔴 **`accountNo` 가 아니라 `accountSeq`(정수)** 다 — accountNo 를 넣으면
+ *   `account-not-found` 가 오는데, 그 문구만 보면 "계좌가 없다" 로 읽힌다(실제로는 형식 문제).
+ */
+async function apiGet(path, { retriedAuth = false, accountSeq = null } = {}) {
   const left = backoffActive(path);
   if (left > 0) {
     // 물러서는 중에 또 때리면 한도만 태운다. **조용히 빈 값을 주지 않는다**
@@ -174,8 +180,10 @@ async function apiGet(path, { retriedAuth = false } = {}) {
   const accessToken = await getToken();
   let res;
   try {
+    const headers = { Authorization: `Bearer ${accessToken}` };
+    if (accountSeq != null) headers['X-Tossinvest-Account'] = String(accountSeq);
     res = await fetch(`${BASE_URL}${path}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers,
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (e) {
@@ -187,7 +195,7 @@ async function apiGet(path, { retriedAuth = false } = {}) {
     // 토큰이 만료된 경우에만 한 번 다시 받는다(무한 재발급 금지)
     logInfo('toss.token.refresh_on_401', { path: bucketOf(path) });
     await getToken({ force: true });
-    return apiGet(path, { retriedAuth: true });
+    return apiGet(path, { retriedAuth: true, accountSeq });
   }
   if (res.status === 403) {
     throw new TossError(

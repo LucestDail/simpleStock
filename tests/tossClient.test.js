@@ -314,3 +314,108 @@ test('저장 스냅샷에도 providerDefault 가 실린다 (화면은 스냅샷�
   );
   assert.ok(/providers:/.test(snapshotBlock), '스냅샷에 providers 가 없다');
 });
+
+// ── 내 자산 (실계좌) ────────────────────────────────────────
+const portfolio = require('../server/tossPortfolio');
+
+function accountRoute(seq = 7) {
+  routes.set('/api/v1/accounts', () =>
+    res(200, { result: [{ accountNo: '123-456-7890', accountSeq: seq, accountType: 'BROKERAGE' }] })
+  );
+}
+function holdingsRoute(capture) {
+  routes.set('/api/v1/holdings', (url) => {
+    if (capture) capture(url);
+    return res(200, {
+      result: {
+        totalPurchaseAmount: { krw: '1000000', usd: '0' },
+        marketValue: { amount: { krw: '1120000', usd: '0' } },
+        profitLoss: { amount: { krw: '120000', usd: '0' }, rate: '12' },
+        dailyProfitLoss: { amount: { krw: '-30000', usd: '0' }, rate: '-2.6' },
+        items: [
+          { symbol: '005930', name: '삼성전자', marketCountry: 'KR', currency: 'KRW',
+            quantity: '3', lastPrice: '272500', averagePurchasePrice: '250000',
+            marketValue: { purchaseAmount: '750000', amount: '817500' },
+            profitLoss: { amount: '67500', rate: '9' },
+            dailyProfitLoss: { amount: '-12000', rate: '-4.2' } },
+          { symbol: 'QLD', name: 'ProShares Ultra QQQ', marketCountry: 'US', currency: 'USD',
+            quantity: '2', lastPrice: '91.72', averagePurchasePrice: '80',
+            marketValue: { purchaseAmount: '160', amount: '183.44' },
+            profitLoss: { amount: '23.44', rate: '14.65' },
+            dailyProfitLoss: { amount: '1.2', rate: '0.9' } },
+        ],
+      },
+    });
+  });
+}
+
+test('🔴 보유 조회는 accountNo 가 아니라 **accountSeq** 를 헤더에 넣는다', async () => {
+  // 실측: accountNo 를 넣으면 `account-not-found` 가 온다. 그 문구만 보면
+  // "계좌가 없다" 로 읽히는데 실제로는 **형식이 틀린 것**이다.
+  routes.set('/oauth2/token', () => okToken());
+  accountRoute(7);
+  let seenHeader = null;
+  const realFetchLocal = global.fetch;
+  global.fetch = async (url, init) => {
+    if (String(url).includes('/holdings')) seenHeader = init?.headers?.['X-Tossinvest-Account'];
+    return realFetchLocal(url, init);
+  };
+  holdingsRoute();
+  portfolio._resetForTest();
+  await portfolio.getHoldings();
+  global.fetch = realFetchLocal;
+  assert.equal(seenHeader, '7', `헤더가 ${seenHeader} 다 — accountSeq(7) 여야 한다`);
+});
+
+test('🔴 계좌번호를 밖으로 내보내지 않는다 (개인 금융정보)', async () => {
+  routes.set('/oauth2/token', () => okToken());
+  accountRoute(7);
+  holdingsRoute();
+  portfolio._resetForTest();
+  const acc = await portfolio.getAccount();
+  assert.ok(!('accountNo' in acc), 'accountNo 가 캐시에 담겼다 — 나갈 일이 없는 값이다');
+  const data = await portfolio.getHoldings();
+  assert.ok(!JSON.stringify(data).includes('123-456-7890'), '응답에 계좌번호가 섞였다');
+});
+
+test('문자열 금액을 숫자로 바꾸고 통화별로 나눠 담는다', async () => {
+  routes.set('/oauth2/token', () => okToken());
+  accountRoute();
+  holdingsRoute();
+  portfolio._resetForTest();
+  const { summary, items } = await portfolio.getHoldings();
+  assert.equal(summary.value.krw, 1120000);
+  assert.equal(summary.profitRate, 12);
+  assert.equal(summary.dailyProfit.krw, -30000);
+  assert.equal(items[0].quantity, 3);
+  assert.equal(items[1].avgPrice, 80);
+  assert.equal(typeof items[0].lastPrice, 'number');
+});
+
+test('계좌 목록은 캐시한다 (limit 이 1/초로 가장 좁다)', async () => {
+  routes.set('/oauth2/token', () => okToken());
+  let accCalls = 0;
+  routes.set('/api/v1/accounts', () => {
+    accCalls += 1;
+    return res(200, { result: [{ accountNo: 'x', accountSeq: 1, accountType: 'BROKERAGE' }] });
+  });
+  holdingsRoute();
+  portfolio._resetForTest();
+  await portfolio.getHoldings();
+  await portfolio.getHoldings();
+  assert.equal(accCalls, 1, `계좌를 ${accCalls}번 조회했다 — 한도가 1/초다`);
+});
+
+test('모멘텀은 임계값을 넘은 것만 고르고 **판단은 안 한다**', () => {
+  const items = [
+    { symbol: 'A', dailyRate: -4.2 },
+    { symbol: 'B', dailyRate: 0.9 },
+    { symbol: 'C', dailyRate: 7.1 },
+    { symbol: 'D', dailyRate: null },
+  ];
+  const picked = portfolio.pickMomentum(items, 3);
+  assert.deepEqual(picked.map((x) => x.symbol), ['C', 'A'], '절대값 큰 순서로 골라야 한다');
+  // ★ 자의 판별력 — 전부 고르지도, 아무것도 안 고르지도 않는다
+  assert.equal(portfolio.pickMomentum(items, 100).length, 0);
+  assert.equal(portfolio.pickMomentum(items, 0.5).length, 3, 'null 은 후보가 아니다');
+});

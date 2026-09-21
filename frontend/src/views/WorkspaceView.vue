@@ -165,6 +165,48 @@ async function onRefreshMarket() {
   }
 }
 
+const portfolio = ref(null);
+const portfolioError = ref('');
+const portfolioLoading = ref(false);
+
+/** 내 실제 보유 — 토스에서 **매번 읽는다**(저장하지 않는다) */
+async function loadPortfolio() {
+  portfolioLoading.value = true;
+  try {
+    const res = await apiFetch('/api/portfolio');
+    if (res.ok) {
+      portfolio.value = await res.json();
+      portfolioError.value = '';
+      return;
+    }
+    // 🔴 조용히 비우지 않는다 — 특히 ip-denied 는 화면에서 바로 알아야 고친다
+    const body = await res.json().catch(() => ({}));
+    portfolio.value = null;
+    portfolioError.value = body.error || `보유 현황을 불러오지 못했습니다 (${res.status})`;
+  } catch (e) {
+    portfolio.value = null;
+    portfolioError.value = e.message || '보유 현황을 불러오지 못했습니다.';
+  } finally {
+    portfolioLoading.value = false;
+  }
+}
+
+function money(v, cur) {
+  if (v == null) return '—';
+  return cur === 'USD'
+    ? `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `₩${Math.round(Number(v)).toLocaleString('ko-KR')}`;
+}
+function pct(v) {
+  if (v == null) return '—';
+  const n = Number(v);
+  return `${n > 0 ? '+' : ''}${n.toFixed(2)}%`;
+}
+function signClass(v) {
+  if (v == null) return 'flat';
+  return Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : 'flat';
+}
+
 async function loadLatestBriefing() {
   try {
     const res = await apiFetch('/api/briefing/latest');
@@ -226,11 +268,13 @@ function openStream() {
 onMounted(async () => {
   await load();
   await loadLatestBriefing();
+  await loadPortfolio();
   clockTimer = setInterval(() => {
     clock.value = formatMarketClock();
   }, 1000);
   pollTimer = setInterval(() => {
     load();
+    loadPortfolio();
   }, 20000); // 시세 신선도 유지
   openStream();
 });
@@ -289,6 +333,80 @@ onUnmounted(() => {
     <!-- ── 본문: 넓으면 보드 + 브리핑 나란히 ──────────── -->
     <div class="layout">
       <div class="layout__main">
+        <!-- ── 내 자산 (토스 실계좌) ───────────────────────────── -->
+        <section class="assets">
+          <header class="assets__head">
+            <div class="assets__title">
+              <span class="assets__badge">TOSS</span>
+              <h2>내 자산</h2>
+              <span v-if="portfolio?.items?.length" class="group__count mono-num">{{ portfolio.items.length }}</span>
+            </div>
+            <span v-if="portfolioLoading" class="assets__note">불러오는 중…</span>
+          </header>
+
+          <p v-if="portfolioError" class="banner banner--error">{{ portfolioError }}</p>
+          <p v-else-if="!portfolio" class="banner banner--empty">토스 연동을 설정하면 실제 보유가 표시됩니다.</p>
+
+          <template v-else>
+            <div class="kpis">
+              <div class="kpi">
+                <span class="kpi__label">평가금액</span>
+                <span class="kpi__value mono-num">{{ money(portfolio.summary.value.krw, 'KRW') }}</span>
+              </div>
+              <div class="kpi">
+                <span class="kpi__label">매입금액</span>
+                <span class="kpi__value kpi__value--sub mono-num">{{ money(portfolio.summary.purchase.krw, 'KRW') }}</span>
+              </div>
+              <div class="kpi">
+                <span class="kpi__label">평가손익</span>
+                <span class="kpi__value mono-num" :class="signClass(portfolio.summary.profit.krw)">
+                  {{ money(portfolio.summary.profit.krw, 'KRW') }}
+                  <small>{{ pct(portfolio.summary.profitRate) }}</small>
+                </span>
+              </div>
+              <div class="kpi">
+                <span class="kpi__label">오늘</span>
+                <span class="kpi__value mono-num" :class="signClass(portfolio.summary.dailyProfit.krw)">
+                  {{ money(portfolio.summary.dailyProfit.krw, 'KRW') }}
+                  <small>{{ pct(portfolio.summary.dailyRate) }}</small>
+                </span>
+              </div>
+            </div>
+
+            <!-- 모멘텀: 판단하지 않고 **고르기만** 한다 -->
+            <div v-if="portfolio.momentum?.length" class="momentum">
+              <span class="momentum__label">오늘 크게 움직임</span>
+              <span v-for="m in portfolio.momentum" :key="m.symbol" class="momentum__chip" :class="signClass(m.dailyRate)">
+                {{ m.name }} <b class="mono-num">{{ pct(m.dailyRate) }}</b>
+              </span>
+            </div>
+
+            <table class="holdings">
+              <thead>
+                <tr>
+                  <th>종목</th><th class="ta-r">수량</th><th class="ta-r">평단</th>
+                  <th class="ta-r">현재가</th><th class="ta-r">평가손익</th><th class="ta-r">오늘</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="h in portfolio.items" :key="h.symbol">
+                  <td>
+                    <span class="holdings__name">{{ h.name }}</span>
+                    <span class="holdings__meta">{{ h.market }} · {{ h.symbol }}</span>
+                  </td>
+                  <td class="ta-r mono-num">{{ h.quantity }}</td>
+                  <td class="ta-r mono-num">{{ money(h.avgPrice, h.currency) }}</td>
+                  <td class="ta-r mono-num">{{ money(h.lastPrice, h.currency) }}</td>
+                  <td class="ta-r mono-num" :class="signClass(h.profit)">
+                    {{ money(h.profit, h.currency) }} <small>{{ pct(h.profitRate) }}</small>
+                  </td>
+                  <td class="ta-r mono-num" :class="signClass(h.dailyRate)">{{ pct(h.dailyRate) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
+        </section>
+
         <div class="addgroup">
           <input
             v-model="newGroupName"
@@ -388,7 +506,12 @@ onUnmounted(() => {
           <article v-else class="report">
             <div class="report__meta">
               <span class="report__date mono-num">{{ briefing.targetDate }}</span>
-              <span class="report__model">{{ briefing.model }}</span>
+              <!-- 🔴 이 값은 **우리가 요청한 모델 이름**이지 실제로 답한 모델이 아니다.
+                   호출은 osh-ai-gateway → OpenRouter 로 나가고, 사업자가 그때그때 다르다
+                   (게이트웨이 기록으로 확인: simpleStock 은 전부 backend=openrouter). -->
+              <span class="report__model" :title="'요청한 모델 이름입니다. 실제 응답 모델은 게이트웨이(OpenRouter)가 정합니다.'">
+                요청 {{ briefing.model }} · osh-ai-gateway
+              </span>
             </div>
 
             <p class="report__summary">{{ briefing.summary }}</p>
@@ -703,6 +826,70 @@ onUnmounted(() => {
   text-align: center;
   color: var(--color-muted);
 }
+
+/* ── 내 자산 ──────────────────────────────────────── */
+.assets {
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline);
+  border-left: 2px solid var(--color-primary-line);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-base);
+}
+.assets__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.assets__title { display: flex; align-items: center; gap: var(--space-sm); }
+.assets__title h2 { margin: 0; font-size: var(--text-lg); font-weight: 700; color: var(--color-ink); }
+.assets__badge {
+  font-size: var(--text-2xs); font-weight: 700; letter-spacing: 0.1em;
+  padding: 2px 6px; border-radius: var(--rounded-xs);
+  background: var(--color-primary-soft); color: var(--color-primary);
+}
+.assets__note { font-size: var(--text-xs); color: var(--color-muted); }
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-sm);
+}
+.kpi {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: var(--space-base);
+  background: var(--color-surface-sunken);
+  border-radius: var(--rounded-md);
+}
+.kpi__label { font-size: var(--text-2xs); letter-spacing: 0.06em; color: var(--color-faint); }
+.kpi__value { font-size: var(--text-xl); font-weight: 700; color: var(--color-ink); }
+.kpi__value--sub { font-size: var(--text-lg); color: var(--color-body); font-weight: 600; }
+.kpi__value small { font-size: var(--text-sm); font-weight: 600; margin-left: 6px; opacity: 0.85; }
+.up { color: var(--color-up); }
+.down { color: var(--color-down); }
+.flat { color: var(--color-body); }
+
+.momentum { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
+.momentum__label { font-size: var(--text-xs); color: var(--color-muted); }
+.momentum__chip {
+  font-size: var(--text-sm);
+  padding: 3px 9px;
+  border-radius: var(--rounded-pill);
+  background: var(--color-flat-soft);
+}
+.momentum__chip.up { background: var(--color-up-soft); }
+.momentum__chip.down { background: var(--color-down-soft); }
+
+.holdings { width: 100%; border-collapse: collapse; font-size: var(--text-md); }
+.holdings th {
+  text-align: left; font-size: var(--text-2xs); font-weight: 600; letter-spacing: 0.06em;
+  color: var(--color-faint); padding: 0 var(--space-sm) var(--space-xs);
+  border-bottom: 1px solid var(--color-hairline-soft);
+}
+.holdings td { padding: var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); }
+.holdings tr:last-child td { border-bottom: none; }
+.holdings__name { display: block; font-weight: 600; color: var(--color-ink); }
+.holdings__meta { display: block; font-size: var(--text-xs); color: var(--color-faint); }
+.holdings small { font-size: var(--text-xs); opacity: 0.85; margin-left: 4px; }
+.ta-r { text-align: right; }
 
 /* ── 보드 ─────────────────────────────────────────── */
 .board {

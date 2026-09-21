@@ -33,6 +33,7 @@ const {
 
 const PORT = Number(process.env.PORT) || 50000;
 const SESSION = require('./server/session');
+const tossPortfolio = require('./server/tossPortfolio');
 
 // 🔴 2026-09-21: 종전에는 토큰이 없으면 `requireAccessToken` 이 그냥 next() 했다(fail-open).
 //    설정 실수 한 번이 곧 전면 개방이었다. 이제 **없으면 무작위로 만들어 잠근다** —
@@ -108,6 +109,32 @@ app.use((req, res, next) => {
 });
 
 app.use('/api', requireAccessToken);
+
+// ── 내 자산 (토스 실계좌) ─────────────────────────────────────
+// 🔴 저장하지 않는다 — 매번 증권사에서 읽는다. 사본을 만들면 백업으로 퍼지고,
+//    그게 09-01 에 portfolio.json 을 걷어낸 이유다.
+app.get('/api/portfolio', async (req, res) => {
+  if (!tossPortfolio.isEnabled()) {
+    return res.status(503).json({
+      error: '토스 연동이 설정되지 않았습니다(TOSS_CLIENT_ID/SECRET).',
+      configured: false,
+    });
+  }
+  try {
+    const data = await tossPortfolio.getHoldings();
+    return res.json({
+      ...data,
+      momentum: tossPortfolio.pickMomentum(data.items, Number(req.query.momentum) || 3),
+    });
+  } catch (error) {
+    // 실패 이유를 그대로 보여 준다 — 특히 ip-denied 는 화면에서 바로 알아야 고친다
+    logError('portfolio.failed', error, { requestId: req.requestId, kind: error.kind });
+    return res.status(error.kind === 'unconfigured' ? 503 : 502).json({
+      error: error.message || '보유 현황을 불러오지 못했습니다.',
+      kind: error.kind || 'unknown',
+    });
+  }
+});
 
 // ── 인증 ─────────────────────────────────────────────────────────
 // 토큰을 **한 번만** 제출하고 이후에는 httpOnly 쿠키로 다닌다.
