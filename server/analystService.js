@@ -358,7 +358,15 @@ function summarizeCandles(rows) {
  *
  * ⚠️ 손절이 진입과 **같거나 반대편**이면 계산 불가다 — 0 으로 두지 않고 `null` 과 이유를 남긴다.
  */
-function computeTrade({ side, entry, stop, target, riskBudget }) {
+/**
+ * @param {number} [costRate] 편도 수수료율(예: 0.001 = 0.1%). 주면 **비용 반영 손익비**를 함께 낸다.
+ *
+ * 🔴 종전 R/R 은 **수수료를 무시**했다. 왕복 0.2% 는 작은 폭 거래에서 손익비를 눈에 띄게 깎는다.
+ * ⚠️ **세금·제비용은 여전히 빠져 있다** — 토스 `/commissions` 가 `commissionRate` 하나만 주고
+ *    매수/매도 구분도 없다. 그래서 이름을 `rrAfterFee`(수수료 반영)로 두고
+ *    *"실제 비용"* 이라고 부르지 않는다. **모르는 것을 아는 척하지 않는다.**
+ */
+function computeTrade({ side, entry, stop, target, riskBudget, costRate }) {
   const e = Number(entry);
   const s2 = Number(stop);
   const t = Number(target);
@@ -377,6 +385,22 @@ function computeTrade({ side, entry, stop, target, riskBudget }) {
     const reward = isBuy ? t - e : e - t;
     out.rr = reward > 0 ? round2(reward / perShareRisk) : null;
     if (out.rr === null) out.rrNote = '목표가가 진입 대비 이익 방향이 아닙니다';
+    /**
+     * 🔴 **수수료를 반영한 손익비** — 종전 R/R 은 비용을 무시했다.
+     *    왕복 0.2% 는 폭이 좁은 거래에서 손익비를 눈에 띄게 깎는다.
+     * ⚠️ 이름이 `rrAfterFee` 인 이유: **세금·제비용은 여전히 빠져 있다**
+     *    (토스가 `commissionRate` 하나만 주고 매수/매도 구분도 없다).
+     *    *"실제 비용 반영"* 이라고 부르면 모르는 것을 아는 척하는 것이다.
+     */
+    const cr = Number(costRate);
+    if (Number.isFinite(cr) && cr > 0 && out.rr !== null) {
+      const roundTrip = (e + t) * cr;          // 진입·청산 양쪽 수수료
+      const netReward = reward - roundTrip;
+      const netRisk = perShareRisk + (e + s2) * cr;
+      out.rrAfterFee = netReward > 0 ? round2(netReward / netRisk) : null;
+      out.costRate = cr;
+      if (out.rrAfterFee === null) out.rrAfterFeeNote = '수수료를 빼면 이익이 남지 않습니다';
+    }
   }
   if (Number.isFinite(riskBudget) && riskBudget > 0) {
     out.riskBudget = Math.round(riskBudget);
@@ -668,13 +692,83 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     }
   }
 
+  /**
+   * 🔴 **수급** — `getInvestorTrading` 은 **구현·라우트까지 있는데** 프롬프트는
+   *    *"기관/외국인 수급 상세는 이 시스템에 없다"* 고 적고 있었다(세 군데).
+   *    모델에게 **없다고 말하고 쓸 수 있는 데이터를 안 준** 것이다.
+   * ⚠️ 보유 종목만 본다(최대 4) — 감시 11종까지 돌면 `STOCK_TRADING_TREND` 그룹을 태운다.
+   * ⚠️ 미국 종목은 빈 배열이 올 수 있다 — **"없다" 와 "못 받았다" 를 구분해 적는다.**
+   */
+  const flows = [];
+  for (const it of items.slice(0, 4)) {
+    try {
+      const rows = await toss.getInvestorTrading(it.symbol);
+      if (Array.isArray(rows) && rows.length) flows.push({ symbol: it.symbol, rows: rows.slice(0, 3) });
+      else flows.push({ symbol: it.symbol, empty: true });
+    } catch (e) {
+      flows.push({ symbol: it.symbol, error: e.message });
+      logWarn('analyst.flows_failed', { symbol: it.symbol, kind: e.kind, message: e.message });
+    }
+  }
+  const withFlows = flows.filter((f) => f.rows);
+  if (withFlows.length) {
+    lines.push('', '## 투자자별 매매동향 (최근)');
+    for (const f of withFlows) {
+      lines.push(`- ${f.symbol}: ${f.rows.map((r) => {
+        const net = (k) => {
+          const b = Number(r?.[k]?.buyAmount ?? r?.[k]?.buyVolume ?? 0);
+          const sl = Number(r?.[k]?.sellAmount ?? r?.[k]?.sellVolume ?? 0);
+          if (!Number.isFinite(b) || !Number.isFinite(sl)) return null;
+          return b - sl;
+        };
+        const parts = [['개인', net('individual')], ['외국인', net('foreigner')], ['기관', net('institution')]]
+          .filter(([, v]) => v != null)
+          .map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${(v / 1e8).toFixed(1)}억`);
+        return `${r.date || ''} ${parts.join('/')}`;
+      }).join(' · ')}`);
+    }
+    // 🔴 순매수 필드가 없어 **우리가 뺀 값**이라는 것을 밝힌다
+    lines.push('⚠️ 순매수는 매수−매도로 **우리가 계산**한 값이다(API 가 순매수를 주지 않는다).');
+  }
+  const flowGaps = flows.filter((f) => f.empty || f.error);
+  if (flowGaps.length) {
+    lines.push(`⚠️ 수급 없음/실패: ${flowGaps.map((f) => `${f.symbol}(${f.error ? '조회 실패' : '데이터 없음'})`).join(' · ')}`);
+  }
+
+  /**
+   * 🔴 **증시 상황** — 어제 "재무·성장성·모멘텀·**증시상황**" 네 축을 요구해 놓고
+   *    **지수를 하나도 안 줬다.** 그런데 테이프가 28종(나스닥·S&P·VIX·미국채30년·환율)을
+   *    이미 받고 있었다 — *"수집해 놓고 안 쓰는"* 것이 또 하나 있었다.
+   * ⚠️ 새 API 가 아니라 **이미 있는 것을 연결**한 것이다(비용 0).
+   * ⚠️ 토스 `market-indicators` 는 **국내 8종(KOSPI·KOSDAQ·국채)뿐**이라 쓰지 않았다 —
+   *    사용자는 국내 주식을 하지 않고, 나스닥·S&P 는 애초에 그 API 에 없다.
+   */
+  try {
+    /**
+     * ⚠️ `getTape()` 는 **async** 다 — 동기로 부르면 Promise 가 와서 `.items` 가 `undefined`,
+     *    그러면 이 절이 **조용히 통째로 빠진다**(오류도 안 난다). 처음에 그렇게 쓸 뻔했다.
+     */
+    const tape = await require('./tickerTapeService').getTape();
+    const tapeRows = [...(tape?.items || []), ...(tape?.fixed || [])];
+    const pick = tapeRows.filter((r) => r && r.changePct != null).slice(0, 14);
+    if (pick.length) {
+      lines.push('', '## 증시 상황 (지수·환율·변동성)');
+      lines.push(pick.map((r) => `${r.label} ${r.prefix || ''}${r.price ?? '-'}${r.suffix || ''} ${r.changePct > 0 ? '+' : ''}${Number(r.changePct).toFixed(2)}%`).join(' · '));
+      lines.push('⚠️ 이 값들은 **시장 전체**다. 종목 판단의 배경이지 그 자체가 매매 근거는 아니다.');
+    }
+  } catch (e) {
+    logWarn('analyst.tape_failed', { message: e.message });
+  }
+
   // 🔴 "없는 데이터" 는 **실제로 못 받은 것만** 적는다.
   //    검색이 붙었는데도 "뉴스 없음" 이라 적으면 모델이 있는 근거를 안 쓴다.
   const missingAxes = [
     '재무제표·매출/이익',
     'PER/PBR/EV·DCF',
     '애널리스트 목표가',
-    '기관/외국인 수급 상세',
+    // 🔴 '기관/외국인 수급 상세' 를 뺐다 — **토스가 준다**(`/stocks/{s}/investor-trading`).
+    //    구현·라우트까지 있는데 프롬프트는 *"없다"* 고 적고 있었다. 모델에게 없다고 말하고
+    //    쓸 수 있는 데이터를 안 준 셈이다(아래 '수급' 절에서 실제로 싣는다).
     '내부자 거래',
     '옵션 IV',
   ];
@@ -777,6 +871,28 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    *    ⚠️ 위험예산은 **사용자가 정한 비율**에서 나온다 — 내가 임의로 정하지 않는다.
    *       설정이 없으면 계산을 **안 한다**(0 으로 두면 "위험 없음" 처럼 보인다).
    */
+  /**
+   * 수수료율 — **한 번만** 받아 모든 종목이 나눠 쓴다.
+   * ⚠️ 실패하면 `null` 이고, 그러면 손익비에 **비용을 안 넣는다**(0 으로 치지 않는다).
+   * 🔴 유효기간을 적용한다 — 라이브에서 미국 요율 `endDate` 가 **오늘**이었다(프로모션 종료).
+   */
+  let fees = null;
+  try {
+    const rows = await toss.getCommissions();
+    fees = {};
+    for (const r of rows) if (r.rate?.num != null) fees[r.market] = r.rate.num;
+    const soon = rows.filter((r) => r.endsSoon);
+    if (soon.length) {
+      lines.push('', `⚠️ **곧 바뀌는 수수료율**: ${soon.map((r) => `${r.market} ${(r.rate.num * 100).toFixed(3)}% (~${r.endDate})`).join(' · ')}`);
+    }
+    if (Object.keys(fees).length) {
+      lines.push('', `## 수수료율 (편도)\n${Object.entries(fees).map(([k, v]) => `${k} ${(v * 100).toFixed(3)}%`).join(' · ')}`);
+      lines.push('⚠️ **세금·제비용은 빠져 있다** — 손익비의 `rrAfterFee` 는 *수수료만* 반영한 값이다.');
+    }
+  } catch (e) {
+    logWarn('analyst.commissions_failed', { kind: e.kind, message: e.message });
+  }
+
   const riskPct = Number(getDashboardSettings().riskPerTradePct);
   const accountKrw = Number(summary?.value?.krw) || 0;
   for (const ps of report.positions) {
@@ -790,7 +906,11 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       const krwBudget = accountKrw * (riskPct / 100);
       budget = held?.currency === 'USD' ? (fxRate > 0 ? krwBudget / fxRate : null) : krwBudget;
     }
-    const calc = computeTrade({ side: ps.stance, entry: ps.entry, stop: ps.stop, target: ps.target, riskBudget: budget });
+    const calc = computeTrade({
+      side: ps.stance, entry: ps.entry, stop: ps.stop, target: ps.target, riskBudget: budget,
+      // ⚠️ 통화가 아니라 **시장**으로 고른다(US/KR 요율이 다르다). 못 받았으면 안 넘긴다 — 0 으로 치지 않는다
+      costRate: fees?.[held?.currency === 'USD' ? 'US' : 'KR'] ?? undefined,
+    });
     ps.trade = { ...calc, currency: held?.currency || null };
   }
 

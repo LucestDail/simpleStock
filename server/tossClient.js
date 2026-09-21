@@ -522,6 +522,55 @@ async function getSellableQuantity(symbol, { accountSeq } = {}) {
   return { symbol: sym, quantity: decimal(r?.sellableQuantity) };
 }
 
+/**
+ * 공매도 동향. `STOCK_TRADING_TREND` 그룹.
+ * ⚠️ 국내 종목 위주다 — 미국 종목은 빈 배열이 올 수 있다(없는 것과 못 받은 것은 다르다).
+ */
+async function getShortSelling(symbol) {
+  const r = await apiGet(`/api/v1/stocks/${encodeURIComponent(symbol)}/short-selling`);
+  return Array.isArray(r?.records) ? r.records : (Array.isArray(r) ? r : []);
+}
+
+/**
+ * 매매 수수료율. **계좌 헤더 필수**(계좌마다 다를 수 있다).
+ *
+ * 🔴 **명세와 라이브가 다르다**(에이전트 실측): 명세는 무기한을 `endDate:null` 로 적는데
+ *    라이브 국내는 **`"9999-12-31"`** 문자열로 온다. `null` 만 보면 *"만료됐다"* 로 오판한다.
+ * 🔴 그리고 실측 미국 `endDate` 가 **측정 당일**이었다 — 프로모션 요율이 곧 끝난다는 뜻이고,
+ *    캐시해 두면 **조용히 틀린 수수료로 손익을 계산**하게 된다 ⇒ **유효기간을 반드시 적용**한다.
+ * ⚠️ 매수/매도 구분이 **없다**(단일 `commissionRate`). 세금·제비용도 없다 —
+ *    이걸로 낸 값은 **"수수료만 반영한 추정"** 이지 실제 비용이 아니다.
+ */
+async function getCommissions({ accountSeq } = {}) {
+  const r = await apiGet('/api/v1/commissions', { accountSeq });
+  const rows = Array.isArray(r) ? r : (Array.isArray(r?.commissions) ? r.commissions : []);
+  return pickLiveCommissions(rows);
+}
+
+/**
+ * 유효한 수수료율만 고른다. **순수 함수라 날짜를 넣어 검증할 수 있다.**
+ * @param {Array} rows 원본
+ * @param {string} [today] YYYY-MM-DD (테스트용)
+ * @param {number} [nowMs] 현재 시각 (테스트용)
+ */
+function pickLiveCommissions(rows, today = new Date().toISOString().slice(0, 10), nowMs = Date.now()) {
+  const FOREVER = '9999-12-31';
+  return (rows || []).filter((x) => {
+    // ⚠️ `9999-12-31` 도 `null` 도 **무기한**이다 — 둘 다 받아야 한다
+    const started = !x?.startDate || x.startDate <= today;
+    const notEnded = !x?.endDate || x.endDate === FOREVER || x.endDate >= today;
+    return started && notEnded;
+  }).map((x) => ({
+    market: String(x.marketCountry || '').toUpperCase(),
+    rate: decimal(x.commissionRate),
+    startDate: x.startDate ?? null,
+    endDate: x.endDate ?? null,
+    // 🔴 곧 끝나는 요율을 표시한다 — 캐시가 조용히 낡는 것을 막는다
+    endsSoon: Boolean(x.endDate && x.endDate !== FOREVER
+      && (Date.parse(`${x.endDate}T23:59:59+09:00`) - nowMs) < 7 * 24 * 3600_000),
+  }));
+}
+
 async function getInvestorTrading(symbol) {
   const r = await apiGet(`/api/v1/stocks/${encodeURIComponent(symbol)}/investor-trading`);
   return Array.isArray(r?.records) ? r.records : [];
@@ -584,6 +633,9 @@ module.exports = {
   getCandles,
   getBuyingPower,
   getSellableQuantity,
+  getShortSelling,
+  getCommissions,
+  pickLiveCommissions,
   getInvestorTrading,
   getPriceLimits,
   getStockInfo,
