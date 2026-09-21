@@ -103,6 +103,20 @@ async function answer(cbId, text) {
 }
 
 /** 버튼을 지운다 — 이미 처리된 제안에 버튼이 남아 있으면 두 번 누른다 */
+/**
+ * 🔴 **끝난 제안의 버튼을 지운다** (2026-09-21)
+ *
+ * 종전엔 버튼 제거가 **텔레그램 콜백 경로에만** 있었다. API·화면·만료로 끝난 제안은
+ * 폰에 `✅ 승인` 이 그대로 남아 **사용자가 아직 결정할 게 있다고 믿는다.**
+ * ⚠️ 실패해도 조용하지 않게 남긴다 — 다만 **상태 전이는 이미 끝났다**(곁가지다).
+ */
+async function clearProposalButtons(p, why = '') {
+  if (!p?.noticeMessageId) return { ok: false, why: 'no_message' };
+  const label = { approved: '✅ 승인됨', rejected: '✖️ 취소됨', expired: '⏳ 만료됨' }[why] || '처리됨';
+  await stripButtons(CHAT_ID, p.noticeMessageId, `${label} — ${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주`);
+  return { ok: true };
+}
+
 async function stripButtons(chatId, messageId, suffix) {
   try {
     await api('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
@@ -213,4 +227,5 @@ function _resetForTest() {
   consecutiveErrors = 0;
 }
 
-module.exports = { start, stop, status, isConfigured, sendProposal, handleCallback, pollOnce, _resetForTest };
+module.exports = {
+  clearProposalButtons, start, stop, status, isConfigured, sendProposal, handleCallback, pollOnce, _resetForTest };

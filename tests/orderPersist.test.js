@@ -153,3 +153,63 @@ test('🔴 상태를 바꾸는 함수는 모두 persist() 를 부른다', () => 
   assert.ok(checked >= 3, `🔴 검사한 함수가 ${checked}개뿐이다 — 자가 헛돈다`);
   assert.deepEqual(problems, [], `\n🔴 이 상태는 재기동에 사라진다:\n${problems.join('\n')}`);
 });
+
+/**
+ * 🔴 **끝난 제안은 폰의 버튼도 지운다** (2026-09-21)
+ *
+ * pm2 가 API 로 거절했는데 **사용자 폰의 `✅ 승인` 이 그대로 남아 있었다** —
+ * 버튼 제거가 **텔레그램 콜백 경로에만** 있었기 때문이다.
+ * 위험한 쪽이 아니라 **놓치는 쪽**이지만, 사용자는 **아직 결정할 게 남았다고 믿는다.**
+ */
+test('🔴 거절하면 정리 신호가 나간다 (폰 버튼을 지우라고)', () => {
+  const a = restart();
+  const { proposal } = a.propose(GOOD, { source: 'test', notify: false });
+  const settled = [];
+  a.onSettled((p, why) => settled.push([p.id, why]));
+  a.reject(proposal.id, '테스트');
+  assert.deepEqual(settled, [[proposal.id, 'rejected']], '🔴 정리 신호가 없다 — 폰 버튼이 살아남는다');
+});
+
+test('승인해도 정리 신호가 나간다 (중복 승인 방지)', () => {
+  const a = restart();
+  const { proposal } = a.propose(GOOD, { source: 'test', notify: false });
+  const settled = [];
+  a.onSettled((p, why) => settled.push(why));
+  a.approve(proposal.id);
+  assert.deepEqual(settled, ['approved']);
+});
+
+test('메시지 id 가 붙고 **재기동을 넘어 살아남는다** (그래야 나중에 지운다)', () => {
+  const a = restart();
+  const { proposal } = a.propose(GOOD, { source: 'test', notify: false });
+  assert.ok(a.attachNotice(proposal.id, { messageId: 12345 }).ok);
+
+  const b = restart();
+  const found = b.list().find((p) => p.id === proposal.id);
+  assert.equal(found.noticeMessageId, 12345, '🔴 재기동 뒤엔 버튼을 못 지운다');
+});
+
+/**
+ * 🔴 **점검용 무발송** — `notify:false` 면 승인 버튼이 안 간다.
+ * pm2 가 *"코드를 봤는데 안 보낸다"* 고 했지만 **실제로는 갔다** — 발송이 **리스너**에서
+ * 일어나 함수 본문만 봐서는 안 보였다. ★ **부작용이 이벤트로 나가면 본문만 보는 건 확인이 아니다.**
+ */
+test('🔴 notify:false 면 알림 리스너를 안 부른다 (점검이 폰을 안 울린다)', () => {
+  const a = restart();
+  const notified = [];
+  a.onProposed((p) => notified.push(p.id));
+  const r = a.propose(GOOD, { source: 'test', notify: false });
+  assert.ok(r.ok);
+  assert.deepEqual(notified, [], '🔴 점검인데 폰으로 승인 버튼이 갔다');
+  // ⚠️ 제안 **자체는** 만들어져야 한다 — 안 그러면 영속화를 검증할 수 없다
+  assert.equal(a.list().length, 1, '제안이 안 만들어지면 점검 자체가 불가능하다');
+});
+
+/** 🔴 판별력 — 기본값에서는 **반드시** 불려야 한다. 안 그러면 위 테스트가 공허하다 */
+test('🔴 자기검증: 기본값에서는 알림 리스너가 불린다', () => {
+  const a = restart();
+  const notified = [];
+  a.onProposed((p) => notified.push(p.id));
+  const r = a.propose(GOOD, { source: 'test' });
+  assert.deepEqual(notified, [r.proposal.id], '🔴 기본값인데 승인 버튼을 안 보낸다 — HITL 이 끊긴다');
+});

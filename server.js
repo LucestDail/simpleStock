@@ -556,7 +556,14 @@ app.get('/api/orders/proposals', (req, res) => {
 });
 
 app.post('/api/orders/proposals', (req, res) => {
-  const r = orderService.propose(req.body || {}, { source: String(req.body?.source || 'manual') });
+  /**
+   * 🔴 `{"notify": false}` 면 **폰의 승인 버튼을 안 보낸다**(점검용).
+   *    pm2 가 이 경로로 영속화를 검증하다 사용자 폰에 버튼을 보냈다 — 본인은 안 보내는 줄 알았다.
+   *    발송이 **리스너**에서 일어나 함수 본문만 봐서는 안 보이기 때문이다.
+   *    ⚠️ 기본은 **보낸다** — 사용자 지시를 바꾸지 않는다.
+   */
+  const notify = req.body?.notify !== false;
+  const r = orderService.propose(req.body || {}, { source: String(req.body?.source || 'manual'), notify });
   // 빠진 값을 400 으로 돌려준다 — **승인 화면에서 채우게 두지 않는다**
   return res.status(r.ok ? 201 : 400).json(r);
 });
@@ -933,6 +940,8 @@ async function startAiSchedule() {
   logInfo('alerts.mode', alerts.status());
   // 🔴 제안 → 텔레그램(승인 버튼). 알림이 꺼져 있으면 onProposal 이 스스로 건너뛴다
   orderService.onProposed((p) => alerts.onProposal(p));
+  // 🔴 끝난 제안은 **폰의 버튼도 지운다** — 안 지우면 사용자가 아직 결정할 게 있다고 믿는다
+  orderService.onSettled((p, why) => alerts.onProposalSettled(p, why));
   telegramBot.start();
   alerts.start();
 

@@ -425,11 +425,29 @@ function stop() {
  * 제안이 생기면 **즉시** 버튼과 함께 보낸다(주기 틱을 기다리지 않는다).
  * ⚠️ 조용한 시간에도 보낸다 — 사람이 기다리는 것이고, 제안에는 **유효기간**이 있다.
  */
+/**
+ * 제안이 끝났다 — **폰의 승인 버튼을 지운다.**
+ * ⚠️ 조용시간을 보지 않는다. 이건 새 알림이 아니라 **이미 보낸 것의 정리**다.
+ */
+async function onProposalSettled(p, why) {
+  try {
+    const r = await bot.clearProposalButtons(p, why);
+    logInfo('alerts.proposal_cleared', { id: p.id, why, cleared: Boolean(r.ok), reason: r.why || null });
+    return r;
+  } catch (e) {
+    // 🔴 버튼을 못 지워도 상태 전이는 끝났다 — 삼키되 **조용하지 않게**
+    logError('alerts.proposal_clear_failed', e, { id: p.id, why });
+    return { ok: false, error: e.message };
+  }
+}
+
 async function onProposal(p) {
   if (!ENABLED) return { ok: false, why: 'disabled' };
   try {
     const r = await bot.sendProposal(p);
-    logInfo('alerts.proposal_sent', { id: p.id, symbol: p.symbol, sent: Boolean(r.sent) });
+    // 🔴 메시지 id 를 제안에 붙인다 — **이게 없으면 나중에 버튼을 못 지운다**
+    if (r?.messageId != null) require('./orderService').attachNotice(p.id, { messageId: r.messageId });
+    logInfo('alerts.proposal_sent', { id: p.id, symbol: p.symbol, sent: Boolean(r.sent), messageId: r?.messageId ?? null });
     activity.record('proposal', `${p.side === 'BUY' ? '매수' : '매도'} 제안 ${p.symbol} ${p.quantity}주 @ ${p.price}`,
       { proposalId: p.id, symbol: p.symbol, side: p.side, telegram: Boolean(r.sent) });
     return r;
@@ -446,4 +464,5 @@ function _resetForTest() {
   sentCount = 0;
 }
 
-module.exports = { tick, start, stop, status, onProposal, isQuiet, STATE_FILE, _resetForTest };
+module.exports = {
+  onProposalSettled, tick, start, stop, status, onProposal, isQuiet, STATE_FILE, _resetForTest };

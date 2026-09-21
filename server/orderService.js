@@ -57,6 +57,45 @@ function onProposed(fn) {
 }
 
 /**
+ * 🔴 **제안이 끝났을 때** 부를 함수들(폰의 승인 버튼 지우기).
+ *
+ * pm2 가 API 로 거절했는데 **사용자 폰의 `✅ 승인` 버튼은 그대로 남아 있었다** —
+ * 버튼 제거가 **텔레그램 콜백 경로에만** 있었기 때문이다. 나중에 누르면
+ * `이미 REJECTED 상태입니다` 가 뜬다. 위험한 쪽이 아니라 **놓치는 쪽**이지만,
+ * 사용자는 **아직 결정할 게 남았다고 믿는다** — 그게 HITL 에서 나쁜 상태다.
+ *
+ * ⚠️ 여기서 텔레그램을 직접 부르지 않는다 — `onProposed` 와 같은 이유(순환 참조).
+ *    **알림은 곁가지다**: 버튼을 못 지워도 상태 전이는 이미 끝났다.
+ */
+const settledListeners = [];
+function onSettled(fn) {
+  if (typeof fn === 'function') settledListeners.push(fn);
+}
+
+/** 어떤 상태가 "끝" 인가 — PENDING 만 아직 사람을 기다린다 */
+function emitSettled(p, why) {
+  for (const fn of settledListeners) {
+    try {
+      Promise.resolve(fn(p, why)).catch((e) => logWarn('orders.settle_notify_failed', { message: e.message }));
+    } catch (e) {
+      logWarn('orders.settle_notify_failed', { message: e.message });
+    }
+  }
+}
+
+/**
+ * 제안 알림의 메시지 id 를 붙여 둔다 — **이게 없으면 버튼을 못 지운다.**
+ * ⚠️ 영속화된다(재기동 뒤에 거절해도 버튼이 지워지게).
+ */
+function attachNotice(id, { messageId } = {}) {
+  const p = proposals.get(id);
+  if (!p || messageId == null) return { ok: false };
+  p.noticeMessageId = messageId;
+  persist();
+  return { ok: true };
+}
+
+/**
  * id → proposal. **파일로 영속화한다** (2026-09-21 사용자 결정).
  *
  * ## 왜 바꿨나 — 종전 주석은 *"메모리에만 둔다, 재기동하면 사라지는 게 맞다"* 였다
@@ -130,7 +169,11 @@ function restore() {
     proposals.set(p.id, p);
   }
   // 🔴 복원하며 EXPIRED 로 올린 것을 **저장한다** — 안 하면 다음 기동에 또 PENDING 으로 읽힌다
-  if (expired) persist();
+  if (expired) {
+    persist();
+    // 🔴 재기동하며 만료된 것들의 **폰 버튼도 지운다** — 안 그러면 밤새 살아 있는 버튼이 남는다
+    for (const p of proposals.values()) if (p.status === 'EXPIRED' && p.noticeMessageId) emitSettled(p, 'expired');
+  }
   logInfo('orders.restored', {
     total: proposals.size,
     pending: [...proposals.values()].filter((x) => x.status === 'PENDING').length,
@@ -160,7 +203,21 @@ function num(v) {
  * 제안을 만든다. **빈칸이 있으면 만들지 않는다.**
  * @returns {{ok:true, proposal:object}|{ok:false, error:string, missing:string[]}}
  */
-function propose(input = {}, { source = 'manual' } = {}) {
+/**
+ * @param {object} opts
+ * @param {boolean} [opts.notify] 제안 알림(폰의 승인 버튼)을 보낼지. 기본 `true`.
+ *
+ * 🔴 **점검할 문을 낸다** (2026-09-21). pm2 가 영속화를 검증하며 이 경로로 제안을 만들었고
+ *    *"코드를 봤는데 텔레그램을 안 보낸다"* 고 보고했지만 **실제로는 사용자 폰에 승인 버튼이 갔다** —
+ *    발송이 `propose()` 본문이 아니라 **리스너**(`onProposed → alerts.onProposal`)에서 일어나기 때문이다.
+ *    ★ **부작용이 이벤트로 나가는 구조에서는 함수 본문만 봐서는 확인이 아니다.**
+ *
+ *    `analyst/run` 의 `dryRun` 과 같은 이유로 문을 낸다:
+ *    **검증할 수 없는 경로는 결국 검증 안 된 채로 배포된다.**
+ * ⚠️ 기본은 **보낸다** — 사용자 지시(*"승인 버튼 주고 사용자가 승인하면 진행"*)를 바꾸지 않는다.
+ * ⚠️ 제안 **자체는 만들어진다.** 안 보내는 것뿐이라 승인 대기 목록에는 뜬다.
+ */
+function propose(input = {}, { source = 'manual', notify = true } = {}) {
   const symbol = String(input.symbol || '').trim().toUpperCase();
   const side = String(input.side || '').trim().toUpperCase();
   const type = String(input.type || 'LIMIT').trim().toUpperCase();
@@ -213,7 +270,11 @@ function propose(input = {}, { source = 'manual' } = {}) {
    *    (alertService → telegramBot → orderService). 그래서 부를 때 가져온다.
    * ⚠️ 알림이 실패해도 **제안은 이미 만들어졌다** — 삼켜서 제안을 되돌리지 않는다.
    */
-  for (const fn of listeners) {
+  if (!notify) {
+    // 🔴 안 보낸 이유를 남긴다 — 나중에 "왜 버튼이 안 왔지" 를 겪지 않게
+    logInfo('orders.notify_skipped', { id: proposal.id, symbol, why: 'notify:false' });
+  }
+  for (const fn of notify ? listeners : []) {
     try {
       Promise.resolve(fn(proposal)).catch((e) => logWarn('orders.notify_failed', { message: e.message }));
     } catch (e) {
@@ -242,12 +303,14 @@ function approve(id) {
   if (isExpired(p)) {
     p.status = 'EXPIRED';
     persist();
+    emitSettled(p, 'expired');
     audit('expired', { id, symbol: p.symbol });
     return { ok: false, error: '제안이 만료되었습니다. 시세가 움직였으니 다시 산출하세요.' };
   }
   p.status = 'APPROVED';
   p.approvedAt = new Date().toISOString();
   persist();
+  emitSettled(p, 'approved');
   audit('approved', { id, symbol: p.symbol, side: p.side, quantity: p.quantity, price: p.price });
   return { ok: true, proposal: p };
 }
@@ -257,6 +320,7 @@ function reject(id, reason = '') {
   if (!p) return { ok: false, error: '제안을 찾을 수 없습니다.' };
   p.status = 'REJECTED';
   persist();
+  emitSettled(p, 'rejected');
   audit('rejected', { id, symbol: p.symbol, reason: String(reason).slice(0, 200) });
   return { ok: true, proposal: p };
 }
@@ -338,6 +402,8 @@ restore();
 
 module.exports = {
   propose,
+  onSettled,
+  attachNotice,
   _restoreForTest: restore,
   _persistForTest: persist,
   onProposed,
