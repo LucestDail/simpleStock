@@ -65,6 +65,41 @@ class TossError extends Error {
   }
 }
 
+/** 버킷별로 마지막에 본 잔여치 — 같은 값을 반복해 찍지 않으려고 들고 있는다 */
+const rateSeen = new Map();
+/** 이 밑으로 떨어지면 시끄럽게 — 기본 20% */
+const RATE_WARN_RATIO = Math.min(1, Math.max(0, Number(process.env.TOSS_RATE_WARN_RATIO) || 0.2));
+
+/**
+ * `X-RateLimit-*` 를 읽어 남긴다.
+ * ⚠️ **없으면 조용히 넘어간다** — 헤더가 없는 것과 한도가 없는 것은 다르지만,
+ *    여기서 그걸 오류로 다루면 멀쩡한 호출이 실패한다. 대신 `seen:false` 로 구분한다.
+ */
+function noteRateLimitHeaders(path, res) {
+  const limit = Number(res.headers.get('X-RateLimit-Limit'));
+  const remaining = Number(res.headers.get('X-RateLimit-Remaining'));
+  if (!Number.isFinite(limit) || !Number.isFinite(remaining) || limit <= 0) return;
+  const bucket = bucketOf(path);
+  const prev = rateSeen.get(bucket);
+  const ratio = remaining / limit;
+  const low = ratio <= RATE_WARN_RATIO;
+  // 처음 보는 버킷이거나, 여유가 적거나, 잔여가 크게 바뀌었을 때만 남긴다
+  if (prev === undefined || low || Math.abs((prev.remaining ?? 0) - remaining) >= Math.max(1, limit * 0.25)) {
+    const payload = {
+      bucket, limit, remaining, ratio: Number(ratio.toFixed(2)),
+      reset: res.headers.get('X-RateLimit-Reset') || null,
+    };
+    if (low) logWarn('toss.ratelimit_low', payload);
+    else logInfo('toss.ratelimit', payload);
+  }
+  rateSeen.set(bucket, { limit, remaining, at: Date.now() });
+}
+
+/** 지금까지 본 버킷별 여유 — 운영 점검이 한 번에 보게 */
+function rateLimitSnapshot() {
+  return Object.fromEntries([...rateSeen].map(([k, v]) => [k, { ...v }]));
+}
+
 function bucketOf(path) {
   return String(path).split('?')[0];
 }
@@ -219,6 +254,17 @@ async function apiGet(path, { retriedAuth = false, accountSeq = null } = {}) {
       { kind: 'ip-denied', status: 403, path: bucketOf(path) }
     );
   }
+  /**
+   * 🔴 **한도는 추정하지 말고 응답 헤더를 읽는다** (2026-09-22 명세에서 발견)
+   *
+   * 토스는 엔드포인트를 **Rate Limits Group** 17개로 묶고 `X-RateLimit-*` 헤더로
+   * 한도·잔여·리셋을 알려준다. 명세 원문: *"두 그룹의 한도 응답 헤더를 각각 확인하는 것을 권장"*.
+   * 종전엔 **헤더를 통째로 버려서** 호출 간격으로 역산하고 있었다 —
+   * 그건 실제 부하는 재도 **남은 여유는 못 잰다.**
+   * ⚠️ 매번 찍으면 로그가 넘친다 ⇒ **여유가 적을 때와 처음 볼 때만** 남긴다.
+   */
+  noteRateLimitHeaders(path, res);
+
   if (res.status === 429) {
     noteRateLimited(path);
     throw new TossError('토스 API 요청 제한(429)', { kind: 'rate-limited', status: 429, path: bucketOf(path) });
@@ -435,6 +481,7 @@ function _resetForTest() {
 
 module.exports = {
   BASE_URL,
+  rateLimitSnapshot,
   TossError,
   isConfigured,
   getToken,

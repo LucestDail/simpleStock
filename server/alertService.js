@@ -441,12 +441,31 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
        *    **내가 고른 41종목이 분석 빈도를 정한다.** 표시는 기본 꺼짐이다.
        */
       let watched = [];
-      try { watched = require('./watchlistService').getWatchedSymbols(); } catch { /* 없으면 빈 목록 */ }
+      try {
+        watched = require('./watchlistService').getWatchedSymbols();
+      } catch (e) {
+        /**
+         * 🔴 **조용히 삼키지 않는다** — 종전엔 빈 catch 라, 이게 던지면 감시 표시가
+         *    **통째로 무시되면서 아무 흔적이 없었다.** 사용자는 별을 켜 놓고
+         *    "왜 안 되지" 만 겪는다. *"버려지는 경로는 반드시 남긴다"* 를 내가 또 어겼다.
+         */
+        logWarn('analyst.trigger_watched_failed', { message: e.message });
+      }
       st.universe = trigger.trackUniverse(st.universe, items.map((i) => i.symbol), targeted, now, watched);
       const rows = await collectMomentumRows(st, st.universe, items, now);
       const d = trigger.decide({ now, sessions: sessionsFor(st.universe, now), symbols: rows, state: st.analyst || {} });
       st.analyst = d.state;
-      if (d.run && analystRunner) {
+      /**
+       * 🔴 **점검(dryRun)은 분석을 부르지 않는다** (2026-09-22)
+       *
+       * 종전엔 `tick({dryRun:true})` 가 알림만 막고 **분석은 그대로 돌렸다** —
+       * LLM 이 돌고 텔레그램·제안까지 나갈 수 있었다. 오늘 `analyst/run` 과
+       * `propose()` 에 문을 낸 것과 **같은 병이 세 번째**다.
+       * ⚠️ 판정은 그대로 하고 **실행만** 막는다 — 그래야 *"돌 뻔했는지"* 를 점검으로 볼 수 있다.
+       */
+      if (d.run && dryRun) {
+        logInfo('analyst.trigger_dry_run', { why: trigger.describe(d.reasons), reasons: d.reasons });
+      } else if (d.run && analystRunner) {
         if (analystRunning) {
           // 분석은 88초쯤 걸리고 틱은 5분이다 — 겹치면 **건너뛴다**(쌓아 두지 않는다)
           logWarn('analyst.trigger_skipped', { why: 'already_running', reasons: trigger.describe(d.reasons) });
