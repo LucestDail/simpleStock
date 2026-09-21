@@ -1,3 +1,4 @@
+const activity = require('./activityLog');
 const { logInfo, logWarn, logError } = require('./logger');
 const telegram = require('./telegramService');
 const orderService = require('./orderService');
@@ -150,6 +151,9 @@ async function handleCallback(cb) {
   await answer(cb.id, verb === 'ok' ? '승인했습니다' : '취소했습니다');
   await stripButtons(cb.message.chat.id, cb.message.message_id, note);
   logInfo('tgbot.callback', { verb, id, symbol: p.symbol });
+  activity.record(verb === 'ok' ? 'approval' : 'rejection',
+    `${verb === 'ok' ? '승인' : '취소'} — ${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주 (텔레그램)`,
+    { proposalId: p.id, symbol: p.symbol, via: 'telegram' });
   return { ok: true, verb, id };
 }
 

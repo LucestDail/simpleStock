@@ -51,8 +51,13 @@ const TAPE_SYMBOLS = [
   { symbol: 'SOXX', label: '반도체 SOXX', digits: 2, prefix: '$' },
   { symbol: '^VIX', label: 'VIX', digits: 2 },
 
-  // 환율
-  { symbol: 'USDKRW=X', label: '원/달러', digits: 2 },
+  /**
+   * 환율.
+   * 🔴 **원/달러는 테이프에 없다** — 헤더 오른쪽 **고정 칸**으로 뺐다
+   *    (2026-09-21 사용자: *"환율 보여주고 여기 보여주는 애들은 테이프에서 빼"*).
+   *    흐르는 값은 **지나가면 못 본다.** 늘 보고 싶은 것은 고정이 맞다.
+   *    ⇒ `FIXED_SYMBOLS` 로 따로 받는다(테이프와 **같은 캐시**를 쓴다 — 두 번 안 받는다).
+   */
   { symbol: 'JPYKRW=X', label: '엔/원', digits: 2, scale: 100, labelSuffix: '(100엔)' },
   { symbol: 'EURKRW=X', label: '유로/원', digits: 2 },
   { symbol: 'DX-Y.NYB', label: '달러인덱스', digits: 2 },
@@ -89,9 +94,12 @@ const TAPE_SYMBOLS = [
  *    다른 출처(금투협 채권정보센터·한국은행 ECOS)가 필요하고 **키 발급이 선행**이다.
  *    ⇒ 조용히 빼지 않고 여기 적어 둔다 — 다음 사람이 "왜 없지" 하고 다시 찾지 않게.
  */
+/** 헤더 **고정 칸**에 보일 것 — 흐르지 않는다 */
+const FIXED_SYMBOLS = [{ symbol: 'USDKRW=X', label: '원/달러', digits: 2 }];
+
 const UNAVAILABLE = ['국고채 2·3·5·10·20·30년 — 야후에 심볼 없음(ECOS 등 별도 출처 필요)'];
 
-let cache = { at: 0, items: [], failed: 0 };
+let cache = { at: 0, items: [], fixed: [], failed: 0 };
 let inflight = null;
 
 async function fetchOne(spec) {
@@ -141,15 +149,19 @@ async function getTape({ force = false } = {}) {
      *    던지면 차단당하기 쉽다. 8개씩 끊어 받는다(전체 소요는 여전히 1초대).
      */
     const settled = [];
-    for (let i = 0; i < TAPE_SYMBOLS.length; i += 8) {
-      const part = await Promise.allSettled(TAPE_SYMBOLS.slice(i, i + 8).map(fetchOne));
+    const ALL = [...FIXED_SYMBOLS, ...TAPE_SYMBOLS];
+    for (let i = 0; i < ALL.length; i += 8) {
+      const part = await Promise.allSettled(ALL.slice(i, i + 8).map(fetchOne));
       settled.push(...part);
     }
     const items = [];
     const failures = [];
+    const ALL2 = [...FIXED_SYMBOLS, ...TAPE_SYMBOLS];
+    const fixed = [];
     settled.forEach((r, i) => {
-      if (r.status === 'fulfilled') items.push(r.value);
-      else failures.push({ symbol: TAPE_SYMBOLS[i].symbol, error: String(r.reason?.message || r.reason).slice(0, 120) });
+      const isFixed = i < FIXED_SYMBOLS.length;
+      if (r.status === 'fulfilled') (isFixed ? fixed : items).push(r.value);
+      else failures.push({ symbol: ALL2[i].symbol, error: String(r.reason?.message || r.reason).slice(0, 120) });
     });
 
     if (!items.length && cache.items.length) {
@@ -159,7 +171,7 @@ async function getTape({ force = false } = {}) {
       return { ...cache, cached: true, stale: true, failed: failures.length };
     }
 
-    cache = { at: Date.now(), items, failed: failures.length };
+    cache = { at: Date.now(), items, fixed, failed: failures.length };
     if (failures.length) logWarn('tape.partial', { ok: items.length, failed: failures.length, failures });
     logInfo('tape.refresh', { ok: items.length, failed: failures.length, durationMs: Date.now() - started });
     inflight = null;
@@ -170,8 +182,8 @@ async function getTape({ force = false } = {}) {
 }
 
 function _resetForTest() {
-  cache = { at: 0, items: [], failed: 0 };
+  cache = { at: 0, items: [], fixed: [], failed: 0 };
   inflight = null;
 }
 
-module.exports = { getTape, TAPE_SYMBOLS, UNAVAILABLE, _resetForTest };
+module.exports = { getTape, TAPE_SYMBOLS, FIXED_SYMBOLS, UNAVAILABLE, _resetForTest };

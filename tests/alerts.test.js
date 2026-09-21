@@ -19,6 +19,13 @@ const path = require('node:path');
  */
 
 process.env.ALERTS_STATE_FILE = path.join(os.tmpdir(), `ssalerts-${process.pid}.json`);
+/**
+ * 🔴 **활동 기록도 갈라 쓴다.** 첫 판은 이걸 안 해서 테스트 알림이 **실제 `data/activity.jsonl`
+ *    에 58건** 쌓였고, 화면 타임라인에 "솔라나 +50%" 같은 **가짜 기록**이 떴다.
+ *    오늘 채팅·dreaming 에서 이미 같은 실수를 했는데 **세 번째**다 —
+ *    새 저장소를 만들 때마다 테스트 경로를 갈라야 한다.
+ */
+process.env.ACTIVITY_FILE = path.join(os.tmpdir(), `ssact-${process.pid}.jsonl`);
 process.env.TELEGRAM_BOT_TOKEN = 'TEST_TOKEN';
 process.env.TELEGRAM_CHAT_ID = '999';
 
@@ -27,7 +34,7 @@ let sent = [];
 
 function freshAlerts(env = {}) {
   for (const k of Object.keys(require.cache)) {
-    if (/alertService|telegramBot|telegramService|tickerTapeService|tossPortfolio|tossClient/.test(k)) delete require.cache[k];
+    if (/alertService|telegramBot|telegramService|tickerTapeService|tossPortfolio|tossClient|activityLog/.test(k)) delete require.cache[k];
   }
   Object.assign(process.env, env);
   return require('../server/alertService');
@@ -56,7 +63,9 @@ beforeEach(() => {
 });
 afterEach(() => {
   global.fetch = realFetch;
-  if (fs.existsSync(process.env.ALERTS_STATE_FILE)) fs.rmSync(process.env.ALERTS_STATE_FILE);
+  for (const f of [process.env.ALERTS_STATE_FILE, process.env.ACTIVITY_FILE]) {
+    if (f && fs.existsSync(f)) fs.rmSync(f);
+  }
 });
 
 // ── ① 권한: 승인 버튼 ────────────────────────────────────────

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import PriceChart from '../components/PriceChart.vue';
 import SettingsPanel from '../components/SettingsPanel.vue';
 import { useWatchlist } from '../composables/useWatchlist';
@@ -7,6 +7,7 @@ import { useUi } from '../composables/useUi';
 import { formatMarketClock } from '../lib/marketClock';
 import { heatmapStyleFromChangePct, formatChangePct } from '../lib/heatmapColor';
 import { readSse } from '../lib/sse';
+import { renderMarkdown } from '../lib/markdown';
 import { apiFetch, apiStreamUrl, readApiError } from '../lib/apiClient';
 
 const {
@@ -195,6 +196,29 @@ function stopStages() {
   if (stageTimer) clearInterval(stageTimer);
   stageTimer = null;
   analystStage.value = '';
+}
+
+/**
+ * 활동 타임라인 (2026-09-21 사용자: *"자동 텔레그램 알림과 애널리스트의 모든 분석 기록들이
+ * **시간순**으로 나와야 하는데"*).
+ * ⚠️ 종전에는 분석 결과가 **화면 메모리에만** 있어 새로고침하면 사라졌고,
+ *    알림은 로그 파일에만 있어 사람이 못 봤다. 서버가 한 시간축으로 모은다.
+ */
+const activity = ref([]);
+let activityTimer = null;
+
+async function loadActivity() {
+  try {
+    const res = await apiFetch('/api/activity?limit=60');
+    if (res.ok) activity.value = (await res.json()).items || [];
+  } catch { /* 타임라인이 없어도 화면은 돈다 */ }
+}
+
+const ACT_ICON = { analysis: '🧭', alert: '📈', proposal: '🟡', approval: '✅', rejection: '✖️', order: '📦' };
+function actTime(at) {
+  try {
+    return new Date(at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch { return at; }
 }
 
 const tgState = ref('');
@@ -402,7 +426,6 @@ async function loadNews() {
     news.value = { loading: false, ok: false, items: [], error: e.message || '뉴스 오류', when: null };
   }
 }
-const useWebSearch = ref(true);
 
 async function loadMcpStatus() {
   try {
@@ -420,16 +443,14 @@ async function runAnalyst() {
   tgState.value = '';
   startStages();
   try {
-    const res = await apiFetch('/api/analyst/run', {
-      method: 'POST',
-      body: JSON.stringify({ useWebSearch: useWebSearch.value }),
-    });
+    const res = await apiFetch('/api/analyst/run', { method: 'POST' });
     if (!res.ok) {
       const b = await res.json().catch(() => ({}));
       throw new Error(b.error || `분석 실패 (${res.status})`);
     }
     report.value = await res.json();
     await loadProposals();
+    await loadActivity();
   } catch (e) {
     analystError.value = e.message || '분석 실패';
   } finally {
@@ -523,6 +544,20 @@ function rankLabel(key) {
  * 랭킹 탭. 🔴 **키가 사라져도 빈 화면이 되지 않게** 현재 탭을 항상 유효한 값으로 맞춘다
  *    (설정에서 국가·종류를 빼면 고르던 탭이 없어진다).
  */
+/**
+ * 관심 테마 페이징 (2026-09-21 사용자 지시).
+ * ⚠️ 한 쪽에 몇 개를 넣을지는 **열 폭에 달렸다** — 상수로 박으면 좁은 화면에서 잘린다.
+ *    지금 열이 좁으므로(전체의 15%) 한 쪽에 하나가 맞다. 넓어지면 여기만 고친다.
+ */
+const GROUPS_PER_PAGE = 1;
+const groupPage = ref(0);
+const groupPages = computed(() => Math.max(1, Math.ceil(groups.value.length / GROUPS_PER_PAGE)));
+const pagedGroups = computed(() =>
+  groups.value.slice(groupPage.value * GROUPS_PER_PAGE, (groupPage.value + 1) * GROUPS_PER_PAGE)
+);
+// 🔴 테마를 지우면 현재 쪽이 범위를 벗어난다 — 그러면 **빈 화면**이 된다
+watch(groupPages, (n) => { if (groupPage.value >= n) groupPage.value = Math.max(0, n - 1); });
+
 const rankQuery = ref('');
 
 /**
@@ -531,14 +566,39 @@ const rankQuery = ref('');
  *  ② 없으면 입력값을 **종목 코드로 보고** 그대로 차트를 띄운다
  * ⚠️ ②가 없으면 "랭킹에 없는 종목은 못 본다" 가 되어 검색창의 뜻이 사라진다.
  */
-function findSymbol() {
+const findBusy = ref(false);
+const findError = ref('');
+
+/**
+ * 종목 검색. 🔴 사용자: *"삼성전자 검색하면 안뜨는데 **이름으로도** 검색할수 있게"*
+ *
+ * ⚠️ 앞판은 입력값을 **그대로 종목 코드로** 썼다 — `005930` 은 되고 `삼성전자` 는 안 됐다
+ *    (한글을 티커로 보내니 당연히 없다). 그게 "안 뜬다" 의 정체다.
+ * ⇒ ①목록 안에서 먼저 찾고 ②없으면 서버 `/api/lookup`(코드 → 이름 순) 에 맡긴다.
+ */
+async function findSymbol() {
   const q = rankQuery.value.trim();
-  if (!q) return;
-  const rows = activeRank.value?.rows || [];
-  const hit = rows.find((r) => r.symbol?.toLowerCase() === q.toLowerCase() || (r.name || '').includes(q));
-  if (hit) pickSymbol(hit.symbol, hit.name || hit.symbol);
-  else pickSymbol(q.toUpperCase(), q.toUpperCase());
-  rankQuery.value = '';
+  if (!q || findBusy.value) return;
+  findError.value = '';
+
+  const hit = (activeRank.value?.rows || []).find(
+    (r) => r.symbol?.toLowerCase() === q.toLowerCase() || (r.name || '').includes(q)
+  );
+  if (hit) { pickSymbol(hit.symbol, hit.name || hit.symbol); rankQuery.value = ''; return; }
+
+  findBusy.value = true;
+  try {
+    const res = await apiFetch(`/api/lookup?q=${encodeURIComponent(q)}`);
+    const b = await res.json().catch(() => ({}));
+    if (!res.ok || !b.ok) throw new Error(b.error || `'${q}' 를 찾지 못했습니다.`);
+    pickSymbol(b.symbol, b.name || b.symbol);
+    rankQuery.value = '';
+  } catch (e) {
+    // 🔴 조용히 실패하지 않는다 — 앞판은 엉뚱한 코드로 차트를 열어 "빈 차트" 로 보였다
+    findError.value = e.message;
+  } finally {
+    findBusy.value = false;
+  }
 }
 
 const rankTab = ref('');
@@ -651,6 +711,8 @@ onMounted(async () => {
   loadMcpStatus();
   loadTape();
   tapeTimer = setInterval(loadTape, 60000);
+  loadActivity();
+  activityTimer = setInterval(loadActivity, 30000);
   await load();
   await loadPortfolio();
   await loadDashboard();
@@ -668,6 +730,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (tapeTimer) clearInterval(tapeTimer);
+  if (activityTimer) clearInterval(activityTimer);
   if (clockTimer) clearInterval(clockTimer);
   if (pollTimer) clearInterval(pollTimer);
   if (dashTimer) clearInterval(dashTimer);
@@ -688,54 +751,57 @@ onUnmounted(() => {
 
 
       <!--
-        🔴 사용자 지시: *"**시간 및** 원/달러·…·wti 지수 표시 **좌→우 자동으로 흘러가게**"*
-           빨간 박스가 **헤더 행 자체**를 감싸고 있었다 — 앞판은 헤더 **아래** 별도 줄로
-           만들어 지시와 어긋났다. 시계도 이 흐름 안에 들어간다("시간 **및**").
-        ⚠️ 같은 목록을 **두 벌** 깔아야 이음매 없이 순환한다(한 벌이면 끝에서 뚝 끊긴다).
-           두 번째 벌은 `aria-hidden` — 화면낭독기가 같은 걸 두 번 읽으면 안 된다.
+        🔴 2026-09-21 사용자: *"한국시간 | 미국시간 | 테이프 ~~~ | 환율 보여주고
+           **여기 보여주는 애들은 테이프에서 빼**"*
+        ★ 흐르는 값은 **지나가면 못 본다.** 늘 봐야 하는 시간·환율은 **고정 칸**이고,
+          훑어보는 지수들만 흐른다. 앞판은 시간까지 흘려보내서 시계 구실을 못 했다.
       -->
+      <div class="clockchip">
+        <span class="clockchip__zone">KST</span>
+        <span class="clockchip__time mono-num">{{ clock.kst.time }}</span>
+        <span class="dot" :class="`dot--${sessions?.kr?.state || 'closed'}`" aria-hidden="true"></span>
+      </div>
+      <div class="clockchip">
+        <span class="clockchip__zone">ET</span>
+        <span class="clockchip__time mono-num">{{ clock.us.time }}</span>
+        <span class="dot" :class="`dot--${sessions?.us?.state || 'closed'}`" aria-hidden="true"></span>
+      </div>
+
       <div class="tape" :class="{ 'tape--stale': tape.stale }">
         <div class="tape__track">
-          <template v-for="pass in 2" :key="pass">
-            <span class="tape__item" :aria-hidden="pass === 2 ? 'true' : undefined">
-              <b class="tape__label">KST</b>
-              <span class="mono-num">{{ clock.kst.time }}</span>
-              <span class="tape__label">KRX {{ sessionLabel(sessions?.kr?.state) }}</span>
-            </span>
-            <span class="tape__item" :aria-hidden="pass === 2 ? 'true' : undefined">
-              <b class="tape__label">ET</b>
-              <span class="mono-num">{{ clock.us.time }}</span>
-              <span class="tape__label">US {{ sessionLabel(sessions?.us?.state) }}</span>
-            </span>
-            <span
-              v-for="i in tape.items"
-              :key="`${pass}-${i.symbol}`"
-              class="tape__item"
-              :aria-hidden="pass === 2 ? 'true' : undefined"
-            >
-              <b class="tape__label">{{ i.label }}</b>
-              <span class="mono-num">{{ tapeNum(i) }}</span>
-              <span v-if="i.changePct !== null" class="mono-num" :class="signClass(i.changePct)">{{ pct(i.changePct) }}</span>
-              <span v-else class="tape__unknown">등락 모름</span>
-            </span>
-          </template>
+          <span
+            v-for="(i, n) in [...tape.items, ...tape.items]"
+            :key="`${n}-${i.symbol}`"
+            class="tape__item"
+            :aria-hidden="n >= tape.items.length ? 'true' : undefined"
+          >
+            <b class="tape__label">{{ i.label }}</b>
+            <span class="mono-num">{{ tapeNum(i) }}</span>
+            <span v-if="i.changePct !== null" class="mono-num" :class="signClass(i.changePct)">{{ pct(i.changePct) }}</span>
+            <span v-else class="tape__unknown">등락 모름</span>
+          </span>
         </div>
-        <span v-if="tape.failed" class="tape__fail">{{ tape.failed }}개 못 받음</span>
+        <span v-if="tape.failed" class="tape__fail">{{ tape.failed }}</span>
+      </div>
+
+      <!-- 고정 칸: 환율은 **흐르지 않는다** -->
+      <div v-for="f in tape.fixed" :key="f.symbol" class="clockchip">
+        <span class="clockchip__zone">{{ f.label }}</span>
+        <span class="clockchip__time mono-num">{{ tapeNum(f) }}</span>
+        <span v-if="f.changePct !== null" class="mono-num" :class="signClass(f.changePct)">{{ pct(f.changePct) }}</span>
       </div>
 
       <div class="topbar__meta">
-        <div v-if="fx?.USDKRW?.rate" class="metric">
-          <span class="metric__label">USD/KRW</span>
-          <span class="metric__value mono-num">{{ Number(fx.USDKRW.rate).toLocaleString('ko-KR') }}</span>
-        </div>
+        <!-- ⚠️ 환율은 위 고정 칸으로 옮겼다 — 같은 값을 두 번 두지 않는다 -->
         <div class="metric">
           <span class="metric__label">종목</span>
           <span class="metric__value mono-num">{{ totalTickers }}</span>
         </div>
-        <button class="btn btn--ghost" aria-label="운영 설정" title="운영 설정" @click="settingsOpen = true">⚙</button>
-        <button class="btn btn--ghost" :disabled="refreshing" @click="onRefreshMarket">
-          <span class="btn__spin" :class="{ 'btn__spin--on': refreshing }" aria-hidden="true"></span>
-          {{ refreshing ? '갱신 중' : '시세 갱신' }}
+        <!-- 🔴 사용자: *"헤더의 설정 버튼 너무 작은데 좀 크기 키워줘"* -->
+        <button class="btn btn--icon" aria-label="운영 설정" title="운영 설정" @click="settingsOpen = true">⚙</button>
+        <button class="btn btn--icon" :disabled="refreshing" aria-label="시세 갱신" title="시세 갱신" @click="onRefreshMarket">
+          <span v-if="refreshing" class="btn__spin btn__spin--on" aria-hidden="true"></span>
+          <template v-else>⟳</template>
         </button>
       </div>
     </header>
@@ -848,7 +914,12 @@ onUnmounted(() => {
       <div v-if="!groups.length" class="strip__empty">
         관심 테마가 없습니다. ⚙ 설정에서 추가하세요.
       </div>
-      <article v-for="group in groups" :key="group.id" class="wcard">
+      <!--
+        🔴 사용자: *"페이징 처리해서 … 스크롤 처리하지말고 페이징 처리해서 보여줘"*
+        ★ 가로 스크롤은 **몇 개가 더 있는지 안 보인다.** 페이지 번호는 그걸 말해 준다.
+        ⚠️ 카드가 한 페이지 분량 이하면 **쪽 번호를 숨긴다** — 1/1 은 아무 정보가 아니다.
+      -->
+      <article v-for="group in pagedGroups" :key="group.id" class="wcard">
         <header class="wcard__head">
           <span class="wcard__name">{{ group.name }}</span>
           <span class="wcard__count mono-num">{{ group.tickers.length }}</span>
@@ -882,6 +953,11 @@ onUnmounted(() => {
           <button class="btn btn--xs btn--soft" :disabled="busy" @click="onAddTicker(group)">+</button>
         </div>
       </article>
+      <nav v-if="groupPages > 1" class="pager">
+        <button class="iconbtn" :disabled="groupPage === 0" aria-label="이전" @click="groupPage -= 1">‹</button>
+        <span class="pager__at mono-num">{{ groupPage + 1 }}/{{ groupPages }}</span>
+        <button class="iconbtn" :disabled="groupPage >= groupPages - 1" aria-label="다음" @click="groupPage += 1">›</button>
+      </nav>
     </section>
         <section class="analyst">
           <header class="analyst__head">
@@ -895,21 +971,13 @@ onUnmounted(() => {
           </header>
 
           <!--
-            🔴 웹검색이 **붙었는지**를 먼저 보여준다. 이게 없으면 "검색이 안 돈 것" 과
-               "검색했는데 별 게 없던 것" 이 화면에서 똑같아진다.
-            ⚠️ 5분 타이머에는 안 붙는다 — 버튼을 눌렀을 때만 검색한다
+            🔴 사용자: *"웹 검색은 당연히 해야하는거니까 저 체크 표시랑 웹 검색 저거 빼"*
+            ⇒ 선택지를 없애고 **항상 켠다.** 다만 **붙었는지**는 여전히 보여야 한다 —
+              안 보이면 "검색이 안 돈 것" 과 "검색했는데 별 게 없던 것" 이 똑같아진다.
           -->
-          <label class="websearch" :class="{ 'websearch--off': mcpState && mcpState.effective !== 'live' }">
-            <input v-model="useWebSearch" type="checkbox" :disabled="!mcpState || mcpState.effective !== 'live'" />
-            <span>웹 검색</span>
-            <span v-if="!mcpState" class="websearch__tag">확인 중…</span>
-            <span v-else-if="mcpState.effective === 'live'" class="websearch__tag websearch__tag--on">
-              my-computer · 도구 {{ mcpState.tools ? mcpState.tools.length : '?' }}
-            </span>
-            <span v-else class="websearch__tag">
-              미연결 ({{ mcpState.reason === 'url_or_token_missing' ? '주소·토큰 없음' : '꺼짐' }})
-            </span>
-          </label>
+          <p v-if="mcpState && mcpState.effective !== 'live'" class="analyst__warn">
+            웹 검색 미연결 — {{ mcpState.reason === 'url_or_token_missing' ? '주소·토큰 없음' : '꺼짐' }}
+          </p>
 
           <!-- 🔴 무엇을 하는 중인지 알린다 — 20~30초 동안 아무 표시가 없으면 멈춘 줄 안다 -->
           <p v-if="analystLoading && analystStage" class="analyst__stage">
@@ -927,7 +995,7 @@ onUnmounted(() => {
               <template v-else>웹 검색 미반영 — {{ report.web.error }}</template>
             </p>
             <div class="analyst__acts">
-              <button class="btn btn--xs btn--soft" @click="sendReportToTelegram">텔레그램 발송</button>
+              <button class="iconbtn" aria-label="텔레그램 발송" title="텔레그램 발송" @click="sendReportToTelegram">✈️</button>
               <span v-if="tgState" class="analyst__tg">{{ tgState }}</span>
             </div>
             <p class="analyst__view">{{ report.marketView }}</p>
@@ -988,6 +1056,19 @@ onUnmounted(() => {
               <ul><li v-for="(g, i) in report.dataGaps" :key="i">{{ g }}</li></ul>
             </div>
           </template>
+
+          <!-- 🔴 분석·알림·제안·승인을 **한 시간축**으로 (사용자 지시) -->
+          <div class="tl">
+            <h3 class="panel__h">활동 기록 <small>{{ activity.length }}</small></h3>
+            <p v-if="!activity.length" class="panel__empty">아직 기록이 없습니다.</p>
+            <ol v-else class="tl__list">
+              <li v-for="(a, i) in activity" :key="i" class="tl__row">
+                <span class="tl__icon" aria-hidden="true">{{ ACT_ICON[a.kind] || '·' }}</span>
+                <time class="tl__at mono-num">{{ actTime(a.at) }}</time>
+                <span class="tl__text">{{ a.title }}</span>
+              </li>
+            </ol>
+          </div>
         </section>
 
         <section class="news">
@@ -996,8 +1077,8 @@ onUnmounted(() => {
               뉴스
               <small v-if="selected.symbol">{{ selected.name || selected.symbol }}</small>
             </h3>
-            <button class="btn btn--xs btn--soft" :disabled="!selected.symbol || news.loading" @click="loadNews">
-              {{ news.loading ? '검색 중…' : '새로고침' }}
+            <button class="iconbtn" :disabled="!selected.symbol || news.loading" aria-label="뉴스 새로고침" title="뉴스 새로고침" @click="loadNews">
+              {{ news.loading ? '…' : '⟳' }}
             </button>
           </header>
           <p v-if="!selected.symbol" class="panel__empty">종목을 고르면 뉴스를 찾습니다.</p>
@@ -1051,9 +1132,12 @@ onUnmounted(() => {
                      코드를 넣으면 차트를 띄울 수 있어야 검색창의 뜻이 산다.
                 -->
                 <form class="rank__find" @submit.prevent="findSymbol">
-                  <input v-model="rankQuery" class="input input--xs" placeholder="티커·종목코드 (예: 005930)" />
-                  <button class="btn btn--xs btn--soft" type="submit" :disabled="!rankQuery.trim()">조회</button>
+                  <input v-model="rankQuery" class="input input--xs" placeholder="종목명·티커 (예: 삼성전자)" />
+                  <button class="iconbtn" type="submit" :disabled="!rankQuery.trim() || findBusy" aria-label="조회" title="조회">
+                    {{ findBusy ? '…' : '🔍' }}
+                  </button>
                 </form>
+                <p v-if="findError" class="panel__err">{{ findError }}</p>
                 <div v-if="rankKeys.length" class="rank__tabs">
                   <button
                     v-for="k in rankKeys" :key="k"
@@ -1097,11 +1181,12 @@ onUnmounted(() => {
             <div class="chat__headacts">
               <span class="chat__tools">도구 {{ 7 }}개</span>
               <button
-                class="btn btn--xs btn--ghost"
+                class="iconbtn"
                 :disabled="clearing || !messages.length"
+                aria-label="대화 초기화"
                 title="대화 이력을 지웁니다(서버 기록도 함께)"
                 @click="clearChat"
-              >{{ clearing ? '…' : '초기화' }}</button>
+              >{{ clearing ? '…' : '🗑' }}</button>
             </div>
           </header>
 
@@ -1127,7 +1212,18 @@ onUnmounted(() => {
               </ul>
 
               <p v-if="m.recall" class="msg__recall">과거 대화 {{ m.recall }}건을 참고했습니다.</p>
-              <div v-if="m.text" class="msg__text">{{ m.text }}</div>
+              <!--
+                🔴 **모델 답만** 마크다운으로 렌더한다. 사용자 발화는 평문 그대로 —
+                   내가 쓴 글을 HTML 로 바꿀 이유가 없고, 표면만 넓힌다.
+                ⚠️ `v-html` 을 쓰므로 `renderMarkdown` 안에서 **반드시 소독**한다
+                   (웹 검색 결과가 답에 섞여 들어온다 = 외부 입력이다).
+              -->
+              <div
+                v-if="m.text && m.role === 'assistant'"
+                class="msg__text md"
+                v-html="renderMarkdown(m.text)"
+              ></div>
+              <div v-else-if="m.text" class="msg__text">{{ m.text }}</div>
               <!-- 아직 아무것도 안 온 상태를 빈칸으로 두지 않는다 -->
               <span v-else-if="!m.done" class="msg__wait">생각 중…</span>
               <p v-if="m.notice" class="msg__notice">{{ m.notice }}</p>
@@ -1841,6 +1937,46 @@ onUnmounted(() => {
 @media (prefers-reduced-motion: reduce) { .analyst__dot { animation: none; } }
 .analyst__acts { display: flex; align-items: center; gap: var(--space-xs); }
 .analyst__tg { font-size: var(--text-2xs); color: var(--color-faint); }
+
+/* ── 아이콘 버튼 · 페이저 · 타임라인 · 마크다운 ──────── */
+/* 🔴 사용자: 조회·갱신·초기화·새로고침을 **아이콘으로** · 설정 버튼은 **크게** */
+.btn--icon {
+  width: 38px; height: 38px; padding: 0; font-size: 18px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.iconbtn {
+  width: 26px; height: 26px; padding: 0; font-size: 13px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--color-hairline); border-radius: var(--rounded-sm);
+  background: var(--color-surface-sunken); color: var(--color-body); cursor: pointer;
+}
+.iconbtn:hover:not(:disabled) { background: var(--color-surface-hover); }
+.iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.pager { display: flex; align-items: center; gap: 4px; justify-content: center; padding-top: 4px; }
+.pager__at { font-size: var(--text-2xs); color: var(--color-faint); }
+
+.analyst__warn { margin: 0; font-size: var(--text-2xs); color: var(--color-down); }
+
+.tl { margin-top: var(--space-sm); border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }
+.tl__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tl__row { display: grid; grid-template-columns: 16px 74px 1fr; gap: 6px; align-items: baseline; font-size: var(--text-2xs); }
+.tl__at { color: var(--color-faint); }
+.tl__text { color: var(--color-body); overflow-wrap: anywhere; }
+
+/* 마크다운 — 채팅 폭이 좁으므로 여백을 줄이고 표는 **가로 스크롤**시킨다 */
+.md :where(p, ul, ol, pre, blockquote, table) { margin: 0 0 6px; }
+.md :where(h1, h2, h3, h4) { margin: 8px 0 4px; font-size: var(--text-sm); font-weight: 700; color: var(--color-ink); }
+.md ul, .md ol { padding-left: 18px; }
+.md code { background: var(--color-surface-sunken); padding: 1px 4px; border-radius: 3px; font-size: 0.92em; }
+.md pre { background: var(--color-surface-sunken); padding: 8px; border-radius: var(--rounded-sm); overflow-x: auto; }
+.md pre code { background: none; padding: 0; }
+.md a { color: var(--color-primary); }
+.md blockquote { border-left: 2px solid var(--color-hairline); padding-left: 8px; color: var(--color-muted); }
+/* ⚠️ 표가 넓으면 **패널이 아니라 표가** 스크롤해야 한다 — 안 그러면 채팅 폭이 밀린다 */
+.md table { display: block; overflow-x: auto; border-collapse: collapse; max-width: 100%; }
+.md th, .md td { border: 1px solid var(--color-hairline-soft); padding: 2px 6px; text-align: left; white-space: nowrap; }
+.md th { color: var(--color-muted); font-weight: 600; }
 
 /* ── 애널리스트 채팅 ─────────────────────────────── */
 .chat {

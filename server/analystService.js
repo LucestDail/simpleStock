@@ -3,6 +3,7 @@ const { getDashboardSettings } = require('./settingsService');
 const orderService = require('./orderService');
 const toss = require('./tossClient');
 const mcp = require('./mcpClient');
+const activity = require('./activityLog');
 const { logInfo, logWarn } = require('./logger');
 
 /**
@@ -259,6 +260,15 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true } = {})
     webTool: web?.tool || null,
     webHits: (web?.results || []).filter((r) => r.text).length,
     durationMs: Date.now() - started,
+  });
+
+  // 🔴 분석 기록을 **시간축에 남긴다**(사용자: "모든 분석 기록들이 시간순으로")
+  activity.record('analysis', report.marketView || '(시황 요약 없음)', {
+    positions: report.positions?.length || 0,
+    proposals: created.length,
+    rejected: rejected.length,
+    gaps: gaps.length,
+    webHits: (web?.results || []).filter((r) => r.text).length,
   });
 
   return {

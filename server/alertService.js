@@ -7,6 +7,7 @@ const toss = require('./tossClient');
 const tossPortfolio = require('./tossPortfolio');
 const { resolveSession } = require('./marketCalendar');
 const { APP_TIMEZONE } = require('./time');
+const activity = require('./activityLog');
 const { logInfo, logWarn, logError } = require('./logger');
 
 /**
@@ -246,6 +247,8 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
     if (!willSend) continue;
     const r = await telegram.send(a.text, { reason: `alert:${a.kind}` });
     if (r.ok) sent += 1;
+    // 🔴 보낸 것은 **타임라인에도** 남긴다 — 로그 파일에만 있으면 사람이 못 본다
+    activity.record('alert', a.text, { alertKind: a.kind, sent: Boolean(r.sent) });
   }
 
   writeState(st);
@@ -295,6 +298,8 @@ async function onProposal(p) {
   try {
     const r = await bot.sendProposal(p);
     logInfo('alerts.proposal_sent', { id: p.id, symbol: p.symbol, sent: Boolean(r.sent) });
+    activity.record('proposal', `${p.side === 'BUY' ? '매수' : '매도'} 제안 ${p.symbol} ${p.quantity}주 @ ${p.price}`,
+      { proposalId: p.id, symbol: p.symbol, side: p.side, telegram: Boolean(r.sent) });
     return r;
   } catch (e) {
     logError('alerts.proposal_failed', e, { id: p.id });
