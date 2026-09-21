@@ -51,7 +51,8 @@ function createDefaultSettings() {
     dashboard: {
       momentumPct: null,        // 당일 등락 |%| 이 이상이면 모멘텀 후보
       refreshSec: null,         // 대시보드 자동 갱신 주기(초)
-      rankingTypes: null,       // 랭킹 종류
+      rankingTypes: null,
+      rankingCountries: null,       // 랭킹 종류
       briefingPrompt: null,     // 브리핑에 덧붙일 사용자 지시
       briefingCron: null,       // 브리핑 자동 생성 주기(cron)
     },
@@ -60,10 +61,13 @@ function createDefaultSettings() {
 }
 
 const RANKING_TYPES = ['TOP_GAINERS', 'TOP_LOSERS', 'tradingVolume', 'tradingAmount'];
+const RANKING_COUNTRIES = ['US', 'KR'];
 const DASHBOARD_DEFAULTS = Object.freeze({
   momentumPct: 3,
   refreshSec: 60,
   rankingTypes: ['TOP_GAINERS', 'TOP_LOSERS'],
+  // 사용자는 주로 미국장을 본다 — 미국을 먼저 둔다
+  rankingCountries: ['US', 'KR'],
   briefingPrompt: '',
   briefingCron: '',
 });
@@ -90,6 +94,10 @@ function normalizeDashboard(d) {
     momentumPct: n(d?.momentumPct, 0.1, 50),
     refreshSec: n(d?.refreshSec, 15, 3600),
     rankingTypes: types && types.length ? types : null,
+    rankingCountries: (() => {
+      const c = Array.isArray(d?.rankingCountries) ? d.rankingCountries.filter((x) => RANKING_COUNTRIES.includes(x)) : null;
+      return c && c.length ? c : null;
+    })(),
     // 프롬프트는 모델에게 가는 값이다 — 길이를 제한한다(토큰과 비용이 붙는다)
     briefingPrompt: d?.briefingPrompt ? String(d.briefingPrompt).slice(0, 1000) : null,
     briefingCron: d?.briefingCron ? String(d.briefingCron).slice(0, 64) : null,
@@ -302,6 +310,7 @@ module.exports = {
   getDashboardSettings,
   DASHBOARD_DEFAULTS,
   RANKING_TYPES,
+  RANKING_COUNTRIES,
   getEnvAiDefaults,
   getPresetById,
   recordTokenUsage,

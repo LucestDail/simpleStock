@@ -205,6 +205,12 @@ function pickSymbol(symbol, name) {
 }
 
 /** 조각이 실패했으면 그 사실을 화면에 남긴다 */
+const RANK_LABEL = { TOP_GAINERS: '급등', TOP_LOSERS: '급락', tradingVolume: '거래량', tradingAmount: '거래대금' };
+function rankLabel(key) {
+  const [country, type] = String(key).split(':');
+  return `${country === 'US' ? '미국' : '한국'} ${RANK_LABEL[type] || type}`;
+}
+
 function partError(name) {
   const p = dash.value?.parts?.[name];
   return p && p.ok === false ? p : null;
@@ -397,6 +403,47 @@ onUnmounted(() => {
 
     <p v-if="error" class="banner banner--error">{{ error }}</p>
 
+    <!-- ── 관심 테마 스트립 (상단) ─────────────────────── -->
+    <section class="strip">
+      <div v-if="!groups.length" class="strip__empty">
+        관심 테마가 없습니다. ⚙ 설정에서 추가하세요.
+      </div>
+      <article v-for="group in groups" :key="group.id" class="wcard">
+        <header class="wcard__head">
+          <span class="wcard__name">{{ group.name }}</span>
+          <span class="wcard__count mono-num">{{ group.tickers.length }}</span>
+        </header>
+        <ul class="wcard__list">
+          <li
+            v-for="t in group.tickers"
+            :key="t.symbol + t.market"
+            class="wrow"
+            :class="{ 'wrow--on': selected.symbol === t.symbol }"
+            @click="pickSymbol(t.symbol, t.name)"
+          >
+            <span class="wrow__name">{{ t.name }}</span>
+            <span class="wrow__price mono-num">{{ formatPrice(t) }}</span>
+            <span
+              v-if="t.quote && t.quote.changePct != null"
+              class="wrow__chg mono-num"
+              :style="heatmapStyleFromChangePct(t.quote.changePct)"
+            >{{ formatChangePct(t.quote.changePct) }}</span>
+            <button class="wrow__rm" title="삭제" @click.stop="onRemoveTicker(group, t)">×</button>
+          </li>
+          <li v-if="!group.tickers.length" class="wrow wrow--empty">비어 있음</li>
+        </ul>
+        <div class="wcard__add">
+          <input
+            v-model="ensureInput(group.id).query"
+            class="input input--xs"
+            placeholder="티커/종목명"
+            @keyup.enter="onAddTicker(group)"
+          />
+          <button class="btn btn--xs btn--soft" :disabled="busy" @click="onAddTicker(group)">+</button>
+        </div>
+      </article>
+    </section>
+
     <!-- ── 본문: 넓으면 보드 + 브리핑 나란히 ──────────── -->
     <div class="layout">
       <div class="layout__main">
@@ -493,9 +540,13 @@ onUnmounted(() => {
         </p>
 
         <!-- ── 차트 + 호가 ────────────────────────────────────── -->
-        <div class="hts">
-          <PriceChart :symbol="selected.symbol" :name="selected.name" />
-          <section class="side">
+        <PriceChart :symbol="selected.symbol" :name="selected.name" />
+
+      </div>
+
+      <!-- ── 신호 (모멘텀·경고·랭킹) ────────────────────── -->
+      <aside class="layout__signals">
+          <div class="signals">
             <div class="panel">
               <h3 class="panel__h">모멘텀 <small>|{{ dash?.momentumPct ?? 3 }}%| 이상</small></h3>
               <p v-if="!dash?.momentum?.length" class="panel__empty">기준을 넘는 종목이 없습니다.</p>
@@ -521,93 +572,23 @@ onUnmounted(() => {
             <div class="panel">
               <h3 class="panel__h">랭킹</h3>
               <p v-if="partError('rankings')" class="panel__err">{{ partError('rankings').error }}</p>
-              <template v-else v-for="(r, type) in (dash?.rankings || {})" :key="type">
+              <template v-else v-for="(r, key) in (dash?.rankings || {})" :key="key">
                 <div class="rank">
-                  <span class="rank__type">{{ type === 'TOP_GAINERS' ? '급등' : type === 'TOP_LOSERS' ? '급락' : type }}</span>
+                  <!-- 🔴 키가 `국가:종류` 다. 사람이 읽는 말로 바꾼다 -->
+                  <span class="rank__type">{{ rankLabel(key) }}</span>
                   <ol class="rank__list">
                     <li v-for="row in (r.rows || []).slice(0, 5)" :key="row.symbol">
-                      <button class="linkish" @click="pickSymbol(row.symbol, row.symbol)">{{ row.symbol }}</button>
+                      <!-- ⚠️ 이름이 없으면 코드를 보여준다(빈칸보다 낫다) -->
+                      <button class="linkish" :title="row.symbol" @click="pickSymbol(row.symbol, row.name || row.symbol)">
+                        {{ row.name || row.symbol }}
+                      </button>
                     </li>
                   </ol>
                 </div>
               </template>
             </div>
-          </section>
-        </div>
-
-        <div class="addgroup">
-          <input
-            v-model="newGroupName"
-            class="input"
-            type="text"
-            placeholder="새 테마 그룹 이름 (예: 반도체, 미국 ETF, 배당주)"
-            @keyup.enter="onAddGroup"
-          />
-          <button class="btn btn--primary" :disabled="busy || !newGroupName.trim()" @click="onAddGroup">
-            그룹 추가
-          </button>
-        </div>
-
-        <p v-if="loading && groups.length === 0" class="banner">불러오는 중…</p>
-        <p v-else-if="groups.length === 0" class="banner banner--empty">
-          아직 그룹이 없습니다. 위에서 테마 그룹을 만들고 종목을 추가하세요.
-        </p>
-
-        <main v-else class="board">
-          <section v-for="group in groups" :key="group.id" class="group">
-            <header class="group__head">
-              <div class="group__title">
-                <span class="group__name">{{ group.name }}</span>
-                <span class="group__count mono-num">{{ group.tickers.length }}</span>
-              </div>
-              <div class="group__actions">
-                <button class="iconbtn" title="이름 변경" @click="onRenameGroup(group)">✎</button>
-                <button class="iconbtn iconbtn--danger" title="그룹 삭제" @click="onDeleteGroup(group)">×</button>
-              </div>
-            </header>
-
-            <ul class="tickers">
-              <li v-for="t in group.tickers" :key="t.symbol + t.market" class="ticker">
-                <div class="ticker__id" role="button" @click="pickSymbol(t.symbol, t.name)">
-                  <span class="ticker__name">{{ t.name }}</span>
-                  <span class="ticker__meta">{{ marketBadge(t) }} · {{ t.symbol }}</span>
-                </div>
-                <div class="ticker__quote">
-                  <span class="ticker__price mono-num">{{ formatPrice(t) }}</span>
-                  <span
-                    v-if="t.quote && t.quote.changePct != null"
-                    class="ticker__chg mono-num"
-                    :style="heatmapStyleFromChangePct(t.quote.changePct)"
-                  >{{ formatChangePct(t.quote.changePct) }}</span>
-                </div>
-                <button
-                  class="iconbtn iconbtn--danger ticker__rm"
-                  title="삭제"
-                  @click="onRemoveTicker(group, t)"
-                >×</button>
-              </li>
-              <li v-if="group.tickers.length === 0" class="ticker--empty">종목을 추가하세요</li>
-            </ul>
-
-            <div class="addticker">
-              <input
-                v-model="ensureInput(group.id).query"
-                class="input input--sm addticker__query"
-                type="text"
-                placeholder="티커 또는 종목명"
-                @keyup.enter="onAddTicker(group)"
-              />
-              <select v-model="ensureInput(group.id).market" class="select">
-                <option value="">자동</option>
-                <option value="KR">KR</option>
-                <option value="US">US</option>
-                <option value="ETF">ETF</option>
-              </select>
-              <button class="btn btn--sm btn--soft" :disabled="busy" @click="onAddTicker(group)">추가</button>
-            </div>
-          </section>
-        </main>
-      </div>
+          </div>
+      </aside>
 
       <!-- ── 브리핑: AI 레이어는 색으로 구분한다 ───────── -->
       <aside class="layout__rail">
@@ -692,15 +673,21 @@ onUnmounted(() => {
  *
  * ⚠️ 하드코딩 색을 다시 넣지 말 것. 필요하면 styles/tokens.css 에 토큰을 추가한다.
  */
+/**
+ * 🔴 데스크탑 전용 — **페이지가 스크롤되지 않는다**(2026-09-21 사용자 지시).
+ *    화면 높이에 맞추고, 넘치는 것은 **각 패널 안에서** 스크롤한다.
+ *    ⚠️ 그래서 모든 스크롤 컨테이너에 `min-height: 0` 이 필요하다 —
+ *       grid/flex 자식은 기본 min-height:auto 라 **내용이 밀어내고 페이지가 늘어난다.**
+ */
 .tracker {
-  height: 100%;
-  overflow-y: auto;
-  padding: var(--space-lg) var(--space-lg) var(--space-xxl);
+  height: 100vh;
+  overflow: hidden;
+  padding: var(--space-sm) var(--space-base) var(--space-base);
   background: var(--color-canvas);
   color: var(--color-ink);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: var(--space-sm);
 }
 
 /* ── 상단 ─────────────────────────────────────────── */
@@ -710,10 +697,10 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-md);
-  padding: var(--space-base) var(--space-md);
+  padding: var(--space-xs) var(--space-base);
   background: var(--color-surface);
   border: 1px solid var(--color-hairline);
-  border-radius: var(--rounded-lg);
+  border-radius: var(--rounded-md);
 }
 .brand {
   display: flex;
@@ -723,8 +710,8 @@ onUnmounted(() => {
 }
 /* 브랜드 마크 — 이 앱의 유일한 그라디언트다(인디고→바이올렛: 시세와 AI 를 한 몸으로) */
 .brand__mark {
-  width: 32px;
-  height: 32px;
+  width: 22px;
+  height: 22px;
   flex: none;
   border-radius: var(--rounded-md);
   background: linear-gradient(140deg, var(--color-primary), var(--color-ai));
@@ -736,16 +723,13 @@ onUnmounted(() => {
 }
 .brand__name {
   margin: 0;
-  font-size: var(--text-lg);
+  font-size: var(--text-base);
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--color-ink);
   white-space: nowrap;
 }
-.brand__sub {
-  font-size: var(--text-sm);
-  color: var(--color-muted);
-}
+.brand__sub { display: none; } /* 헤더를 낮춘다 — 부제는 공간값이 없다 */
 
 .clocks {
   display: flex;
@@ -812,27 +796,27 @@ onUnmounted(() => {
 }
 
 /* ── 레이아웃 ─────────────────────────────────────── */
+/* 데스크탑 3열 — 자산·차트 / 신호 / 브리핑. 각 열은 **자기 안에서** 스크롤한다 */
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-md);
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) 260px 340px;
+  gap: var(--space-sm);
+  min-height: 0;
 }
-@media (min-width: 1180px) {
-  /* 넓으면 보드와 브리핑을 나란히 — 종전에는 오른쪽이 통째로 비었다 */
-  .layout {
-    grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
-  }
-  .layout__rail {
-    position: sticky;
-    top: 0;
-  }
+@media (max-width: 1400px) {
+  .layout { grid-template-columns: minmax(0, 1fr) 240px 300px; }
 }
-.layout__main {
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
+}
+.layout__main,
+.layout__rail {
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: var(--space-sm);
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .addgroup {
@@ -867,11 +851,12 @@ onUnmounted(() => {
 /* ── 버튼 ─────────────────────────────────────────── */
 .btn {
   display: inline-flex;
+  /* 헤더가 낮아졌다 */
   align-items: center;
   justify-content: center;
   gap: var(--space-sm);
-  height: 40px;
-  padding: 0 var(--space-md);
+  height: 32px;
+  padding: 0 var(--space-base);
   border: 1px solid var(--color-hairline-strong);
   border-radius: var(--rounded-md);
   background: var(--color-surface-raised);
@@ -965,18 +950,19 @@ onUnmounted(() => {
 
 /* ── 내 자산 ──────────────────────────────────────── */
 .assets {
+  flex: none;
   background: var(--color-surface);
   border: 1px solid var(--color-hairline);
   border-left: 2px solid var(--color-primary-line);
   border-radius: var(--rounded-lg);
-  padding: var(--space-md);
+  padding: var(--space-base);
   display: flex;
   flex-direction: column;
-  gap: var(--space-base);
+  gap: var(--space-sm);
 }
 .assets__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
 .assets__title { display: flex; align-items: center; gap: var(--space-sm); }
-.assets__title h2 { margin: 0; font-size: var(--text-lg); font-weight: 700; color: var(--color-ink); }
+.assets__title h2 { margin: 0; font-size: var(--text-base); font-weight: 700; color: var(--color-ink); }
 .assets__badge {
   font-size: var(--text-2xs); font-weight: 700; letter-spacing: 0.1em;
   padding: 2px 6px; border-radius: var(--rounded-xs);
@@ -986,18 +972,18 @@ onUnmounted(() => {
 
 .kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: var(--space-sm);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-xs);
 }
 .kpi {
-  display: flex; flex-direction: column; gap: 2px;
-  padding: var(--space-base);
+  display: flex; flex-direction: column; gap: 1px;
+  padding: var(--space-sm) var(--space-base);
   background: var(--color-surface-sunken);
   border-radius: var(--rounded-md);
 }
 .kpi__label { font-size: var(--text-2xs); letter-spacing: 0.06em; color: var(--color-faint); }
-.kpi__value { font-size: var(--text-xl); font-weight: 700; color: var(--color-ink); }
-.kpi__value--sub { font-size: var(--text-lg); color: var(--color-body); font-weight: 600; }
+.kpi__value { font-size: var(--text-lg); font-weight: 700; color: var(--color-ink); }
+.kpi__value--sub { font-size: var(--text-md); color: var(--color-body); font-weight: 600; }
 .kpi__value small { font-size: var(--text-sm); font-weight: 600; margin-left: 6px; opacity: 0.85; }
 .up { color: var(--color-up); }
 .down { color: var(--color-down); }
@@ -1020,22 +1006,68 @@ onUnmounted(() => {
   color: var(--color-faint); padding: 0 var(--space-sm) var(--space-xs);
   border-bottom: 1px solid var(--color-hairline-soft);
 }
-.holdings td { padding: var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); }
+.holdings td { padding: 5px var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); }
 .holdings tr:last-child td { border-bottom: none; }
 .holdings__name { display: block; font-weight: 600; color: var(--color-ink); }
 .holdings__meta { display: block; font-size: var(--text-xs); color: var(--color-faint); }
 .holdings small { font-size: var(--text-xs); opacity: 0.85; margin-left: 4px; }
 .ta-r { text-align: right; }
 
+/* ── 관심 테마 스트립 (상단) ───────────────────────── */
+.strip {
+  display: flex;
+  gap: var(--space-sm);
+  overflow-x: auto;
+  padding-bottom: 2px;
+  flex: none;
+}
+.strip__empty {
+  font-size: var(--text-sm); color: var(--color-faint);
+  padding: var(--space-sm) var(--space-base);
+  border: 1px dashed var(--color-hairline); border-radius: var(--rounded-md);
+}
+.wcard {
+  flex: none;
+  width: 236px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-md);
+  padding: var(--space-sm);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.wcard__head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.wcard__name {
+  font-size: var(--text-sm); font-weight: 700; color: var(--color-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wcard__count { font-size: var(--text-2xs); color: var(--color-faint); }
+.wcard__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; max-height: 92px; overflow-y: auto; }
+.wrow {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto 14px;
+  align-items: center; gap: 5px;
+  padding: 2px 3px; border-radius: var(--rounded-xs); cursor: pointer;
+}
+.wrow:hover { background: var(--color-surface-hover); }
+.wrow--on { background: var(--color-primary-soft); }
+.wrow--empty { color: var(--color-faint); font-size: var(--text-xs); cursor: default; display: block; }
+.wrow__name { font-size: var(--text-xs); color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wrow__price { font-size: var(--text-2xs); color: var(--color-body); }
+.wrow__chg { font-size: var(--text-3xs, 9px); padding: 1px 4px; border-radius: var(--rounded-xs); font-weight: 700; }
+.wrow__rm { border: 0; background: none; color: var(--color-faint); cursor: pointer; font-size: 12px; padding: 0; opacity: 0; }
+.wrow:hover .wrow__rm { opacity: 1; }
+.wcard__add { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 4px; }
+.input--xs { height: 26px; font-size: var(--text-xs); padding: 0 6px; }
+.btn--xs { height: 26px; padding: 0; font-size: var(--text-sm); }
+
+.layout__signals {
+  display: flex; flex-direction: column; gap: var(--space-sm);
+  min-width: 0; min-height: 0; overflow-y: auto;
+}
+.signals { display: flex; flex-direction: column; gap: var(--space-sm); }
+
 /* ── HTS: 차트 + 사이드 패널 ──────────────────────── */
-.hts {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-md);
-}
-@media (min-width: 1100px) {
-  .hts { grid-template-columns: minmax(0, 1fr) 280px; }
-}
+/* 신호 패널은 가운데 열로 옮겼다 — 차트는 자기 폭을 다 쓴다 */
+.hts { display: block; }
 .side { display: flex; flex-direction: column; gap: var(--space-sm); min-width: 0; }
 .panel {
   background: var(--color-surface);
@@ -1187,8 +1219,6 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-base);
-  max-height: calc(100vh - 2 * var(--space-lg));
-  overflow-y: auto;
 }
 .briefing__head {
   display: flex;

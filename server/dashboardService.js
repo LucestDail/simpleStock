@@ -50,7 +50,13 @@ async function sequential(tasks, gapMs = 120) {
  * @param {number} [opts.momentumPct] 모멘텀 임계값(%)
  * @param {string[]} [opts.rankingTypes]
  */
-async function build({ watchSymbols = [], fx = null, momentumPct = 3, rankingTypes = ['TOP_GAINERS', 'TOP_LOSERS'] } = {}) {
+async function build({
+  watchSymbols = [],
+  fx = null,
+  momentumPct = 3,
+  rankingTypes = ['TOP_GAINERS', 'TOP_LOSERS'],
+  rankingCountries = ['US', 'KR'],
+} = {}) {
   const startedAt = Date.now();
 
   // ① 보유 — 화면의 중심. 실패해도 나머지는 그린다
@@ -75,10 +81,30 @@ async function build({ watchSymbols = [], fx = null, momentumPct = 3, rankingTyp
       }),
     () =>
       part('rankings', async () => {
+        /**
+         * 🔴 2026-09-21: 두 가지가 틀려 있었다(사용자 지적).
+         *  ① **종목명이 없다** — 랭킹 응답에는 `symbol` 뿐이라 화면에 코드만 떴다.
+         *     ⇒ 받은 심볼을 모아 `/stocks` **한 번**으로 이름을 붙인다(종목마다 부르지 않는다).
+         *  ② **한국만 봤다** — 사용자는 주로 미국장을 본다. `marketCountry` 를 설정으로 받는다.
+         */
         const out = {};
-        for (const type of rankingTypes) {
-          out[type] = await toss.getRankings({ type, country: 'KR', duration: '1d', count: 10 });
-          await new Promise((r) => setTimeout(r, 220)); // 한도 5/s
+        const symbols = new Set();
+        for (const country of rankingCountries) {
+          for (const type of rankingTypes) {
+            const r = await toss.getRankings({ type, country, duration: '1d', count: 10 });
+            out[`${country}:${type}`] = { ...r, country, type };
+            r.rows.forEach((x) => symbols.add(x.symbol));
+            await new Promise((z) => setTimeout(z, 220)); // 한도 5/s
+          }
+        }
+        // 이름 붙이기 — 실패해도 랭킹 자체는 살린다(코드만 보이는 게 아무것도 없는 것보다 낫다)
+        try {
+          const info = await toss.getStockInfo([...symbols]);
+          for (const g of Object.values(out)) {
+            g.rows = g.rows.map((x) => ({ ...x, name: info.get(x.symbol)?.name || null }));
+          }
+        } catch (e) {
+          logWarn('dashboard.ranking_names_failed', { message: e?.message });
         }
         return out;
       }),

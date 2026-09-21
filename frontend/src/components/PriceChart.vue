@@ -161,7 +161,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
   padding: var(--space-base);
-  min-height: 300px;
+  min-height: 230px;
 }
 .chart__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
 .chart__title { display: flex; align-items: baseline; gap: var(--space-sm); min-width: 0; }
@@ -174,7 +174,7 @@ onBeforeUnmount(() => {
   border-radius: var(--rounded-sm); cursor: pointer;
 }
 .chart__tab--on { background: var(--color-primary-soft); color: var(--color-primary); }
-.chart__canvas { flex: 1; min-height: 240px; }
+.chart__canvas { flex: 1; min-height: 170px; }
 .chart__empty, .chart__err {
   margin: auto; font-size: var(--text-md); color: var(--color-muted); text-align: center; padding: var(--space-lg);
 }

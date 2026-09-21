@@ -63,7 +63,13 @@ test('한 번에 모아 준다 (화면이 조각마다 요청하면 한도를 �
   const d = await dashboard.build({ watchSymbols: ['005930'], momentumPct: 3 });
   assert.ok(d.portfolio, '보유가 없다');
   assert.equal(d.failedCount, 0, `실패 조각 ${JSON.stringify(d.parts)}`);
-  assert.ok(d.rankings.TOP_GAINERS, '랭킹이 없다');
+  // ⚠️ 2026-09-21: 키가 `국가:종류` 로 바뀌었다(미국장을 주로 보므로 국가를 나눈다)
+  const keys = Object.keys(d.rankings);
+  assert.ok(keys.length, '랭킹이 없다');
+  assert.ok(keys.every((k) => k.includes(':')), `키가 국가:종류 가 아니다 — ${keys}`);
+  // 🔴 종목명이 붙어야 한다 — 코드만 뜨면 사용자가 무슨 종목인지 모른다
+  const first = Object.values(d.rankings)[0].rows[0];
+  assert.ok('name' in first, '랭킹에 종목명이 안 붙었다');
   assert.ok('stockInfo' in d);
 });
 
@@ -181,4 +187,40 @@ test('🔴 보유가 있으면 프롬프트가 그것을 **금지하지 않는�
   assert.ok(i > 0, '금지 문장을 못 찾았다 — 가드가 대상을 잃었다(통과 아님)');
   const around = mgr.slice(Math.max(0, i - 400), i);
   assert.ok(/hasHoldings\s*\n?\s*\?/.test(around), '금지 문장이 보유 유무와 무관하게 항상 나간다');
+});
+
+test('🔴 컴포넌트가 **남의 scoped 스타일**에 기대지 않는다', () => {
+  /*
+   * 2026-09-21: 설정 패널의 입력·버튼이 화면에서 **안 보였다.**
+   * `.input`·`.btn`·`.iconbtn` 이 WorkspaceView 의 **scoped** 스타일이라 적용되지 않았다.
+   * ⚠️ 입력만 고치고 버튼을 안 훑어서 **두 번** 당했다 — *"한 곳 고치면 전수 훑는다"*.
+   * ⇒ 이 가드가 그 전수 훑기를 대신한다.
+   */
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const root = path.join(__dirname, '..', 'frontend/src');
+  const wv = fs.readFileSync(path.join(root, 'views/WorkspaceView.vue'), 'utf8');
+  const wvStyle = wv.split('<style scoped>')[1] || '';
+  const defined = new Set([...wvStyle.matchAll(/\.([a-z][a-z0-9_-]*)/g)].map((m) => m[1]));
+  assert.ok(defined.size > 20, 'WorkspaceView 스타일을 못 읽었다 — 가드가 대상을 잃었다(통과 아님)');
+
+  const dir = path.join(root, 'components');
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.vue'));
+  assert.ok(files.length >= 2, `컴포넌트가 ${files.length}개뿐 — 경로가 틀렸을 수 있다`);
+
+  const offenders = [];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    const tpl = (src.split('<template>')[1] || '').split('</template>')[0];
+    const own = new Set([...(src.split('<style scoped>')[1] || '').matchAll(/\.([a-z][a-z0-9_-]*)/g)].map((m) => m[1]));
+    const used = new Set();
+    for (const m of tpl.matchAll(/class="([^"]+)"/g)) m[1].split(/\s+/).forEach((c) => used.add(c));
+    for (const m of tpl.matchAll(/'([a-z][a-z0-9_-]*)':/g)) used.add(m[1]);
+    for (const c of used) if (defined.has(c) && !own.has(c)) offenders.push(`${f}:${c}`);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `남의 scoped 클래스를 쓴다(화면에서 스타일이 안 먹는다): ${offenders.join(', ')}`
+  );
 });

@@ -204,6 +204,8 @@ app.get('/api/dashboard', async (req, res) => {
       watchSymbols,
       fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || null } : null,
       momentumPct: Number(req.query.momentum) || getDashboardSettings().momentumPct,
+      rankingTypes: getDashboardSettings().rankingTypes,
+      rankingCountries: getDashboardSettings().rankingCountries,
     });
     // ⚠️ 조각이 하나라도 실패하면 **200 이지만 그 사실을 몸통에 담아** 보낸다.
     //    실패를 502 로 바꾸면 나머지 멀쩡한 조각까지 화면에서 사라진다.
