@@ -415,16 +415,110 @@ async function execute(id) {
     return { ok: true, proposal: p, dryRun: true };
   }
 
-  // ── 여기부터는 **실거래**다. 아직 연결하지 않는다 ────────────────
-  // 🔴 연결하는 그 커밋이 이 프로젝트에서 가장 위험한 한 줄이다.
-  //    붙일 때 지켜야 할 것:
-  //      · 전송 후 타임아웃이면 **재시도 금지** — `GET /api/v1/orders` 로 **조회해 확정**한다
-  //        ("실패" 와 "모름" 은 다르다. 모르는 채 재시도하면 두 번 산다)
-  //      · idempotencyKey 를 토스가 받는지 확인(스펙에서 아직 못 봤다). 안 받으면
-  //        전송 직전/직후 조회로 중복을 막는다
-  //      · 첫 실주문은 **소액 1주 · 사람이 직접 · 1회**
-  p.status = 'BLOCKED';
+  /**
+   * ── 여기부터 **실거래**다 ──────────────────────────────────────
+   *
+   * 종전 주석이 남겨 둔 열린 질문 셋에 **명세가 답을 줬다**(2026-09-22):
+   * ```
+   * Q 멱등키를 받는가?     A `clientOrderId` (본문). **서버가 자동 생성하지 않는다** · 10분 유효
+   *                         ⚠️ 우리가 안 주면 **두 번 승인 = 두 번 주문**이다
+   * Q 타임아웃이면?        A 재시도 금지. 성공 응답에도 **orderId 만** 오므로
+   *                         상태는 `GET /orders/{id}` 로 **따로** 확정한다
+   * Q 정정·취소는?         A **멱등키가 없고** 성공해도 **새 orderId** 가 발급된다 ⇒ 자동 재시도 절대 금지
+   * ```
+   * ⚠️ 그래도 **첫 실주문은 소액 1주 · 사람이 직접 · 1회** 라는 원칙은 그대로다.
+   */
+  const rules = require('./orderRules');
+  const key = rules.idempotencyKeyFor(p.id);
+  const built = rules.validateOrderRequest({
+    symbol: p.symbol, side: p.side, orderType: p.type,
+    quantity: p.quantity, price: p.type === 'LIMIT' ? p.price : undefined,
+    clientOrderId: key,
+  });
+  if (!built.ok) {
+    // 🔴 보내기 전에 막는다 — 거래소가 거부하는 것보다 여기서 걸리는 게 낫다
+    p.status = 'BLOCKED';
+    persist();
+    audit('execute_blocked', { id, reason: 'invalid_request', errors: built.errors });
+    return { ok: false, error: `주문 형식이 맞지 않습니다: ${built.errors.join(' · ')}` };
+  }
+  if (built.uncertain?.length) {
+    /**
+     * 🔴 **모르면 보내지 않는다.** 예: 국내 종목의 ETF 여부를 몰라 호가 단위를 확정 못 하면
+     *    일반주 기준으로 추측해 보내지 않는다 — 거래소가 거부하거나, 더 나쁘게는
+     *    **의도와 다른 가격으로 체결**될 수 있다.
+     * ★ *"검사하지 않은 것" 과 "통과한 것" 을 구분하지 못하는 자를 만들지 말 것* 의 돈 버전이다.
+     *    제안 단계에서는 경고로 두고, **실거래에서만** 막는다(제안까지 막으면 화면이 비어 버린다).
+     */
+    p.status = 'BLOCKED';
+    persist();
+    audit('execute_blocked', { id, reason: 'uncertain', uncertain: built.uncertain });
+    return { ok: false, error: `확인하지 못한 조건이 있어 보내지 않았습니다: ${built.warnings.join(' · ')}` };
+  }
+  if (!key) {
+    /**
+     * 🔴 **멱등키 없이 보내지 않는다.** 명세가 *"미전달: 멱등성 미적용, 매 요청을 별개 주문으로 처리"*
+     *    라고 못박았다 — 그 상태로 타임아웃이 나면 **중복 주문을 막을 방법이 없다.**
+     */
+    p.status = 'BLOCKED';
+    persist();
+    audit('execute_blocked', { id, reason: 'no_idempotency_key' });
+    return { ok: false, error: '멱등키를 만들 수 없어 실행하지 않았습니다(중복 주문 위험).' };
+  }
+
+  const toss = require('./tossClient');
+  audit('sending', { id, symbol: p.symbol, side: p.side, quantity: p.quantity, clientOrderId: key });
+  let created;
+  try {
+    created = await toss.createOrder(built.body);
+  } catch (e) {
+    if (e.kind === 'unknown') {
+      /**
+       * 🔴🔴 **보냈는데 답을 못 받았다** — 최악의 상태다. 재시도하면 두 번 산다.
+       *    ⇒ `UNKNOWN` 으로 남기고 **조회로 확정**하게 한다. 사람이 볼 수 있게 감사에도 남긴다.
+       */
+      p.status = 'UNKNOWN';
+      p.result = { mode: 'unknown', clientOrderId: key, note: '전송 후 응답 없음 — 주문 조회로 확정해야 합니다. **재시도 금지**.' };
+      persist();
+      audit('send_unknown', { id, clientOrderId: key, message: e.message });
+      return { ok: false, unknown: true, error: e.message, proposal: p };
+    }
+    if (e.kind === 'idempotency-conflict') {
+      // 같은 키로 **다른 내용**을 보냈다 — 우리 상태가 꼬인 것이다. 조용히 재시도하면 안 된다
+      p.status = 'FAILED';
+      persist();
+      audit('send_conflict', { id, clientOrderId: key, message: e.message });
+      return { ok: false, error: `멱등키 충돌: ${e.message}` };
+    }
+    p.status = 'FAILED';
+    p.result = { mode: 'failed', error: e.message, kind: e.kind };
+    persist();
+    audit('send_failed', { id, kind: e.kind, message: e.message });
+    return { ok: false, error: e.message, kind: e.kind };
+  }
+
+  /**
+   * 🔴 **응답에 `orderId` 만 온다** — 체결됐는지는 **모른다.**
+   *    여기서 "성공" 이라고 적으면 사용자는 체결된 줄 안다 ⇒ **SENT** 로 두고 상태를 따로 확인한다.
+   */
+  const orderId = created?.orderId || created?.id || null;
+  p.status = 'SENT';
+  p.orderId = orderId;
+  p.executedAt = new Date().toISOString();
+  p.result = { mode: 'live', orderId, clientOrderId: key, note: '접수됐습니다. 체결 여부는 주문 조회로 확인합니다.' };
   persist();
+  audit('sent', { id, orderId, clientOrderId: key });
+
+  // 상태를 한 번 확인한다 — ⚠️ 실패해도 **주문은 이미 나갔다**(되돌리지 않는다)
+  try {
+    const detail = await toss.getOrder(orderId);
+    p.result.orderStatus = detail?.status ?? null;
+    persist();
+    audit('status_checked', { id, orderId, status: detail?.status ?? null });
+  } catch (e) {
+    logWarn('orders.status_check_failed', { id, orderId, message: e.message });
+  }
+  return { ok: true, proposal: p, orderId };
   p.result = { mode: 'not-implemented', note: '실거래 연결은 아직 만들지 않았습니다.' };
   audit('execute_not_implemented', { id, symbol: p.symbol });
   logWarn('orders.live_path_missing', { id });

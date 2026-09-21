@@ -501,6 +501,110 @@ function decimal(v) {
  * ⚠️ 계좌를 못 찾으면 이 엔드포인트는 **404**, `sellable-quantity` 는 **400** 이다 —
  *    **상태코드로 분기하면 한쪽이 깨진다.** 코드(`account-not-found`)로 봐야 한다.
  */
+/**
+ * 🔴 **쓰기 요청** (주문·조건주문). 읽기(`apiGet`)와 **일부러 다르게** 만들었다.
+ *
+ * ## 왜 갈랐나 — 재시도가 위험하다
+ * `apiGet` 은 401 이면 토큰을 새로 받아 **한 번 다시 보낸다.** 읽기라 안전하다.
+ * 🔴 **쓰기에서 그러면 주문이 두 번 나갈 수 있다.** 그래서 여기서는:
+ *   - **자동 재시도 없음**(401 포함). 토큰은 보내기 **전에** 확보한다
+ *   - 타임아웃은 `kind:'unknown'` — **"실패" 가 아니라 "모름"** 이다.
+ *     호출자는 **재시도하지 말고 조회로 확정**해야 한다
+ *   - 멱등키(`clientOrderId`)는 **호출자가 넣는다** — 명세: *"서버는 자동 생성하지 않습니다"*
+ * ⚠️ 422 `idempotency-key-conflict`(같은 키 다른 본문) · 409 `request-in-progress` 를
+ *    **오류 코드로** 구분해 돌려준다. 상태코드만 보면 원인을 못 가른다.
+ */
+async function apiPost(path, body, { accountSeq, method = 'POST' } = {}) {
+  const accessToken = await getToken();
+  const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+  if (accountSeq != null) headers['X-Tossinvest-Account'] = String(accountSeq);
+  callCount += 1;
+  pathCounts.set(bucketOf(path), (pathCounts.get(bucketOf(path)) || 0) + 1);
+
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (e) {
+    /**
+     * 🔴 **여기가 이 파일에서 가장 위험한 자리다.** 보냈는데 답을 못 받았다 —
+     *    주문이 들어갔는지 **알 수 없다.** 재시도하면 두 번 살 수 있다.
+     */
+    throw new TossError(
+      `토스에 보냈지만 응답을 받지 못했습니다(${TIMEOUT_MS}ms). **재시도하지 말고 주문 조회로 확정하세요.**`,
+      { kind: 'unknown', path: bucketOf(path) }
+    );
+  }
+  noteRateLimitHeaders(path, res);
+
+  if (res.status === 204) return null; // 조건주문 취소는 **204** 다(200 이 아니다)
+  let json = null;
+  try { json = await res.json(); } catch { /* 본문이 없을 수 있다 */ }
+
+  if (!res.ok) {
+    const code = json?.error?.code || null;
+    const msg = json?.error?.message || `토스 API 오류 (${res.status})`;
+    // ⚠️ 코드로 갈라 준다 — 호출자가 "다시 보내도 되는가" 를 판단할 수 있어야 한다
+    const kind = code === 'idempotency-key-conflict' ? 'idempotency-conflict'
+      : code === 'request-in-progress' ? 'in-progress'
+        : res.status === 429 ? 'rate-limited'
+          : res.status === 401 ? 'auth' : 'upstream';
+    throw new TossError(msg, { kind, status: res.status, path: bucketOf(path), code, data: json?.error?.data });
+  }
+  return json?.result ?? json ?? null;
+}
+
+/** 주문 생성. ⚠️ 응답은 **`orderId` 뿐**이다 — 상태·체결은 `getOrder` 로 따로 봐야 한다 */
+async function createOrder(body, { accountSeq } = {}) {
+  return apiPost('/api/v1/orders', body, { accountSeq });
+}
+
+/** 주문 상세 — **"들어갔는지 모를 때" 확정하는 유일한 수단** */
+async function getOrder(orderId, { accountSeq } = {}) {
+  return apiGet(`/api/v1/orders/${encodeURIComponent(orderId)}`, { accountSeq });
+}
+
+/** 주문 목록. 멱등키로 보낸 주문을 되찾을 때도 쓴다 */
+async function listOrders(query = {}, { accountSeq } = {}) {
+  const q = new URLSearchParams(Object.entries(query).filter(([, v]) => v != null && v !== ''));
+  return apiGet(`/api/v1/orders${q.toString() ? `?${q}` : ''}`, { accountSeq });
+}
+
+/**
+ * 주문 취소.
+ * 🔴 **성공해도 새 `orderId` 가 발급된다**(원 ID 와 다르다) — 이후 추적은 새 ID 로.
+ * 🔴 **멱등키가 없다** ⇒ 자동 재시도 금지.
+ */
+async function cancelOrder(orderId, { accountSeq } = {}) {
+  return apiPost(`/api/v1/orders/${encodeURIComponent(orderId)}/cancel`, undefined, { accountSeq });
+}
+
+/** 주문 정정. 🔴 취소와 같다 — **새 orderId** · **멱등키 없음** · POST(PUT 아님) */
+async function modifyOrder(orderId, body, { accountSeq } = {}) {
+  return apiPost(`/api/v1/orders/${encodeURIComponent(orderId)}/modify`, body, { accountSeq });
+}
+
+/** 조건주문 생성(손절 등). `orderRules.buildStopLoss()` 가 본문을 만든다 */
+async function createConditionalOrder(body, { accountSeq } = {}) {
+  return apiPost('/api/v1/conditional-orders', body, { accountSeq });
+}
+
+/** 조건주문 목록. ⚠️ `status` 가 **필수**다(OPEN|CLOSED) */
+async function listConditionalOrders({ status = 'OPEN', symbol, cursor, limit } = {}, { accountSeq } = {}) {
+  const q = new URLSearchParams(Object.entries({ status, symbol, cursor, limit }).filter(([, v]) => v != null && v !== ''));
+  return apiGet(`/api/v1/conditional-orders?${q}`, { accountSeq });
+}
+
+/** 조건주문 취소. ⚠️ 성공이 **204 No Content** 다(일반 주문 취소와 다르다) */
+async function cancelConditionalOrder(conditionalOrderId, { accountSeq } = {}) {
+  return apiPost(`/api/v1/conditional-orders/${encodeURIComponent(conditionalOrderId)}`, undefined,
+    { accountSeq, method: 'DELETE' });
+}
+
 async function getBuyingPower(currency, { accountSeq } = {}) {
   const c = String(currency || '').trim().toUpperCase();
   if (!c) throw new TossError('통화를 지정해야 합니다(KRW/USD).', { kind: 'shape', path: '/api/v1/buying-power' });
@@ -631,6 +735,15 @@ module.exports = {
   getWarnings,
   getOrderbook,
   getCandles,
+  apiPost,
+  createOrder,
+  getOrder,
+  listOrders,
+  cancelOrder,
+  modifyOrder,
+  createConditionalOrder,
+  listConditionalOrders,
+  cancelConditionalOrder,
   getBuyingPower,
   getSellableQuantity,
   getShortSelling,
