@@ -6,6 +6,7 @@ import { useWatchlist } from '../composables/useWatchlist';
 import { useUi } from '../composables/useUi';
 import { formatMarketClock } from '../lib/marketClock';
 import { heatmapStyleFromChangePct, formatChangePct } from '../lib/heatmapColor';
+import { readSse } from '../lib/sse';
 import { apiFetch, apiStreamUrl, readApiError } from '../lib/apiClient';
 
 const {
@@ -179,6 +180,87 @@ const analystError = ref('');
  *    둘 다 "뉴스 없음" 으로 똑같이 보인다(오늘 하루 종일 본 그 실패 모드).
  */
 const mcpState = ref(null);
+
+/**
+ * 애널리스트 채팅 (2026-09-21 레이아웃 지시: 본문 우열).
+ *
+ * 🔴 사용자: *"스트리밍 형태로 출력되어야 함. **REST 형태로 안 나오게 주의**"*
+ *    ⇒ 조각이 오는 즉시 마지막 말풍선에 이어붙인다. 다 받고 한 번에 넣지 않는다.
+ * 🔴 `thinking_delta`·`tool_call`·`tool_result` 를 **따로** 보여준다 —
+ *    사고 과정과 답이 섞이면 무엇이 근거인지 알 수 없다.
+ */
+const chatInput = ref('');
+const chatBusy = ref(false);
+const chatError = ref('');
+const messages = ref([]);
+const chatBox = ref(null);
+
+function scrollChat() {
+  requestAnimationFrame(() => {
+    if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight;
+  });
+}
+
+async function loadChatHistory() {
+  try {
+    const res = await apiFetch('/api/analyst/chat/history?limit=40');
+    if (!res.ok) return;
+    const b = await res.json();
+    messages.value = (b.items || []).map((m) => ({
+      role: m.role, text: m.text, at: m.at, thinking: '', tools: [], done: true,
+    }));
+    scrollChat();
+  } catch { /* 이력이 없어도 대화는 시작할 수 있다 */ }
+}
+
+async function sendChat() {
+  const text = chatInput.value.trim();
+  if (!text || chatBusy.value) return;
+  chatInput.value = '';
+  chatError.value = '';
+  chatBusy.value = true;
+
+  messages.value.push({ role: 'user', text, at: new Date().toISOString(), done: true });
+  // 답이 들어올 빈 말풍선을 **먼저** 만든다 — 조각이 이어붙을 자리다
+  const reply = { role: 'assistant', text: '', thinking: '', tools: [], recall: 0, done: false, at: null };
+  messages.value.push(reply);
+  scrollChat();
+
+  try {
+    // 화면이 지금 무엇을 보고 있는지 한 줄로 — 모델이 "그 종목" 을 알아들을 수 있게
+    const contextNote = selected.value.symbol
+      ? `사용자가 보고 있는 종목: ${selected.value.name || ''}(${selected.value.symbol})`
+      : '';
+    const res = await apiFetch('/api/analyst/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message: text, contextNote }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error(b.error || `대화에 실패했습니다 (${res.status})`);
+    }
+    await readSse(res, (event, data) => {
+      if (event === 'text_delta') reply.text += data.text || '';
+      else if (event === 'thinking_delta') reply.thinking += data.text || '';
+      else if (event === 'tool_call') reply.tools.push({ id: data.id, name: data.name, args: data.args, state: 'running' });
+      else if (event === 'tool_result') {
+        const t = reply.tools.find((x) => x.id === data.id);
+        // ⚠️ 실패를 조용히 성공으로 만들지 않는다 — 화면에 그대로 남긴다
+        if (t) { t.state = data.ok ? 'ok' : 'fail'; t.detail = data.ok ? data.preview : data.error; }
+      } else if (event === 'recall') reply.recall = data.count || 0;
+      else if (event === 'notice') reply.notice = data.text;
+      else if (event === 'error') chatError.value = data.message || '대화 오류';
+      else if (event === 'done') { reply.done = true; reply.at = new Date().toISOString(); }
+      scrollChat();
+    });
+  } catch (e) {
+    chatError.value = e.message || '대화 오류';
+  } finally {
+    reply.done = true;
+    chatBusy.value = false;
+    scrollChat();
+  }
+}
 
 /**
  * 선택한 종목 뉴스(레이아웃 지시: 본문 좌열 상단).
@@ -424,6 +506,8 @@ function openStream() {
 }
 
 onMounted(async () => {
+  loadChatHistory();
+  loadMcpStatus();
   await load();
   await loadPortfolio();
   await loadDashboard();
@@ -838,6 +922,57 @@ onUnmounted(() => {
               <ul><li v-for="(g, i) in report.dataGaps" :key="i">{{ g }}</li></ul>
             </div>
           </template>
+        </section>
+
+        <!-- ── 애널리스트와 채팅 (레이아웃 지시: 우열) ─────────── -->
+        <section class="chat">
+          <header class="chat__head">
+            <h3 class="panel__h">애널리스트와 대화</h3>
+            <span class="chat__tools">도구 {{ 6 }}개</span>
+          </header>
+
+          <div ref="chatBox" class="chat__log">
+            <p v-if="!messages.length" class="panel__empty">
+              보유 종목·시황을 물어보세요. 필요하면 시세·차트·뉴스를 <b>직접 찾아서</b> 답합니다.
+            </p>
+            <article v-for="(m, i) in messages" :key="i" class="msg" :class="`msg--${m.role}`">
+              <!-- 사고 과정: 접어 둔다. 🔴 답과 섞으면 무엇이 근거인지 알 수 없다 -->
+              <details v-if="m.thinking" class="msg__think">
+                <summary>생각 ({{ m.thinking.length }}자)</summary>
+                <pre>{{ m.thinking }}</pre>
+              </details>
+
+              <!-- 도구 호출: 무엇을 부르고 무엇을 받았는지 그대로 -->
+              <ul v-if="m.tools && m.tools.length" class="msg__tools">
+                <li v-for="t in m.tools" :key="t.id" class="tool" :class="`tool--${t.state}`">
+                  <span class="tool__name">{{ t.name }}</span>
+                  <span class="tool__args mono-num">{{ JSON.stringify(t.args) }}</span>
+                  <span class="tool__state">{{ t.state === 'running' ? '…' : t.state === 'ok' ? '✓' : '✕' }}</span>
+                  <span v-if="t.detail" class="tool__detail">{{ t.detail }}</span>
+                </li>
+              </ul>
+
+              <p v-if="m.recall" class="msg__recall">과거 대화 {{ m.recall }}건을 참고했습니다.</p>
+              <div v-if="m.text" class="msg__text">{{ m.text }}</div>
+              <!-- 아직 아무것도 안 온 상태를 빈칸으로 두지 않는다 -->
+              <span v-else-if="!m.done" class="msg__wait">생각 중…</span>
+              <p v-if="m.notice" class="msg__notice">{{ m.notice }}</p>
+            </article>
+          </div>
+
+          <p v-if="chatError" class="banner banner--error">{{ chatError }}</p>
+
+          <form class="chat__form" @submit.prevent="sendChat">
+            <input
+              v-model="chatInput"
+              class="input"
+              :disabled="chatBusy"
+              placeholder="예: QLD 지금 더 사도 될까?"
+            />
+            <button class="btn btn--ai" type="submit" :disabled="chatBusy || !chatInput.trim()">
+              {{ chatBusy ? '…' : '보내기' }}
+            </button>
+          </form>
         </section>
       </aside>
     </div>
@@ -1425,6 +1560,55 @@ onUnmounted(() => {
   border-top: 1px solid var(--color-hairline-soft);
 }
 .addticker__query { min-width: 0; }
+
+/* ── 애널리스트 채팅 ─────────────────────────────── */
+.chat {
+  display: flex; flex-direction: column; gap: var(--space-sm);
+  background: var(--color-surface); border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg); padding: var(--space-base);
+  /* 남는 높이를 채팅이 가져간다 — 대화가 주인공인 열이다 */
+  flex: 1; min-height: 280px;
+}
+.chat__head { display: flex; align-items: center; justify-content: space-between; }
+.chat__head .panel__h { margin: 0; }
+.chat__tools { font-size: var(--text-2xs); color: var(--color-faint); }
+.chat__log {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: var(--space-sm);
+}
+.msg { font-size: var(--text-xs); line-height: 1.6; }
+.msg__text { white-space: pre-wrap; word-break: break-word; }
+.msg--user .msg__text {
+  background: var(--color-primary-soft); color: var(--color-ink);
+  padding: 6px 10px; border-radius: var(--rounded-md); align-self: flex-end;
+}
+.msg--assistant .msg__text { color: var(--color-body); }
+.msg__wait { color: var(--color-faint); font-size: var(--text-2xs); }
+.msg__recall { margin: 0 0 4px; font-size: var(--text-2xs); color: var(--color-ai); }
+.msg__notice { margin: 4px 0 0; font-size: var(--text-2xs); color: var(--color-warn, #d9a441); }
+.msg__think { margin-bottom: 4px; }
+.msg__think summary { cursor: pointer; font-size: var(--text-2xs); color: var(--color-faint); }
+.msg__think pre {
+  margin: 4px 0 0; padding: 6px 8px; white-space: pre-wrap; word-break: break-word;
+  background: var(--color-surface-sunken); border-radius: var(--rounded-sm);
+  font-size: var(--text-2xs); color: var(--color-muted);
+}
+.msg__tools { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.tool {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  font-size: var(--text-2xs); padding: 3px 6px;
+  background: var(--color-surface-sunken); border-radius: var(--rounded-sm);
+  border-left: 2px solid var(--color-hairline);
+}
+.tool--running { border-left-color: var(--color-ai); }
+.tool--ok { border-left-color: var(--color-up); }
+/* 🔴 실패를 눈에 띄게 — 조용히 성공처럼 보이면 안 된다 */
+.tool--fail { border-left-color: var(--color-down); }
+.tool__name { font-weight: 700; color: var(--color-body); }
+.tool__args { color: var(--color-faint); }
+.tool__detail { flex-basis: 100%; color: var(--color-muted); word-break: break-all; }
+.chat__form { display: flex; gap: var(--space-xs); }
+.chat__form .input { flex: 1; }
 
 /* ── 선택 종목 뉴스 ──────────────────────────────── */
 .news {

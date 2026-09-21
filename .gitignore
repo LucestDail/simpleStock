@@ -10,5 +10,9 @@ backups/
 data/*.json
 !data/.gitkeep
 !data/README.md
-# 주문 감사 로그 — 개인 금융 기록. 형상에 올리지 않는다
-data/orders-audit.jsonl
+# 🔴 개인 금융·대화 기록. 형상에 올리지 않는다.
+#    ⚠️ 위 `data/*.json` 은 **`.jsonl` 을 안 덮는다**(확장자가 다르다) — 실제로
+#       `analyst-chat.jsonl` 이 추적 대상으로 잡혀 있었다. 이어붙이는 기록을 새로
+#       만들 때마다 여기에 **한 줄 추가**해야 한다 ⇒ 그래서 개별 나열 대신 통째로 막는다.
+data/*.jsonl
+data/analyst-dream.json

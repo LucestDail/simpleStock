@@ -40,6 +40,8 @@ const orderService = require('./server/orderService');
 const telegram = require('./server/telegramService');
 const analyst = require('./server/analystService');
 const mcp = require('./server/mcpClient');
+const analystChat = require('./server/analystChat');
+const analystDream = require('./server/analystDream');
 
 // 🔴 2026-09-21: 종전에는 토큰이 없으면 `requireAccessToken` 이 그냥 next() 했다(fail-open).
 //    설정 실수 한 번이 곧 전면 개방이었다. 이제 **없으면 무작위로 만들어 잠근다** —
@@ -175,6 +177,86 @@ app.post('/api/analyst/run', async (req, res) => {
     logError('analyst.failed', error, { requestId: req.requestId, kind: error.kind });
     return res.status(502).json({ error: error.message || '분석에 실패했습니다.', kind: error.kind || 'unknown' });
   }
+});
+
+/**
+ * 애널리스트 채팅 — **SSE 스트리밍**.
+ *
+ * 🔴 사용자 지시: *"스트리밍 형태로 출력되어야 함. REST 형태로 안 나오게 주의"*
+ *    ⇒ 여기서 `res.json` 을 쓰면 요구사항 위반이다. 조각이 생기는 즉시 `res.write` 한다.
+ *
+ * ⚠️ **SSE 는 `data:` 한 줄에 개행을 못 담는다.** 줄바꿈이 든 텍스트를 그대로 쓰면
+ *    프레임이 깨져 클라이언트가 조용히 일부만 받는다 ⇒ **JSON 으로 감싸** 한 줄로 만든다
+ *    (피어가 오늘 `data:` 공백 문제로 한 번 걸렸다. 같은 층의 함정이다).
+ * ⚠️ nginx 가 버퍼링하면 **스트리밍이 REST 처럼 보인다** ⇒ `X-Accel-Buffering: no`.
+ */
+app.post('/api/analyst/chat', async (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  const emit = (event, data) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    // ⚠️ 압축 미들웨어가 붙으면 flush 가 필요하다. 없으면 no-op
+    if (typeof res.flush === 'function') res.flush();
+  };
+
+  /**
+   * 끊긴 연결에 계속 쓰지 않는다(브라우저 탭을 닫으면 바로 일어난다).
+   *
+   * 🔴 **`req.on('close')` 를 쓰면 안 된다.** `express.json()` 이 본문을 이미 다 읽어서
+   *    핸들러가 도는 시점에 요청 스트림은 **끝나 있고**, `close` 가 **즉시** 발화한다.
+   *    첫 판이 그랬고 `event: start` 뒤로 **모든 이벤트가 막혔다** — 화면은 영원히
+   *    "생각 중…" 이었을 것이다. 서비스 테스트는 전부 초록이었다(라우트 밖의 일이라서).
+   *    ⇒ 연결이 살아 있는지는 **응답 쪽**(`res`)으로 판정한다.
+   */
+  let aborted = false;
+  res.on('close', () => { aborted = true; });
+  const safeEmit = (e, d) => { if (!aborted && !res.writableEnded) emit(e, d); };
+
+  try {
+    const mkt = getMarketSnapshot();
+    const rate = Number(mkt?.fx?.USDKRW?.rate) || 0;
+    safeEmit('start', { at: new Date().toISOString() });
+    const summary = await analystChat.chat({
+      message: req.body?.message,
+      contextNote: String(req.body?.contextNote || '').slice(0, 800),
+      fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || null } : null,
+      emit: safeEmit,
+    });
+    safeEmit('done', summary);
+  } catch (error) {
+    logError('chat.failed', error, { requestId: req.requestId, kind: error.kind });
+    // 🔴 이미 헤더를 보냈으므로 상태코드로 알릴 수 없다 — **이벤트로** 알린다
+    safeEmit('error', { message: error.message || '대화에 실패했습니다.', kind: error.kind || 'unknown' });
+  } finally {
+    res.end();
+  }
+});
+
+/**
+ * dreaming — 유휴 시 이력을 되짚어 장기기억을 남긴다.
+ * ⚠️ `force` 는 **수동 실행**이다(기본 꺼짐을 우회). 화면 버튼·점검용.
+ */
+app.get('/api/analyst/dream', (req, res) => res.json(analystDream.status()));
+app.post('/api/analyst/dream', async (req, res) => {
+  try {
+    const r = await analystDream.dream({ force: req.body?.force === true });
+    // 🔴 `ran:false` 도 200 이다 — "안 돌았다" 는 오류가 아니라 **정상적인 결과**다.
+    //    다만 why 를 반드시 실어서 화면이 이유를 말할 수 있게 한다
+    return res.json(r);
+  } catch (e) {
+    logError('dream.route_failed', e, { requestId: req.requestId });
+    return res.status(500).json({ error: e.message || 'dreaming 실패' });
+  }
+});
+
+/** 대화 이력(화면 복원용). 스트리밍이 아니라 이건 REST 가 맞다 */
+app.get('/api/analyst/chat/history', (req, res) => {
+  const rows = analystChat.readHistory({ limit: Number(req.query.limit) || 60 });
+  res.json({ items: rows.filter((r) => r.role === 'user' || r.role === 'assistant') });
 });
 
 /**
@@ -600,6 +682,8 @@ async function startAiSchedule() {
   logInfo('telegram.mode', telegram.status());
   // 어느 쪽이 막고 있는지(미설정/꺼짐)까지 기동 로그에 남긴다
   logInfo('mcp.mode', mcp.status());
+  // 무인 반복은 켜졌는지·왜 안 도는지를 기동 때 말한다
+  logInfo('dream.mode', analystDream.status());
   logInfo('llm.fetch_probe', require('./server/geminiClient').describeFetchProbe());
   logInfo('auth.lan_trust', {
     enabled: SESSION.TRUST_LAN,
