@@ -65,6 +65,35 @@ class TossError extends Error {
   }
 }
 
+/**
+ * 🔴 **토스의 Rate Limits Group** (명세 v1.2.17). 우리 내부 버킷(경로)과 다르다 —
+ *    경로로 역추정하면 종목마다 버킷이 갈려서 **여유를 못 합산한다.**
+ * ⚠️ 명세의 태그 → 그룹 대응을 그대로 옮겼다. **모르면 `null`** 이지 추측하지 않는다.
+ */
+function tossGroupOf(path) {
+  const p = String(path).split('?')[0];
+  if (p.startsWith('/oauth2/')) return 'AUTH';
+  if (p === '/api/v1/accounts') return 'ACCOUNT';
+  if (p === '/api/v1/holdings') return 'ASSET';
+  if (p === '/api/v1/buying-power' || p === '/api/v1/commissions' || p === '/api/v1/sellable-quantity') return 'ORDER_INFO';
+  if (p === '/api/v1/candles') return 'MARKET_DATA_CHART';
+  if (['/api/v1/prices', '/api/v1/orderbook', '/api/v1/price-limits', '/api/v1/trades'].includes(p)) return 'MARKET_DATA';
+  if (p === '/api/v1/market-indicators/prices') return 'MARKET_INDICATOR';
+  if (/^\/api\/v1\/market-indicators\/[^/]+\/candles$/.test(p)) return 'MARKET_INDICATOR_CHART';
+  if (p.startsWith('/api/v1/market-indicators/')) return 'MARKET_INDICATOR';
+  if (p.startsWith('/api/v1/market-calendar') || p === '/api/v1/exchange-rate') return 'MARKET_INFO';
+  if (p === '/api/v1/rankings') return 'RANKING';
+  if (p === '/api/v1/stocks/all') return 'STOCK_ALL';
+  if (/^\/api\/v1\/stocks\/[^/]+\/(investor-trading|short-selling|program-trades|credit-trades|securities-lending)$/.test(p)) return 'STOCK_TRADING_TREND';
+  if (p.startsWith('/api/v1/stocks')) return 'STOCK';
+  if (p.startsWith('/api/v1/conditional-orders')) return 'CONDITIONAL_ORDER';
+  if (p.startsWith('/api/v1/orders')) return 'ORDER';
+  return null;
+}
+
+/** 그룹별 나가는 호출 수 — 🔴 **분모다.** 이게 없으면 "429 0건" 이 *여유* 인지 *안 불렀다* 인지 안 갈린다 */
+const groupCalls = new Map();
+
 /** 버킷별로 마지막에 본 잔여치 — 같은 값을 반복해 찍지 않으려고 들고 있는다 */
 const rateSeen = new Map();
 /** 이 밑으로 떨어지면 시끄럽게 — 기본 20% */
@@ -76,17 +105,29 @@ const RATE_WARN_RATIO = Math.min(1, Math.max(0, Number(process.env.TOSS_RATE_WAR
  *    여기서 그걸 오류로 다루면 멀쩡한 호출이 실패한다. 대신 `seen:false` 로 구분한다.
  */
 function noteRateLimitHeaders(path, res) {
+  const group = tossGroupOf(path);
+  /**
+   * 🔴 **분모를 먼저 센다** — 헤더가 없어도 *"몇 번 나갔는지"* 는 남아야 한다.
+   *    pm2 실측: `candles` 는 성공하면 로그가 **0건**이라 기준선에 축 자체가 없었다.
+   *    그 상태에서 "429 0건" 은 *여유* 가 아니라 **판정 불가**다.
+   */
+  const gkey = group || bucketOf(path);
+  groupCalls.set(gkey, (groupCalls.get(gkey) || 0) + 1);
+
   const limit = Number(res.headers.get('X-RateLimit-Limit'));
   const remaining = Number(res.headers.get('X-RateLimit-Remaining'));
   if (!Number.isFinite(limit) || !Number.isFinite(remaining) || limit <= 0) return;
-  const bucket = bucketOf(path);
+  const bucket = group || bucketOf(path);
   const prev = rateSeen.get(bucket);
   const ratio = remaining / limit;
   const low = ratio <= RATE_WARN_RATIO;
   // 처음 보는 버킷이거나, 여유가 적거나, 잔여가 크게 바뀌었을 때만 남긴다
   if (prev === undefined || low || Math.abs((prev.remaining ?? 0) - remaining) >= Math.max(1, limit * 0.25)) {
     const payload = {
-      bucket, limit, remaining, ratio: Number(ratio.toFixed(2)),
+      group: group || null, bucket, limit, remaining, ratio: Number(ratio.toFixed(2)),
+      // 🔴 분모를 같이 실어 보낸다 — 이 줄 하나로 "여유" 와 "안 불렀다" 가 갈린다
+      calls: groupCalls.get(gkey) || 0,
+      path: bucketOf(path),
       reset: res.headers.get('X-RateLimit-Reset') || null,
     };
     if (low) logWarn('toss.ratelimit_low', payload);
@@ -97,7 +138,12 @@ function noteRateLimitHeaders(path, res) {
 
 /** 지금까지 본 버킷별 여유 — 운영 점검이 한 번에 보게 */
 function rateLimitSnapshot() {
-  return Object.fromEntries([...rateSeen].map(([k, v]) => [k, { ...v }]));
+  const out = {};
+  // ⚠️ **헤더를 못 본 그룹도 넣는다** — 호출은 했는데 헤더가 없는 것과
+  //    아예 안 부른 것을 구분해야 한다(`seenHeaders:false` vs 항목 없음)
+  for (const [k, calls] of groupCalls) out[k] = { calls, seenHeaders: false };
+  for (const [k, v] of rateSeen) out[k] = { ...(out[k] || { calls: 0 }), ...v, seenHeaders: true };
+  return out;
 }
 
 function bucketOf(path) {
@@ -482,6 +528,7 @@ function _resetForTest() {
 module.exports = {
   BASE_URL,
   rateLimitSnapshot,
+  tossGroupOf,
   TossError,
   isConfigured,
   getToken,
