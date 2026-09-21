@@ -1,4 +1,4 @@
-const { resolveSession } = require('./marketCalendar');
+const marketCalendar = require('./marketCalendar');
 const { APP_TIMEZONE } = require('./time');
 const { loadStore, mutateStore } = require('./dataStore');
 const { broadcast } = require('./realtimeService');
@@ -164,34 +164,46 @@ function getTimezoneHour(now = new Date(), timeZone = APP_TIMEZONE) {
   return Number(hourPart?.value || 0);
 }
 
-function getSessionState(hour, windowStartHour, windowEndHour) {
-  if (windowStartHour < windowEndHour) {
-    if (hour < windowStartHour) return 'pre';
-    if (hour >= windowEndHour) return 'closed';
-    return 'open';
-  }
+/**
+ * 🔴 2026-09-22: **캘린더를 본다.** 종전에는 시각만 봤고(요일 판정만 덧대 있었다),
+ *    그 결과 미국 마감 21분 뒤에 화면이 **"장 전"**(`pre`) 이라고 말했다 —
+ *    자정을 넘는 창에서 `hour < 시작시각` 이 마감 직후에도 참이기 때문이다.
+ *    게다가 여기 창(22~5)과 경보 쪽 창(22~6)이 **서로 달라** 같은 시각에 다른 답을 냈다.
+ * ⚠️ 캘린더 실패 시 `resolveSessionLive` 가 알아서 폴백한다(그때만 종전 동작).
+ */
+async function getMarketSessionSnapshot(now = new Date(), deps = {}) {
+  // ⚠️ `deps` 는 **검증 통로**다 — 캘린더를 주입해야 "정말 휴장일을 보는가" 를 증명할 수 있다.
+  //    주입 없이 도는 테스트는 폴백만 재고 **캘린더 경로를 한 번도 안 태운다.**
+  const [kr, us] = await Promise.all([
+    marketCalendar.resolveSessionLive(now, 'KR', 9, 16, APP_TIMEZONE, deps),
+    marketCalendar.resolveSessionLive(now, 'US', 22, 5, APP_TIMEZONE, deps),
+  ]);
 
-  if (hour >= windowStartHour || hour < windowEndHour) {
-    return 'open';
-  }
-
-  return hour < windowStartHour ? 'pre' : 'closed';
-}
-
-function getMarketSessionSnapshot(now = new Date()) {
-  // 🔴 2026-09-21: 종전에는 **시각만** 봐서 토요일 오전 10시도 'open' 이었다.
-  //    요일은 각 시장의 **현지 시간대**로 본다 — KST 로 자르면 KST 토요일 새벽인
-  //    미국 금요일장을 통째로 닫아 버린다. 공휴일은 아직 모른다(holidayAware:false).
-  const kr = resolveSession(now, 'KR', 9, 16, APP_TIMEZONE);
-  const us = resolveSession(now, 'US', 22, 5, APP_TIMEZONE);
+  /**
+   * 🔴 **필드가 조용히 비지 않게 한다.** 캘린더 경로는 `reason`·`holidayAware` 를 안 준다
+   *    (폴백 경로만 준다) ⇒ 그대로 옮기면 화면에서 두 필드가 `undefined` 로 **사라진다.**
+   *    사라진 정보는 아무도 못 본다 — 출처에 맞는 값을 **명시적으로** 만든다.
+   */
+  const shape = (m, r) => ({
+    market: m,
+    state: r.state,
+    /**
+     * ⚠️ 폴백 경로는 **항상** `reason`(`weekend`/`schedule`)을 준다 — 종전 어휘를 덮지 않는다.
+     *    비어 있는 건 캘린더 경로뿐이라 **그쪽만** 채운다.
+     * 🔴 처음엔 여기에 폴백용 문구도 적었는데 **도달 불가**였다(`reason` 이 늘 차 있다).
+     *    쓰이지 않는 가지를 남기면 *"그런 안내가 나간다"* 고 믿게 된다 ⇒ 지웠다.
+     */
+    reason: r.reason || `거래소 캘린더 기준${r.date ? ` (${r.date})` : ''}`,
+    // 🔴 캘린더 경로는 휴장일을 **실제로** 안다(휴장이면 regular 가 null 이다).
+    //    폴백은 요일만 보므로 종전대로 그 값을 쓴다.
+    holidayAware: r.source === 'calendar' ? true : Boolean(r.holidayAware),
+    source: r.source || 'fallback',
+  });
 
   return {
     timezone: APP_TIMEZONE,
     asOf: now.toISOString(),
-    sessions: {
-      kr: { market: 'KRX', state: kr.state, reason: kr.reason, holidayAware: kr.holidayAware },
-      us: { market: 'US', state: us.state, reason: us.reason, holidayAware: us.holidayAware },
-    },
+    sessions: { kr: shape('KRX', kr), us: shape('US', us) },
   };
 }
 
@@ -847,7 +859,7 @@ async function refreshMarketData({ reason = 'interval', force = false } = {}) {
   refreshPromise = (async () => {
     const initialStore = loadStore();
     const trackedTickers = listTrackedTickerConfigs(initialStore);
-    const sessions = getMarketSessionSnapshot();
+    const sessions = await getMarketSessionSnapshot();
     const nextQuotes = {};
     const errors = [];
     let nextFx = null;

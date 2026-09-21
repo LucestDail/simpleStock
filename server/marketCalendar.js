@@ -61,12 +61,20 @@ function normalizeCalendarDay(day) {
 }
 
 /**
- * 지금이 어떤 세션인가 — **정규장 기준**으로 `open`/`closed` 를 낸다.
+ * 지금이 어떤 세션인가 — **정규장 기준**으로 `open`/`pre`/`closed` 를 낸다.
+ *
  * ⚠️ 프리·애프터는 `open` 으로 치지 **않는다**. 장마감 트리거가 애프터마켓까지 열린 것으로 보면
  *    마감 요약이 3시간 늦게 나간다.
- * @returns {{state:'open'|'closed', source:'calendar', regular:object|null}|null} 모르면 null
+ *
+ * 🔴 **`pre` 를 캘린더에서 유도한다** (2026-09-22). 종전에는 시계 폴백에만 있던 어휘라,
+ *    이쪽으로 정본을 합치면 *"장 전"* 알림이 **조용히 사라질** 뻔했다.
+ *    ★ 사라진 알림은 아무도 못 본다 — 그래서 없애지 않고 **더 정확하게** 만든다.
+ *    정의 = *"오늘 정규장이 있는데 아직 시작 전"*. 마감 뒤에는 `pre` 가 아니라 `closed` 다.
+ *    ⚠️ 시계 폴백은 이걸 표현 못 했다 — 자정을 넘는 창(미국장)에서 마감 직후를
+ *      `hour < 시작시각` 으로 판정해 **"장 전"** 이라 답했다(실측: 마감 21분 뒤 화면이 `pre`).
  */
 function sessionFromCalendar(nowMs, days) {
+  const today = normalizeCalendarDay(days?.today);
   const list = [days?.previousBusinessDay, days?.today, days?.nextBusinessDay]
     .map(normalizeCalendarDay).filter(Boolean);
   if (!list.length) return null;
@@ -74,6 +82,13 @@ function sessionFromCalendar(nowMs, days) {
     if (d.regular && nowMs >= d.regular.start && nowMs < d.regular.end) {
       return { state: 'open', source: 'calendar', regular: d.regular, date: d.date };
     }
+  }
+  /**
+   * 오늘 정규장이 **아직 시작 전**이면 `pre`. 휴장일(regular=null)은 해당 없음 —
+   * **"안 여는 날" 을 "곧 연다" 로 말하지 않는다.**
+   */
+  if (today?.regular && nowMs < today.regular.start) {
+    return { state: 'pre', source: 'calendar', regular: today.regular, date: today.date };
   }
   /**
    * 어느 구간에도 안 들면 **닫혀 있다.** 다만 *"캘린더를 못 읽어서 모른다"* 와는 다르다 —

@@ -48,7 +48,15 @@ test('🔴 국내 — `integrated` 안을 읽고 마감이 15:30 이다 (하드�
 
 test('🔴 프리·애프터는 정규장이 아니다 (마감 요약이 늦으면 안 된다)', () => {
   const days = { today: US_DAY };
-  assert.equal(sessionFromCalendar(at('2026-09-22T20:00:00+09:00'), days).state, 'closed', '프리마켓을 open 으로 봤다');
+  /**
+   * 🔴 2026-09-22: 여기가 `closed` → **`pre`** 로 바뀌었다. **의도는 그대로다** —
+   *    이 테스트가 지키려던 것은 *"프리마켓을 `open` 으로 보지 마라"*(그러면 마감 요약이 늦는다)이고
+   *    `pre` 도 `open` 이 아니다. 마감 트리거는 `closed` 전이에서만 돌므로 영향 없다.
+   *    바뀐 이유 = 시계 폴백에만 있던 `pre` 어휘를 캘린더로 옮겨 **정본을 하나로** 합쳤다.
+   */
+  const preMarket = sessionFromCalendar(at('2026-09-22T20:00:00+09:00'), days).state;
+  assert.notEqual(preMarket, 'open', '🔴 프리마켓을 open 으로 봤다 — 마감 요약이 늦어진다');
+  assert.equal(preMarket, 'pre', '개장 전이면 pre 다');
   assert.equal(sessionFromCalendar(at('2026-09-23T06:00:00+09:00'), days).state, 'closed', '애프터마켓을 open 으로 봤다');
   assert.equal(sessionFromCalendar(at('2026-09-23T01:00:00+09:00'), days).state, 'open');
 });

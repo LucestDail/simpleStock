@@ -201,8 +201,18 @@ function status() {
 
 /** 🔔 시장 개장/폐장 — **상태가 바뀐 순간에만** */
 async function ruleSessions(st, now, out, sup, items, summary) {
+  /**
+   * 🔴 **정본이 셋이었고 셋 다 다른 답을 냈다** (2026-09-22 실측, 05:21 KST = 미국 마감 21분 뒤):
+   * ```
+   *   화면(marketDataService, 22~5)  pre     ← "장 전"  ❌
+   *   경보(여기, 22~6)               open    ← "장중"   ❌ 폐장 알림이 1시간 늦는다
+   *   애널리스트(캘린더)             closed  ← 정답
+   * ```
+   * 내가 캘린더를 붙일 때 **애널리스트만 갈아끼우고 나머지를 안 훑었다.**
+   * ⇒ 셋 다 `resolveSessionLive` 하나를 본다. 조기폐장·서머타임·공휴일까지 따라간다.
+   */
   for (const [key, label, s, e] of [['kr', 'KRX', 9, 16], ['us', '미국장', 22, 6]]) {
-    const cur = resolveSession(now, key, s, e, APP_TIMEZONE).state;
+    const cur = (await marketCalendar.resolveSessionLive(now, key.toUpperCase(), s, e, APP_TIMEZONE)).state;
     const mark = `session:${key}`;
     if (st[mark] === cur) continue;
     const was = st[mark];
