@@ -37,6 +37,7 @@ const tossPortfolio = require('./server/tossPortfolio');
 const tossClient = require('./server/tossClient');
 const dashboardService = require('./server/dashboardService');
 const orderService = require('./server/orderService');
+const telegram = require('./server/telegramService');
 
 // 🔴 2026-09-21: 종전에는 토큰이 없으면 `requireAccessToken` 이 그냥 next() 했다(fail-open).
 //    설정 실수 한 번이 곧 전면 개방이었다. 이제 **없으면 무작위로 만들어 잠근다** —
@@ -141,6 +142,25 @@ app.get('/api/portfolio', async (req, res) => {
       error: error.message || '보유 현황을 불러오지 못했습니다.',
       kind: error.kind || 'unknown',
     });
+  }
+});
+
+// ── 텔레그램 (밖에서 받는 창구) ────────────────────────────────
+app.get('/api/telegram/status', (req, res) => res.json(telegram.status()));
+
+/** 지금 자산 현황을 한 통 보낸다. 🔴 기본은 dry-run 이라 실제로 안 나간다 */
+app.post('/api/telegram/portfolio', async (req, res) => {
+  try {
+    const mkt = getMarketSnapshot();
+    const rate = Number(mkt?.fx?.USDKRW?.rate) || 0;
+    const p = await tossPortfolio.getHoldings({
+      fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || null } : null,
+    });
+    const r = await telegram.send(telegram.formatPortfolio(p), { reason: 'portfolio' });
+    return res.status(r.ok ? 200 : 502).json(r);
+  } catch (e) {
+    logError('telegram.portfolio_failed', e, { requestId: req.requestId });
+    return res.status(502).json({ ok: false, error: e.message, kind: e.kind || 'unknown' });
   }
 });
 
@@ -485,6 +505,8 @@ async function startAiSchedule() {
 
   // ⚠️ 조용한 우회를 만들지 않는다 — LAN 면제가 켜져 있으면 그 사실을 기동 때 말한다
   logInfo('orders.mode', orderService.status());
+  // 조용히 켜져 있지도, 조용히 꺼져 있지도 않게 — 어느 쪽이 막는지 이유까지 남긴다
+  logInfo('telegram.mode', telegram.status());
   logInfo('llm.fetch_probe', require('./server/geminiClient').describeFetchProbe());
   logInfo('auth.lan_trust', {
     enabled: SESSION.TRUST_LAN,
