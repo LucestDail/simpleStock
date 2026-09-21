@@ -22,6 +22,13 @@ services:
     env_file:
       - path: /etc/simplestock.env
         required: false
+    # 🔴 컨테이너에서 호스트(.25)의 my-computer MCP 를 부르기 위해 (2026-09-21)
+    #    컨테이너 안의 127.0.0.1 은 **자기 자신**이라 MYCOMPUTER_MCP_URL 이 안 닿는다
+    #    (실측: fetch failed). 도커 게이트웨이(172.18.0.1)나 LAN IP 로도 닿지만
+    #    ⚠️ 게이트웨이 IP 는 네트워크 재생성 시, LAN IP 는 공유기 설정에 따라 바뀐다.
+    #    ⇒ 이름으로 고정한다. host-gateway 는 도커가 호스트 주소로 채워 준다.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       PORT: "${PORT:-50000}"
       APP_ACCESS_TOKEN: "${APP_ACCESS_TOKEN:-}"
