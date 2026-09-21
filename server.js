@@ -10,7 +10,7 @@ const { APP_TIMEZONE, getDateInTimezone, getDateTimeInTimezone } = require('./se
 const { AI_DAILY_CRON, isAiConfigured } = require('./server/aiService');
 const { syncScheduledTasks } = require('./server/taskService');
 const { ensureManagerBriefSchedule } = require('./server/managerBriefSchedule');
-const { logInfo, logError } = require('./server/logger');
+const { logInfo, logWarn, logError } = require('./server/logger');
 const { runManagerReview, getSystemStatus, getLatestManagerReport } = require('./server/managerService');
 const { ORCHESTRATION_NOTES, buildServerStatusPayload } = require('./server/payloadService');
 const { subscribe, unsubscribe, sendToClient, broadcast, getSubscriberCount } = require('./server/realtimeService');
@@ -30,6 +30,7 @@ const {
   addTicker,
   removeTicker,
 } = require('./server/watchlistService');
+const { resolveTickerByName } = require('./server/tickerLookupService');
 
 const PORT = Number(process.env.PORT) || 50000;
 const SESSION = require('./server/session');
@@ -45,6 +46,7 @@ const analystDream = require('./server/analystDream');
 const tape = require('./server/tickerTapeService');
 const telegramBot = require('./server/telegramBot');
 const alerts = require('./server/alertService');
+const activity = require('./server/activityLog');
 
 // 🔴 2026-09-21: 종전에는 토큰이 없으면 `requireAccessToken` 이 그냥 next() 했다(fail-open).
 //    설정 실수 한 번이 곧 전면 개방이었다. 이제 **없으면 무작위로 만들어 잠근다** —
@@ -183,6 +185,41 @@ app.post('/api/analyst/run', async (req, res) => {
 });
 
 /**
+ * 종목 검색 — **이름으로도** 찾는다 (2026-09-21 사용자: *"삼성전자 검색하면 안뜨는데"*).
+ *
+ * ⚠️ 종전 랭킹 검색은 **입력값을 그대로 종목 코드로** 썼다. 그래서 `005930` 은 되고
+ *    `삼성전자` 는 안 됐다 — 한글을 티커로 보내니 당연히 없다.
+ * ⇒ ①토스 `/stocks` 로 **코드로** 먼저 확인 ②안 되면 `resolveTickerByName` 으로 이름 해석.
+ *   🔴 순서가 중요하다 — 코드처럼 생긴 입력을 이름 검색에 보내면 엉뚱한 종목이 나온다.
+ */
+app.get('/api/lookup', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.status(400).json({ error: '검색어가 필요합니다.' });
+
+  // ① 코드로 보고 조회 — 맞으면 이름까지 돌려준다
+  try {
+    const info = await tossClient.getStockInfo([q.toUpperCase()]);
+    const hit = info.get(q.toUpperCase());
+    if (hit?.name) {
+      return res.json({ ok: true, by: 'symbol', symbol: q.toUpperCase(), name: hit.name, market: hit.market });
+    }
+  } catch (e) {
+    // 코드 조회 실패는 **이름 검색을 막지 않는다**(둘은 독립된 경로다)
+    logInfo('lookup.symbol_miss', { q, message: e.message });
+  }
+
+  // ② 이름으로 해석
+  try {
+    const c = await resolveTickerByName(q);
+    if (c?.symbol) return res.json({ ok: true, by: 'name', symbol: c.symbol, name: c.name || q, market: c.market || null });
+  } catch (e) {
+    logWarn('lookup.name_failed', { q, message: e.message });
+  }
+  // 🔴 "못 찾았다" 를 200+빈값으로 주지 않는다 — 화면이 "없다" 와 "실패" 를 구분해야 한다
+  return res.status(404).json({ ok: false, error: `'${q}' 를 찾지 못했습니다.` });
+});
+
+/**
  * 헤더 시세 테이프 — 환율·지수·원자재·코인.
  * ⚠️ 토스가 아니라 Yahoo 다(토스는 종목만 준다). 무인증이라 캐시로 아껴 쓴다.
  */
@@ -190,7 +227,8 @@ app.get('/api/tape', async (req, res) => {
   try {
     const t = await tape.getTape({ force: req.query.force === 'true' });
     // 🔴 몇 개를 못 받았는지 함께 준다 — 화면이 "없다" 와 "못 받았다" 를 구분해야 한다
-    return res.json({ items: t.items, failed: t.failed, cached: Boolean(t.cached), stale: Boolean(t.stale) });
+    // 고정 칸(원/달러)과 흐르는 칸을 **갈라서** 준다 — 화면이 둘을 다르게 놓는다
+    return res.json({ items: t.items, fixed: t.fixed || [], failed: t.failed, cached: Boolean(t.cached), stale: Boolean(t.stale) });
   } catch (e) {
     logError('tape.failed', e, { requestId: req.requestId });
     return res.status(502).json({ error: e.message || '시세 테이프를 불러오지 못했습니다.', items: [] });
@@ -304,6 +342,21 @@ app.delete('/api/analyst/chat/history', (req, res) => {
   const r = analystChat.clearHistory();
   return res.json(r);
 });
+
+/**
+ * 활동 타임라인 — 분석·알림·제안·승인을 **한 시간축**으로.
+ * ⚠️ 종전에는 세 곳에 흩어져 있어(화면 메모리 · 로그 파일 · 감사 JSONL) 사람이 못 봤다.
+ */
+app.get('/api/activity', (req, res) => {
+  const kinds = String(req.query.kinds || '').trim();
+  res.json({
+    items: activity.list({
+      limit: Math.min(300, Number(req.query.limit) || 80),
+      kinds: kinds ? kinds.split(',') : null,
+    }),
+  });
+});
+app.delete('/api/activity', (req, res) => res.json(activity.clear()));
 
 /** 대화 이력(화면 복원용). 스트리밍이 아니라 이건 REST 가 맞다 */
 app.get('/api/analyst/chat/history', (req, res) => {
@@ -801,6 +854,40 @@ async function startAiSchedule() {
   orderService.onProposed((p) => alerts.onProposal(p));
   telegramBot.start();
   alerts.start();
+
+  /**
+   * 🔴 매매 분석 **자동 실행** (2026-09-21 사용자: *"분석 실행해야 시작하는거야?"*).
+   * ⚠️ **기본 꺼짐**이다 — LLM 을 주기적으로 부르면 비용이 선형으로 는다.
+   *    `ANALYST_AUTO_CRON` 에 cron 을 주면 그때만 돈다(예: 장 시작·마감).
+   * ★ 결과는 화면이 아니라 **활동 기록**에 남는다 — 그래서 새로고침해도 시간순으로 보인다.
+   */
+  const autoCron = String(process.env.ANALYST_AUTO_CRON || '').trim();
+  if (autoCron && cron.validate(autoCron)) {
+    cron.schedule(autoCron, async () => {
+      try {
+        const mkt = getMarketSnapshot();
+        const rate = Number(mkt?.fx?.USDKRW?.rate) || 0;
+        const st = getDashboardSettings();
+        const watch = getWatchlistState();
+        const dash = await dashboardService.build({
+          watchSymbols: (watch?.groups || []).flatMap((g) => (g.tickers || []).map((t) => t.symbol)),
+          fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || null } : null,
+          momentumPct: st.momentumPct,
+          rankingTypes: st.rankingTypes,
+          rankingCountries: st.rankingCountries,
+        });
+        const r = await analyst.analyze(dash, { userInstruction: st.briefingPrompt });
+        logInfo('analyst.auto', { positions: r.positions?.length || 0, created: r.created?.length || 0 });
+      } catch (e) {
+        // 자동 실행이 실패해도 앱은 돈다. 다만 **조용하지 않다**
+        logError('analyst.auto_failed', e, {});
+      }
+    }, { timezone: APP_TIMEZONE });
+    logInfo('analyst.auto_scheduled', { cron: autoCron });
+  } else {
+    // 🔴 "안 켜져 있다" 를 기동 로그에 남긴다 — 사용자가 자동인 줄 알고 기다리지 않게
+    logInfo('analyst.auto_off', { reason: autoCron ? 'invalid_cron' : 'unset', cron: autoCron || null });
+  }
   logInfo('llm.fetch_probe', require('./server/geminiClient').describeFetchProbe());
   logInfo('auth.lan_trust', {
     enabled: SESSION.TRUST_LAN,
