@@ -222,7 +222,20 @@ function systemPrompt(type) {
  * ⚠️ **아무 숫자나 줍지 않는다** — 정규화한 키가 **채점표에 있는 이름일 때만** 받는다.
  *    그래서 `total: 88` 같은 걸 항목 점수로 오인하지 않는다.
  */
-const normName = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
+/**
+ * 🔴 **숫자를 버린다** — 모델이 항목에 번호를 붙인다(2026-09-21 라이브, 같은 병 **여섯 번째**).
+ *
+ * 고친 직후 같은 종목 두 회차가 이렇게 갈렸다:
+ * ```
+ * 회차A  { "강한 기업 선호": 10, … }                          → 93점 ✅
+ * 회차B  { "10개 항목 점수": { "1. 강한 기업 선호": 10.0, … } } → 번호 때문에 불일치 ❌
+ * ```
+ * ⚠️ 이게 성립하는 **전제는 "채점표 이름에 숫자가 없다"** 는 것이다.
+ *    전제가 깨지면 서로 다른 항목이 같은 이름으로 뭉개진다 ⇒ **테스트가 그 전제를 강제한다**
+ *    (`ratingShape.test.js` 의 "채점표 이름에 숫자가 없다·정규화 후에도 안 겹친다").
+ *    가정을 주석으로만 적으면 다음 사람이 숫자 든 항목을 추가하고 조용히 깨진다.
+ */
+const normName = (s) => String(s ?? '').toLowerCase().replace(/[^a-z가-힣]/g, '');
 
 const NAME_KEYS = ['name', 'item', 'title', 'label', '항목', '이름'];
 const SCORE_KEYS = ['score', 'points', 'value', '점수', '배점'];
@@ -308,6 +321,24 @@ function shapeScores(out, names) {
       comment: String(got.comment || '').trim(),
     };
   });
+}
+
+/**
+ * 🔴 **서술 필드가 배열로 오는 것도 흡수한다** (2026-09-21 라이브 실측).
+ *
+ * 스키마에 `strengths: {type:'string'}` 이라 적었는데 모델이 **배열**을 줬다:
+ * ```
+ * 약점: ['일일 리밸런싱으로 인한 변동성 감쇠', '방향이 틀리면 손실 폭이 커짐', …]
+ * ```
+ * 그대로 내보내면 화면에 **`["a","b","c"]` 라는 날 JSON** 이 찍힌다.
+ * 점수 모양 문제와 **같은 가족**이다 — 스키마는 게이트웨이에서 지시일 뿐 강제가 아니다.
+ * ⚠️ 빈 값과 못 읽은 값을 섞지 않는다 — 읽을 게 없으면 `''` 다(`"undefined"` 같은 문자열이 아니라).
+ */
+function asText(v) {
+  if (v == null) return '';
+  if (Array.isArray(v)) return v.map(asText).filter(Boolean).join(' · ');
+  if (typeof v === 'object') return Object.values(v).map(asText).filter(Boolean).join(' · ');
+  return String(v).trim();
 }
 
 const fmtNum = (v, d = 2) => (v == null ? '확인 못 함' : Number(v).toFixed(d));
@@ -425,15 +456,15 @@ async function rateFund(stats, cls, newsText) {
     scoreNotApplicable: '기업 채점표(10항목 100점)는 **회사** 를 재는 자입니다. ETF 에는 매출·이익·해자가 없어 점수를 내지 않습니다.',
     items: [],
     bandText: '',
-    description: out.whatItTracks || '',
+    description: asText(out.whatItTracks),
     holdIt: out.holdIt || null,
-    holdWhy: out.holdWhy || '',
-    strengths: out.strengths || '',
-    weaknesses: out.weaknesses || '',
+    holdWhy: asText(out.holdWhy),
+    strengths: asText(out.strengths),
+    weaknesses: asText(out.weaknesses),
     interpretation: '',
     confidence: '낮음',
     confidenceWhy: ['펀드는 보수율·추적오차·구성종목을 이 시스템이 받지 못합니다.', ...notes].join(' '),
-    oneLiner: out.oneLiner || '',
+    oneLiner: asText(out.oneLiner),
     unverified: out.unverified || ['보수율', '추적오차', 'AUM', '구성종목 비중'],
     notes,
     missingValueMetrics: [],
@@ -497,18 +528,18 @@ async function rate(symbol, { newsText = '' } = {}) {
     type,
     typeWhy: cls.why,
     typeAssumed: cls.assumed,
-    description: out.description || '',
+    description: asText(out.description),
     items,
     total,
     maxTotal: 100,
     opinion,
     bandText: bandText(type),
-    strengths: out.strengths || '',
-    weaknesses: out.weaknesses || '',
-    interpretation: out.interpretation || '',
+    strengths: asText(out.strengths),
+    weaknesses: asText(out.weaknesses),
+    interpretation: asText(out.interpretation),
     confidence: order[confIdx],
-    confidenceWhy: [out.confidenceWhy || '', downgrades.length ? `(자동 하향: ${downgrades.join(' · ')})` : ''].filter(Boolean).join(' '),
-    oneLiner: out.oneLiner || '',
+    confidenceWhy: [asText(out.confidenceWhy), downgrades.length ? `(자동 하향: ${downgrades.join(' · ')})` : ''].filter(Boolean).join(' '),
+    oneLiner: asText(out.oneLiner),
     unverified: out.unverified || [],
     missingValueMetrics: stats.missing,
     links: stats.links,
@@ -526,4 +557,4 @@ async function rate(symbol, { newsText = '' } = {}) {
   return result;
 }
 
-module.exports = { rate, classify, opinionFor, bandText, shapeScores, RUBRICS, TYPES, BANDS };
+module.exports = { rate, classify, opinionFor, bandText, shapeScores, asText, leverageHint, RUBRICS, TYPES, BANDS };

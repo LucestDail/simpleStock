@@ -179,3 +179,107 @@ test('채점 유형의 채점표는 모두 평평한 객체를 읽는다', () =>
   // 면제한 것이 **실제로 그 이유 때문인지** 확인한다(존재만 보면 장식이 된다)
   assert.equal((RUBRICS[TYPES.FUND] || []).length, 0, 'ETF 에 기업 채점표가 생겼다 — 없는 축을 재게 된다');
 });
+
+/**
+ * 🔴 **번호가 붙은 키** (2026-09-21 라이브 — 같은 병 **여섯 번째**)
+ *
+ * 다섯 번째를 고친 **직후** 같은 종목 두 회차가 이렇게 갈렸다:
+ * ```
+ * 회차A  { "강한 기업 선호": 10, … }                          → 93점 ✅
+ * 회차B  { "10개 항목 점수": { "1. 강한 기업 선호": 10.0, … } } → 불일치 ❌
+ * ```
+ * ★ **고쳤다고 끝난 게 아니었다** — 모양은 **회차마다** 달라진다. 그래서 키를 열거하면
+ *   영원히 따라잡을 수 없고, 정규화를 **넉넉하게** 잡는 쪽이 맞다.
+ */
+test('🔴 번호 붙은 키 `"1. 강한 기업 선호"` 를 읽는다 (라이브 실측)', () => {
+  const live = {
+    '10개 항목 점수': Object.fromEntries(NAMES.map((n, i) => [`${i + 1}. ${n}`, 10 - i * 0.5])),
+  };
+  const items = shapeScores(live, NAMES);
+  assert.equal(items.filter((x) => x.score == null).length, 0, '🔴 번호 때문에 못 읽었다');
+  assert.equal(items[0].score, 10);
+  assert.equal(items[9].score, 5.5);
+});
+
+test('다른 번호 표기도 읽는다 (`1)`·`①`·`- `)', () => {
+  for (const mk of [(n, i) => `${i + 1}) ${n}`, (n) => `- ${n}`, (n, i) => `${'①②③④⑤⑥⑦⑧⑨⑩'[i]} ${n}`]) {
+    const out = Object.fromEntries(NAMES.map((n, i) => [mk(n, i), 7]));
+    const bad = shapeScores(out, NAMES).filter((x) => x.score == null);
+    assert.equal(bad.length, 0, `🔴 못 읽은 항목 ${bad.length}개 — 표기: ${mk(NAMES[0], 0)}`);
+  }
+});
+
+/**
+ * 🔴 **숫자를 버리는 정규화의 전제를 강제한다.**
+ *
+ * ⚠️ 처음에 전제를 *"채점표 이름에 숫자가 없다"* 로 적었다가 **이 자에 걸렸다** —
+ *    중소형 채점표에 `3~5년 성장 지속성` 이 있다. 그런데 그건 문제가 아니었다.
+ *    **진짜 불변식은 "정규화 후에도 비지 않고 서로 안 겹친다"** 다:
+ *    - 겹치면 → 점수가 **엉뚱한 항목에** 붙는다(총점이 나오므로 화면에선 정상으로 보인다)
+ *    - 비면 → 그 이름이 **아무 키에나** 매칭된다
+ *    `3~5년 성장 지속성` → `년성장지속성` 은 유일하고 비어 있지도 않으니 **안전하다.**
+ *    (오히려 모델이 `3-5년`·`3~5년` 중 무엇을 써도 같은 항목으로 잡히는 이점이 있다.)
+ *
+ * ★ 자가 나를 멈춰 세워 **전제를 정확히 말하게** 만들었다 — 대리 지표(`숫자 금지`)를
+ *   불변식으로 착각하면, 멀쩡한 항목을 막으면서 진짜 위험(겹침)은 못 잡는다.
+ */
+test('🔴 전제 강제: 정규화한 항목 이름이 비지 않고 서로 안 겹친다', () => {
+  const norm = (s) => s.toLowerCase().replace(/[^a-z가-힣]/g, '');
+  let checked = 0;
+  for (const [type, names] of Object.entries(RUBRICS)) {
+    if (!names.length) continue; // ETF·펀드는 일부러 비어 있다
+    const seen = new Map();
+    for (const n of names) {
+      const k = norm(n);
+      assert.ok(k.length >= 2, `🔴 "${type}" 의 "${n}" 이 정규화하면 "${k}" — 너무 짧아 아무 키에나 붙는다`);
+      assert.ok(!seen.has(k), `🔴 "${type}" 에서 "${n}" 과 "${seen.get(k)}" 이 정규화하면 같아진다 — 점수가 엉뚱한 항목에 붙는다`);
+      seen.set(k, n);
+      checked += 1;
+    }
+  }
+  // 🔴 대상이 0건이면 통과가 아니라 실패다
+  assert.equal(checked, 30, `검사한 항목이 ${checked}개다 — 채점표가 바뀌었으면 이 자를 다시 보라`);
+});
+
+/** 🔴 자기검증: 겹치는 이름을 넣으면 위 불변식이 실제로 깨지는가 */
+test('🔴 자기검증: 겹치는 이름은 실제로 엉뚱한 항목에 점수를 붙인다', () => {
+  const names = ['성장성', '성장-성'];  // 정규화하면 둘 다 `성장성`
+  const items = shapeScores({ 성장성: 9 }, names);
+  /**
+   * ⚠️ 겹치면 **나중 이름이 이긴다**(`want` 맵을 뒤에서 덮어쓰므로).
+   *    즉 첫 항목은 **조용히 빈 채로 남고** 값은 엉뚱한 쪽으로 간다 —
+   *    바로 이게 위 불변식이 막으려는 해악이다. 방향까지 못박아 둔다.
+   */
+  assert.equal(items[0].score, null, '겹침이 안 일어났다면 위 불변식은 아무것도 안 지킨다');
+  assert.equal(items[1].score, 9, '값이 엉뚱한 항목으로 가는 것이 이 겹침의 해악이다');
+});
+
+/** 🔴 자기검증: 정규화가 숫자를 안 버리면 라이브 지문이 실제로 깨지는가 */
+test('🔴 자기검증: 번호를 떼지 않으면 위 라이브 지문은 못 읽힌다', () => {
+  const withDigits = (s) => s.toLowerCase().replace(/[^a-z0-9가-힣]/g, ''); // 옛 정규화
+  assert.notEqual(withDigits('1. 강한 기업 선호'), withDigits('강한 기업 선호'),
+    '🔴 옛 정규화로도 같아진다면 이 회차는 원래 깨지지 않았다는 뜻 — 지문이 틀렸다');
+});
+
+/**
+ * 🔴 **서술 필드가 배열로 온다** (2026-09-21 라이브 QLD 실측)
+ *
+ * 스키마에 `strengths: {type:'string'}` 이라 적었는데 모델이 배열을 줬고,
+ * 그대로 내보내니 화면에 **`["a","b","c"]` 라는 날 JSON** 이 찍혔다.
+ * 점수 모양과 **같은 가족** — 스키마는 게이트웨이에서 지시일 뿐 강제가 아니다.
+ */
+const { asText } = require('../server/stockRating');
+
+test('🔴 배열로 온 서술을 사람이 읽는 문장으로 편다 (라이브 실측)', () => {
+  const live = ['일일 리밸런싱으로 인한 변동성 감쇠', '방향이 틀리면 손실 폭이 커짐'];
+  assert.equal(asText(live), '일일 리밸런싱으로 인한 변동성 감쇠 · 방향이 틀리면 손실 폭이 커짐');
+  assert.ok(!asText(live).includes('['), '🔴 날 JSON 이 화면에 나간다');
+});
+
+test('문자열·객체·빈 값을 모두 받는다', () => {
+  assert.equal(asText('그냥 문장'), '그냥 문장');
+  assert.equal(asText({ a: '하나', b: '둘' }), '하나 · 둘');
+  // ⚠️ 빈 값과 못 읽은 값을 섞지 않는다 — "undefined" 같은 문자열이 나가면 안 된다
+  for (const v of [null, undefined, '', [], {}]) assert.equal(asText(v), '', `${JSON.stringify(v)} 를 못 비웠다`);
+  assert.equal(asText(['', null, '남는 것']), '남는 것', '빈 칸이 구분자만 남기면 안 된다');
+});
