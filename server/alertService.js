@@ -435,7 +435,14 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
   if (!failed.includes('holdings')) {
     try {
       const targeted = Object.keys(getDashboardSettings().targets || {});
-      st.universe = trigger.trackUniverse(st.universe, items.map((i) => i.symbol), targeted, now);
+      /**
+       * ⚠️ **관심종목 전체가 아니라 "감시" 표시한 것만** 넣는다 (2026-09-22 사용자 지적).
+       *    지금 관심종목은 테마 프리셋으로 대량 추가된 것이라, 전부 넣으면
+       *    **내가 고른 41종목이 분석 빈도를 정한다.** 표시는 기본 꺼짐이다.
+       */
+      let watched = [];
+      try { watched = require('./watchlistService').getWatchedSymbols(); } catch { /* 없으면 빈 목록 */ }
+      st.universe = trigger.trackUniverse(st.universe, items.map((i) => i.symbol), targeted, now, watched);
       const rows = await collectMomentumRows(st, st.universe, items, now);
       const d = trigger.decide({ now, sessions: sessionsFor(st.universe, now), symbols: rows, state: st.analyst || {} });
       st.analyst = d.state;

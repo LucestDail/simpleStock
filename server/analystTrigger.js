@@ -57,6 +57,12 @@ const DEFAULT_Z = Number(process.env.ANALYST_MOMENTUM_Z) || 2;
 const CLEAR_RATIO = 0.7;
 /** 팔고 나서 며칠이나 되살 자리를 봐 줄 것인가 */
 const REENTRY_DAYS = Math.max(1, Number(process.env.ANALYST_REENTRY_DAYS) || 20);
+/**
+ * 모멘텀을 **모으는 창**. 관심종목까지 감시하면 같은 날 여러 종목이 다른 틱에 걸린다 —
+ * 분석 1회가 어차피 전부를 함께 보므로 **묶는 편이 싸고 읽기도 낫다.**
+ * ⚠️ 장마감은 이 창을 무시한다(늦으면 의미가 준다).
+ */
+const COOLDOWN_MS = Math.max(0, Number(process.env.ANALYST_COOLDOWN_MS) ?? 0) || 30 * 60_000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -91,7 +97,7 @@ function zScore(dailyChangePct, history) {
  * @param {string[]} targeted 목표·손절을 지정한 심볼
  * @param {number} now
  */
-function trackUniverse(prev, held, targeted, now) {
+function trackUniverse(prev, held, targeted, now, watched = []) {
   const heldSet = new Set((held || []).map((s) => String(s).toUpperCase()));
   const targetSet = new Set((targeted || []).map((s) => String(s).toUpperCase()));
   const next = {};
@@ -114,6 +120,20 @@ function trackUniverse(prev, held, targeted, now) {
   // 사용자가 목표·손절을 찍은 것은 보유가 아니어도 본다
   for (const sym of targetSet) if (!next[sym]) next[sym] = { role: 'targeted', since: now };
 
+  /**
+   * 🔴 **한 번도 안 산 종목** (2026-09-21 사용자 지적: *"감시 대상 기준을 내가 한번도 안샀으면
+   * 어떻게 하려고?"*). 보유·매도·지정만 보면 **사려고 보고 있는 종목은 영원히 감시 밖**이다 —
+   * 정작 진입 시점을 알아야 하는 건 그쪽이다.
+   *
+   * ⇒ **관심종목(watchlist)** 을 넣는다. 그게 사용자가 *"안 샀지만 보고 있다"* 고 직접 표시한 목록이다.
+   * ⚠️ 처음엔 비용 때문에 뺐는데 **두 비용을 뭉뚱그린 판단이었다**:
+   *    감시(시세·z 계산)는 싸고 **분석(LLM)만 비싸다.** 실측으로 갈렸다 —
+   *    41종목을 다 감시해도 분석은 **월 ~17회**(z=2)다.
+   */
+  for (const sym of (watched || []).map((x) => String(x).toUpperCase())) {
+    if (!next[sym]) next[sym] = { role: 'watch', since: now };
+  }
+
   return next;
 }
 
@@ -128,7 +148,7 @@ function trackUniverse(prev, held, targeted, now) {
  * @param {number} [input.z]      모멘텀 문턱(σ)
  * @returns {{run:boolean, reasons:Array, state:object}}
  */
-function decide({ now, sessions = [], symbols = [], state = {}, z = DEFAULT_Z } = {}) {
+function decide({ now, sessions = [], symbols = [], state = {}, z = DEFAULT_Z, cooldownMs = COOLDOWN_MS } = {}) {
   const st = { ...(state || {}) };
   st.sessions = { ...(st.sessions || {}) };
   st.momentum = { ...(st.momentum || {}) };
@@ -174,7 +194,29 @@ function decide({ now, sessions = [], symbols = [], state = {}, z = DEFAULT_Z } 
   const alive = new Set(symbols.map((r) => String(r?.symbol || '').toUpperCase()));
   for (const sym of Object.keys(st.momentum)) if (!alive.has(sym)) delete st.momentum[sym];
 
-  return { run: reasons.length > 0, reasons, state: st };
+  /**
+   * 🔴 **모아서 한 번에 돌린다** — 관심종목까지 보면 같은 날 여러 종목이 **다른 틱**에 걸린다.
+   *    그때마다 분석을 돌리면 하루에 몇 번씩 도는데, 분석 1회는 어차피 **전부를 함께 본다.**
+   * ⚠️ 표시(mark)는 이미 찍혔으니 **미룬 이유를 버리면 영영 못 본다** ⇒ 상태에 쌓아 두고
+   *    쿨다운이 끝나면 **함께** 넘긴다. *"버려지는 경로는 반드시 남긴다"* 의 이 모듈 판본이다.
+   * ⚠️ 장마감은 미루지 않는다 — 마감 요약은 늦으면 의미가 준다.
+   */
+  const pending = Array.isArray(st.pending) ? st.pending : [];
+  const all = [...pending, ...reasons];
+  const hasClose = all.some((r) => r.kind === 'close');
+  const since = now - (st.lastRunAt || 0);
+
+  if (!all.length) return { run: false, reasons: [], state: { ...st, pending: [] } };
+  /**
+   * ⚠️ **`st.lastRunAt` 이 0 이면 falsy 다** — `&& st.lastRunAt` 으로 쓰면 그 회차만 쿨다운이 풀린다.
+   *    테스트가 `now: 0` 으로 재다 잡았다. 실제 타임스탬프에서는 **영영 안 드러났을** 자리고,
+   *    오늘 하루 종일 본 *"0 을 '없음' 으로 읽는다"* 와 같은 모양이다.
+   */
+  if (!hasClose && st.lastRunAt != null && since < cooldownMs) {
+    // 아직 이르다 — 쌓아 두고 다음에 함께
+    return { run: false, reasons: [], deferred: all.length, state: { ...st, pending: all } };
+  }
+  return { run: true, reasons: all, state: { ...st, pending: [], lastRunAt: now } };
 }
 
 /** 사람이 읽는 한 줄 — 활동 기록·로그에 그대로 쓴다 */
@@ -184,4 +226,4 @@ function describe(reasons) {
     : `${r.symbol} 모멘텀 ${r.z}σ (${r.changePct > 0 ? '+' : ''}${r.changePct}%)`)).join(' · ');
 }
 
-module.exports = { decide, trackUniverse, zScore, stats, describe, DEFAULT_Z, REENTRY_DAYS, CLEAR_RATIO };
+module.exports = { decide, trackUniverse, zScore, stats, describe, DEFAULT_Z, REENTRY_DAYS, CLEAR_RATIO, COOLDOWN_MS };

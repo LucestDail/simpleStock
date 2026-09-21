@@ -557,6 +557,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
 
   if (reentry.length) {
     lines.push('', '## 되살/신규 진입 후보 (보유 아님 — 다른 질문이다)');
+    const ROLE_LABEL = { reentry: '최근까지 보유했다 매도', targeted: '목표·손절 지정', watch: '감시 표시(미보유)' };
     for (const r of reentry) {
       let tech = null;
       try {
@@ -565,11 +566,35 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       } catch (e) {
         logWarn('analyst.reentry_candles_failed', { symbol: r.symbol, message: e?.message });
       }
+      /**
+       * 🔴 **후보도 기업 평가를 받는다** (2026-09-22 사용자 지시)
+       *
+       * *"감시중이라고 무조건 분석하지말고 **회사 재무/회계/성장성/모멘텀/증시상황 전반적 분석 후에**
+       * 매수 및 매도 처리가 되도록 해."*
+       *
+       * 종전엔 보유 종목만 10항목 평가를 받았다 ⇒ 미보유 후보는 **모멘텀과 차트만** 보고
+       * 매수 제안이 나갈 수 있었다. 그건 사용자가 금지한 바로 그 모양이다.
+       * ⚠️ 서술은 안 받는다(`withProse:false`) — 종목당 35초라 후보까지 붙이면 분석이 못 쓰게 느려진다.
+       */
+      try {
+        const ysym = /^\d{6}$/.test(r.symbol) ? `${r.symbol}.KS` : r.symbol;
+        ratings[r.symbol] = await rating.rate(ysym, { withProse: false });
+      } catch (e) {
+        ratings[r.symbol] = { error: e.message, kind: e.kind || 'unknown' };
+        logWarn('analyst.reentry_rating_failed', { symbol: r.symbol, message: e?.message });
+      }
+      const rr = ratings[r.symbol];
       lines.push(
-        `- **${r.symbol}** (${r.role === 'reentry' ? '최근까지 보유했다 매도' : '목표·손절 지정'})`
+        `- **${r.symbol}** (${ROLE_LABEL[r.role] || r.role})`
         + ` · 오늘 ${r.changePct > 0 ? '+' : ''}${r.changePct}% (이 종목 기준 ${r.z}σ)`
         + (tech ? `\n    현재가 ${fmt(tech.last)} · 20일선 ${fmt(tech.ma20)} · 60일선 ${fmt(tech.ma60)}`
           + ` · 20일 스윙 ${fmt(tech.swingLow)}~${fmt(tech.swingHigh)} · 일변동성 ${fmt(tech.volPct)}%` : '')
+        + (rr && !rr.error && rr.total != null
+          ? `\n    기업 평가 **${rr.total}/100 · ${rr.opinion}** (확신도 ${rr.confidence})`
+            + `\n    항목: ${rr.items.map((x) => `${x.name} ${x.score}`).join(' / ')}`
+          : '')
+        + (rr?.isFund ? `\n    ${rr.typeWhy} — 기업 채점 대상 아님${rr.holdIt ? ` · 보유 적합성 ${rr.holdIt}` : ''}` : '')
+        + (rr?.error ? `\n    ⚠️ 기업 평가 실패: ${rr.error} — **질 평가 없이 판단해야 한다**` : '')
       );
     }
     lines.push(
@@ -580,6 +605,18 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       '⚠️ **한 번에 다 사는 것을 전제하지 마세요.** 분할이면 `entry` 에 **1차 진입가**를 쓰고',
       '   `rationale` 에 나머지 회차 조건을 한 문장으로 적으세요(예: "1차 92, 89 이탈 없이 반등 확인 후 2차").',
       '⚠️ 되살 이유가 **"전에 들고 있었으니까" 가 되면 안 됩니다** — 판 이유가 해소됐는지로 판단하세요.',
+      '',
+      '## 🔴 모멘텀만으로 사지 마세요 (사용자 지시)',
+      '이 종목들이 여기 올라온 이유는 **"오늘 평소보다 크게 움직였다"** 뿐입니다.',
+      '그건 **깨우는 신호**이지 매수 근거가 아닙니다. `BUY` 를 내려면 아래를 **함께** 보고',
+      '`rationale` 에 **각각을 한 문장씩** 적으세요:',
+      '1. **재무·회계** — 위 기업 평가 점수와 항목(없으면 "확인 못 함" 이라고 쓰세요)',
+      '2. **성장성** — 매출·이익이 실제로 늘고 있는가(주어진 숫자로만)',
+      '3. **모멘텀** — 오늘 움직임이 추세의 시작인지 과열인지',
+      '4. **증시 상황** — 위 지수·환율 구간에서 이 종목을 살 때인가',
+      '🔴 넷 중 하나라도 **근거를 못 대면 `HOLD`** 로 두세요. "일단 조금 사본다" 는 답이 아닙니다.',
+      '⚠️ 기업 평가가 **실패했거나 ETF 라 점수가 없으면** 그 사실을 `rationale` 에 적고',
+      '   확신도를 낮추세요 — 모르는 것을 모른다고 적는 것이 지어내는 것보다 낫습니다.',
     );
   }
 

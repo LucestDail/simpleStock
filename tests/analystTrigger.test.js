@@ -15,6 +15,15 @@ const { decide, trackUniverse, zScore, describe: describeReasons, CLEAR_RATIO } 
  * 3. **매도 뒤에도 되살 자리를 본다** — 보유만 보면 판 순간 시야에서 사라진다(사용자 지적)
  */
 
+
+/**
+ * ⚠️ 아래 테스트 대부분은 **돌파 의미론**을 재는 것이지 배치를 재는 게 아니다.
+ *    쿨다운을 켠 채로 재면 *"두 번째 돌파를 못 잡는다"* 로 보이는데 그건 **미뤄진 것**이다.
+ *    ⇒ 여기서는 끄고, 배치는 아래 전용 테스트가 따로 본다.
+ *    ★ 쿨다운을 넣자 기존 테스트가 깨진 것이 **자가 동작 변화를 알려준 것**이다.
+ */
+const D = (args) => decide({ cooldownMs: 0, ...args });
+
 const DAY = 24 * 60 * 60 * 1000;
 /** 평균 0 · σ 1 에 가까운 표본 20개 */
 const CALM = [0.9, -1.1, 0.5, -0.4, 1.2, -0.8, 0.3, -0.2, 1.0, -1.0, 0.6, -0.6, 0.8, -0.9, 0.2, -0.3, 1.1, -1.2, 0.4, -0.5];
@@ -50,29 +59,29 @@ const S = (key, state) => ({ key, label: key.toUpperCase(), state });
 
 test('🔴 장마감은 **전이일 때만** 부른다 (닫혀 있는 내내가 아니다)', () => {
   // 첫 실행 = 기준선. 부르지 않는다
-  let r = decide({ now: 1, sessions: [S('us', 'open')], state: {} });
+  let r = D({ now: 1, sessions: [S('us', 'open')], state: {} });
   assert.equal(r.run, false, '🔴 첫 실행을 사건으로 읽었다');
 
   // open → closed = 사건
-  r = decide({ now: 2, sessions: [S('us', 'closed')], state: r.state });
+  r = D({ now: 2, sessions: [S('us', 'closed')], state: r.state });
   assert.equal(r.run, true);
   assert.equal(r.reasons[0].kind, 'close');
 
   // 계속 닫혀 있음 = 사건 아님
-  r = decide({ now: 3, sessions: [S('us', 'closed')], state: r.state });
+  r = D({ now: 3, sessions: [S('us', 'closed')], state: r.state });
   assert.equal(r.run, false, '🔴 닫혀 있는 내내 분석을 돌린다 — 비용이 그대로다');
 });
 
 test('🔴 첫 실행이 마감 상태여도 부르지 않는다 (기준선이지 전이가 아니다)', () => {
-  const r = decide({ now: 1, sessions: [S('us', 'closed')], state: {} });
+  const r = D({ now: 1, sessions: [S('us', 'closed')], state: {} });
   assert.equal(r.run, false, '🔴 재기동할 때마다 분석이 돈다 — 배포 11회면 11번이다');
 });
 
 test('다음 날 다시 닫히면 **새 사건**이다', () => {
-  let r = decide({ now: 1, sessions: [S('us', 'open')], state: {} });
-  r = decide({ now: 2, sessions: [S('us', 'closed')], state: r.state });
-  r = decide({ now: 3, sessions: [S('us', 'open')], state: r.state });
-  r = decide({ now: 4, sessions: [S('us', 'closed')], state: r.state });
+  let r = D({ now: 1, sessions: [S('us', 'open')], state: {} });
+  r = D({ now: 2, sessions: [S('us', 'closed')], state: r.state });
+  r = D({ now: 3, sessions: [S('us', 'open')], state: r.state });
+  r = D({ now: 4, sessions: [S('us', 'closed')], state: r.state });
   assert.equal(r.run, true, '🔴 이튿날 마감을 못 잡는다');
 });
 
@@ -81,19 +90,19 @@ test('다음 날 다시 닫히면 **새 사건**이다', () => {
 const row = (symbol, pct, history = CALM, role = 'held') => ({ symbol, dailyChangePct: pct, history, role });
 
 test('🔴 모멘텀은 **통과하는 순간** 한 번만 (넘어 있는 내내가 아니다)', () => {
-  let r = decide({ now: 1, symbols: [row('QLD', 5)], state: {} });
+  let r = D({ now: 1, symbols: [row('QLD', 5)], state: {} });
   assert.equal(r.run, true);
   assert.equal(r.reasons[0].kind, 'momentum');
 
-  r = decide({ now: 2, symbols: [row('QLD', 5.2)], state: r.state });
+  r = D({ now: 2, symbols: [row('QLD', 5.2)], state: r.state });
   assert.equal(r.run, false, '🔴 계속 떠 있는 동안 매번 돈다');
 });
 
 test('🔴 내려왔다 다시 넘으면 새 사건이다 (표시를 지운다)', () => {
-  let r = decide({ now: 1, symbols: [row('QLD', 5)], state: {} });
-  r = decide({ now: 2, symbols: [row('QLD', 0.2)], state: r.state });  // 충분히 내려옴
+  let r = D({ now: 1, symbols: [row('QLD', 5)], state: {} });
+  r = D({ now: 2, symbols: [row('QLD', 0.2)], state: r.state });  // 충분히 내려옴
   assert.equal(r.run, false);
-  r = decide({ now: 3, symbols: [row('QLD', 5)], state: r.state });
+  r = D({ now: 3, symbols: [row('QLD', 5)], state: r.state });
   assert.equal(r.run, true, '🔴 되돌아온 뒤 다시 넘었는데 안 잡는다');
 });
 
@@ -102,37 +111,37 @@ test('🔴 내려왔다 다시 넘으면 새 사건이다 (표시를 지운다)'
  * 오늘 텔레그램 진동에서 겪은 것과 같은 모양이다.
  */
 test('🔴 문턱 바로 아래로만 내려온 것은 표시를 안 지운다 (진동 방지)', () => {
-  let r = decide({ now: 1, symbols: [row('QLD', 5)], state: {} });
+  let r = D({ now: 1, symbols: [row('QLD', 5)], state: {} });
   const z1 = r.reasons[0].z;
   // 문턱 바로 아래(2σ*0.7 보다는 위)로 내려온 값을 만든다
   const justBelow = 2 * CLEAR_RATIO * 1.05;
   const s = CALM.reduce((a, b) => a + b, 0) / CALM.length;
   const sd = Math.sqrt(CALM.reduce((a, b) => a + (b - s) ** 2, 0) / CALM.length);
-  r = decide({ now: 2, symbols: [row('QLD', s + justBelow * sd)], state: r.state });
+  r = D({ now: 2, symbols: [row('QLD', s + justBelow * sd)], state: r.state });
   assert.equal(r.run, false);
-  r = decide({ now: 3, symbols: [row('QLD', 5)], state: r.state });
+  r = D({ now: 3, symbols: [row('QLD', 5)], state: r.state });
   assert.equal(r.run, false, `🔴 진동이 그대로 분석 호출이 된다(첫 z=${z1})`);
 });
 
 test('🔴 판정 불가(표본 부족)는 표시를 건드리지 않는다', () => {
-  let r = decide({ now: 1, symbols: [row('QLD', 5)], state: {} });
+  let r = D({ now: 1, symbols: [row('QLD', 5)], state: {} });
   assert.ok(r.state.momentum.QLD, '표시가 없다');
-  r = decide({ now: 2, symbols: [row('QLD', 5, [1, -1])], state: r.state });
+  r = D({ now: 2, symbols: [row('QLD', 5, [1, -1])], state: r.state });
   assert.ok(r.state.momentum.QLD, '🔴 표본이 없다고 표시를 지웠다 — 다음에 새 사건이 된다');
   assert.equal(r.run, false);
 });
 
 test('감시 대상에서 빠진 종목의 표시는 정리한다 (상태가 자라지 않게)', () => {
-  let r = decide({ now: 1, symbols: [row('QLD', 5), row('RAM', 6)], state: {} });
+  let r = D({ now: 1, symbols: [row('QLD', 5), row('RAM', 6)], state: {} });
   assert.equal(Object.keys(r.state.momentum).length, 2);
-  r = decide({ now: 2, symbols: [row('QLD', 0.1)], state: r.state });
+  r = D({ now: 2, symbols: [row('QLD', 0.1)], state: r.state });
   assert.deepEqual(Object.keys(r.state.momentum), [], '🔴 사라진 종목의 표시가 남는다');
 });
 
 test('아무 일도 없으면 **안 돈다** (이게 이 기능의 목적이다)', () => {
-  let r = decide({ now: 1, sessions: [S('us', 'open')], symbols: [row('QLD', 0.3)], state: {} });
-  r = decide({ now: 2, sessions: [S('us', 'open')], symbols: [row('QLD', 0.4)], state: r.state });
-  r = decide({ now: 3, sessions: [S('us', 'open')], symbols: [row('QLD', -0.2)], state: r.state });
+  let r = D({ now: 1, sessions: [S('us', 'open')], symbols: [row('QLD', 0.3)], state: {} });
+  r = D({ now: 2, sessions: [S('us', 'open')], symbols: [row('QLD', 0.4)], state: r.state });
+  r = D({ now: 3, sessions: [S('us', 'open')], symbols: [row('QLD', -0.2)], state: r.state });
   assert.equal(r.run, false, '🔴 조용한데 분석이 돈다 — 비용이 안 줄어든다');
 });
 
@@ -155,7 +164,7 @@ test('🔴 팔아서 사라진 종목을 **되살 후보로 남긴다**', () => 
 });
 
 test('되살 후보도 **모멘텀 감시를 받는다** (그래야 되살 자리에 깨어난다)', () => {
-  const r = decide({ now: 1, symbols: [row('RAM', 6, CALM, 'reentry')], state: {} });
+  const r = D({ now: 1, symbols: [row('RAM', 6, CALM, 'reentry')], state: {} });
   assert.equal(r.run, true);
   assert.equal(r.reasons[0].role, 'reentry', '🔴 역할이 안 실린다 — 분석이 "들고 있을까" 를 묻게 된다');
 });
@@ -195,7 +204,7 @@ test('⚠️ 감시 대상은 보유·되살·지정 셋뿐이다 (관심목록 
 // ── 사람이 읽는 이유 ─────────────────────────────────────────
 
 test('왜 돌았는지 한 줄로 설명한다', () => {
-  const r = decide({ now: 2, sessions: [S('us', 'closed')], symbols: [row('QLD', 5)], state: { sessions: { us: 'open' } } });
+  const r = D({ now: 2, sessions: [S('us', 'closed')], symbols: [row('QLD', 5)], state: { sessions: { us: 'open' } } });
   const t = describeReasons(r.reasons);
   assert.match(t, /US 마감/);
   assert.match(t, /QLD 모멘텀/);
@@ -207,7 +216,7 @@ test('🔴 자기검증: 조용한 날을 사건으로 만들지 않는다 (20�
   let state = { sessions: { us: 'open' } };
   let fired = 0;
   for (let i = 0; i < 20; i += 1) {
-    const r = decide({
+    const r = D({
       now: i,
       sessions: [S('us', 'open')],
       symbols: [row('QLD', CALM[i % CALM.length])],
@@ -217,4 +226,72 @@ test('🔴 자기검증: 조용한 날을 사건으로 만들지 않는다 (20�
     if (r.run) fired += 1;
   }
   assert.equal(fired, 0, `🔴 평범한 등락 20일에 ${fired}번 돌았다 — 비용이 안 준다`);
+});
+
+// ── 배치(쿨다운) ─────────────────────────────────────────────
+
+/**
+ * 🔴 **모아서 한 번에** — 관심종목(41개)까지 감시하면 같은 날 여러 종목이 **다른 틱**에 걸린다.
+ * 그때마다 분석을 돌리면 하루에 몇 번씩 도는데, **분석 1회는 어차피 전부를 함께 본다.**
+ */
+const HOUR = 60 * 60 * 1000;
+
+test('🔴 창 안의 두 번째 돌파는 **미뤘다가 함께** 넘긴다 (버리지 않는다)', () => {
+  let r = decide({ now: 0, symbols: [row('QLD', 5)], state: {}, cooldownMs: HOUR });
+  assert.equal(r.run, true);
+  assert.equal(r.reasons.length, 1);
+
+  // 10분 뒤 다른 종목이 돌파 — 아직 창 안이다
+  r = decide({ now: 10 * 60_000, symbols: [row('QLD', 5), row('RAM', 6)], state: r.state, cooldownMs: HOUR });
+  assert.equal(r.run, false, '🔴 창 안인데 또 돌렸다');
+  assert.equal(r.deferred, 1, '미룬 건수를 안 남겼다');
+
+  // 창이 지나면 **미룬 것이 함께** 나온다
+  r = decide({ now: HOUR + 1, symbols: [row('QLD', 5), row('RAM', 6)], state: r.state, cooldownMs: HOUR });
+  assert.equal(r.run, true);
+  assert.deepEqual(r.reasons.map((x) => x.symbol), ['RAM'], '🔴 미룬 돌파를 잃어버렸다 — 영영 못 본다');
+});
+
+/** 🔴 **장마감은 미루지 않는다** — 마감 요약은 늦으면 의미가 준다 */
+test('🔴 장마감은 창을 무시하고 즉시 돈다', () => {
+  let r = decide({ now: 0, symbols: [row('QLD', 5)], state: { sessions: { us: 'open' } }, cooldownMs: HOUR });
+  assert.equal(r.run, true);
+  r = decide({ now: 60_000, sessions: [S('us', 'closed')], state: r.state, cooldownMs: HOUR });
+  assert.equal(r.run, true, '🔴 마감이 30분 밀렸다');
+  assert.ok(r.reasons.some((x) => x.kind === 'close'));
+});
+
+test('미룬 것이 있어도 마감과 **함께** 나간다', () => {
+  let r = decide({ now: 0, symbols: [row('QLD', 5)], state: { sessions: { us: 'open' } }, cooldownMs: HOUR });
+  r = decide({ now: 60_000, symbols: [row('QLD', 5), row('RAM', 6)], state: r.state, cooldownMs: HOUR });
+  assert.equal(r.run, false);
+  r = decide({ now: 120_000, sessions: [S('us', 'closed')], symbols: [], state: r.state, cooldownMs: HOUR });
+  assert.equal(r.reasons.length, 2, `마감 때 미룬 것이 안 따라왔다(${r.reasons.length}건)`);
+});
+
+// ── 감시 대상: 한 번도 안 산 종목 ────────────────────────────
+
+/**
+ * 🔴 **사용자 지적** — *"감시 대상 기준을 내가 한번도 안샀으면 어떻게 하려고?"*
+ * 보유·매도·지정만 보면 **사려고 보고 있는 종목이 영원히 감시 밖**이다.
+ */
+test('🔴 한 번도 안 산 관심종목도 감시 대상이다', () => {
+  const u = trackUniverse({}, ['QLD'], [], 1, ['NVDA', 'TSLA']);
+  assert.equal(u.NVDA?.role, 'watch', '🔴 관심종목이 감시 밖이다 — 진입 시점을 영영 못 본다');
+  assert.equal(u.TSLA?.role, 'watch');
+  assert.equal(u.QLD.role, 'held', '보유가 관심종목으로 덮였다');
+});
+
+test('역할 우선순위: 보유 > 되살 > 지정 > 관심', () => {
+  const t0 = 1_000_000;
+  let u = trackUniverse({}, ['RAM'], [], t0, ['RAM']);
+  assert.equal(u.RAM.role, 'held', '보유인데 관심으로 덮였다');
+  u = trackUniverse(u, [], [], t0 + 1000, ['RAM']);
+  assert.equal(u.RAM.role, 'reentry', '🔴 판 직후인데 "그냥 관심" 으로 내려갔다 — 되살 질문을 못 받는다');
+});
+
+test('관심종목 돌파는 **신규 진입 후보** 역할을 달고 온다', () => {
+  const r = D({ now: 1, symbols: [row('NVDA', 5, CALM, 'watch')], state: {} });
+  assert.equal(r.run, true);
+  assert.equal(r.reasons[0].role, 'watch');
 });

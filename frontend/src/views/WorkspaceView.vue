@@ -431,6 +431,24 @@ async function loadMcpStatus() {
 
 /** 시황 → 모멘텀 → 매매 제안. 🔴 제안은 **승인해야** 진행된다 */
 /** 마지막 분석을 불러온다 — **실행하지 않는다**(LLM 비용 0) */
+/**
+ * 🔴 감시 표시 토글 — **이것만** 모멘텀 분석을 부른다.
+ * ⚠️ 실패를 조용히 넘기지 않는다 — 별이 켜진 줄 알았는데 안 켜졌으면 알림이 안 온다.
+ */
+async function onToggleWatch(group, t) {
+  try {
+    const res = await apiFetch(
+      `/api/watchlist/groups/${encodeURIComponent(group.id)}/tickers/${encodeURIComponent(t.symbol)}/watch`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: !t.watch }) }
+    );
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || '감시 설정 실패');
+    t.watch = !t.watch;
+  } catch (e) {
+    // ⚠️ 형제 핸들러와 같은 통보 경로를 쓴다 — 새 상태를 만들면 표시되는 자리가 갈린다
+    notify({ message: e.message || '감시 설정 실패', tone: 'error' });
+  }
+}
+
 async function loadLastReport() {
   try {
     const res = await apiFetch('/api/analyst/last');
@@ -991,7 +1009,7 @@ onUnmounted(() => {
             v-for="t in group.tickers"
             :key="t.symbol + t.market"
             class="wrow"
-            :class="{ 'wrow--on': selected.symbol === t.symbol }"
+            :class="{ 'wrow--on': selected.symbol === t.symbol, 'wrow--watch': t.watch }"
             @click="pickSymbol(t.symbol, t.name)"
           >
             <span class="wrow__name">{{ t.name }}</span>
@@ -1001,6 +1019,18 @@ onUnmounted(() => {
               class="wrow__chg mono-num"
               :style="heatmapStyleFromChangePct(t.quote.changePct)"
             >{{ formatChangePct(t.quote.changePct) }}</span>
+            <!--
+              🔴 **감시 표시** (2026-09-22 사용자: *"내가 클릭하면 테두리로 치고 음영으로 감시중 이라고 해"*)
+              켠 종목만 분석을 깨운다. 관심종목은 테마 프리셋으로 대량 추가된 것이라
+              **전부 감시하면 내 기본값이 분석 빈도와 비용을 정한다** ⇒ **기본 꺼짐**.
+              ⚠️ 행 전체 클릭은 **차트 선택**이라 그대로 두고, 표시는 전용 버튼으로 받는다.
+            -->
+            <button
+              class="wrow__w"
+              :class="{ 'wrow__w--on': t.watch }"
+              :title="t.watch ? '감시 중 — 끄려면 클릭' : '감시 켜기'"
+              @click.stop="onToggleWatch(group, t)"
+            >{{ t.watch ? '감시중' : '감시' }}</button>
             <button class="wrow__rm" title="삭제" @click.stop="onRemoveTicker(group, t)">×</button>
           </li>
           <li v-if="!group.tickers.length" class="wrow wrow--empty">비어 있음</li>
@@ -1923,13 +1953,25 @@ onUnmounted(() => {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .wcard__count { font-size: var(--text-2xs); color: var(--color-faint); }
+/*
+  🔴 **`max-height: 92px` 를 뺐다** (2026-09-22 사용자: *"이거때문에 지금 전체 종목이 안보여."*)
+
+  티커가 행 높이를 밀지 않게 하려고 넣은 마법 숫자였는데, **5행쯤에서 목록을 잘랐다.**
+  카드가 이미 그리드 행 안에서 높이가 정해지므로 `flex:1 + min-height:0` 만으로 충분하다 —
+  넘치면 **카드 안에서 스크롤**하고, 적으면 다 보인다.
+  ★ 높이 제약은 **컨테이너가 정하게** 둔다. 자식에 숫자를 박으면 내용이 늘 때 조용히 잘린다.
+  ⚠️ `overflow-y: auto` 가 두 번 적혀 있던 것도 정리했다.
+*/
 .wcard__list {
-  /* 티커가 많으면 **카드 안에서** 스크롤한다(행 높이를 밀지 않는다) */
-  flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; max-height: 92px; overflow-y: auto; }
+  flex: 1; min-height: 0; overflow-y: auto;
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 1px;
+}
 .wrow {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto auto 14px;
+  /* ⚠️ 감시 별 칸을 더했다 — 안 늘리면 별이 이름 칸을 빼앗아 종목명이 잘린다 */
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto 14px;
   align-items: center; gap: 5px;
-  padding: 2px 3px; border-radius: var(--rounded-xs); cursor: pointer;
+  padding: 1px 2px; border: 1px solid transparent; border-radius: var(--rounded-xs); cursor: pointer;
 }
 .wrow:hover { background: var(--color-surface-hover); }
 .wrow--on { background: var(--color-primary-soft); }
@@ -1937,6 +1979,24 @@ onUnmounted(() => {
 .wrow__name { font-size: var(--text-xs); color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wrow__price { font-size: var(--text-2xs); color: var(--color-body); }
 .wrow__chg { font-size: var(--text-3xs, 9px); padding: 1px 4px; border-radius: var(--rounded-xs); font-weight: 700; }
+/*
+  감시 배지 — 꺼져 있어도 **보인다**(숨기면 켤 수 있다는 걸 모른다).
+  사용자: *"테두리로 치고 음영으로 감시중"* ⇒ 켜지면 행에 테두리+음영, 배지에 글자.
+*/
+.wrow__w {
+  border: 1px solid var(--color-hairline); background: none; color: var(--color-faint);
+  cursor: pointer; font-size: var(--text-3xs, 9px); line-height: 1;
+  padding: 2px 4px; border-radius: var(--rounded-xs); white-space: nowrap;
+}
+.wrow__w:hover { border-color: var(--color-primary); color: var(--color-body); }
+.wrow__w--on { border-color: var(--color-primary); background: var(--color-primary-soft); color: var(--color-primary); font-weight: 700; }
+/* 🔴 행 자체에 **테두리 + 음영** — 목록에서 한눈에 갈린다 */
+.wrow--watch {
+  border: 1px solid var(--color-primary);
+  background: var(--color-primary-soft);
+}
+/* ⚠️ 차트 선택과 겹칠 때는 선택이 이긴다 — 둘이 같은 색이면 무엇이 선택인지 모른다 */
+.wrow--watch.wrow--on { background: var(--color-primary-soft); box-shadow: inset 2px 0 0 var(--color-primary); }
 .wrow__rm { border: 0; background: none; color: var(--color-faint); cursor: pointer; font-size: 12px; padding: 0; opacity: 0; }
 .wrow:hover .wrow__rm { opacity: 1; }
 /*

@@ -29,6 +29,8 @@ const {
   reorderGroups,
   addTicker,
   removeTicker,
+  setWatch,
+  getWatchedSymbols,
 } = require('./server/watchlistService');
 const { resolveTickerByName } = require('./server/tickerLookupService');
 const { THEME_PRESETS } = require('./server/themePresets');
@@ -163,6 +165,19 @@ app.get('/api/portfolio', async (req, res) => {
  *    ⚠️ **"안 돌린 것" 과 "고장난 것" 을 화면에서 구분할 수 있어야 한다.**
  */
 app.get('/api/analyst/last', (req, res) => res.json({ report: analyst.readLast() }));
+
+/**
+ * 🔴 **감시 표시 토글** — 분석 모멘텀 감시를 받을 종목을 사용자가 고른다.
+ *    관심종목은 **테마 프리셋으로 대량 추가**된 것이라 그대로 쓰면 기본값이 비용을 정한다.
+ */
+app.post('/api/watchlist/groups/:groupId/tickers/:symbol/watch', async (req, res) => {
+  try {
+    const state = await setWatch(req.params.groupId, req.params.symbol, req.body?.on !== false);
+    return res.json(state);
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+});
 
 app.post('/api/analyst/run', async (req, res) => {
   if (!tossPortfolio.isEnabled()) {

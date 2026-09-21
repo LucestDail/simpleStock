@@ -219,6 +219,46 @@ async function addTicker(groupId, input = {}) {
   return { added, ticker: resolved, watchlist: getWatchlistState() };
 }
 
+/**
+ * 🔴 **감시 표시** (2026-09-22 사용자 지적: *"지금 넣은 관심종목들 다 디폴트로 넣은 애들이잖아."*)
+ *
+ * 관심종목 41개는 **내가 테마 프리셋으로 넣은 것**이지 사용자가 고른 게 아니다.
+ * 그걸 그대로 분석 감시 대상으로 쓰면 **내 기본값이 분석 빈도와 비용을 정한다.**
+ *
+ * ⇒ 종목마다 **감시 표시**를 둔다. **기본은 꺼짐**이고, 켠 것만 모멘텀 감시를 받는다.
+ * ⚠️ 보유·최근매도·목표손절은 표시가 필요 없다 — 그건 **사용자 행동 자체가 신호**다.
+ *    표시가 필요한 건 *"아직 안 샀지만 지켜보겠다"* 하나뿐이다.
+ * ⚠️ 기본을 켜짐으로 두면 프리셋 41개가 전부 켜져 **같은 문제가 반복된다.**
+ */
+async function setWatch(groupId, symbol, on) {
+  const target = normalizeSymbol(symbol);
+  let found = false;
+  await mutateStore((store) => {
+    const group = (store.watchlist?.groups || []).find((g) => g.id === groupId);
+    if (!group) return;
+    const t = (group.tickers || []).find((x) => normalizeSymbol(x.symbol) === target);
+    if (!t) return;
+    t.watch = Boolean(on);
+    found = true;
+  });
+  if (!found) throw new Error('해당 종목을 찾을 수 없습니다.');
+  logInfo('watchlist.ticker.watch', { groupId, symbol: target, on: Boolean(on) });
+  broadcastWatchlist();
+  return getWatchlistState();
+}
+
+/**
+ * 감시 표시된 심볼 — 분석 트리거가 이것만 본다.
+ * ⚠️ 그룹이 달라도 같은 종목이면 **한 번만** 센다(반도체·AI 에 NVDA 가 겹친다).
+ */
+function getWatchedSymbols(state = getWatchlistState()) {
+  const out = new Set();
+  for (const g of state.groups || []) {
+    for (const t of g.tickers || []) if (t.watch) out.add(normalizeSymbol(t.symbol));
+  }
+  return [...out];
+}
+
 async function removeTicker(groupId, symbol) {
   const target = normalizeSymbol(symbol);
   let removed = false;
@@ -243,5 +283,7 @@ module.exports = {
   reorderGroups,
   addTicker,
   removeTicker,
+  setWatch,
+  getWatchedSymbols,
   inferMarket,
 };
