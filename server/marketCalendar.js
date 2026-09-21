@@ -15,11 +15,112 @@
  *
  * ## 휴장일
  *
- * 지금은 **주말만** 판정한다. 공휴일 목록은 신뢰할 소스가 있어야 하고
- * (토스 `/api/v1/market-calendar/KR|US`), 그건 자격증명이 필요해 아직 붙이지 못했다.
- * 🔴 그래서 이 모듈은 **"공휴일은 아직 모른다"** 를 `holidayAware:false` 로 **밝힌다** —
- *    모르는 것을 아는 척하면 화면이 조용히 틀린다(검사 못 함 ≠ 통과).
+ * ~~지금은 주말만 판정한다. … 자격증명이 필요해 아직 붙이지 못했다.~~
+ * ✅ **2026-09-22: 토스 캘린더를 붙였다.** 자격증명은 09-21 부터 있었는데
+ *    **이 주석이 낡으면서 아무도 안 붙였다** — 문서가 거짓이 되면 그 자리가 영영 남는다.
+ *
+ * ## 🔴 하드코딩이 **실제와 어긋나 있었다** (라이브 실측)
+ * ```
+ *        하드코딩            실제(토스 캘린더)
+ * KRX    09~16시            09:00 ~ **15:30**      ⇒ 마감을 30분 늦게 잡았다
+ * 미국장  22~06시            22:30 ~ **05:00**      ⇒ 개장 30분 이르고 마감 1시간 늦었다
+ * ```
+ * ⚠️ 어젯밤 만든 **장마감 분석 트리거가 이 추정 위에 서 있었다.**
+ *
+ * ## ⚠️ 두 시장의 **응답 모양이 다르다** — 한쪽만 보고 짜면 조용히 깨진다
+ * ```
+ * US  today.{dayMarket, preMarket, regularMarket, afterMarket}
+ * KR  today.integrated.{preMarket, regularMarket, afterMarket}   ← 한 겹 더 깊고 dayMarket 이 없다
+ * ```
+ * ⚠️ 휴장일은 세션이 **`null`** 이다(키가 없는 게 아니다).
+ * ⚠️ `MARKET_INFO` 한도가 **3/s** 로 좁다 ⇒ **하루 한 번만** 받아 캐시한다.
  */
+
+/**
+ * 캘린더 응답에서 **정규장 구간**을 꺼낸다. 순수 함수 — 네트워크 없이 검증한다.
+ *
+ * @returns {{date:string, regular:{start:number,end:number}|null, pre:object|null, after:object|null}|null}
+ * ⚠️ 휴장이면 `regular: null` 이다 — **"모른다" 가 아니라 "그날은 안 연다"** 로 구분해야 한다.
+ */
+function normalizeCalendarDay(day) {
+  if (!day || typeof day !== 'object') return null;
+  // 🔴 KR 은 `integrated` 안에, US 는 최상위에 세션이 있다
+  const src = day.integrated && typeof day.integrated === 'object' ? day.integrated : day;
+  const span = (x) => {
+    if (!x || !x.startTime || !x.endTime) return null;
+    const start = Date.parse(x.startTime);
+    const end = Date.parse(x.endTime);
+    return Number.isFinite(start) && Number.isFinite(end) ? { start, end } : null;
+  };
+  return {
+    date: day.date || null,
+    regular: span(src.regularMarket),
+    pre: span(src.preMarket),
+    after: span(src.afterMarket),
+  };
+}
+
+/**
+ * 지금이 어떤 세션인가 — **정규장 기준**으로 `open`/`closed` 를 낸다.
+ * ⚠️ 프리·애프터는 `open` 으로 치지 **않는다**. 장마감 트리거가 애프터마켓까지 열린 것으로 보면
+ *    마감 요약이 3시간 늦게 나간다.
+ * @returns {{state:'open'|'closed', source:'calendar', regular:object|null}|null} 모르면 null
+ */
+function sessionFromCalendar(nowMs, days) {
+  const list = [days?.previousBusinessDay, days?.today, days?.nextBusinessDay]
+    .map(normalizeCalendarDay).filter(Boolean);
+  if (!list.length) return null;
+  for (const d of list) {
+    if (d.regular && nowMs >= d.regular.start && nowMs < d.regular.end) {
+      return { state: 'open', source: 'calendar', regular: d.regular, date: d.date };
+    }
+  }
+  /**
+   * 어느 구간에도 안 들면 **닫혀 있다.** 다만 *"캘린더를 못 읽어서 모른다"* 와는 다르다 —
+   * 여기 왔다는 건 캘린더를 읽었고 그중 어디에도 안 든다는 뜻이다.
+   */
+  return { state: 'closed', source: 'calendar', regular: null, date: list.find((d) => d.date)?.date || null };
+}
+
+/**
+ * 캘린더 하루치 캐시. ⚠️ `MARKET_INFO` 한도가 **3/s** 라 매 틱 부르면 안 된다.
+ * ⚠️ 실패를 **캐시하지 않는다** — 한 번 실패했다고 하루 종일 폴백에 머물면 안 된다.
+ */
+const calCache = new Map(); // market → { day, days, at }
+
+async function loadCalendar(market, { toss = require('./tossClient'), now = Date.now() } = {}) {
+  const m = String(market || '').toUpperCase();
+  const today = new Date(now).toISOString().slice(0, 10);
+  const hit = calCache.get(m);
+  if (hit && hit.day === today) return hit.days;
+  const days = await toss.getMarketCalendar(m);
+  calCache.set(m, { day: today, days, at: now });
+  return days;
+}
+
+/**
+ * 실제 캘린더로 세션을 판정한다. **못 읽으면 폴백**하되 **어느 쪽을 썼는지 밝힌다.**
+ *
+ * 🔴 조용히 폴백하면 *"캘린더를 붙였다"* 고 믿는 채로 옛 추정이 계속 돈다 —
+ *    오늘 내내 본 *"검사하지 않은 것과 통과한 것을 구분 못 하는 자"* 다.
+ */
+async function resolveSessionLive(now, market, fallbackStart, fallbackEnd, appTimeZone, deps = {}) {
+  const nowMs = now instanceof Date ? now.getTime() : Number(now);
+  try {
+    const days = await loadCalendar(market, { ...deps, now: nowMs });
+    const r = sessionFromCalendar(nowMs, days);
+    if (r) return r;
+    // 캘린더는 읽었는데 모양이 예상과 다르다 — 그것도 밝힌다
+    return { ...resolveSession(new Date(nowMs), market, fallbackStart, fallbackEnd, appTimeZone), source: 'fallback', why: 'shape' };
+  } catch (e) {
+    return {
+      ...resolveSession(new Date(nowMs), market, fallbackStart, fallbackEnd, appTimeZone),
+      source: 'fallback',
+      why: e?.kind || 'error',
+      error: e?.message,
+    };
+  }
+}
 
 const MARKET_TZ = {
   KR: 'Asia/Seoul',
@@ -91,4 +192,8 @@ module.exports = {
   isWeekend,
   sessionStateByHour,
   resolveSession,
+  normalizeCalendarDay,
+  sessionFromCalendar,
+  resolveSessionLive,
+  loadCalendar,
 };

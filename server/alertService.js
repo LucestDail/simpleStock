@@ -6,6 +6,7 @@ const tape = require('./tickerTapeService');
 const toss = require('./tossClient');
 const tossPortfolio = require('./tossPortfolio');
 const { resolveSession } = require('./marketCalendar');
+const marketCalendar = require('./marketCalendar');
 const trigger = require('./analystTrigger');
 const { getDashboardSettings, updateSettings } = require('./settingsService');
 const { APP_TIMEZONE } = require('./time');
@@ -150,11 +151,25 @@ async function collectMomentumRows(st, universe, items, now) {
  * 장마감 판정 대상 — **보유·감시 중인 시장만** 본다(사용자 승인 ③).
  * 지금은 둘 다 미국이라 **05시 한 번**이고, 국내 종목을 사면 15:30 이 자동으로 붙는다.
  */
-function sessionsFor(universe, now) {
+async function sessionsFor(universe, now) {
   const markets = new Set();
   for (const sym of Object.keys(universe || {})) markets.add(/^\d{6}$/.test(sym) ? 'kr' : 'us');
+  /**
+   * 🔴 **실제 캘린더로 판정한다** (2026-09-22). 종전 하드코딩은 실제와 어긋나 있었다:
+   *    KRX `09~16` vs 실제 **15:30 마감** · 미국장 `22~06` vs 실제 **22:30~05:00**.
+   *    ⇒ 마감 트리거가 KR 은 30분 늦고, US 는 1시간 늦게 돌았다.
+   * ⚠️ 폴백을 쓰면 **로그에 남긴다** — 조용히 옛 추정으로 돌아가면 "붙였다" 고 믿게 된다.
+   */
   const spec = { kr: ['KRX', 9, 16], us: ['미국장', 22, 6] };
-  return [...markets].map((k) => ({ key: k, label: spec[k][0], state: resolveSession(now, k, spec[k][1], spec[k][2], APP_TIMEZONE).state }));
+  const out = [];
+  for (const k of markets) {
+    const r = await marketCalendar.resolveSessionLive(now, k.toUpperCase(), spec[k][1], spec[k][2], APP_TIMEZONE);
+    if (r.source === 'fallback') {
+      logWarn('alerts.session_fallback', { market: k, why: r.why, error: r.error || null });
+    }
+    out.push({ key: k, label: spec[k][0], state: r.state, source: r.source });
+  }
+  return out;
 }
 
 function isQuiet(now = new Date()) {
@@ -453,7 +468,7 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
       }
       st.universe = trigger.trackUniverse(st.universe, items.map((i) => i.symbol), targeted, now, watched);
       const rows = await collectMomentumRows(st, st.universe, items, now);
-      const d = trigger.decide({ now, sessions: sessionsFor(st.universe, now), symbols: rows, state: st.analyst || {} });
+      const d = trigger.decide({ now, sessions: await sessionsFor(st.universe, now), symbols: rows, state: st.analyst || {} });
       st.analyst = d.state;
       /**
        * 🔴 **점검(dryRun)은 분석을 부르지 않는다** (2026-09-22)

@@ -560,18 +560,18 @@ async function apiPost(path, body, { accountSeq, method = 'POST' } = {}) {
 
 /** 주문 생성. ⚠️ 응답은 **`orderId` 뿐**이다 — 상태·체결은 `getOrder` 로 따로 봐야 한다 */
 async function createOrder(body, { accountSeq } = {}) {
-  return apiPost('/api/v1/orders', body, { accountSeq });
+  return apiPost('/api/v1/orders', body, { accountSeq: await withAccount(accountSeq) });
 }
 
 /** 주문 상세 — **"들어갔는지 모를 때" 확정하는 유일한 수단** */
 async function getOrder(orderId, { accountSeq } = {}) {
-  return apiGet(`/api/v1/orders/${encodeURIComponent(orderId)}`, { accountSeq });
+  return apiGet(`/api/v1/orders/${encodeURIComponent(orderId)}`, { accountSeq: await withAccount(accountSeq) });
 }
 
 /** 주문 목록. 멱등키로 보낸 주문을 되찾을 때도 쓴다 */
 async function listOrders(query = {}, { accountSeq } = {}) {
   const q = new URLSearchParams(Object.entries(query).filter(([, v]) => v != null && v !== ''));
-  return apiGet(`/api/v1/orders${q.toString() ? `?${q}` : ''}`, { accountSeq });
+  return apiGet(`/api/v1/orders${q.toString() ? `?${q}` : ''}`, { accountSeq: await withAccount(accountSeq) });
 }
 
 /**
@@ -580,35 +580,63 @@ async function listOrders(query = {}, { accountSeq } = {}) {
  * 🔴 **멱등키가 없다** ⇒ 자동 재시도 금지.
  */
 async function cancelOrder(orderId, { accountSeq } = {}) {
-  return apiPost(`/api/v1/orders/${encodeURIComponent(orderId)}/cancel`, undefined, { accountSeq });
+  return apiPost(`/api/v1/orders/${encodeURIComponent(orderId)}/cancel`, undefined, { accountSeq: await withAccount(accountSeq) });
 }
 
 /** 주문 정정. 🔴 취소와 같다 — **새 orderId** · **멱등키 없음** · POST(PUT 아님) */
 async function modifyOrder(orderId, body, { accountSeq } = {}) {
-  return apiPost(`/api/v1/orders/${encodeURIComponent(orderId)}/modify`, body, { accountSeq });
+  return apiPost(`/api/v1/orders/${encodeURIComponent(orderId)}/modify`, body, { accountSeq: await withAccount(accountSeq) });
 }
 
 /** 조건주문 생성(손절 등). `orderRules.buildStopLoss()` 가 본문을 만든다 */
 async function createConditionalOrder(body, { accountSeq } = {}) {
-  return apiPost('/api/v1/conditional-orders', body, { accountSeq });
+  return apiPost('/api/v1/conditional-orders', body, { accountSeq: await withAccount(accountSeq) });
 }
 
 /** 조건주문 목록. ⚠️ `status` 가 **필수**다(OPEN|CLOSED) */
 async function listConditionalOrders({ status = 'OPEN', symbol, cursor, limit } = {}, { accountSeq } = {}) {
   const q = new URLSearchParams(Object.entries({ status, symbol, cursor, limit }).filter(([, v]) => v != null && v !== ''));
-  return apiGet(`/api/v1/conditional-orders?${q}`, { accountSeq });
+  return apiGet(`/api/v1/conditional-orders?${q}`, { accountSeq: await withAccount(accountSeq) });
 }
 
 /** 조건주문 취소. ⚠️ 성공이 **204 No Content** 다(일반 주문 취소와 다르다) */
 async function cancelConditionalOrder(conditionalOrderId, { accountSeq } = {}) {
   return apiPost(`/api/v1/conditional-orders/${encodeURIComponent(conditionalOrderId)}`, undefined,
-    { accountSeq, method: 'DELETE' });
+    { accountSeq: await withAccount(accountSeq), method: 'DELETE' });
+}
+
+/**
+ * 계좌 식별자(`accountSeq`) — **캐시한다.**
+ *
+ * 🔴 `ACCOUNT` 그룹 한도가 **1/s** 다(pm2 헤더 실측: `limit=1 remaining=0`).
+ *    호출 한 번에 소진되므로 **요청마다 계좌를 조회하면 바로 429** 다.
+ * 🔴 그리고 이걸 안 붙여서 **계좌 검증이 항상 400 으로 실패**하고 있었다 —
+ *    `buying-power`·`sellable-quantity`·`commissions` 는 `X-Tossinvest-Account` 가 **필수**인데
+ *    호출부가 안 넘겼다. 방향은 안전(막힘)이었지만 **모든 제안이 막혔다.**
+ * ⚠️ 계좌는 거의 안 바뀌지만 **영원히 캐시하지 않는다**(기본 10분).
+ */
+let accountSeqCache = null;
+const ACCOUNT_TTL_MS = Math.max(60_000, Number(process.env.TOSS_ACCOUNT_TTL_MS) || 10 * 60_000);
+
+async function getAccountSeq({ force = false } = {}) {
+  if (!force && accountSeqCache && Date.now() - accountSeqCache.at < ACCOUNT_TTL_MS) return accountSeqCache.seq;
+  const rows = await apiGet('/api/v1/accounts');
+  const list = Array.isArray(rows) ? rows : (rows?.accounts || []);
+  const seq = list[0]?.accountSeq;
+  if (seq == null) throw new TossError('토스 계좌를 찾지 못했습니다', { kind: 'shape', path: '/api/v1/accounts' });
+  accountSeqCache = { seq, at: Date.now() };
+  return seq;
+}
+
+/** 호출부가 안 주면 **여기서 채운다** — 빠뜨리면 400 이고, 빠뜨리기 쉽다 */
+async function withAccount(accountSeq) {
+  return accountSeq != null ? accountSeq : getAccountSeq();
 }
 
 async function getBuyingPower(currency, { accountSeq } = {}) {
   const c = String(currency || '').trim().toUpperCase();
   if (!c) throw new TossError('통화를 지정해야 합니다(KRW/USD).', { kind: 'shape', path: '/api/v1/buying-power' });
-  const r = await apiGet(`/api/v1/buying-power?currency=${encodeURIComponent(c)}`, { accountSeq });
+  const r = await apiGet(`/api/v1/buying-power?currency=${encodeURIComponent(c)}`, { accountSeq: await withAccount(accountSeq) });
   return { currency: r?.currency || c, cash: decimal(r?.cashBuyingPower) };
 }
 
@@ -622,7 +650,7 @@ async function getBuyingPower(currency, { accountSeq } = {}) {
 async function getSellableQuantity(symbol, { accountSeq } = {}) {
   const sym = String(symbol || '').trim();
   if (!sym) throw new TossError('종목을 지정해야 합니다.', { kind: 'shape', path: '/api/v1/sellable-quantity' });
-  const r = await apiGet(`/api/v1/sellable-quantity?symbol=${encodeURIComponent(sym)}`, { accountSeq });
+  const r = await apiGet(`/api/v1/sellable-quantity?symbol=${encodeURIComponent(sym)}`, { accountSeq: await withAccount(accountSeq) });
   return { symbol: sym, quantity: decimal(r?.sellableQuantity) };
 }
 
@@ -646,7 +674,7 @@ async function getShortSelling(symbol) {
  *    이걸로 낸 값은 **"수수료만 반영한 추정"** 이지 실제 비용이 아니다.
  */
 async function getCommissions({ accountSeq } = {}) {
-  const r = await apiGet('/api/v1/commissions', { accountSeq });
+  const r = await apiGet('/api/v1/commissions', { accountSeq: await withAccount(accountSeq) });
   const rows = Array.isArray(r) ? r : (Array.isArray(r?.commissions) ? r.commissions : []);
   return pickLiveCommissions(rows);
 }
@@ -744,6 +772,7 @@ module.exports = {
   createConditionalOrder,
   listConditionalOrders,
   cancelConditionalOrder,
+  getAccountSeq,
   getBuyingPower,
   getSellableQuantity,
   getShortSelling,
