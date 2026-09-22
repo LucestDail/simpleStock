@@ -278,3 +278,67 @@ test('🔴 주문 실행이 제안 만료시각을 큐에 **실제로 넘긴다*
   assert.match(block, /deadlineAt/, '🔴 만료시각을 안 넘긴다 — 큐가 언제까지 유효한지 모른다');
   assert.match(block, /expiresAt/, '🔴 제안의 expiresAt 이 아니라 다른 값을 넘긴다');
 });
+
+// ── "안 나간 것" 도 되꽂는다 ──────────────────────────────────────
+/**
+ * 🔴 **처음 설계가 덜 갔다** (2026-09-22 라이브에서 드러남)
+ *
+ * 되꽂는 대상을 `rate-limited` 하나로 뒀는데, **`unreachable`·`not-sent` 는
+ * 연결조차 못 맺은 것**이라 *"서버가 받고 거절한"* 429 **보다도** 안 나갔음이 확실하다.
+ * 재시도 안전 판정의 근거를 내가 만들어 놓고 **정작 큐에서 안 썼다.**
+ *
+ * ⚠️ 대가가 실측으로 나왔다 — 도커 내장 DNS 간헐 실패(`EAI_AGAIN`)로
+ *    **30분에 시세 갱신 1324건이 그냥 버려졌다.**
+ * 🔴 그래도 **`unknown`·`timeout` 은 절대 안 넣는다** — 나갔는지 모르는 것이라 **두 번 산다.**
+ */
+const netErr = (kind) => Object.assign(new Error('토스에 연결하지 못했습니다(EAI_AGAIN 5015ms)'), { kind });
+
+for (const kind of ['unreachable', 'not-sent']) {
+  test(`🔴 \`${kind}\` 은 **되꽂는다** (나간 적이 없으니 안전)`, async () => {
+    const c = fakeClock();
+    const q = createQueue(c);
+    let n = 0;
+    const p = q.run('MARKET_DATA', async () => { n += 1; if (n === 1) throw netErr(kind); return 'ok'; });
+    await c.advance(0);
+    for (let i = 0; i < 4; i += 1) await c.advance(1500);
+    assert.equal(await p, 'ok', `🔴 ${kind} 을 버렸다 — DNS 한 번 흔들리면 그 회차가 통째로 사라진다`);
+    assert.equal(n, 2);
+  });
+}
+
+/** 🔴🔴 여기를 넓히면 **두 번 주문**이 나간다 — 경계가 정확한지 본다 */
+for (const kind of ['unknown', 'timeout']) {
+  test(`🔴 \`${kind}\` 은 **절대 되꽂지 않는다** (나갔는지 모른다)`, async () => {
+    const c = fakeClock();
+    const q = createQueue(c);
+    let n = 0;
+    const r = settled(q.run('ORDER', async () => { n += 1; throw netErr(kind); }));
+    await c.advance(0);
+    for (let i = 0; i < 3; i += 1) await c.advance(1500);
+    assert.equal((await r).ok, false);
+    assert.equal(n, 1, `🔴 "${kind}" 을 ${n}번 보냈다 — 주문이 두 번 나갈 수 있다`);
+  });
+}
+
+test('⚠️ 네트워크 실패는 429 보다 **길게** 쉰다 (초가 바뀐다고 DNS 가 낫지 않는다)', () => {
+  assert.ok(queueMod.NET_RETRY_MS > queueMod.WINDOW_MS,
+    `🔴 네트워크 재시도(${queueMod.NET_RETRY_MS}ms)가 429 창(${queueMod.WINDOW_MS}ms) 이하다 — 같은 실패를 바로 또 맞는다`);
+});
+
+test('🔴 재시도 대상 목록이 **정확히** 셋이다 (넓히면 두 번 주문)', () => {
+  assert.deepEqual([...queueMod.RETRYABLE].sort(), ['not-sent', 'rate-limited', 'unreachable']);
+  for (const bad of ['unknown', 'timeout', 'upstream', 'auth', 'idempotency-conflict']) {
+    assert.ok(!queueMod.RETRYABLE.has(bad), `🔴 ${bad} 이 재시도 대상에 있다`);
+  }
+});
+
+/** ⚠️ 계속 실패하면 **포기한다** — DNS 가 완전히 죽어도 큐가 영원히 돌지 않는다 */
+test('⚠️ 네트워크가 계속 죽어 있으면 포기한다(무한 루프 없음)', async () => {
+  const c = fakeClock();
+  const q = createQueue(c);
+  let n = 0;
+  const r = settled(q.run('MARKET_DATA', async () => { n += 1; throw netErr('unreachable'); }));
+  for (let i = 0; i < 30; i += 1) await c.advance(1500);
+  assert.equal((await r).ok, false);
+  assert.ok(n >= 2 && n <= 5, `🔴 재시도가 상한을 벗어났다: ${n}회`);
+});

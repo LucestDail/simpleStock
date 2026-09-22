@@ -59,6 +59,24 @@ const MAX_RETRY = Math.max(0, Number(process.env.TOSS_QUEUE_MAX_RETRY) || 3);
 /** 큐 길이 상한 — 넘으면 **즉시 거절**한다(무한히 쌓으면 호출자가 영영 못 돌아온다) */
 const MAX_QUEUE = Math.max(10, Number(process.env.TOSS_QUEUE_MAX_DEPTH) || 500);
 
+/**
+ * 🔴 **되꽂아도 되는 실패** (2026-09-22 확장).
+ *
+ * 처음엔 `rate-limited` 하나였다. 그런데 **그건 내 설계가 덜 간 것**이었다 —
+ * `unreachable`·`not-sent` 는 **연결조차 못 맺은** 것이라 *"서버가 받고 거절한"* 429 **보다도**
+ * 안 나갔음이 확실하다. 재시도 안전 판정의 근거를 만들어 놓고 **정작 큐에서 안 썼다.**
+ *
+ * ⚠️ 실측이 대가를 보여 줬다 — 도커 내장 DNS 간헐 실패(`EAI_AGAIN`)로
+ *    **30분에 시세 갱신 1324건이 그냥 버려졌다.** 되꽂았으면 앱이 통째로 흡수했을 것이다.
+ * 🔴 **주문도 안전하다** — `not-sent` 는 서버에 닿지도 않았다는 뜻이다(두 번 주문이 될 수 없다).
+ * 🔴 **`unknown`·`timeout` 은 절대 넣지 않는다** — 그건 *나갔는지 모르는* 것이고, 되꽂으면 두 번 산다.
+ * ⚠️ 큐가 **스스로** 내는 `not-sent`(대기 상한·큐 포화)는 `item.fn()` 을 거치지 않으므로
+ *    이 분기에 오지 않는다 — 자기 거절을 자기가 재시도하는 고리는 생기지 않는다.
+ */
+const RETRYABLE = new Set(['rate-limited', 'unreachable', 'not-sent']);
+/** 네트워크 실패의 재시도 간격 — 429(1초 창)보다 길게. DNS 는 초가 바뀐다고 낫지 않는다 */
+const NET_RETRY_MS = Math.max(200, Number(process.env.TOSS_QUEUE_NET_RETRY_MS) || 1500);
+
 class RateLimitedError extends Error {
   constructor(message, kind) { super(message); this.name = 'TossQueueError'; this.kind = kind; }
 }
@@ -135,16 +153,22 @@ function createQueue({ now = () => Date.now(), sleep = (ms) => new Promise((r) =
            *    그 밖(타임아웃·연결 실패·업스트림 오류)은 **나갔는지 모르거나 재시도가 의미 없다**
            *    ⇒ 그대로 호출자에게 돌려준다. **여기서 재시도하면 두 번 주문이 될 수 있다.**
            */
-          if (e?.kind === 'rate-limited' && item.attempt < MAX_RETRY) {
+          if (RETRYABLE.has(e?.kind) && item.attempt < MAX_RETRY) {
             item.attempt += 1;
-            // 그 그룹을 잠깐 쉬게 한다 — 바로 다시 쏘면 같은 초에 또 맞는다
-            s.penaltyUntil = now() + WINDOW_MS * item.attempt;
+            /**
+             * 그 그룹을 잠깐 쉬게 한다 — 바로 다시 쏘면 같은 초에 또 맞는다.
+             * ⚠️ **네트워크 실패는 더 길게 쉰다** — 429 는 "초가 바뀌면 풀리는" 것이지만
+             *    DNS·연결 실패는 그 짧은 창에 다시 쏘면 **똑같이 실패한다**(2026-09-22 실측:
+             *    도커 내장 DNS 간헐 실패가 30분에 1300건 넘게 났다).
+             */
+            const unit = e?.kind === 'rate-limited' ? WINDOW_MS : NET_RETRY_MS;
+            s.penaltyUntil = now() + unit * item.attempt;
             s.items.unshift(item); // 🔴 **앞에** 되꽂는다(사용자 지시: "큐 상단 재산입")
-            logWarn('tossq.requeue', { group, attempt: item.attempt, depth: s.items.length, penaltyMs: WINDOW_MS * item.attempt });
+            logWarn('tossq.requeue', { group, kind: e?.kind, attempt: item.attempt, depth: s.items.length, penaltyMs: unit * item.attempt });
             continue;
           }
-          if (e?.kind === 'rate-limited') {
-            logWarn('tossq.gave_up', { group, attempt: item.attempt });
+          if (RETRYABLE.has(e?.kind)) {
+            logWarn('tossq.gave_up', { group, kind: e?.kind, attempt: item.attempt });
           }
           item.reject(e);
         }
@@ -190,4 +214,4 @@ function createQueue({ now = () => Date.now(), sleep = (ms) => new Promise((r) =
   return { run, setLimit, snapshot, _groups: groups };
 }
 
-module.exports = { createQueue, DEFAULT_LIMITS, WINDOW_MS, MAX_RETRY, DEFAULT_MAX_WAIT_MS, ORDER_MAX_WAIT_MS, ORDER_GROUPS, RateLimitedError };
+module.exports = { createQueue, RETRYABLE, NET_RETRY_MS, DEFAULT_LIMITS, WINDOW_MS, MAX_RETRY, DEFAULT_MAX_WAIT_MS, ORDER_MAX_WAIT_MS, ORDER_GROUPS, RateLimitedError };
