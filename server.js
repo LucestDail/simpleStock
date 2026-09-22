@@ -35,6 +35,9 @@ const {
 const { resolveTickerByName } = require('./server/tickerLookupService');
 const { THEME_PRESETS } = require('./server/themePresets');
 const stockRating = require('./server/stockRating');
+// ⚠️ 헬스가 **직접 읽는다** — 저장소가 살아 있는지는 남의 말이 아니라 읽어 봐야 안다
+const dataStore = require('./server/dataStore');
+const health = require('./server/healthService');
 
 const PORT = Number(process.env.PORT) || 50000;
 const SESSION = require('./server/session');
@@ -907,8 +910,15 @@ app.put('/api/system/settings', async (req, res) => {
 // ⚠️ 이 헬스는 **프로세스가 응답한다는 것만** 말한다. 의존물(시세 업스트림·데이터
 //    디렉토리)은 **보지 않는다** — 담으려면 별도 작업이고, 그때까지 이 응답을
 //    "전부 정상" 으로 읽으면 안 된다.
+/**
+ * 🔴 **2026-09-22: `checks: 'process-only'` 를 끝냈다** — 판정 로직은 `server/healthService.js` 에 있다
+ *    (네트워크·리스너 없이 재야 해서 뺐다). 여기는 **배선**뿐이다.
+ * ⚠️ 규칙·근거는 그 파일 머리말 참고 — 무인증 공개라 **규모 정보 금지 · 외부 호출 금지 · 200 유지**.
+ */
+const HEALTH_STALE_MS = Math.max(60_000, Number(process.env.HEALTH_STALE_MS) || health.DEFAULT_STALE_MS);
+
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'simplestock', checks: 'process-only' });
+  res.json(health.healthPayload({ loadStore: dataStore.loadStore, staleMs: HEALTH_STALE_MS }));
 });
 
 // ── 정적 프론트 ───────────────────────────────────────────────────

@@ -916,12 +916,29 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
 
   // 🔴 웹검색 실패를 **코드가** dataGaps 에 적는다 — 모델에게 맡기면 빠뜨린다.
   //    "검사하지 않은 것" 이 "통과한 것" 으로 보이면 안 되는 그 규칙의 이 프로젝트 판본이다.
+  /**
+   * 🔴 **"못 구한 것" 과 "해당 없음" 을 가른다** (2026-09-22).
+   *
+   * 종전에는 한 바구니였다. 그래서 09-22 05시 마감 분석의 `gaps:7` 중 **2건이
+   * *"QLD·RAM 은 ETF 라 기업 100점 채점 대상이 아닙니다"*** 였다 —
+   * **우리가 일부러 만든 분리(기업↔ETF)가 결함처럼 계수된 것**이다.
+   * 숫자만 보면 *"근거가 7개나 부족하다"* 로 읽혀 `proposed:0` 의 해석을 흐린다.
+   *
+   * ⇒ `missing`(못 구했다 = 진짜 결손) 과 `notApplicable`(해당 없다 = 정상) 로 가른다.
+   * ⚠️ **합친 `dataGaps` 는 그대로 둔다** — 화면·프롬프트가 이미 쓰고 있고, 사람에게는
+   *    *"못 본 것"* 으로 한 줄에 보이는 편이 낫다. **가르는 것은 세는 자리**다.
+   */
   const gaps = [...(report.dataGaps || [])];
+  const notApplicable = [];
   for (const [sym, r] of Object.entries(ratings)) {
     if (r?.error) gaps.push(`${sym} 기업 평가 실패 — ${r.error}`);
-    // 🔴 "안 잰 것" 과 "재서 나쁜 것" 을 화면이 구분해야 한다 — ETF 는 점수가 **없다**
-    else if (r?.isFund) gaps.push(`${sym} 은 ETF·펀드 — 기업 100점 채점 대상이 아닙니다`);
-    else if (r && r.total == null) gaps.push(`${sym} 기업 평가 미완 — 항목이 다 안 채워졌습니다`);
+    else if (r?.isFund) {
+      // 🔴 "안 잰 것" 과 "재서 나쁜 것" 을 화면이 구분해야 한다 — ETF 는 점수가 **없다**.
+      //    다만 이건 **결손이 아니라 설계**다 ⇒ 세는 바구니를 따로 쓴다
+      const line = `${sym} 은 ETF·펀드 — 기업 100점 채점 대상이 아닙니다`;
+      gaps.push(line);
+      notApplicable.push(line);
+    } else if (r && r.total == null) gaps.push(`${sym} 기업 평가 미완 — 항목이 다 안 채워졌습니다`);
   }
   if (useWebSearch) {
     if (!web?.ok) gaps.push(`웹 검색 사용 불가 — ${web?.error || '알 수 없음'}`);
@@ -957,7 +974,10 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     // ★ 제안이 0 인 **이유**가 여기서 갈린다(판단했는데 HOLD / 판단 자체가 없음)
     stances,
     lowConfidence,
+    // 🔴 `gaps` 는 **합계**다. 그중 "해당 없음"(설계대로 동작한 것)을 빼야 진짜 결손이 보인다
     gaps: gaps.length,
+    gapsMissing: gaps.length - notApplicable.length,
+    gapsNotApplicable: notApplicable.length,
     // ★ 새 기능이 **실제로 돌았다는 증거**를 지표에 함께 넣는다 — 0 이면 결과가 스스로 알려준다
     webTool: web?.tool || null,
     webHits: (web?.results || []).filter((r) => r.text).length,
@@ -1045,6 +1065,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     stances,
     lowConfidence,
     gaps: gaps.length,
+    gapsMissing: gaps.length - notApplicable.length,
     webHits: (web?.results || []).filter((r) => r.text).length,
   });
 
@@ -1053,6 +1074,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     marketView: report.marketView || '',
     momentumRead: report.momentumRead || '',
     dataGaps: gaps,
+    // ⚠️ 합친 목록은 그대로 두고 **분류만 함께** 낸다(화면·프롬프트가 `dataGaps` 를 쓴다)
+    dataGapsNotApplicable: notApplicable,
     positions: report.positions || [],
     created,
     rejected,
