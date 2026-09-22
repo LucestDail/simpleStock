@@ -492,7 +492,13 @@ async function execute(id) {
   audit('sending', { id, symbol: p.symbol, side: p.side, quantity: p.quantity, clientOrderId: key });
   let created;
   try {
-    created = await toss.createOrder(built.body);
+    /**
+     * 🔴 **제안의 유효시각을 큐까지 넘긴다** (2026-09-22, pm2 지적).
+     *    만료 검사는 이 함수 **맨 위에서 한 번**뿐인데, 그 뒤 큐에서 기다릴 수 있다.
+     *    안 넘기면 *"제안은 EXPIRED 인데 주문은 나간"* 상태가 생긴다 — 상태가 갈리면
+     *    사람이 무엇을 취소해야 하는지 모른다.
+     */
+    created = await toss.createOrder(built.body, { deadlineAt: Date.parse(p.expiresAt) || null });
   } catch (e) {
     if (e.kind === 'unknown') {
       /**

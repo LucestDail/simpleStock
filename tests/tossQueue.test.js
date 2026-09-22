@@ -197,3 +197,84 @@ test('⚠️ 401 재발급은 큐를 다시 타지 않는다', () => {
   const block = code.slice(Math.max(0, i - 200), i + 120);
   assert.match(block, /apiGetOnce\(/, '🔴 재발급이 apiGet 을 다시 불러 큐를 두 번 탄다');
 });
+
+// ── 주문 대기 상한 ↔ 제안 TTL ↔ 멱등창 ────────────────────────────
+/**
+ * 🔴 **바깥이 안쪽보다 촘촘한가** (2026-09-22, pm2 지적 — 우리가 Probius 에서 세 번 밟은 가족)
+ *
+ * ```
+ * 주문 큐 대기 상한  ← 이게 가장 짧아야 한다
+ *   < 제안 TTL(10분)
+ *     ≤ 토스 멱등창(10분)
+ * ```
+ * 순서가 깨지면:
+ * - 큐 대기 > TTL 이면 **제안은 EXPIRED 인데 주문은 나간다**(상태가 갈려 무엇을 취소할지 모른다)
+ * - TTL > 멱등창이면 **이중발주 둘째 층이 사라진다**(오늘 새벽에 잠근 것)
+ *
+ * ⚠️ 값이 **세 파일에 흩어져 있다** ⇒ 누가 하나만 바꾸면 조용히 뒤집힌다. 여기서 한 번에 본다.
+ */
+const queueMod = require('../server/tossQueue');
+
+function freshOrders(env = {}) {
+  const saved = { ...process.env };
+  Object.assign(process.env, env);
+  for (const k of Object.keys(require.cache)) if (/orderService/.test(k)) delete require.cache[k];
+  const m = require('../server/orderService');
+  process.env = saved;
+  return m;
+}
+
+test('🔴 주문 큐 대기 상한 < 제안 TTL ≤ 멱등창', () => {
+  const st = freshOrders().status();
+  assert.ok(queueMod.ORDER_MAX_WAIT_MS > 0, '주문 대기 상한이 없다');
+  assert.ok(
+    queueMod.ORDER_MAX_WAIT_MS < st.proposalTtlMs,
+    `🔴 주문이 큐에서 ${queueMod.ORDER_MAX_WAIT_MS}ms 기다릴 수 있는데 제안 TTL 은 ${st.proposalTtlMs}ms 다 `
+    + '— 제안은 만료됐는데 주문이 나갈 수 있다',
+  );
+  assert.ok(
+    st.proposalTtlMs <= st.idempotencyWindowMs,
+    `🔴 TTL(${st.proposalTtlMs}) 이 멱등창(${st.idempotencyWindowMs}) 을 넘었다 — 이중발주 둘째 층이 사라진다`,
+  );
+});
+
+/** 🔴 자의 판별력 — 뒤집으면 실제로 잡히는가 */
+test('🔴 주문 대기 상한을 TTL 위로 올리면 **잡힌다**', () => {
+  const st = freshOrders().status();
+  const bad = st.proposalTtlMs + 1;
+  assert.throws(() => { assert.ok(bad < st.proposalTtlMs); },
+    '🔴 뒤집었는데 규칙이 통과한다 — 자가 장식이다');
+});
+
+test('⚠️ 주문 계열 그룹이 **전부** 짧은 상한을 쓴다(하나만 고치고 옆을 안 보는 그 병)', () => {
+  for (const grp of ['ORDER', 'ORDER_INFO', 'CONDITIONAL_ORDER', 'ACCOUNT']) {
+    assert.ok(queueMod.ORDER_GROUPS.has(grp), `🔴 ${grp} 이 긴 상한을 쓴다`);
+  }
+});
+
+/** 🔴 마감시각이 지나면 **보내지 않는다** — 이게 pm2 가 짚은 구멍의 실제 방어다 */
+test('🔴 큐에서 기다리다 유효시간이 지나면 **안 보낸다**', async () => {
+  const c = fakeClock();
+  const q = createQueue(c);
+  let sent = 0;
+  const blocker = q.run('ACCOUNT', async () => { sent += 1; });
+  const late = settled(q.run('ACCOUNT', async () => { sent += 1; }, { deadlineAt: 500 }));
+  await c.advance(0);
+  await c.advance(1000);
+  const got = await late;
+  assert.equal(got.ok, false);
+  assert.equal(got.e.kind, 'not-sent');
+  assert.match(got.e.message, /유효시간이 지났습니다/);
+  assert.equal(sent, 1, '🔴 유효시간이 지난 주문이 나갔다 — 제안은 EXPIRED 인데 주문은 체결될 수 있다');
+  await blocker;
+});
+
+test('🔴 주문 실행이 제안 만료시각을 큐에 **실제로 넘긴다**', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'orderService.js'), 'utf-8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  const i = src.indexOf('toss.createOrder(');
+  assert.ok(i > 0, 'createOrder 호출부가 없다');
+  const block = src.slice(i, i + 200);
+  assert.match(block, /deadlineAt/, '🔴 만료시각을 안 넘긴다 — 큐가 언제까지 유효한지 모른다');
+  assert.match(block, /expiresAt/, '🔴 제안의 expiresAt 이 아니라 다른 값을 넘긴다');
+});

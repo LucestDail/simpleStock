@@ -43,6 +43,17 @@ const FALLBACK_LIMIT = 1;
 const WINDOW_MS = 1000;
 /** 한 건이 큐에서 기다릴 수 있는 기본 상한. 호출자가 더 짧게 줄 수 있다 */
 const DEFAULT_MAX_WAIT_MS = Math.max(1000, Number(process.env.TOSS_QUEUE_MAX_WAIT_MS) || 20_000);
+/**
+ * 🔴 **주문 계열은 더 짧게 기다린다** (2026-09-22, pm2 지적).
+ *
+ * 주문은 **사람이 방금 누른 것**이다. 큐가 몇 분 들고 있다가 보내면
+ *  - 지정가라 불리한 체결은 없지만 **판단은 그만큼 낡은 가격 기준**이고
+ *  - 사용자는 *"방금 눌렀는데 왜 지금 나가지"* 를 본다
+ * ⇒ 기다리게 하는 것보다 **못 보냈다고 돌려주고 다시 누르게 하는 편이 낫다.**
+ * ⚠️ `not-sent` 로 돌려주므로 **재시도가 안전하다**(나간 적이 없다).
+ */
+const ORDER_MAX_WAIT_MS = Math.max(1000, Number(process.env.TOSS_QUEUE_ORDER_MAX_WAIT_MS) || 30_000);
+const ORDER_GROUPS = new Set(['ORDER', 'ORDER_INFO', 'CONDITIONAL_ORDER', 'ACCOUNT', 'ASSET']);
 /** 429 재산입 상한. 넘으면 **조용히 포기하지 않고** 사유를 붙여 던진다 */
 const MAX_RETRY = Math.max(0, Number(process.env.TOSS_QUEUE_MAX_RETRY) || 3);
 /** 큐 길이 상한 — 넘으면 **즉시 거절**한다(무한히 쌓으면 호출자가 영영 못 돌아온다) */
@@ -94,6 +105,17 @@ function createQueue({ now = () => Date.now(), sleep = (ms) => new Promise((r) =
         if (wait > 0) { await sleep(Math.min(wait, WINDOW_MS)); continue; }
 
         const item = s.items.shift();
+        /**
+         * 🔴 **마감시각을 넘겼으면 보내지 않는다.** 제안 만료 검사는 큐에 넣기 전 한 번뿐이라,
+         *    여기서 다시 안 보면 *"제안은 EXPIRED 인데 주문은 나간"* 상태가 생긴다.
+         */
+        if (item.deadlineAt != null && now() > item.deadlineAt) {
+          item.reject(new RateLimitedError(
+            `대기 중 유효시간이 지났습니다(${group}). **나가지 않았습니다.** 다시 산출하세요.`,
+            'not-sent',
+          ));
+          continue;
+        }
         // ⚠️ 대기 중에 상한을 넘겼으면 **보내지 않는다** — 그리고 "안 나갔다" 로 알린다
         if (now() - item.at > item.maxWaitMs) {
           item.reject(new RateLimitedError(
@@ -137,15 +159,21 @@ function createQueue({ now = () => Date.now(), sleep = (ms) => new Promise((r) =
    * @param {string} group `tossGroupOf(path)` 결과
    * @param {Function} fn 실제 호출(응답을 그대로 반환하거나 던진다)
    */
-  function run(group, fn, { maxWaitMs = DEFAULT_MAX_WAIT_MS } = {}) {
+  /**
+   * @param {number} [opts.deadlineAt] 🔴 **이 시각을 넘기면 보내지 않는다**(epoch ms).
+   *   주문 제안의 `expiresAt` 을 그대로 넘긴다 — 안 그러면 **제안은 만료됐는데 주문은 나가는**
+   *   상태가 생긴다(만료 검사는 큐에 넣기 **전**에 한 번뿐이기 때문이다).
+   */
+  function run(group, fn, { maxWaitMs, deadlineAt = null } = {}) {
     const s = g(group);
+    const wait = maxWaitMs != null ? maxWaitMs : (ORDER_GROUPS.has(group) ? ORDER_MAX_WAIT_MS : DEFAULT_MAX_WAIT_MS);
     if (s.items.length >= MAX_QUEUE) {
       return Promise.reject(new RateLimitedError(
         `${group} 큐가 가득 찼습니다(${s.items.length}). **요청이 나가지 않았습니다.**`, 'not-sent',
       ));
     }
     return new Promise((resolve, reject) => {
-      s.items.push({ fn, resolve, reject, at: now(), attempt: 0, maxWaitMs });
+      s.items.push({ fn, resolve, reject, at: now(), attempt: 0, maxWaitMs: wait, deadlineAt });
       drain(group);
     });
   }
@@ -162,4 +190,4 @@ function createQueue({ now = () => Date.now(), sleep = (ms) => new Promise((r) =
   return { run, setLimit, snapshot, _groups: groups };
 }
 
-module.exports = { createQueue, DEFAULT_LIMITS, WINDOW_MS, MAX_RETRY, RateLimitedError };
+module.exports = { createQueue, DEFAULT_LIMITS, WINDOW_MS, MAX_RETRY, DEFAULT_MAX_WAIT_MS, ORDER_MAX_WAIT_MS, ORDER_GROUPS, RateLimitedError };

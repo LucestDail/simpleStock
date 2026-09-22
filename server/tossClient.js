@@ -600,12 +600,12 @@ function decimal(v) {
  * ⚠️ 422 `idempotency-key-conflict`(같은 키 다른 본문) · 409 `request-in-progress` 를
  *    **오류 코드로** 구분해 돌려준다. 상태코드만 보면 원인을 못 가른다.
  */
-async function apiPost(path, body, { accountSeq, method = 'POST' } = {}) {
+async function apiPost(path, body, { accountSeq, method = 'POST', deadlineAt = null } = {}) {
   /**
    * ⚠️ 주문도 큐를 탄다. **429 재산입은 안전하다** — 서버가 받고 거절한 것이라 처리되지 않았다.
    *    반면 타임아웃·연결실패는 큐가 **재시도하지 않는다**(`tossQueue` 가 `rate-limited` 만 되꽂는다).
    */
-  return tossQueue.run(tossGroupOf(path) || bucketOf(path), () => apiPostOnce(path, body, { accountSeq, method }));
+  return tossQueue.run(tossGroupOf(path) || bucketOf(path), () => apiPostOnce(path, body, { accountSeq, method }), { deadlineAt });
 }
 
 async function apiPostOnce(path, body, { accountSeq, method = 'POST' } = {}) {
@@ -666,8 +666,8 @@ async function apiPostOnce(path, body, { accountSeq, method = 'POST' } = {}) {
 }
 
 /** 주문 생성. ⚠️ 응답은 **`orderId` 뿐**이다 — 상태·체결은 `getOrder` 로 따로 봐야 한다 */
-async function createOrder(body, { accountSeq } = {}) {
-  return apiPost('/api/v1/orders', body, { accountSeq: await withAccount(accountSeq) });
+async function createOrder(body, { accountSeq, deadlineAt = null } = {}) {
+  return apiPost('/api/v1/orders', body, { accountSeq: await withAccount(accountSeq), deadlineAt });
 }
 
 /** 주문 상세 — **"들어갔는지 모를 때" 확정하는 유일한 수단** */
