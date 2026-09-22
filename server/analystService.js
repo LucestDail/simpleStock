@@ -431,11 +431,27 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    * 웹 검색(my-computer MCP). 🔴 **검색어에 수량·금액을 싣지 않는다** — 종목명·티커만 넘긴다.
    * ⚠️ 실패해도 리포트는 난다. 검색은 곁가지이지 본체가 아니다.
    */
+  /**
+   * 🔴 **브리핑 대상 시장을 웹 검색보다 **먼저** 구한다** (2026-09-22).
+   *    사용자 지시: *"국장도 국장 관련 종합적인 웹 검색 및 종목 없으면 전반적인 시황 브리핑"*.
+   *    보유가 없는 시장은 종목 질의가 **하나도 안 만들어져** 검색이 통째로 비어 있었다.
+   */
+  const BRIEF_KINDS = new Set(['open', 'mid', 'close']);
+  const MARKET_NAME = { kr: '한국 증시(코스피·코스닥)', us: '미국 증시(S&P500·나스닥)' };
+  const briefMarkets = [...new Set((trigger?.reasons || [])
+    .filter((r) => BRIEF_KINDS.has(r?.kind) && MARKET_NAME[r?.key])
+    .map((r) => r.key))];
+  /** 그 시장에 보유·감시 종목이 하나도 없으면 **시장 자체**를 검색 주제로 넣는다 */
+  const marketSubjects = briefMarkets
+    .filter((m) => !items.some((i) => (m === 'kr') === (String(i.market).toUpperCase() === 'KR')))
+    .map((m) => ({ symbol: m.toUpperCase(), name: MARKET_NAME[m], market: m }));
+
   let web = null;
   if (useWebSearch) {
     // ⚠️ **일부러 통째로 넘긴다.** 걸러서 넘기면 가드가 호출부에 있는 셈이고,
     //    다음 사람이 이 줄을 고치는 순간 조용히 뚫린다. `buildQuery` 가 두 칸만 읽는다.
-    web = await mcp.searchMarketNews(items);
+    // ⚠️ 시장 주제를 **앞에** 둔다 — `maxSubjects` 로 잘릴 때 종목보다 시황이 먼저 살아남게
+    web = await mcp.searchMarketNews([...marketSubjects, ...items]);
     if (!web.ok) logWarn('analyst.web_unavailable', { kind: web.kind, error: web.error });
   }
 
@@ -611,6 +627,20 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   if (briefKinds.length) {
     lines.push('', '## 이번 브리핑의 성격');
     for (const k of briefKinds) lines.push(`- ${BRIEF_JOB[k]}`);
+    /**
+     * 🔴 **어느 시장의 브리핑인지 말해 준다** — 안 말하면 국장 마감 브리핑에
+     *    미국 보유 종목 얘기만 적힌다(그 시장에 보유가 없으니 할 말이 그것뿐이다).
+     * ⚠️ 보유가 없는 시장이면 **종목 판단이 아니라 시황**을 요구한다. 사용자 지시가 그렇다.
+     */
+    for (const m of briefMarkets) {
+      const has = items.some((i) => (m === 'kr') === (String(i.market).toUpperCase() === 'KR'));
+      lines.push(has
+        ? `- 대상 시장: **${MARKET_NAME[m]}** — 이 시장의 보유 종목을 중심으로 판단하라.`
+        : `- 대상 시장: **${MARKET_NAME[m]}** — 이 시장에는 **보유·감시 종목이 없다.** `
+          + '종목 판단 대신 **지수·업종·수급·주요 이슈 중심의 전반적 시황**을 쓰고, '
+          + '보유 종목(다른 시장)에 미칠 영향이 있으면 그것만 연결하라. '
+          + '**없는 종목을 지어내지 마라.**');
+    }
     // ⚠️ 종류가 둘 이상이면(이월로 겹친 경우) 둘 다 적는다 — 하나로 뭉뚱그리면 하나가 조용히 사라진다
   }
 

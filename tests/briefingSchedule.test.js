@@ -205,3 +205,53 @@ test('🔴 보유가 전부 미국이어도 **국장이 후보에 든다**', () 
   assert.match(block, /new Set\(\['kr', 'us'\]\)/,
     '🔴 universe 에서만 시장을 뽑는다 — 한국 종목이 0개면 국장 브리핑이 영영 안 뜬다');
 });
+
+/**
+ * 🔴 **보유가 없는 시장도 브리핑이 나와야 한다** (2026-09-22 사용자 지시)
+ *   *"국장도 국장 관련 종합적인 웹 검색 및 종목 없으면 전반적인 시황 브리핑을 해야해."*
+ *
+ * 종전엔 웹 검색이 **보유 종목으로만** 질의를 만들어, 한국 보유가 0이면
+ * 국장 브리핑의 검색이 **통째로 비었다.** 그러면 지수 숫자만 있고 **왜 그런지가 없다.**
+ */
+const MCP = codeOnly(fs.readFileSync(path.join(__dirname, '..', 'server', 'mcpClient.js'), 'utf-8'));
+
+test('🔴 시장 단위 검색 주제를 만든다 (보유 0인 시장)', () => {
+  const i = ANALYST.indexOf('const marketSubjects');
+  assert.ok(i > 0, '🔴 시장 주제가 없다 — 보유 없는 시장은 검색이 빈다');
+  const block = ANALYST.slice(i, i + 400);
+  assert.match(block, /!items\.some/, '🔴 "보유가 없는 시장" 을 가리지 않는다');
+  assert.match(block, /market: m/, '🔴 시장 표시가 없어 종목 질의로 만들어진다');
+});
+
+test('🔴 검색 호출에 시장 주제가 **실제로 실린다**', () => {
+  const i = ANALYST.indexOf('searchMarketNews(');
+  const block = ANALYST.slice(i - 80, i + 160);
+  assert.match(block, /marketSubjects/, '🔴 만들어만 놓고 안 넘긴다("수집해 놓고 안 쓰는")');
+  assert.ok(/\[\.\.\.marketSubjects,\s*\.\.\.items\]/.test(block),
+    '⚠️ 시장 주제가 **앞에** 와야 maxSubjects 로 잘릴 때 시황이 먼저 살아남는다');
+});
+
+test('🔴 buildQuery 가 시장 주제에 **다른 질의**를 낸다', () => {
+  const i = MCP.indexOf('function buildQuery');
+  const block = MCP.slice(i, i + 500);
+  assert.match(block, /subject\?\.market/, '🔴 시장 주제를 구분 안 한다 — "코스피 주가 뉴스 전망" 이 된다');
+  assert.match(block, /증시 시황/, '🔴 시황 질의가 없다');
+});
+
+/** 🔴 개인정보 가드가 약해지지 않았는가 — 자유 질의를 받게 열면 호출부로 샌다 */
+test('🔴 buildQuery 는 여전히 **정해진 칸만** 읽는다 (수량·금액 차단 유지)', () => {
+  const i = MCP.indexOf('function buildQuery');
+  const block = MCP.slice(i, i + 500);
+  assert.ok(!/subject\?\.query|subject\.query/.test(block),
+    '🔴 자유 질의 칸이 생겼다 — 수량·금액을 안 싣는다는 보장이 호출부로 샌다');
+});
+
+/** ⚠️ 프롬프트가 "이 시장엔 보유가 없다" 를 말해야 한다 — 안 하면 남의 시장 종목 얘기를 쓴다 */
+test('🔴 보유 없는 시장이면 프롬프트가 **시황을 요구**한다', () => {
+  const i = ANALYST.indexOf('for (const m of briefMarkets)');
+  assert.ok(i > 0, '🔴 대상 시장을 프롬프트에 안 쓴다');
+  const block = ANALYST.slice(i, i + 900);
+  assert.match(block, /보유·감시 종목이 없다/, '🔴 보유 없음을 안 알린다');
+  assert.match(block, /전반적 시황/, '🔴 시황을 요구하지 않는다');
+  assert.match(block, /지어내지 마라/, '🔴 없는 종목을 지어낼 여지를 남긴다');
+});

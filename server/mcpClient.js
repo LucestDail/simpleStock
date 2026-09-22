@@ -272,6 +272,13 @@ function buildQuery(subject) {
   const name = String(subject?.name || '').trim();
   const symbol = String(subject?.symbol || '').trim();
   // 🔴 수량·평단·평가금액·계좌번호는 **이 함수가 읽지 않는다**
+  /**
+   * 🔴 **시장 단위 주제** (2026-09-22 사용자 지시 — *"종목 없으면 전반적인 시황 브리핑"*).
+   *    보유가 없는 시장은 종목 질의가 하나도 안 만들어져 **웹 검색이 통째로 비어** 있었다.
+   * ⚠️ 여기도 **`name`·`market` 두 칸만** 읽는다 — 자유 문자열 질의를 받게 열어 두면
+   *    수량·금액을 안 싣는다는 보장이 **호출부로 새어 나간다**.
+   */
+  if (subject?.market) return `${name || symbol} 증시 시황 마감 주요 이슈 뉴스`;
   return `${name || symbol} 주가 뉴스 전망`;
 }
 
