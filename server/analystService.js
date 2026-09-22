@@ -714,7 +714,14 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
           if (!Number.isFinite(b) || !Number.isFinite(sl)) return null;
           return Math.round((b - sl) / 1e8); // 억원
         };
-        const parts = [['개인', 'individual'], ['외국인', 'foreign'], ['기관', 'institutional']]
+        /**
+         * 🔴 **필드명을 추측해서 3분의 2가 조용히 사라졌다** (2026-09-22 첫 실증에서 발견).
+         *    명세의 실제 키는 `foreigner`·`institution` 인데 나는 `foreign`·`institutional` 로 짐작했다.
+         *    `individual` 만 우연히 맞아 **개인만 프롬프트에 실렸고**, 모델이 그걸 정확히 짚었다 —
+         *    gap 에 *"코스피·코스닥 **개인만 제공**"* 이라고 적었다. **모델의 불평이 자였다.**
+         *    ⚠️ null 을 거르는 방어(`filter(Boolean)`)가 오히려 증상을 숨겼다 — 죽지 않으니 아무도 모른다.
+         */
+        const parts = [['개인', 'individual'], ['외국인', 'foreigner'], ['기관', 'institution']]
           .map(([ko, k]) => { const n = net(k); return n == null ? null : `${ko} ${n > 0 ? '+' : ''}${n}억`; })
           .filter(Boolean);
         if (parts.length) lines.push(`- ${idx} ${String(r?.date || r?.baseDate || '').slice(5)}: ${parts.join(' · ')}`);

@@ -108,3 +108,41 @@ test('⚠️ KR 전용 호출이 전부 시장 가드를 갖는다 (전수)', ()
     assert.ok(/\bisKr\b|['"]KR['"]/.test(before), `🔴 ${fn} 이 시장 가드 없이 불린다`);
   }
 });
+
+/**
+ * 🔴 **지수 수급 필드명을 추측해서 외국인·기관이 조용히 사라졌다** (2026-09-22 첫 실증)
+ *
+ * 명세의 실제 키: `individual` · `foreigner` · `institution` (각각 `{buyAmount, sellAmount}`, **문자열**).
+ * 나는 `foreign`·`institutional` 로 짐작했고, null 방어가 오히려 증상을 숨겨
+ * **개인만 프롬프트에 실렸다.** 잡은 건 내가 아니라 **모델의 gap 불평**이었다
+ * ("코스피·코스닥 개인만 제공") — 사람이 로그만 봤으면 webHits·stances 다 정상이라 몰랐다.
+ */
+test('🔴 지수 수급 파싱이 **명세의 실제 키**를 쓴다', () => {
+  const i = code.indexOf("['개인', 'individual']");
+  assert.ok(i > 0, '수급 파싱을 못 찾았다');
+  const block = code.slice(i, i + 200);
+  assert.match(block, /'foreigner'/, "🔴 'foreign' 은 명세에 없다 — 외국인이 조용히 사라진다");
+  assert.match(block, /'institution'/, "🔴 'institutional' 은 명세에 없다 — 기관이 조용히 사라진다");
+  assert.ok(!/'foreign'[^e]/.test(block), '옛 추측 키가 남아 있다');
+});
+
+/** 🔴 명세 모양의 실데이터로 셋 다 계산되는지 — 키만 보면 "있다"까지고 이게 "맞다"다 */
+test('🔴 명세 모양 레코드에서 개인·외국인·기관 **셋 다** 나온다', () => {
+  const r = {
+    date: '2026-09-22',
+    individual: { buyAmount: '1000000000000', sellAmount: '900000000000' },
+    foreigner: { buyAmount: '2000000000000', sellAmount: '2300000000000' },
+    institution: { buyAmount: '500000000000', sellAmount: '400000000000', breakdown: {} },
+  };
+  const net = (who) => {
+    const b = Number(r?.[`${who}BuyAmount`] ?? r?.[who]?.buyAmount);
+    const sl = Number(r?.[`${who}SellAmount`] ?? r?.[who]?.sellAmount);
+    if (!Number.isFinite(b) || !Number.isFinite(sl)) return null;
+    return Math.round((b - sl) / 1e8);
+  };
+  const parts = [['개인', 'individual'], ['외국인', 'foreigner'], ['기관', 'institution']]
+    .map(([ko, k]) => { const n = net(k); return n == null ? null : `${ko} ${n > 0 ? '+' : ''}${n}억`; })
+    .filter(Boolean);
+  assert.equal(parts.length, 3, `🔴 ${3 - parts.length}개 투자자 분류가 조용히 사라졌다: ${parts}`);
+  assert.deepEqual(parts, ['개인 +1000억', '외국인 -3000억', '기관 +1000억']);
+});
