@@ -685,6 +685,20 @@ function restartDashTimer() {
   dashTimer = setInterval(loadDashboard, Math.max(15, sec) * 1000);
 }
 
+/**
+ * 현금(매수 가능) 표시. 🔴 **`null` 은 0 이 아니라 "못 받았다"** — 빈칸이면 사용자가 0 으로 읽으므로
+ * "확인 못 함" 을 글자로 쓴다(서버 프롬프트와 같은 규율).
+ */
+function cashCell(cash) {
+  if (!cash) return '확인 못 함';
+  const part = (v, unit) => (v == null ? null : (unit === '₩'
+    ? `₩${Number(v.amount ?? v.raw ?? 0).toLocaleString('ko-KR')}`
+    : `$${Number(v.amount ?? v.raw ?? 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}`));
+  const parts = [part(cash.krw, '₩'), part(cash.usd, '$')].filter(Boolean);
+  const failed = (cash.failed || []).length ? ` (${cash.failed.join('·')} 확인 못 함)` : '';
+  return (parts.join(' · ') || '확인 못 함') + failed;
+}
+
 const portfolio = ref(null);
 const portfolioError = ref('');
 const portfolioLoading = ref(false);
@@ -960,6 +974,13 @@ onUnmounted(() => {
                 {{ krwCell(portfolio.summary.profit) }}
                 <small>{{ pct(portfolio.summary.profitRate) }}</small>
               </span>
+            </div>
+            <div class="kpi">
+              <!-- 🔴 2026-09-22 사용자: "웹 화면에 내 잔고 잔액이 안보이는데" —
+                   서버는 summary.cash 를 이미 주고 있었다(어제 배선). 화면만 안 그렸다.
+                   ⚠️ 라벨은 "주문 가능 현금" — 예수금 총액과 다를 수 있어 정직하게 붙인다 -->
+              <span class="kpi__label">주문 가능 현금</span>
+              <span class="kpi__value kpi__value--sub mono-num">{{ cashCell(portfolio.summary.cash) }}</span>
             </div>
             <div class="kpi">
               <span class="kpi__label">오늘</span>
