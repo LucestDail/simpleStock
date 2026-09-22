@@ -350,6 +350,8 @@ test('🔴 실측된 그룹은 실측값으로 시드됐다 (재기동 직후 4�
   assert.equal(L.MARKET_DATA_CHART, 20);
   assert.equal(L.ASSET, 5);
   assert.equal(L.ORDER_INFO, 6);
+  // 🔴 라이브 정정 실측(from:3 to:10) — 시드 표에서 빠졌던 줄. 되돌아가면 첫 배치가 3/초로 묶인다
+  assert.equal(L.STOCK_TRADING_TREND, 10);
 });
 
 /** 🔴 ACCOUNT 만은 절대 낙관하지 않는다 — 실측이자 최악값(1/s). 올리면 바로 429 */

@@ -45,8 +45,22 @@ const { logInfo, logWarn } = require('./logger');
 const DEFAULT_LIMITS = {
   AUTH: 1, ACCOUNT: 1, ASSET: 5, ORDER_INFO: 6, ORDER: 5, CONDITIONAL_ORDER: 5,
   MARKET_DATA: 15, MARKET_DATA_CHART: 20, MARKET_INDICATOR: 3, MARKET_INDICATOR_CHART: 3,
-  MARKET_INFO: 3, RANKING: 5, STOCK: 5, STOCK_ALL: 1, STOCK_TRADING_TREND: 3,
+  MARKET_INFO: 3, RANKING: 5, STOCK: 5, STOCK_ALL: 1,
+  /**
+   * 🔴 3 → 10 (2026-09-22 라이브 정정 실측: `tossq.limit from:3 to:10`).
+   *    pm2 가 05:00 관측에서 이미 10 으로 재 뒀던 값인데 시드 표에서 빠졌다.
+   *    보수적 방향이라 429 는 없었지만 **첫 배치(보유 수급 조회)가 3/초로 묶여** 필요 없이 느렸다.
+   * ★ 이 정정이 라이브에서 발동한 덕에, 다른 그룹에서 정정이 **안 뜬 것**을
+   *   "자가 고장" 이 아니라 "시드가 맞았다" 로 읽을 수 있게 됐다.
+   */
+  STOCK_TRADING_TREND: 10,
 };
+/**
+ * ⚠️ 미관측 그룹(2026-09-22 기준): AUTH · CONDITIONAL_ORDER · MARKET_INDICATOR ·
+ *    MARKET_INDICATOR_CHART · ORDER · STOCK_ALL — 이들 시드는 **아직 실측 검증이 없다**(통과 아님).
+ * ⚠️ `ORDER: 5` 는 **조회 기준값**이다 — pm2 실측은 생성·취소 10 / 조회(detail) 5.
+ *    경로별로 갈리는 그룹이라 낮은 쪽을 시드했다. 헤더가 오면 자가 정정된다.
+ */
 const FALLBACK_LIMIT = 1;
 const WINDOW_MS = 1000;
 /** 한 건이 큐에서 기다릴 수 있는 기본 상한. 호출자가 더 짧게 줄 수 있다 */

@@ -55,7 +55,8 @@ test('🔴 지수 투자자별 매매대금이 **국장 브리핑일 때** 붙�
 test('🔴 지수 수급이 프롬프트까지 간다 (모으고 버리지 않는다)', () => {
   const i = code.indexOf('국내 지수 투자자별 매매대금');
   assert.ok(i > 0, '🔴 모으기만 하고 프롬프트에 안 넣는다');
-  const block = code.slice(i, i + 900);
+  // ⚠️ 고정 창은 코드가 자라면 밀린다 — 기타법인 추가로 900자가 모자라 한 번 깨졌다
+  const block = code.slice(i, i + 1400);
   assert.match(block, /개인|외국인|기관/, '🔴 투자자 분류가 없다');
   assert.match(block, /중계다/, '⚠️ "등락률만 되풀이하지 마라" 지시가 없다');
 });
@@ -145,4 +146,10 @@ test('🔴 명세 모양 레코드에서 개인·외국인·기관 **셋 다** �
     .filter(Boolean);
   assert.equal(parts.length, 3, `🔴 ${3 - parts.length}개 투자자 분류가 조용히 사라졌다: ${parts}`);
   assert.deepEqual(parts, ['개인 +1000억', '외국인 -3000억', '기관 +1000억']);
+});
+
+/** pm2 실응답에 `otherCorporation`(기타법인)이 있어 함께 싣는다 — 프롬프트 배선 확인 */
+test('기타법인도 파싱 목록에 있다', () => {
+  const i = code.indexOf("['기타법인', 'otherCorporation']");
+  assert.ok(i > 0, '🔴 기타법인이 빠졌다 — 실응답에 있는 주체를 버린다');
 });

@@ -721,7 +721,9 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
          *    gap 에 *"코스피·코스닥 **개인만 제공**"* 이라고 적었다. **모델의 불평이 자였다.**
          *    ⚠️ null 을 거르는 방어(`filter(Boolean)`)가 오히려 증상을 숨겼다 — 죽지 않으니 아무도 모른다.
          */
-        const parts = [['개인', 'individual'], ['외국인', 'foreigner'], ['기관', 'institution']]
+        // `otherCorporation`(기타법인)도 싣는다 — pm2 실응답 확인(2026-09-22). 국내 수급에서
+        // 무시 못 할 주체이고, 파싱 구조가 같아 비용이 없다.
+        const parts = [['개인', 'individual'], ['외국인', 'foreigner'], ['기관', 'institution'], ['기타법인', 'otherCorporation']]
           .map(([ko, k]) => { const n = net(k); return n == null ? null : `${ko} ${n > 0 ? '+' : ''}${n}억`; })
           .filter(Boolean);
         if (parts.length) lines.push(`- ${idx} ${String(r?.date || r?.baseDate || '').slice(5)}: ${parts.join(' · ')}`);
