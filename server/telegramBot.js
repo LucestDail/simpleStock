@@ -261,8 +261,76 @@ async function handleCallback(cb) {
   return { ok: true, verb, id };
 }
 
+/**
+ * 🔴 **텍스트 메시지 → 애널리스트 채팅 릴레이** (2026-09-22 사용자: *"해당 텔레그램을 통해서
+ *    애널리스트랑 대화가 되어야 하는데 지금 릴레이도 안 되는 거 같은데"*)
+ *
+ * 안 되던 이유: `allowed_updates: ['callback_query']` — **텍스트 메시지를 아예 안 받고 있었다.**
+ *
+ * ## 안전 경계
+ * - CHAT_ID 만 받는다(버튼과 같은 규율 — 남의 채팅은 기록하고 거절)
+ * - 채팅이 부를 수 있는 도구는 조회 + `propose_order`(HITL **제안 등록**)뿐이다 —
+ *   **실행 도구가 아니므로** 대화로는 돈이 못 나간다. 제안이 되면 여기 승인 버튼이 온다
+ * - 🔴 **한 번에 하나만** — chat 은 LLM+도구로 수십 초를 쓴다. 처리 중 새 질문이 오면
+ *   "앞 질문 처리 중" 을 답한다(쌓으면 몇 분 뒤 낡은 답이 연달아 온다)
+ */
+let chatBusy = false;
+
+async function handleUserMessage(msg) {
+  const fromChat = String(msg?.chat?.id || '');
+  const text = String(msg?.text || '').trim();
+  if (fromChat !== CHAT_ID) {
+    logWarn('tgbot.rejected_foreign_chat', { fromChat: fromChat.slice(0, 6) + '…', kind: 'message' });
+    return;
+  }
+  if (!text || text.startsWith('/')) return; // 명령어는 아직 없다 — 조용히 무시하지 않고 아래에서 안내
+  if (chatBusy) {
+    await api('sendMessage', { chat_id: CHAT_ID, text: '⏳ 앞 질문을 아직 처리 중입니다 — 끝나면 이어서 물어봐 주세요.' });
+    return;
+  }
+  chatBusy = true;
+  try {
+    await api('sendChatAction', { chat_id: CHAT_ID, action: 'typing' });
+    const analystChat = require('./analystChat');
+    const { getMarketSnapshot } = require('./marketDataService');
+    const mkt = getMarketSnapshot();
+    const rate = Number(mkt?.fx?.USDKRW?.rate) || 0;
+    let answer = '';
+    const toolsUsed = [];
+    const keepTyping = setInterval(() => {
+      api('sendChatAction', { chat_id: CHAT_ID, action: 'typing' }).catch(() => {});
+    }, 5000);
+    try {
+      await analystChat.chat({
+        message: text,
+        contextNote: '텔레그램에서 온 질문이다. 답은 채팅 메시지로 전달되므로 간결하게 쓰되, 근거 숫자는 유지하라.',
+        fx: rate ? { rate } : null,
+        emit: (event, data) => {
+          if (event === 'text_delta') answer += data?.text || '';
+          else if (event === 'tool_call') toolsUsed.push(data?.name);
+        },
+      });
+    } finally {
+      clearInterval(keepTyping);
+    }
+    if (!answer.trim()) answer = '(모델이 빈 답을 냈습니다 — 다시 물어봐 주세요)';
+    if (toolsUsed.length) answer += `\n\n🔧 확인한 것: ${[...new Set(toolsUsed)].join(' · ')}`;
+    // 텔레그램 한 메시지 상한 4096 — 자르지 말고 나눠 보낸다(잘리면 근거 숫자가 사라진다)
+    for (let i = 0; i < answer.length; i += 3800) {
+      await api('sendMessage', { chat_id: CHAT_ID, text: answer.slice(i, i + 3800) });
+    }
+    logInfo('tgbot.chat_relayed', { chars: answer.length, tools: toolsUsed.length });
+  } catch (e) {
+    logError('tgbot.chat_failed', e, {});
+    // 🔴 실패를 삼키지 않는다 — 사용자는 "읽씹" 을 가장 나쁘게 겪는다
+    await api('sendMessage', { chat_id: CHAT_ID, text: `🔴 답변 중 오류: ${e.message}` }).catch(() => {});
+  } finally {
+    chatBusy = false;
+  }
+}
+
 async function pollOnce() {
-  const updates = await api('getUpdates', { offset, timeout: POLL_SEC, allowed_updates: ['callback_query'] });
+  const updates = await api('getUpdates', { offset, timeout: POLL_SEC, allowed_updates: ['callback_query', 'message'] });
   for (const u of updates || []) {
     offset = Math.max(offset, Number(u.update_id) + 1);
     if (u.callback_query) {
@@ -271,6 +339,12 @@ async function pollOnce() {
       } catch (e) {
         logError('tgbot.handle_failed', e, {});
       }
+    } else if (u.message) {
+      /**
+       * ⚠️ 릴레이는 **기다리지 않는다** — chat 이 수십 초라 await 하면 그동안
+       *    getUpdates 가 멈춰 **승인 버튼까지 같이 늦는다**(주문 경로가 대화에 볼모잡힌다).
+       */
+      handleUserMessage(u.message).catch((e) => logError('tgbot.msg_failed', e, {}));
     }
   }
   return (updates || []).length;
@@ -318,4 +392,5 @@ function _resetForTest() {
 }
 
 module.exports = {
+  handleUserMessage, // 릴레이 검증용
   clearProposalButtons, start, stop, status, isConfigured, sendProposal, handleCallback, pollOnce, _resetForTest };

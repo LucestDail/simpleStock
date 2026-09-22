@@ -130,3 +130,13 @@ test('⚠️ 해당없음만 있으면 결손 0 이 된다', () => {
   const na = gaps.filter((g) => /ETF·펀드/.test(g));
   assert.equal(gaps.length - na.length, 0, '🔴 해당없음뿐인데 결손이 있다고 센다');
 });
+
+/**
+ * 🔴 **dryRun 이 로그에 안 밝혀져 워치독이 사용자에게 거짓 알림을 보냈다** (2026-09-22)
+ * 점검 실행의 stances:{SELL:1} 을 실전으로 읽어 "자동 제안이 나왔습니다" ×2 가 폰에 갔다.
+ */
+test('🔴 analyst.report 로그가 dryRun 을 밝힌다', () => {
+  const c = codeOnly(SRC);
+  const i = c.indexOf("logInfo('analyst.report'");
+  assert.match(c.slice(i, i + 300), /dryRun,/, '🔴 dryRun 표시가 없다 — 감시가 점검과 실전을 원리상 구분 못 한다');
+});

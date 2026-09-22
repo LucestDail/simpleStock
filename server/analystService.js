@@ -1229,6 +1229,13 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   }
 
   logInfo('analyst.report', {
+    /**
+     * 🔴 **dryRun 을 로그에 밝힌다** (2026-09-22). 점검 실행의 `stances:{SELL:1}` 을
+     *    워치독이 실전으로 읽어 **사용자 폰에 "자동 제안이 나왔습니다" 를 두 번** 보냈다
+     *    (17:23·17:28 — pm2 배포 검증이었다). 로그에 dryRun 표시가 없으면
+     *    감시하는 쪽은 **원리상 구분할 수 없다.**
+     */
+    dryRun,
     positions: report.positions?.length || 0,
     proposed: report.proposals?.length || 0,
     created: created.length,
