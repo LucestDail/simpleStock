@@ -187,3 +187,21 @@ test('⚠️ 종류가 겹치면 **둘 다** 싣는다 (이월로 개장+장중�
   const block = ANALYST.slice(i, i + 400);
   assert.match(block, /for \(const k of briefKinds\)/, '🔴 하나만 싣는다 — 이월된 브리핑이 조용히 사라진다');
 });
+
+/**
+ * 🔴 **국장 브리핑이 원리상 안 뜨던 것** (2026-09-22 배포 직후 발견)
+ *
+ * `sessionsFor` 가 `universe` 에 있는 시장만 봤는데, 사용자 보유·감시가 **전부 미국**이라
+ * 한국이 후보 집합에 **한 번도 안 들어갔다**(실측: 11종목 중 한국 0개).
+ * ⇒ *"미장/국장 하루 6번"* 지시에도 **실제로는 3번**이고, 사용자는 *"국장 브리핑이 안 오네"* 로 겪는데
+ *   **로그에 아무 흔적이 없다** — 트리거가 실패한 게 아니라 **애초에 후보가 아니었다.**
+ * ★ *"0건" 을 "안 일어났다" 로 읽는* 그 병의 반대편이다 — 여기선 **일어날 수가 없었다.**
+ */
+test('🔴 보유가 전부 미국이어도 **국장이 후보에 든다**', () => {
+  const src = codeOnly(fs.readFileSync(path.join(__dirname, '..', 'server', 'alertService.js'), 'utf-8'));
+  const i = src.indexOf('async function sessionsFor');
+  assert.ok(i > 0, 'sessionsFor 를 못 찾았다');
+  const block = src.slice(i, i + 400);
+  assert.match(block, /new Set\(\['kr', 'us'\]\)/,
+    '🔴 universe 에서만 시장을 뽑는다 — 한국 종목이 0개면 국장 브리핑이 영영 안 뜬다');
+});
