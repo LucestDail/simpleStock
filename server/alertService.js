@@ -167,7 +167,13 @@ async function sessionsFor(universe, now) {
     if (r.source === 'fallback') {
       logWarn('alerts.session_fallback', { market: k, why: r.why, error: r.error || null });
     }
-    out.push({ key: k, label: spec[k][0], state: r.state, source: r.source });
+    /**
+     * 🔴 **`regular{start,end}` 를 함께 넘긴다** (2026-09-22) — 정기 브리핑의 **중간 시점**을
+     *    여기서 유도하기 때문이다. 종전엔 `state` 만 넘기고 **시간대를 버렸다**(또 "수집해 놓고 안 쓰는").
+     * ⚠️ 폴백 경로에는 `regular` 가 **없다** ⇒ 중간 브리핑은 캘린더가 살아 있을 때만 돈다.
+     *    그게 맞다 — 시각을 추측해서 중간이라고 우기면 조기폐장일에 **장 끝난 뒤 "중간 보고"** 가 나간다.
+     */
+    out.push({ key: k, label: spec[k][0], state: r.state, source: r.source, regular: r.regular || null });
   }
   return out;
 }
@@ -481,6 +487,22 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
       const d = trigger.decide({ now, sessions: await sessionsFor(st.universe, now), symbols: rows, state: st.analyst || {} });
       st.analyst = d.state;
       /**
+       * 🔴 **건너뛴 정기 브리핑을 이월한다** (2026-09-22, pm2 지적).
+       *
+       * 분석은 ~70초 걸리고 틱은 5분이라 겹치면 건너뛰는데, 종전엔 **그 회차를 잃었다.**
+       * 개장 브리핑이 마침 모멘텀 분석과 겹치면 **조용히 안 오고**, 사용자는
+       * *"개장 브리핑이 안 왔네" * 로 본다. 전이 표시는 `decide()` 안에서 이미 소비돼
+       * **다음 틱에는 다시 안 뜬다.**
+       * ⇒ 실행이 막힌 회차의 **예정 브리핑만** 들고 있다가 다음 틱에 얹는다.
+       * ⚠️ **모멘텀은 이월하지 않는다** — 지나간 순간의 돌파를 나중에 알리는 건 거짓이다.
+       */
+      const SCHEDULED = new Set(['open', 'mid', 'close']);
+      const carried = Array.isArray(st.analystCarry) ? st.analystCarry : [];
+      if (carried.length) {
+        d.reasons = [...carried, ...d.reasons];
+        d.run = true;
+      }
+      /**
        * 🔴 **점검(dryRun)은 분석을 부르지 않는다** (2026-09-22)
        *
        * 종전엔 `tick({dryRun:true})` 가 알림만 막고 **분석은 그대로 돌렸다** —
@@ -493,9 +515,15 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
       } else if (d.run && analystRunner) {
         if (analystRunning) {
           // 분석은 88초쯤 걸리고 틱은 5분이다 — 겹치면 **건너뛴다**(쌓아 두지 않는다)
-          logWarn('analyst.trigger_skipped', { why: 'already_running', reasons: trigger.describe(d.reasons) });
+          // 🔴 단 **예정 브리핑은 이월한다** — 잃으면 사용자가 "안 왔네" 로 겪는다
+          const keep = d.reasons.filter((r) => SCHEDULED.has(r?.kind));
+          st.analystCarry = keep;
+          logWarn('analyst.trigger_skipped', {
+            why: 'already_running', reasons: trigger.describe(d.reasons), carried: keep.length,
+          });
         } else {
           analystRunning = true;
+          st.analystCarry = []; // 실행에 들어갔으니 이월분을 비운다
           const why = trigger.describe(d.reasons);
           logInfo('analyst.triggered', { why, reasons: d.reasons });
           // 🔴 **틱을 막지 않는다** — 분석이 느리다고 알림이 밀리면 안 된다

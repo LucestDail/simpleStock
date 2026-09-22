@@ -592,6 +592,28 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    *    깨운 종목은 **다른 질문**으로 다룬다: *들고 있을 것인가* 가 아니라 **지금 되살 자리인가**.
    * ⚠️ 보유가 아니므로 **수량·평단이 없다** — 분할 매수 레벨을 물어야지 손익을 물으면 안 된다.
    */
+  /**
+   * 🔴 **브리핑 종류를 모델에게 말해 준다** (2026-09-22 — 정기 브리핑 6회 체계).
+   *
+   * 안 말해 주면 개장·장중·마감이 **전부 같은 글**이 된다. 사용자가 하루 6번 받는데
+   * 내용이 구분되지 않으면 **셋째부터 안 읽는다**(그러면 진짜 소식도 같이 묻힌다).
+   * ⚠️ 같은 데이터로 **다른 질문**에 답하게 하는 것이지, 데이터를 바꾸는 게 아니다.
+   */
+  const BRIEF_JOB = {
+    open: '**개장 브리핑**이다. 직전 세션(밤사이 해외장 포함)에서 넘어온 흐름과 **시가 갭**을 먼저 짚고, '
+      + '오늘 이 종목들에서 **무엇을 지켜볼 것인지**를 말하라. 지금 당장의 매매보다 **관전 포인트**가 중심이다.',
+    mid: '**장중 브리핑**이다. 개장 이후 흐름이 **개장 때 본 그림과 같은지 달라졌는지**를 먼저 말하라. '
+      + '달라졌으면 무엇이 바뀌었는지 짚고, 같으면 "유지" 라고 분명히 말하라. **바뀐 게 없으면 없다고 하라** — 억지로 새 얘기를 만들지 마라.',
+    close: '**마감 브리핑**이다. 오늘 결과를 정리하고, **다음 세션까지 무엇을 들고 갈지**를 말하라. '
+      + '장이 닫혀 있으므로 **지금 당장 집행할 수 없다** — 다음 개장에 볼 것으로 적어라.',
+  };
+  const briefKinds = [...new Set((trigger?.reasons || []).filter((r) => BRIEF_JOB[r.kind]).map((r) => r.kind))];
+  if (briefKinds.length) {
+    lines.push('', '## 이번 브리핑의 성격');
+    for (const k of briefKinds) lines.push(`- ${BRIEF_JOB[k]}`);
+    // ⚠️ 종류가 둘 이상이면(이월로 겹친 경우) 둘 다 적는다 — 하나로 뭉뚱그리면 하나가 조용히 사라진다
+  }
+
   const heldSet = new Set(items.map((i) => String(i.symbol).toUpperCase()));
   const reentry = [...new Map(
     (trigger?.reasons || [])
@@ -1006,11 +1028,35 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    * ⇒ **결정만** 넣는다: 종목·방향·확신도 + 실제로 만들어진 주문.
    * ⚠️ 서술은 일부러 뺀다 — 같은 판단을 다르게 설명한 것은 **새 소식이 아니다.**
    */
+  /**
+   * 🔴 **정기 브리핑은 지문에서 빠져나가야 한다** (2026-09-22, pm2 지적).
+   *
+   * 지문을 *"결정만"* 으로 좁힌 건 옳았지만, 그 때문에 **브리핑이 삼켜진다**:
+   * 개장·장중·마감에 전부 `HOLD` 면 결정이 같아 **둘째·셋째가 안 나간다.**
+   * 사용자는 *"개장 브리핑이 안 왔네"* 로 보고, **조용히 사라져 아무도 모른다**
+   * (*"점검이 다음 진짜 발송을 삼킨다"* 와 같은 가족).
+   *
+   * ⇒ **예정된 브리핑이면** 종류·시장·날짜를 지문에 넣어 **매 회차가 서로 다른 사건**이 되게 한다.
+   * ⚠️ **모멘텀은 넣지 않는다** — 같은 판단으로 두 번 튀는 건 여전히 새 소식이 아니다.
+   * ⚠️ 날짜를 넣는 이유: 안 넣으면 **어제 개장과 오늘 개장이 같은 지문**이라 이튿날이 막힌다.
+   */
+  const SCHEDULED = new Set(['open', 'mid', 'close']);
+  // ⚠️ `trigger` 는 이 함수의 **구조분해 인자**다. 처음에 `opts?.trigger` 라 썼는데
+  //    `opts` 는 선언된 적이 없어 **ReferenceError** 다 — 옵셔널 체이닝은 미선언 변수를 못 막는다.
+  const brief = (trigger?.reasons || [])
+    .filter((r) => SCHEDULED.has(r?.kind))
+    .map((r) => `${r.key || ''}:${r.kind}`)
+    .sort();
+  const briefKey = brief.length
+    ? `${brief.join(',')}@${new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })}`
+    : '';
+
   const digest = crypto
     .createHash('sha1')
     .update(JSON.stringify({
       p: (report.positions || []).map((x) => `${x.symbol}:${x.stance}:${x.confidence}`).sort(),
       c: created.map((x) => `${x.symbol}:${x.side}:${x.quantity}`).sort(),
+      b: briefKey,
     }))
     .digest('hex');
 

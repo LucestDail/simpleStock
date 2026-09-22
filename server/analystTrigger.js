@@ -164,6 +164,34 @@ function decide({ now, sessions = [], symbols = [], state = {}, z = DEFAULT_Z, c
     // 🔴 첫 실행은 기준선일 뿐 "바뀐 것" 이 아니다(alertService.ruleSessions 와 같은 규율)
     if (!was || was === cur) continue;
     if (cur === 'closed') reasons.push({ kind: 'close', key, label: s.label || key });
+    /**
+     * 🔴 **개장 브리핑** (2026-09-22 사용자 지시 — 하루 6회 정기 브리핑).
+     *    `open` 은 **정규장(데이장)** 시작이다. 프리마켓은 `open` 이 아니라 `pre` 라
+     *    17:00 KST 프리 시작에는 안 뜬다 — 사용자가 짚은 *"데이장/프리장"* 구분이 이것이다.
+     */
+    else if (cur === 'open') reasons.push({ kind: 'open', key, label: s.label || key });
+  }
+
+  /**
+   * 🔴 **중간 브리핑** — 정규장 **중간 지점**에서 하루 한 번.
+   *
+   * ⚠️ 고정 시각을 쓰지 않는다. `regular{start,end}` 에서 유도하므로
+   *    **서머타임·조기폐장·공휴일이 자동으로 따라온다**(오늘 `ss-obs` 05:10 이 겨울에 어긋나던 그 함정의 반대편).
+   * ⚠️ **장이 끝난 뒤에는 안 보낸다** — 재기동이 늦어 중간 지점을 지나쳐 버렸으면
+   *    "중간 보고" 가 장 끝난 뒤 나가는 꼴이 된다. 그럴 땐 **표시만 남기고 건너뛴다**(다음 날 정상 동작).
+   */
+  st.mid = { ...(st.mid || {}) };
+  for (const s of sessions) {
+    const key = String(s?.key || '');
+    const reg = s?.regular;
+    if (!key || !reg || !Number.isFinite(reg.start) || !Number.isFinite(reg.end)) continue;
+    const midAt = reg.start + (reg.end - reg.start) / 2;
+    const mark = String(reg.start); // 세션마다 고유 — 날짜 문자열보다 안전하다(자정을 넘는 장)
+    if (st.mid[key] === mark) continue;
+    if (now < midAt) continue;
+    st.mid[key] = mark;
+    if (now >= reg.end) continue; // 지나쳐 버렸다 — 표시만 남기고 보내지 않는다
+    reasons.push({ kind: 'mid', key, label: s.label || key });
   }
 
   // ② 모멘텀 — **통과하는 순간** 한 번. 넘어 있는 내내가 아니다
@@ -220,10 +248,13 @@ function decide({ now, sessions = [], symbols = [], state = {}, z = DEFAULT_Z, c
 }
 
 /** 사람이 읽는 한 줄 — 활동 기록·로그에 그대로 쓴다 */
+/** 브리핑 종류 이름 — 로그·텔레그램·프롬프트가 같은 낱말을 쓰게 한 곳에 둔다 */
+const KIND_LABEL = { open: '개장', mid: '장중', close: '마감' };
+
 function describe(reasons) {
-  return (reasons || []).map((r) => (r.kind === 'close'
-    ? `${r.label} 마감`
+  return (reasons || []).map((r) => (KIND_LABEL[r.kind]
+    ? `${r.label} ${KIND_LABEL[r.kind]}`
     : `${r.symbol} 모멘텀 ${r.z}σ (${r.changePct > 0 ? '+' : ''}${r.changePct}%)`)).join(' · ');
 }
 
-module.exports = { decide, trackUniverse, zScore, stats, describe, DEFAULT_Z, REENTRY_DAYS, CLEAR_RATIO, COOLDOWN_MS };
+module.exports = { decide, trackUniverse, zScore, stats, describe, KIND_LABEL, DEFAULT_Z, REENTRY_DAYS, CLEAR_RATIO, COOLDOWN_MS };
