@@ -194,6 +194,14 @@ const SYSTEM_PROMPT = [
   '- 뭉뚱그리지 않습니다. 판단이 안 서면 "판단 못 하겠다" 고 그렇게 말합니다.',
   '- 한국어로, 과장 없이 씁니다.',
   '',
+  '## 🔴 답은 "종합 소견" 이다 — 결과 나열이 아니다 (2026-09-22 사용자 지적)',
+  '- 🔴 **도구 실행 여부를 사용자에게 묻지 않는다.** "실행해 드릴까요?" "확인해 볼까요?" 금지 —',
+  '  필요한 도구는 **당신이 지금 부른다.** 사용자가 원한 것은 답이지 계획이 아니다.',
+  '- 🔴 검색·도구 결과를 **늘어놓고 끝내지 않는다.** 결과들을 사용자 지침(아래 템플릿)과',
+  '  포트폴리오 맥락으로 **종합해 소견을 낸다**: ①결론 한 줄 → ②근거(숫자 인용) → ③판단이',
+  '  안 서면 무엇이 더 필요한지 **한 줄**(도구 나열이 아니라 "무엇을 모르는지").',
+  '- 확인 못 한 것은 "확인 못 했다" 한 줄로 — 못 한 과정을 길게 쓰지 않는다.',
+  '',
   '## 🔴 주문은 내지 않습니다',
   '매수/매도가 필요하다고 판단되면 **제안으로 등록**됩니다(상단 HITL 목록).',
   '그건 주문이 아닙니다 — **사람이 승인해야** 진행되고, 당신은 승인도 실행도 할 수 없습니다.',
@@ -608,7 +616,7 @@ function partsOf(chunk) {
  * @param {string} o.message 사용자 발화
  * @param {function} o.emit `(event, data) => void` — SSE 로 그대로 흘린다
  */
-async function chat({ message, emit, fx = null, contextNote = '' }) {
+async function chat({ message, emit, fx = null, contextNote = '', userInstruction = '' }) {
   if (!isAiConfigured()) throw new Error('AI 가 설정되지 않았습니다.');
   const text = String(message || '').trim();
   if (!text) throw new Error('메시지가 비어 있습니다.');
@@ -637,6 +645,12 @@ async function chat({ message, emit, fx = null, contextNote = '' }) {
     contents.push({ role: h.role === 'user' ? 'user' : 'model', parts: [{ text: String(h.text || '') }] });
   }
   const preface = [];
+  /**
+   * 🔴 **사용자 템플릿을 채팅에도 싣는다** (2026-09-22). 분석 경로에는 있었는데
+   *    채팅 경로에는 **빠져 있었다** — 사용자: *"내부의 내가 준 템플릿들을 종합하여서
+   *    문의에 대한 탐색 소견 … 이 나와야 하는데"*. 템플릿 없이 답하니 나열이 됐다.
+   */
+  if (userInstruction) preface.push(`## 사용자 지침 (모든 답에 이 관점을 적용하라)\n${String(userInstruction).slice(0, 2000)}`);
   if (contextNote) preface.push(`## 지금 화면 상태\n${contextNote}`);
   if (recalled.length) {
     preface.push(

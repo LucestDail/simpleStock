@@ -303,7 +303,9 @@ async function handleUserMessage(msg) {
     try {
       await analystChat.chat({
         message: text,
-        contextNote: '텔레그램에서 온 질문이다. 답은 채팅 메시지로 전달되므로 간결하게 쓰되, 근거 숫자는 유지하라.',
+        userInstruction: require('./settingsService').getDashboardSettings().briefingPrompt,
+        contextNote: '텔레그램에서 온 질문이다. 답은 채팅 메시지로 전달되므로 간결하게 쓰되, 근거 숫자는 유지하라. '
+          + '🔴 도구 실행 여부를 묻지 마라 — 텔레그램은 왕복이 느려 "실행해 드릴까요?" 는 사용자를 두 번 기다리게 한다. 바로 실행하고 종합 소견으로 답하라.',
         fx: rate ? { rate } : null,
         emit: (event, data) => {
           if (event === 'text_delta') answer += data?.text || '';

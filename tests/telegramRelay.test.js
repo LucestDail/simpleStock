@@ -108,3 +108,30 @@ test('명령어(/)와 빈 텍스트는 릴레이하지 않는다', async () => {
   await bot.handleUserMessage({ chat: { id: '999' }, text: '' });
   assert.equal(chatCalls.length, 0);
 });
+
+// ── 답변 품질 규율 (2026-09-22 사용자 지적) ─────────────────────
+const fsq = require('node:fs');
+const srcChat = fsq.readFileSync(path.join(__dirname, '..', 'server', 'analystChat.js'), 'utf-8');
+const srcBot = fsq.readFileSync(path.join(__dirname, '..', 'server', 'telegramBot.js'), 'utf-8');
+const srcSrv = fsq.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf-8');
+const strip = (x) => x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+
+/**
+ * 🔴 사용자: *"결과만 늘어놓으면 볼 내용이 없어 … 도구 사용해서 전체 결과를 바탕으로
+ * 총 정리해서 갈무리해서 정제된 답변을 주게"* + *"내가 준 템플릿들을 종합하여서"*
+ */
+test('🔴 시스템 프롬프트가 "묻지 말고 종합하라" 를 강제한다', () => {
+  assert.match(srcChat, /실행 여부를 사용자에게 묻지 않는다/, '🔴 "실행해 드릴까요?" 를 막는 규율이 없다');
+  assert.match(srcChat, /늘어놓고 끝내지 않는다/, '🔴 나열 금지 규율이 없다');
+  assert.match(srcChat, /결론 한 줄/, '결론 우선 구조가 없다');
+});
+
+test('🔴 사용자 템플릿이 **채팅 경로에도** 들어간다 (분석 경로에만 있었다)', () => {
+  assert.match(strip(srcChat), /userInstruction/, 'chat 이 템플릿을 안 받는다');
+  assert.match(strip(srcChat), /사용자 지침/, '받아도 프롬프트에 안 싣는다');
+  // 호출부 둘 다
+  assert.match(strip(srcSrv), /userInstruction: getDashboardSettings\(\)\.briefingPrompt/,
+    '🔴 화면 채팅이 템플릿을 안 넘긴다');
+  assert.match(strip(srcBot), /userInstruction: require\('\.\/settingsService'\)/,
+    '🔴 텔레그램 릴레이가 템플릿을 안 넘긴다');
+});

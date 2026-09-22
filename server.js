@@ -402,6 +402,8 @@ app.post('/api/analyst/chat', async (req, res) => {
     safeEmit('start', { at: new Date().toISOString() });
     const summary = await analystChat.chat({
       message: req.body?.message,
+      // 🔴 채팅에도 사용자 템플릿 — 분석 경로에만 있고 여긴 빠져 있었다(2026-09-22)
+      userInstruction: getDashboardSettings().briefingPrompt,
       contextNote: String(req.body?.contextNote || '').slice(0, 800),
       fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || null } : null,
       emit: safeEmit,
