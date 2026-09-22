@@ -852,6 +852,15 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    */
   const flows = [];
   for (const it of items.slice(0, 4)) {
+    /**
+     * 🔴 **투자자별 매매동향은 국내(KR) 전용이다**(명세 명시). 2026-09-22 라이브 로그에서 확인:
+     *    `analyst.flows_failed QLD/RAM 토스 API 오류 (400)` 이 **분석마다** 났다.
+     *    ⇒ 쓸 수 없는 호출을 매번 하면서 **한도를 깎고**, 그 실패가 리포트에
+     *      *"수급 조회 실패"* 라는 gap 으로 남아 **"데이터가 없다" 로 읽혔다.**
+     *      실제로는 없는 게 아니라 **애초에 물어볼 수 없는 곳에 물은 것**이다.
+     * ⚠️ 같은 가족을 오늘 `short-selling` 에서 이미 막았다 — 그때 이 자리를 안 훑었다.
+     */
+    if (String(it.market).toUpperCase() !== 'KR') continue;
     try {
       const rows = await toss.getInvestorTrading(it.symbol);
       if (Array.isArray(rows) && rows.length) flows.push({ symbol: it.symbol, rows: rows.slice(0, 3) });

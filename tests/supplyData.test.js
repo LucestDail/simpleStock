@@ -75,3 +75,36 @@ test('⚠️ 세 조회 모두 실패 시 로그가 남는다', () => {
     assert.ok(code.includes(ev), `🔴 ${ev} 가 없다 — 실패가 "데이터 없음" 으로 보인다`);
   }
 });
+
+/**
+ * 🔴 **KR 전용 API 를 미국 종목에 부르고 있었다** (2026-09-22 라이브 로그에서 발견)
+ *
+ * `analyst.flows_failed QLD/RAM 토스 API 오류 (400)` 이 **분석마다** 났다.
+ * 쓸 수 없는 호출로 한도를 깎으면서, 그 실패가 리포트에 *"수급 조회 실패"* gap 으로 남아
+ * **"데이터가 없다" 로 읽혔다.** 실제로는 **애초에 물어볼 수 없는 곳에 물은 것**이다.
+ *
+ * ⚠️ 같은 날 `short-selling` 에 KR 가드를 넣으면서 **이 자리를 안 훑었다** —
+ *    *"규칙을 정하면 그 자리에서 적용 범위를 전수로 훑어라"* 를 또 어긴 것이다.
+ */
+test('🔴 투자자별 매매동향(KR 전용)을 **미국 종목에 안 부른다**', () => {
+  const i = code.indexOf('toss.getInvestorTrading(');
+  assert.ok(i > 0, 'getInvestorTrading 호출부를 못 찾았다');
+  const before = code.slice(Math.max(0, i - 400), i);
+  assert.match(before, /market[\s\S]{0,40}KR/,
+    '🔴 시장 구분 없이 부른다 — 미국 종목마다 400 이 나고 한도가 깎인다');
+});
+
+/** ⚠️ KR 전용 API 세 개가 **전부** 가드를 갖는가 — 하나만 고치고 옆을 안 보는 그 병 */
+test('⚠️ KR 전용 호출이 전부 시장 가드를 갖는다 (전수)', () => {
+  for (const fn of ['getInvestorTrading', 'getShortSelling']) {
+    const i = code.indexOf(`toss.${fn}(`);
+    assert.ok(i > 0, `${fn} 호출부가 없다`);
+    const before = code.slice(Math.max(0, i - 400), i);
+    /**
+     * ⚠️ **첫 판에서 이 자가 틀렸다** — `/KR/` 로만 봤는데 가드 변수가 `isKr`(소문자 r)이라
+     *    안 걸렸다. 주석은 `codeOnly` 가 지우므로 한글 "국내 전용" 도 안 보인다.
+     *    제품은 멀쩡했고 **자가 대소문자에서 틀린 것**이다 ⇒ 두 형태를 다 받는다.
+     */
+    assert.ok(/\bisKr\b|['"]KR['"]/.test(before), `🔴 ${fn} 이 시장 가드 없이 불린다`);
+  }
+});
