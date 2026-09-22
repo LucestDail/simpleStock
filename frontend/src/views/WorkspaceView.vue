@@ -1017,8 +1017,14 @@ onUnmounted(() => {
                 @click="pickSymbol(h.symbol, h.name)"
               >
                 <td>
-                  <span class="holdings__name">{{ h.name }}</span>
-                  <span class="holdings__meta">{{ h.market }} · {{ h.symbol }}</span>
+                  <span class="holdings__name">
+                    {{ h.name }}
+                    <!-- 🔴 레버리지는 판단의 전제 — 사용자도 "RAM" 만 보면 무엇인지 모른다 -->
+                    <span v-if="Number(h.leverageFactor) >= 2" class="holdings__lev">{{ h.leverageFactor }}x</span>
+                  </span>
+                  <span class="holdings__meta" :title="h.officialName || ''">
+                    {{ h.market }} · {{ h.symbol }}<template v-if="h.officialName"> · {{ h.officialName }}</template>
+                  </span>
                 </td>
                 <td class="ta-r mono-num">{{ h.quantity }}</td>
                 <td class="ta-r mono-num">{{ money(h.avgPrice, h.currency) }}</td>
@@ -1970,7 +1976,16 @@ onUnmounted(() => {
 .holdings th.ta-r, .holdings td.ta-r { text-align: right; }
 .holdings tr:last-child td { border-bottom: none; }
 .holdings__name { display: block; font-weight: 600; color: var(--color-ink); }
-.holdings__meta { display: block; font-size: var(--text-xs); color: var(--color-faint); }
+.holdings__meta {
+  display: block; font-size: var(--text-xs); color: var(--color-faint);
+  /* 정식명이 길다("ROUNDHILL T-REX 2X …") — 칸을 밀지 말고 자른다. 전체는 title 로 */
+  max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.holdings__lev {
+  display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 4px;
+  font-size: var(--text-xs); font-weight: 700; line-height: 1.5;
+  color: var(--color-warn, #b45309); background: color-mix(in srgb, currentColor 14%, transparent);
+}
 .holdings small { font-size: var(--text-xs); opacity: 0.85; margin-left: 4px; }
 .ta-r { text-align: right; }
 

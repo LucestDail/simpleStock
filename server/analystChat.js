@@ -377,10 +377,22 @@ function shapeToolCalls(out) {
  * 🔴 **덮어쓰지 않고 이어붙인다.** 대화는 '현재 상태' 가 아니라 **'일어난 일의 목록'** 이다
  *    (Probius `AuditStore` 와 같은 이유). 통째로 다시 쓰면 동시 쓰기에 한쪽이 사라진다.
  */
+/**
+ * ⚠️ 상한 (2026-09-22): 이 파일은 감사가 아니라 **대화 맥락**이다 — 무한히 자라면
+ *    recall 이 전체를 읽는 비용만 는다. `activityLog.js` 와 같은 방식(한 세대만 민다).
+ *    🔴 `orders-audit.jsonl` 은 이 규율의 대상이 **아니다**(돈 기록은 지우지 않는다).
+ */
+const HISTORY_MAX_BYTES = Math.max(256 * 1024, Number(process.env.CHAT_HISTORY_MAX_BYTES) || 4 * 1024 * 1024);
+
 function appendHistory(entry) {
   try {
     fs.mkdirSync(path.dirname(HISTORY_FILE), { recursive: true });
     fs.appendFileSync(HISTORY_FILE, `${JSON.stringify(entry)}\n`);
+    if (fs.statSync(HISTORY_FILE).size > HISTORY_MAX_BYTES) {
+      // ⚠️ 한 세대만 민다 — 여러 세대를 쌓으면 디스크를 조용히 먹는다
+      fs.renameSync(HISTORY_FILE, `${HISTORY_FILE}.1`);
+      logWarn('chat.history_rotated', { file: HISTORY_FILE });
+    }
   } catch (e) {
     // 기록 실패가 대화를 멈추지는 않지만 **조용하지도 않다**
     logError('chat.history_append_failed', e, {});
@@ -696,6 +708,13 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
    * ★ 인자까지 합쳐 구분한다 — `get_candles` 를 종목 둘에 부르는 것은 **정당하다.**
    */
   const calledKeys = new Set();
+  /**
+   * 🔴 도구 이름·성패를 이력에 남긴다 (2026-09-22, pm2 발견) — 종전엔 rounds/toolCalls
+   *    숫자만 남아, 재기동 뒤에는 "어느 도구가 왜 실패했나" 진단이 **원리상 불가능**했다
+   *    (컨테이너 로그가 재기동 2회로 사라져 21:09 턴을 영영 못 갈랐다).
+   *    ⚠️ 결과 본문은 안 남긴다 — 크기와 개인 금융정보 때문에 이름·성패·에러 문구까지만.
+   */
+  const toolLog = [];
 
   // ── ① 도구 바퀴: **스키마로 강제된 판단기**가 정한다 ─────────
   for (let round = 1; round <= MAX_ROUNDS; round += 1) {
@@ -740,11 +759,14 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
       try {
         result = await runTool(call.name, call.args, { fx });
         emit('tool_result', { id: callId, name: call.name, ok: true, preview: preview(result) });
+        // ⚠️ 도구가 스스로 {ok:false} 를 돌려주는 경우(runTool 안에서 잡은 실패)도 실패로 센다
+        toolLog.push({ name: call.name, ok: result?.ok !== false, ...(result?.ok === false ? { error: String(result.error || '').slice(0, 200) } : {}) });
       } catch (e) {
         // 🔴 실패도 모델에게 돌려준다. 삼키면 모델이 "받았다" 고 착각하고 지어낸다
         result = { ok: false, error: e.message, kind: e.kind || 'unknown' };
         logWarn('chat.tool_failed', { name: call.name, kind: e.kind, message: e.message });
         emit('tool_result', { id: callId, name: call.name, ok: false, error: e.message });
+        toolLog.push({ name: call.name, ok: false, error: String(e.message || '').slice(0, 200), kind: e.kind || 'unknown' });
       }
       const line = `[도구 결과] ${call.name}(${JSON.stringify(call.args)})\n${JSON.stringify(result).slice(0, 4000)}`;
       resultParts.push({ text: line });
@@ -779,9 +801,10 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
     }
   }
 
-  appendHistory({ at: new Date().toISOString(), turnId, role: 'assistant', text: answer, toolCalls, rounds });
+  appendHistory({ at: new Date().toISOString(), turnId, role: 'assistant', text: answer, toolCalls, rounds, tools: toolLog });
   logInfo('chat.turn', {
     turnId, rounds, toolCalls, chars: answer.length, recalled: recalled.length,
+    toolFailed: toolLog.filter((t) => !t.ok).length,
     // ★ 도구가 **실제로 불렸다는 증거**를 지표에 함께 — 0이면 결과가 스스로 알려준다
     decideFailed: decideFailed || null,
     durationMs: Date.now() - startedAt,
