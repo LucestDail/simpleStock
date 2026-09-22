@@ -72,7 +72,9 @@ test('⚠️ 지수 API 가 잘못된 심볼을 **부르기 전에** 막는다',
 
 /** ⚠️ 실패를 조용히 넘기지 않는다 */
 test('⚠️ 세 조회 모두 실패 시 로그가 남는다', () => {
-  for (const ev of ['analyst.warnings_failed', 'analyst.short_selling_failed', 'analyst.index_flow_failed']) {
+  // ⚠️ 2026-09-22 저녁: 공매도 단독 → KR 4축 세트가 되며 short_selling_failed 가
+  //    kr_supply_failed(axis 라벨 포함)로 바뀌었다 — 의도된 변화라 자를 따라 옮긴다
+  for (const ev of ['analyst.warnings_failed', 'analyst.kr_supply_failed', 'analyst.index_flow_failed', 'analyst.orderbook_failed', 'analyst.index_candles_failed']) {
     assert.ok(code.includes(ev), `🔴 ${ev} 가 없다 — 실패가 "데이터 없음" 으로 보인다`);
   }
 });
@@ -152,4 +154,58 @@ test('🔴 명세 모양 레코드에서 개인·외국인·기관 **셋 다** �
 test('기타법인도 파싱 목록에 있다', () => {
   const i = code.indexOf("['기타법인', 'otherCorporation']");
   assert.ok(i > 0, '🔴 기타법인이 빠졌다 — 실응답에 있는 주체를 버린다');
+});
+
+// ── 2026-09-22 저녁 — "제공하는 기능을 왜 안 쓰나" 전수 정비 ──────
+/**
+ * 🔴 사용자: *"toss_security.json 보고 안 쓰고 있는 내용 있으면 활용해."*
+ * 전수 대조 결과 **만들어 놓고 소비 0** 이 7개였다(exchange-rate·orderbook·price-limits ·
+ * 지수캔들·신용·프로그램·대차). 이 블록이 각 배선의 **소비 실재**를 잠근다 —
+ * 클라이언트 함수 존재만 보면 "쓴다" 로 보이는 그 함정을 막는 자다.
+ */
+const codeOnly = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+const ORDER_SVC = codeOnly(fs.readFileSync(path.join(__dirname, '..', 'server', 'orderService.js'), 'utf-8'));
+const MKT = codeOnly(fs.readFileSync(path.join(__dirname, '..', 'server', 'marketDataService.js'), 'utf-8'));
+
+test('🔴 환율: 야후 실패 시 토스 폴백이 배선돼 있다', () => {
+  assert.match(MKT, /getExchangeRate\(/, '🔴 토스 환율 폴백이 없다 — 야후 단일 의존이면 야후 장애=환산 전체 사망');
+  const i = MKT.indexOf('getExchangeRate(');
+  const before = MKT.slice(Math.max(0, i - 600), i);
+  assert.match(before, /catch/, '🔴 폴백이 아니라 본선이다 — 평시에도 MARKET_INFO 한도(3/s)를 깎는다');
+});
+
+test('🔴 상하한가: KR 지정가 제안을 사전검증한다', () => {
+  assert.match(ORDER_SVC, /getPriceLimits\(/, '🔴 상하한 검증이 없다 — 승인 누른 뒤에야 거래소 거부를 안다');
+  const i = ORDER_SVC.indexOf('getPriceLimits(');
+  const around = ORDER_SVC.slice(Math.max(0, i - 400), i + 700);
+  assert.match(around, /\\d\{6\}|price-limit/, 'KR 판정 또는 거부 kind 가 없다');
+  assert.match(around, /catch/, '🔴 조회 실패가 정당한 제안을 막으면 안 된다(보조 축) — 경고만');
+});
+
+test('🔴 호가: 보유 종목 프롬프트에 최우선 호가가 실린다', () => {
+  assert.match(code, /getOrderbook\(/, '🔴 호가를 안 부른다');
+  assert.match(code, /이 호가를 기준/, '🔴 모으고 프롬프트에 안 싣는다');
+});
+
+test('🔴 지수 캔들: 국장 브리핑에 추세가 실린다 (같은 판정 함수 재사용)', () => {
+  assert.match(code, /getIndexCandles\(/, '🔴 지수 캔들을 안 부른다 — 수급만 있고 추세가 없는 반쪽 시황');
+  const i = code.indexOf('getIndexCandles(');
+  const after = code.slice(i, i + 400);
+  assert.match(after, /summarizeCandles/, '🔴 자를 새로 만들었다 — 보유 종목과 같은 판정 함수를 써야 한다');
+  assert.match(code, /지수 기술적 위치/, '🔴 렌더가 없다');
+});
+
+test('🔴 KR 수급이 4축이다 (공매도·신용·프로그램·대차)', () => {
+  for (const fn of ['getShortSelling', 'getCreditTrades', 'getProgramTrades', 'getSecuritiesLending']) {
+    assert.match(code, new RegExp(`toss\\.${fn}\\(`), `🔴 ${fn} 이 안 불린다`);
+  }
+  assert.match(code, /국내 수급 4축/, '🔴 렌더가 4축이 아니다');
+  assert.match(code, /추세와 조합/, '⚠️ 읽는 법 지시가 없다 — 숫자만 주면 모델이 절대량으로 읽는다');
+});
+
+/** 🔴 렌더 키가 **실제 명세/반환** 키인가 — 오늘 두 번 밟은 "필드명 추측" 차단 */
+test('🔴 렌더가 추측 키를 쓰지 않는다', () => {
+  assert.ok(!/high20|low20/.test(code), '🔴 summarizeCandles 에 없는 키(high20/low20)를 쓴다');
+  assert.match(code, /balanceQuantity/, '대차잔고 키(명세 SecuritiesLendingRecord)가 없다');
+  assert.match(code, /arbitrage/, '프로그램 키(명세 ProgramTradeRecord)가 없다');
 });

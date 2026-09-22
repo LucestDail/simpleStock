@@ -563,7 +563,26 @@ async function fetchUsdKrwRate(options = {}) {
         message: lastError.message,
       });
     }
-    quote = await getCachedQuote('fx', FX_SYMBOL, fetchYahooChartQuote, options);
+    try {
+      quote = await getCachedQuote('fx', FX_SYMBOL, fetchYahooChartQuote, options);
+    } catch (yahooError) {
+      /**
+       * 🔴 **토스 환율 폴백** (2026-09-22 — "제공하는 기능을 왜 안 쓰나" 정비).
+       *    환율이 **야후 단일 의존**이었다 — 야후가 죽으면 KRW 환산(포트폴리오 합계·
+       *    위험예산 계산)이 통째로 죽는다. 토스는 이미 인증돼 있고 `getExchangeRate` 가
+       *    **만들어져 있었는데 소비자가 0** 이었다.
+       * ⚠️ 폴백 순서를 바꾸지 않는다(야후 우선 유지) — 토스 호출은 한도(MARKET_INFO 3/s)를
+       *    쓰므로 **평시엔 아끼고 장애 때만** 쓴다. 폴백 사용을 로그로 남긴다.
+       */
+      const toss = require('./tossProvider');
+      if (!toss.isEnabled()) throw yahooError;
+      const tossClient = require('./tossClient');
+      const fx = await tossClient.getExchangeRate('USD', 'KRW');
+      if (!Number.isFinite(fx.rate) || fx.rate <= 0) throw yahooError;
+      logWarn('market.fx.toss_fallback', { rate: fx.rate, yahooError: yahooError.message });
+      quote = { price: fx.rate, previousClose: null, change: null, changePct: null,
+        source: 'toss-exchange-rate', updatedAt: new Date().toISOString() };
+    }
   }
 
   return {

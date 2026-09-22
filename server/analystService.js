@@ -501,6 +501,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    * ⚠️ 국장 브리핑일 때만 부른다(한도 그룹 `MARKET_INDICATOR`, 종목 조회와 다른 통).
    */
   const indexFlow = {};
+  const indexTech = {};
   if (briefMarkets.includes('kr')) {
     for (const idx of ['KOSPI', 'KOSDAQ']) {
       try {
@@ -508,6 +509,19 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
         if (rows.length) indexFlow[idx] = rows;
       } catch (e) {
         logWarn('analyst.index_flow_failed', { index: idx, kind: e.kind, message: e.message });
+      }
+      /**
+       * 🔴 **지수 캔들** (2026-09-22 — 명세에 있는데 안 쓰던 것 정비).
+       *    수급(누가 샀나)만 있고 **추세(어디에 서 있나)** 가 없으면 시황이 반쪽이다.
+       *    보유 종목에 쓰는 `summarizeCandles`(20·60일선 등)를 지수에 그대로 재사용한다 —
+       *    자를 새로 만들지 않는다(같은 판정 함수를 쓴다).
+       */
+      try {
+        const c = await toss.getIndexCandles(idx, { interval: '1d', count: 120 });
+        const t = summarizeCandles(c.rows || []);
+        if (t) indexTech[idx] = t;
+      } catch (e) {
+        logWarn('analyst.index_candles_failed', { index: idx, kind: e.kind, message: e.message });
       }
     }
   }
@@ -524,12 +538,45 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       logWarn('analyst.warnings_failed', { symbol: it.symbol, kind: e.kind, message: e.message });
       warnings[it.symbol] = { error: e.message };
     }
-    if (!isKr) continue; // 공매도 동향은 **국내 전용**이다
+    if (!isKr) continue; // 아래 넷은 전부 **국내 전용**이다(명세)
+    /**
+     * 🔴 KR 수급 4종 세트 (2026-09-22 확장 — 신용·프로그램·대차가 명세에 있는데 안 쓰고 있었다).
+     *    공매도만으로는 반쪽이다: 공매도(하방 베팅) ↔ 대차잔고(그 탄약) ↔ 신용융자(레버리지 매수)
+     *    ↔ 프로그램(기관 바스켓). 넷이 함께 있어야 "누가 어느 방향으로 기울었나" 가 읽힌다.
+     * ⚠️ 한 축이 실패해도 나머지는 싣는다 · 전부 STOCK_TRADING_TREND 그룹(실측 10/s — 여유 있다).
+     */
+    const kr = { short: null, credit: null, program: null, lending: null };
+    const pulls = [
+      ['short', () => toss.getShortSelling(it.symbol)],
+      ['credit', () => toss.getCreditTrades(it.symbol, { count: 3 })],
+      ['program', () => toss.getProgramTrades(it.symbol, { count: 3 })],
+      ['lending', () => toss.getSecuritiesLending(it.symbol, { count: 3 })],
+    ];
+    for (const [key, fn] of pulls) {
+      try {
+        const rows = await fn();
+        if (rows.length) kr[key] = rows.slice(0, 5);
+      } catch (e) {
+        logWarn('analyst.kr_supply_failed', { symbol: it.symbol, axis: key, kind: e.kind, message: e.message });
+      }
+    }
+    if (kr.short || kr.credit || kr.program || kr.lending) supply[it.symbol] = kr;
+  }
+
+  /**
+   * 🔴 **호가(최우선 매수/매도)** (2026-09-22 — `getOrderbook` 이 만들어져 있었는데 소비 0).
+   *    지정가 제안의 근거가 **어제 종가·지표**뿐이면 모델이 스프레드 밖 가격을 부른다.
+   *    최우선 호가를 주면 "지금 시장이 서 있는 자리" 를 알고 값을 정한다.
+   * ⚠️ 장이 닫혀 있으면 비어 있을 수 있다 — 그때는 싣지 않는다(빈 호가를 0 으로 읽게 하지 않는다).
+   */
+  const books = {};
+  for (const it of items.slice(0, 6)) {
     try {
-      const rows = await toss.getShortSelling(it.symbol);
-      if (rows.length) supply[it.symbol] = rows.slice(0, 5);
+      const ob = await toss.getOrderbook(it.symbol);
+      const bestAsk = ob.asks?.[0]; const bestBid = ob.bids?.[0];
+      if (bestAsk?.price || bestBid?.price) books[it.symbol] = { ask: bestAsk || null, bid: bestBid || null, at: ob.at };
     } catch (e) {
-      logWarn('analyst.short_selling_failed', { symbol: it.symbol, kind: e.kind, message: e.message });
+      logWarn('analyst.orderbook_failed', { symbol: it.symbol, kind: e.kind, message: e.message });
     }
   }
 
@@ -703,6 +750,18 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    * 🔴 **유의사항은 점수보다 먼저 온다** — 100점짜리라도 정리매매면 사면 안 된다.
    *    그래서 프롬프트에서도 **위쪽**에 놓고, 모델에게 *"매수 제안을 내지 마라"* 를 명시한다.
    */
+  const techKeys = Object.keys(indexTech);
+  if (techKeys.length) {
+    lines.push('', '## 국내 지수 기술적 위치');
+    for (const idx of techKeys) {
+      const t = indexTech[idx];
+      // ⚠️ 키는 summarizeCandles 의 실제 반환(last·ma20·ma60·high·low)이다 —
+      //    high20 으로 추측해 썼다가 소스 대조에서 잡았다(오늘 수급 필드명과 같은 병)
+      lines.push(`- ${idx}: 종가 ${t.last} · 20일선 ${t.ma20 ?? '-'} · 60일선 ${t.ma60 ?? '-'} · 고점 ${t.high ?? '-'} (대비 ${t.fromHighPct != null ? t.fromHighPct.toFixed(1) + '%' : '-'}) · 저점 ${t.low ?? '-'}`);
+    }
+    lines.push('⚠️ 지수의 자리다 — 수급(아래)과 붙여서 "어디서 누가" 를 설명하라.');
+  }
+
   const flowKeys = Object.keys(indexFlow);
   if (flowKeys.length) {
     lines.push('', '## 국내 지수 투자자별 매매대금 (최근 3일)');
@@ -746,15 +805,44 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
 
   const supplySyms = Object.keys(supply);
   if (supplySyms.length) {
-    lines.push('', '## 공매도 동향 (국내, 최근 5일)');
+    lines.push('', '## 국내 수급 4축 (최근 3~5일 · 최신순)');
+    const d5 = (r) => String(r?.date || r?.baseDate || '').slice(5);
     for (const sym of supplySyms) {
-      const rows = supply[sym].map((r) => {
-        const ratio = r?.shortSellingVolumeRatio ?? r?.volumeRatio ?? r?.ratio;
-        return `${String(r?.date || r?.baseDate || '').slice(5)} ${ratio != null ? `${ratio}%` : '-'}`;
-      });
-      lines.push(`- ${sym}: ${rows.join(' · ')}`);
+      const k = supply[sym];
+      const parts = [];
+      if (k.short) {
+        parts.push(`공매도비중 ${k.short.map((r) => {
+          const ratio = r?.shortSellingVolumeRatio ?? r?.volumeRatio ?? r?.ratio;
+          return `${d5(r)} ${ratio != null ? `${ratio}%` : '-'}`;
+        }).join('·')}`);
+      }
+      if (k.lending) {
+        parts.push(`대차잔고 ${k.lending.map((r) => `${d5(r)} ${r?.balanceQuantity ?? '-'}주`).join('·')}`);
+      }
+      if (k.credit) {
+        parts.push(`신용융자잔고 ${k.credit.map((r) => `${d5(r)} ${r?.marginLoan?.balanceQuantity ?? r?.marginLoan?.balance ?? '-'}`).join('·')}`);
+      }
+      if (k.program) {
+        parts.push(`프로그램 ${k.program.map((r) => {
+          const b = Number(r?.arbitrage?.buyVolume ?? 0) + Number(r?.nonArbitrage?.buyVolume ?? 0);
+          const sl = Number(r?.arbitrage?.sellVolume ?? 0) + Number(r?.nonArbitrage?.sellVolume ?? 0);
+          return `${d5(r)} 순${b - sl >= 0 ? '+' : ''}${(b - sl).toLocaleString('ko-KR')}주`;
+        }).join('·')}`);
+      }
+      lines.push(`- **${sym}**: ${parts.join(' | ')}`);
     }
-    lines.push('⚠️ 공매도 **비중**이다(거래량 대비). 절대량이 아니라 **추세**로 읽어라.');
+    lines.push('⚠️ 읽는 법: 공매도·대차잔고 상승 = 하방 압력 축적 · 신용융자 상승 = 개인 레버리지 매수(과열 신호일 수 있음) · '
+      + '프로그램 순매수 = 기관 바스켓 방향. **절대량이 아니라 추세와 조합**으로 읽어라.');
+  }
+
+  const bookSyms = Object.keys(books);
+  if (bookSyms.length) {
+    lines.push('', '## 현재 호가 (최우선)');
+    for (const sym of bookSyms) {
+      const b = books[sym];
+      lines.push(`- ${sym}: 매도호가 ${b.ask ? `${b.ask.price} (${b.ask.volume}주)` : '-'} · 매수호가 ${b.bid ? `${b.bid.price} (${b.bid.volume}주)` : '-'}`);
+    }
+    lines.push('⚠️ 지정가를 낼 때 **이 호가를 기준**으로 하라 — 스프레드 밖 가격은 체결되지 않거나 불리하게 체결된다.');
   }
 
   const heldSet = new Set(items.map((i) => String(i.symbol).toUpperCase()));

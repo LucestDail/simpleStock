@@ -851,6 +851,39 @@ async function getIndexInvestorTrading(symbol, { interval = '1d', count = 5 } = 
   return Array.isArray(r?.records) ? r.records : (Array.isArray(r) ? r : []);
 }
 
+/**
+ * 지수 캔들(KOSPI·KOSDAQ·국채). 한도 그룹 MARKET_INDICATOR_CHART.
+ * ⚠️ 응답 키는 open/high/low/closePrice·volume·timestamp (명세 MarketIndicatorCandle — 추측 아님).
+ *    `summarizeCandles` 가 기대하는 {t,o,h,l,c,v} 로 여기서 변환한다.
+ */
+async function getIndexCandles(symbol, { interval = '1d', count = 60 } = {}) {
+  const sym = String(symbol || '').toUpperCase();
+  const q = new URLSearchParams({ interval, count: String(count) });
+  const r = await apiGet(`/api/v1/market-indicators/${encodeURIComponent(sym)}/candles?${q}`);
+  const rows = (Array.isArray(r?.candles) ? r.candles : []).map((c) => ({
+    t: c.timestamp, o: Number(c.openPrice), h: Number(c.highPrice),
+    l: Number(c.lowPrice), c: Number(c.closePrice), v: Number(c.volume),
+  }));
+  return { rows };
+}
+
+/**
+ * 🔴 KR 수급 심화 3종 — 신용거래·프로그램매매·대차거래. 전부 **국내 전용**(명세)·그룹 STOCK_TRADING_TREND.
+ *    공매도(getShortSelling)와 같은 계열이다. 필드명은 명세에서 확정했다(추측 금지 — 오늘 그걸로 결함 냈다).
+ */
+async function getCreditTrades(symbol, { count = 5 } = {}) {
+  const r = await apiGet(`/api/v1/stocks/${encodeURIComponent(symbol)}/credit-trades?count=${count}`);
+  return Array.isArray(r?.records) ? r.records : [];
+}
+async function getProgramTrades(symbol, { count = 5 } = {}) {
+  const r = await apiGet(`/api/v1/stocks/${encodeURIComponent(symbol)}/program-trades?count=${count}`);
+  return Array.isArray(r?.records) ? r.records : [];
+}
+async function getSecuritiesLending(symbol, { count = 5 } = {}) {
+  const r = await apiGet(`/api/v1/stocks/${encodeURIComponent(symbol)}/securities-lending?count=${count}`);
+  return Array.isArray(r?.records) ? r.records : [];
+}
+
 async function getInvestorTrading(symbol) {
   const r = await apiGet(`/api/v1/stocks/${encodeURIComponent(symbol)}/investor-trading`);
   return Array.isArray(r?.records) ? r.records : [];
@@ -931,6 +964,10 @@ module.exports = {
   pickLiveCommissions,
   getInvestorTrading,
   getIndexInvestorTrading,
+  getSecuritiesLending,
+  getProgramTrades,
+  getCreditTrades,
+  getIndexCandles,
   getPriceLimits,
   getStockInfo,
   getObservedLimits,

@@ -261,6 +261,27 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency } = 
 
   const toss = require('./tossClient');
   try {
+    /**
+     * 🔴 **상·하한가 검증** (2026-09-22 — 토스 API 정비. `getPriceLimits` 가 만들어져 있었는데 소비 0).
+     *    KR 지정가가 상·하한 밖이면 **거래소가 거부**한다 — 여기서 안 막으면 사용자가
+     *    승인을 누른 **뒤에야** 실패를 안다(HITL 이 헛수고가 되는 그 자리).
+     * ⚠️ KR + 지정가일 때만 본다(미국은 상하한 제도가 다르고, 시장가는 가격이 없다).
+     * ⚠️ **못 물어봤으면 막지 않는다** — 상하한은 계좌 검증(현금·수량)과 달리 *보조* 축이라,
+     *    조회 실패로 정당한 제안까지 막으면 오탐이 잦아 게이트를 끄게 된다. 경고만 남긴다.
+     */
+    if (/^\d{6}$/.test(sym) && Number.isFinite(px) && px > 0) {
+      try {
+        const lim = await toss.getPriceLimits(sym);
+        if (lim.upper != null && px > lim.upper) {
+          return { ok: false, kind: 'price-limit', error: `지정가 ${px} 가 상한가(${lim.upper})를 넘습니다 — 거래소가 거부합니다.` };
+        }
+        if (lim.lower != null && px < lim.lower) {
+          return { ok: false, kind: 'price-limit', error: `지정가 ${px} 가 하한가(${lim.lower}) 아래입니다 — 거래소가 거부합니다.` };
+        }
+      } catch (e) {
+        logWarn('orders.price_limit_check_failed', { symbol: sym, kind: e.kind, message: e.message });
+      }
+    }
     if (up === 'SELL') {
       const r = await toss.getSellableQuantity(sym);
       const have = r.quantity.num;
