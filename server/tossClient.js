@@ -715,14 +715,38 @@ async function cancelConditionalOrder(conditionalOrderId, { accountSeq } = {}) {
 let accountSeqCache = null;
 const ACCOUNT_TTL_MS = Math.max(60_000, Number(process.env.TOSS_ACCOUNT_TTL_MS) || 10 * 60_000);
 
+/**
+ * 🔴 **단일비행(single-flight)** — 진행 중인 조회가 있으면 **그 약속을 나눠 쓴다**. (2026-09-22)
+ *
+ * 없으면 **캐시 스탬피드**가 난다: TTL(10분)이 만료된 그 순간 `withAccount` 를 쓰는 **11개 함수**가
+ * 동시에 들어오면 각자 `/api/v1/accounts` 를 친다. 그런데 **`ACCOUNT` 한도는 1/s** 라 즉시 429다.
+ *
+ * ⚠️ 실제로 났다 — 감시를 13 → 41종목으로 늘린 직후 `portfolio.failed kind="rate-limited"`,
+ *    그 순간 `ACCOUNT 0/1`. 캐시가 있으니 안전하다고 본 것이 **"캐시 미스가 동시에 일어나는 순간"**
+ *    을 안 본 것이다.
+ * 🔴 **이게 주문 직전에 나면 `send_unknown` 이 된다** — 사람이 거래소를 확인해야 하는 상태다.
+ *    호출이 드문 그룹이라 방심하기 쉬운데, **드문 게 아니라 한도가 1일 뿐**이다.
+ */
+let accountSeqInflight = null;
+
 async function getAccountSeq({ force = false } = {}) {
   if (!force && accountSeqCache && Date.now() - accountSeqCache.at < ACCOUNT_TTL_MS) return accountSeqCache.seq;
-  const rows = await apiGet('/api/v1/accounts');
-  const list = Array.isArray(rows) ? rows : (rows?.accounts || []);
-  const seq = list[0]?.accountSeq;
-  if (seq == null) throw new TossError('토스 계좌를 찾지 못했습니다', { kind: 'shape', path: '/api/v1/accounts' });
-  accountSeqCache = { seq, at: Date.now() };
-  return seq;
+  // ⚠️ `force` 여도 진행 중인 것이 있으면 나눠 쓴다 — 강제 갱신을 동시에 두 번 할 이유가 없다
+  if (accountSeqInflight) return accountSeqInflight;
+  accountSeqInflight = (async () => {
+    const rows = await apiGet('/api/v1/accounts');
+    const list = Array.isArray(rows) ? rows : (rows?.accounts || []);
+    const seq = list[0]?.accountSeq;
+    if (seq == null) throw new TossError('토스 계좌를 찾지 못했습니다', { kind: 'shape', path: '/api/v1/accounts' });
+    accountSeqCache = { seq, at: Date.now() };
+    return seq;
+  })();
+  try {
+    return await accountSeqInflight;
+  } finally {
+    // 🔴 **실패해도 반드시 비운다** — 안 비우면 한 번 실패한 뒤 영원히 그 실패를 나눠 쓴다
+    accountSeqInflight = null;
+  }
 }
 
 /** 호출부가 안 주면 **여기서 채운다** — 빠뜨리면 400 이고, 빠뜨리기 쉽다 */
