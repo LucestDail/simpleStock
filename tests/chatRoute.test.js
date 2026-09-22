@@ -27,8 +27,13 @@ const TOKEN = 'CHAT_ROUTE_TEST_0921';
 // ⚠️ 포트를 **다른 테스트 파일과 겹치지 않게** 잡는다 — `node --test` 는 파일을
 //    병렬로 돌리므로 겹치면 남의 서버에 요청이 가고 **엉뚱한 401** 을 받는다
 //    (실제로 50097 이 health-endpoint 와 겹쳐 그렇게 됐다).
-const PORT = 50090;
-const PORT_HISTORY = 50091;
+/**
+ * ⚠️ **포트를 실행마다 달리한다** (2026-09-22 둘째 수정). 대기를 60초로 늘렸는데도
+ *    간헐 실패가 남았다 — 고정 포트라 **직전 실행이 남긴 소켓(TIME_WAIT)** 과 충돌하면
+ *    기동 자체가 실패한다. PID 기반이면 같은 순간의 병렬 파일끼리도 안 겹친다.
+ */
+const PORT = 52000 + (process.pid % 900);
+const PORT_HISTORY = 52000 + 900 + (process.pid % 90);
 const BASE = `http://127.0.0.1:${PORT}`;
 
 /**

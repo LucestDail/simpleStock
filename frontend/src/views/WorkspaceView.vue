@@ -1919,7 +1919,8 @@ onUnmounted(() => {
 
 .kpis {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* 2026-09-22 사용자: "5개 한 줄에" — 현금 카드가 추가되며 4열이 4+1 로 접혔다 */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--space-xs);
 }
 .kpi {
@@ -1930,9 +1931,9 @@ onUnmounted(() => {
 }
 .kpi__label { font-size: var(--text-2xs); letter-spacing: 0.06em; color: var(--color-faint); }
 /* 🔴 사용자: *"내 자산 부분 크기 좀 더 줄여"* — 상단으로 올라가므로 한 줄을 낮춘다 */
-.kpi__value { font-size: var(--text-base); font-weight: 700; color: var(--color-ink); }
-.kpi__value--sub { font-size: var(--text-sm); color: var(--color-body); font-weight: 600; }
-.kpi__value small { font-size: var(--text-sm); font-weight: 600; margin-left: 6px; opacity: 0.85; }
+.kpi__value { font-size: var(--text-sm); font-weight: 700; color: var(--color-ink); }
+.kpi__value--sub { font-size: var(--text-xs); color: var(--color-body); font-weight: 600; }
+.kpi__value small { font-size: var(--text-xs); font-weight: 600; margin-left: 6px; opacity: 0.85; }
 .up { color: var(--color-up); }
 .down { color: var(--color-down); }
 .flat { color: var(--color-body); }

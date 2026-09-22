@@ -22,7 +22,12 @@ const path = require('node:path');
  * (workspace 규율: "코드가 있다 ≠ 그 경로가 실제로 그렇게 돈다")
  */
 
-const PORT = 50098;
+/**
+ * ⚠️ **포트를 실행마다 달리한다** (2026-09-22 둘째 수정). 대기를 60초로 늘렸는데도
+ *    간헐 실패가 남았다 — 고정 포트라 **직전 실행이 남긴 소켓(TIME_WAIT)** 과 충돌하면
+ *    기동 자체가 실패한다. PID 기반이면 같은 순간의 병렬 파일끼리도 안 겹친다.
+ */
+const PORT = 53000 + (process.pid % 900);
 const BASE = `http://127.0.0.1:${PORT}`;
 
 function spawnServer(env) {
