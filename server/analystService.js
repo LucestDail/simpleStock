@@ -2,6 +2,7 @@ const { generateStructuredOutput, getAiSettings } = require('./aiService');
 const { getDashboardSettings } = require('./settingsService');
 const orderService = require('./orderService');
 const toss = require('./tossClient');
+const stockIdentity = require('./stockIdentity');
 const mcp = require('./mcpClient');
 const rating = require('./stockRating');
 const activity = require('./activityLog');
@@ -622,6 +623,13 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   } else {
     lines.push('보유 정보를 받지 못했습니다.');
   }
+
+  /**
+   * 🔴 종목 정체를 먼저 깐다 (2026-09-22) — 이름이 "RAM" 뿐이면 모델이 레버리지 여부를
+   *    회차마다 지어낸다(17시 "2배 리밸런싱" ↔ 21시 "일반 종목" — 정반대). 판단의 전제다.
+   */
+  const identity = stockIdentity.sectionFromItems(items);
+  if (identity) lines.push('', identity);
 
   lines.push('', '## 보유 종목');
   for (const h of items) {

@@ -467,9 +467,15 @@ async function runTool(name, args = {}, ctx = {}) {
         summary: p.summary,
         items: (p.items || []).map((h) => ({
           symbol: h.symbol, name: h.name, market: h.market, currency: h.currency,
+          // 🔴 정체 필드 (2026-09-22) — 이게 빠져 있어 모델이 RAM 의 레버리지 여부를 지어냈다
+          officialName: h.officialName || null, securityType: h.securityType || null,
+          leverageFactor: h.leverageFactor ?? null, listDate: h.listDate || null,
           quantity: h.quantity, avgPrice: h.avgPrice, lastPrice: h.lastPrice,
           profitRate: h.profitRate, dailyRate: h.dailyRate,
         })),
+        note: '종목의 정체(사업·레버리지)는 officialName/leverageFactor **만** 근거로 말하라. '
+          + '티커 글자에서 추측 금지 — 티커가 비슷한 다른 회사와 혼동하지 말 것. '
+          + 'leverageFactor≥2 면 일일 리밸런싱 상품이다(횡보 시 가치 감쇠를 전제로 판단).',
       };
     }
     case 'get_candles': {
@@ -486,6 +492,8 @@ async function runTool(name, args = {}, ctx = {}) {
         ma20: ma(20), ma60: ma(60),
         high: closes.length ? Math.max(...closes) : null,
         low: closes.length ? Math.min(...closes) : null,
+        // 🔴 실측: 모델이 이 high/low 를 "52주 고점" 이라 지어 불렀다(상장 3개월 종목에서)
+        note: `high/low 는 이 ${closes.length}개 봉 창 안의 값이다 — "52주" 등 더 긴 기간의 이름을 붙이지 말 것.`,
       };
     }
     case 'get_rankings': {

@@ -909,6 +909,13 @@ async function getStockInfo(symbols) {
     if (!x?.symbol) continue;
     out.set(String(x.symbol), {
       name: x.name || null,
+      /**
+       * 🔴 정체 3필드 (2026-09-22) — 토스가 주는데 여기서 **버리고 있었다.**
+       *    이름이 "RAM" 뿐이라 모델이 레버리지 여부를 회차마다 지어냈다(돈 판단의 전제).
+       */
+      englishName: x.englishName || null,
+      leverageFactor: x.leverageFactor != null ? String(x.leverageFactor) : null,
+      listDate: x.listDate || null,
       market: x.market || null,
       currency: x.currency || null,
       status: x.status || null,

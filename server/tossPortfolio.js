@@ -1,4 +1,5 @@
 const toss = require('./tossClient');
+const stockIdentity = require('./stockIdentity');
 const { logInfo, logWarn } = require('./logger');
 
 /**
@@ -115,6 +116,13 @@ async function getHoldings({ fx = null } = {}) {
   }));
 
   /**
+   * 🔴 종목 정체(정식명·레버리지 배수·상장일)를 **여기 한 곳**에서 붙인다 (2026-09-22).
+   *    분석 프롬프트·채팅 도구·화면이 전부 이 items 를 물려받는다 — 세 곳에 따로 붙이면
+   *    하나가 빠진 채 "채워진 척" 한다. 실패해도 보유는 돌려준다(정체는 곁가지, 6h 캐시).
+   */
+  const enriched = await stockIdentity.enrich(items);
+
+  /**
    * 현금은 **통화별 별도 호출**이라 둘을 함께 받는다.
    * ⚠️ 한쪽이 실패해도 다른 쪽은 쓴다 — `null` 은 "0" 이 아니라 **"못 받았다"** 로 구분한다.
    */
@@ -156,8 +164,8 @@ async function getHoldings({ fx = null } = {}) {
   };
 
   // 금액·수량은 로그에 남기지 않는다. 건수와 성패만.
-  logInfo('toss.holdings', { items: items.length });
-  return { summary, items, asOf: new Date().toISOString() };
+  logInfo('toss.holdings', { items: enriched.length });
+  return { summary, items: enriched, asOf: new Date().toISOString() };
 }
 
 /**
