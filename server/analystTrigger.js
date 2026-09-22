@@ -148,8 +148,26 @@ function trackUniverse(prev, held, targeted, now, watched = []) {
  * @param {number} [input.z]      모멘텀 문턱(σ)
  * @returns {{run:boolean, reasons:Array, state:object}}
  */
-function decide({ now, sessions = [], symbols = [], state = {}, z = DEFAULT_Z, cooldownMs = COOLDOWN_MS } = {}) {
+function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAULT_Z, cooldownMs = COOLDOWN_MS } = {}) {
+  /**
+   * 🔴 **호출자는 `Date` 를 넘긴다**(`alertService.tick` 의 `const now = new Date()`).
+   *    그런데 이 함수는 숫자로 계산한다 ⇒ `lastRunAt: now` 가 **Date 로 저장**되고,
+   *    JSON 으로 직렬화되면서 **ISO 문자열**이 된다. 다음 회차에
+   *    `now - "2026-09-22T03:24:15.088Z"` = **NaN** ⇒ `NaN < cooldownMs` 가 **false** 라
+   *    **쿨다운이 통째로 무효**였고, `pending` 이월 경로는 **죽은 코드**였다.
+   *
+   * ★ **내 테스트는 `now` 에 숫자를 넘겨서 이걸 못 봤다** — 자가 *실제 호출 모양*을 안 쟀다.
+   *   순수 함수라 믿고 편한 타입으로 불렀고, 그게 프로덕션과 달랐다.
+   *   2026-09-22 서비스 모니터링에서 `경과: NaN분` 을 보고 잡았다.
+   * ⚠️ 상태에 남는 값도 **숫자로 못박는다** — 안 그러면 같은 일이 다시 난다.
+   */
+  const now = nowIn instanceof Date ? nowIn.getTime() : Number(nowIn);
   const st = { ...(state || {}) };
+  // 옛 회차가 남긴 문자열/Date 를 숫자로 되돌린다(재기동해도 쿨다운이 살아나게)
+  if (st.lastRunAt != null && typeof st.lastRunAt !== 'number') {
+    const parsed = Date.parse(st.lastRunAt);
+    st.lastRunAt = Number.isFinite(parsed) ? parsed : null;
+  }
   st.sessions = { ...(st.sessions || {}) };
   st.momentum = { ...(st.momentum || {}) };
   const reasons = [];

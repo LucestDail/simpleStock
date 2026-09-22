@@ -295,3 +295,60 @@ test('관심종목 돌파는 **신규 진입 후보** 역할을 달고 온다', 
   assert.equal(r.run, true);
   assert.equal(r.reasons[0].role, 'watch');
 });
+
+/**
+ * 🔴 **호출자가 넘기는 실제 타입으로 잰다** (2026-09-22 서비스 모니터링에서 발견)
+ *
+ * `alertService.tick` 은 `const now = new Date()` 로 **Date 객체**를 넘긴다.
+ * 그런데 이 모듈은 숫자로 계산한다 ⇒ `lastRunAt: now` 가 Date 로 저장되고
+ * JSON 직렬화에서 **ISO 문자열**이 된다. 다음 회차에 `now - "2026-…Z"` = **NaN** 이고
+ * `NaN < cooldownMs` 는 **false** 라 **쿨다운이 통째로 무효**였다.
+ *
+ * ★ **기존 테스트가 전부 숫자를 넘겨서 못 봤다** — 순수 함수라 믿고 편한 타입으로 불렀고,
+ *   그게 프로덕션과 달랐다. 라이브 상태에서 `경과: NaN분` 을 보고서야 드러났다.
+ *   *"로직은 맞는데 실제로 그렇게 안 불린다"* 의 **타입 판본**이다.
+ */
+const trig = require('../server/analystTrigger');
+
+test('🔴 `now` 에 **Date** 를 넘겨도 lastRunAt 이 **숫자**로 남는다', () => {
+  const t = Date.parse('2026-09-22T06:30:00+09:00');
+  const d = trig.decide({
+    now: new Date(t),
+    sessions: [{ key: 'us', label: '미국장', state: 'closed' }],
+    symbols: [],
+    state: { sessions: { us: 'open' } },
+  });
+  assert.equal(d.run, true, '마감 전이가 안 잡혔다');
+  assert.equal(typeof d.state.lastRunAt, 'number',
+    `🔴 lastRunAt 이 ${typeof d.state.lastRunAt} 다 — 직렬화되면 문자열이 되고 쿨다운이 NaN 이 된다`);
+});
+
+test('🔴 Date 로 두 번 부르면 **쿨다운이 실제로 막는다**', () => {
+  const base = Date.parse('2026-09-22T06:30:00+09:00');
+  const st1 = trig.decide({
+    now: new Date(base),
+    sessions: [{ key: 'us', label: '미국장', state: 'closed' }],
+    symbols: [], state: { sessions: { us: 'open' } },
+  }).state;
+  // 5분 뒤 모멘텀 — 쿨다운(30분) 안이라 **미뤄져야** 한다
+  const d2 = trig.decide({
+    now: new Date(base + 5 * 60_000),
+    sessions: [{ key: 'us', label: '미국장', state: 'closed' }],
+    symbols: [{ symbol: 'AAA', dailyChangePct: 20, history: Array.from({ length: 30 }, () => 0.1) }],
+    state: st1,
+  });
+  assert.equal(d2.run, false, '🔴 쿨다운이 안 먹는다 — NaN 비교로 매 틱 분석이 돈다');
+  assert.ok(d2.deferred > 0, '미룬 이유가 안 쌓인다');
+});
+
+/** ⚠️ 옛 회차가 남긴 **문자열** 상태에서도 되살아나야 한다(재기동 호환) */
+test('⚠️ 저장된 lastRunAt 이 ISO 문자열이어도 쿨다운이 산다', () => {
+  const base = Date.parse('2026-09-22T06:30:00+09:00');
+  const d = trig.decide({
+    now: new Date(base + 60_000),
+    sessions: [{ key: 'us', label: '미국장', state: 'open' }],
+    symbols: [{ symbol: 'AAA', dailyChangePct: 20, history: Array.from({ length: 30 }, () => 0.1) }],
+    state: { sessions: { us: 'open' }, lastRunAt: new Date(base).toISOString() },
+  });
+  assert.equal(d.run, false, '🔴 문자열 lastRunAt 을 못 읽어 쿨다운이 통째로 풀린다');
+});
