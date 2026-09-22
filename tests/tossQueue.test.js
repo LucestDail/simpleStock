@@ -342,3 +342,18 @@ test('⚠️ 네트워크가 계속 죽어 있으면 포기한다(무한 루프 
   assert.equal((await r).ok, false);
   assert.ok(n >= 2 && n <= 5, `🔴 재시도가 상한을 벗어났다: ${n}회`);
 });
+
+/** 🔴 실측 시드 — pm2 헤더 실측과 큐 학습이 **독립적으로 일치**한 값(2026-09-22) */
+test('🔴 실측된 그룹은 실측값으로 시드됐다 (재기동 직후 4배 감속 방지)', () => {
+  const L = queueMod.DEFAULT_LIMITS;
+  assert.equal(L.MARKET_DATA, 15);
+  assert.equal(L.MARKET_DATA_CHART, 20);
+  assert.equal(L.ASSET, 5);
+  assert.equal(L.ORDER_INFO, 6);
+});
+
+/** 🔴 ACCOUNT 만은 절대 낙관하지 않는다 — 실측이자 최악값(1/s). 올리면 바로 429 */
+test('🔴 ACCOUNT 시드는 **1** 이다 (여기만은 낙관 금지)', () => {
+  assert.equal(queueMod.DEFAULT_LIMITS.ACCOUNT, 1,
+    '🔴 ACCOUNT 를 낙관적으로 잡았다 — 캐시 만료가 겹치는 순간 바로 429 다');
+});

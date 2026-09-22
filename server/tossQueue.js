@@ -34,9 +34,17 @@ const { logInfo, logWarn } = require('./logger');
  * ⚠️ 모르는 그룹은 **1** 로 둔다 — 넘겨 짚어 크게 잡으면 첫 폭주에서 429 가 난다.
  * ⚠️ 실측(2026-09-22): ACCOUNT 1 · MARKET_INFO 3 · RANKING 5 · ORDER_INFO 6.
  */
+/**
+ * 🔴 **2026-09-22 실측으로 갱신** — pm2 가 응답 헤더로 잰 값과 큐가 학습한 값이
+ *    **서로 다른 경로에서 정확히 일치**했다(ASSET 5 · ORDER_INFO 6 · MARKET_DATA 15 · CHART 20).
+ *    종전 추측값은 최대 **4배 보수적**이라, 재기동 직후 학습 전 구간에서 41종목 캔들이
+ *    필요 없이 느렸다. ⇒ 실측으로 시드한다. **헤더가 오면 어차피 갱신되므로 틀려도 자기교정된다.**
+ * ⚠️ **`ACCOUNT` 는 1 을 유지한다** — 실측이자 최악값이고, 여기만은 낙관적으로 잡으면 바로 429 다.
+ * ⚠️ 실측이 없는 그룹(AUTH·ORDER 등)은 보수값 그대로 — 시드는 **잰 것만** 한다.
+ */
 const DEFAULT_LIMITS = {
-  AUTH: 1, ACCOUNT: 1, ASSET: 2, ORDER_INFO: 5, ORDER: 5, CONDITIONAL_ORDER: 5,
-  MARKET_DATA: 5, MARKET_DATA_CHART: 5, MARKET_INDICATOR: 3, MARKET_INDICATOR_CHART: 3,
+  AUTH: 1, ACCOUNT: 1, ASSET: 5, ORDER_INFO: 6, ORDER: 5, CONDITIONAL_ORDER: 5,
+  MARKET_DATA: 15, MARKET_DATA_CHART: 20, MARKET_INDICATOR: 3, MARKET_INDICATOR_CHART: 3,
   MARKET_INFO: 3, RANKING: 5, STOCK: 5, STOCK_ALL: 1, STOCK_TRADING_TREND: 3,
 };
 const FALLBACK_LIMIT = 1;

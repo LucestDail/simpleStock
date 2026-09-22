@@ -43,7 +43,12 @@ function get(pathname) {
   }));
 }
 
-async function waitUntilUp(deadlineMs = 15000) {
+/**
+ * ⚠️ **60초인 이유** (2026-09-22): 단독 기동은 1.7초지만, 전체 스위트(557개)가 코어를 다 쓰는
+ *    중에 서버 spawn 테스트 3개가 겹치면 15초를 넘겨 **flaky** 가 됐다(같은 테스트가 단독으론 통과).
+ *    "서버가 안 떴다=실패" 원칙은 유지하되, **부하 때문에 늦는 것**을 실패로 읽지 않게 여유를 둔다.
+ */
+async function waitUntilUp(deadlineMs = 60000) {
   const until = Date.now() + deadlineMs;
   while (Date.now() < until) {
     try {
@@ -61,6 +66,9 @@ test('/health 는 토큰을 흘리지 않는다 (라우트 순서 회귀 가드)
     env: {
       ...process.env,
       PORT: String(PORT),
+      // 🔴 실데이터 격리 — 안 주면 repo 의 data/ 를 읽고 **쓸 수도** 있다
+      //    (테스트가 실제 watchlist.json 을 오염시킨 사고의 같은 계열)
+      SIMPLESTOCK_DATA_DIR: require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'ss-spawn-')),
       APP_ACCESS_TOKEN: TOKEN,
       // ⚠️ 2026-09-21: LAN 면제(기본 켜짐)를 끈다. 127.0.0.1 에서 오는 이 테스트는
       //    안 끄면 ④축(무인증 401)이 **면제 때문에 통과**해 아무것도 안 재게 된다.
@@ -81,7 +89,15 @@ test('/health 는 토큰을 흘리지 않는다 (라우트 순서 회귀 가드)
   // ① JSON 이다 (HTML 이면 catch-all 로 떨어진 것)
   assert.equal(health.status, 200);
   const parsed = JSON.parse(health.body);
-  assert.equal(parsed.status, 'ok');
+  /**
+   * ⚠️ **`'ok'` 를 단언하지 않는다** (2026-09-22 정정). 이 테스트의 존재 이유는
+   *    **토큰이 안 새는가**이지 의존물 상태가 아니다. 데이터 격리(빈 tmpdir)를 넣자
+   *    시세 성공 기록이 없어 헬스가 **정직하게** `degraded`(upstream unknown)를 냈고,
+   *    `'ok'` 단언이 깨졌다 — 종전엔 repo 실데이터를 읽어 **우연히** ok 였던 것이다.
+   *    목적과 무관한 과잉 단언은 다른 기능의 정직한 동작을 실패로 읽는다.
+   */
+  assert.ok(['ok', 'degraded'].includes(parsed.status), `모르는 상태: ${parsed.status}`);
+  assert.equal(parsed.service, 'simplestock');
 
   // ② 토큰이 없다 — 이것이 이 테스트의 존재 이유다
   assert.ok(

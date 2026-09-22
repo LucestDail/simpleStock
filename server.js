@@ -6,6 +6,8 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const cron = require('node-cron');
+// 🔴 **가장 먼저** — 다른 모듈이 fetch 를 잡기 전에 keep-alive 를 설치해야 한다
+require('./server/httpKeepAlive').install();
 const { APP_TIMEZONE, getDateInTimezone, getDateTimeInTimezone } = require('./server/time');
 const { AI_DAILY_CRON, isAiConfigured } = require('./server/aiService');
 const { syncScheduledTasks } = require('./server/taskService');

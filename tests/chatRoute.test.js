@@ -31,7 +31,12 @@ const PORT = 50090;
 const PORT_HISTORY = 50091;
 const BASE = `http://127.0.0.1:${PORT}`;
 
-async function waitUntilUp(deadlineMs = 15000) {
+/**
+ * ⚠️ **60초인 이유** (2026-09-22): 단독 기동은 1.7초지만, 전체 스위트(557개)가 코어를 다 쓰는
+ *    중에 서버 spawn 테스트 3개가 겹치면 15초를 넘겨 **flaky** 가 됐다(같은 테스트가 단독으론 통과).
+ *    "서버가 안 떴다=실패" 원칙은 유지하되, **부하 때문에 늦는 것**을 실패로 읽지 않게 여유를 둔다.
+ */
+async function waitUntilUp(deadlineMs = 60000) {
   const until = Date.now() + deadlineMs;
   while (Date.now() < until) {
     try {
@@ -48,6 +53,9 @@ test('채팅 응답은 SSE 다 (REST 로 돌아가지 않는다)', async (t) => 
     env: {
       ...process.env,
       PORT: String(PORT),
+      // 🔴 실데이터 격리 — 안 주면 repo 의 data/ 를 읽고 **쓸 수도** 있다
+      //    (테스트가 실제 watchlist.json 을 오염시킨 사고의 같은 계열)
+      SIMPLESTOCK_DATA_DIR: require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'ss-spawn-')),
       APP_ACCESS_TOKEN: TOKEN,
       SIMPLESTOCK_TRUST_LAN: 'false',
       MANAGER_BRIEF_PRESET_SCHEDULE: 'false',
