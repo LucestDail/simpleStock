@@ -478,6 +478,56 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     }
   }
 
+  /**
+   * 🔴 **수집해 놓고 안 쓰던 둘을 배선한다** (2026-09-22 — 사용자 *"데이터 좀 개선해봐"*).
+   *
+   * `tossClient.getWarnings`·`getShortSelling` 은 **만들어 놓고 분석이 한 번도 안 불렀다.**
+   * 이 저장소가 반복해 밟은 *"수집해 놓고 안 쓰는"* 의 또 한 건이다.
+   *
+   * ★ `warnings` 는 **안전 축**이다 — 정리매매·거래정지·단기과열·투자경고·VI.
+   *   이걸 안 보면 **정리매매 종목을 사라고 할 수 있다.** 점수가 높아도 사면 안 되는 종목이 있다.
+   * ⚠️ `short-selling` 은 **KR 전용**(명세). US 에 부르면 낭비다.
+   * ⚠️ 한 종목이 실패해도 나머지는 간다 — 그리고 **실패를 조용히 넘기지 않는다**(gaps 에 남는다).
+   */
+  /**
+   * 🔴 **국장 시황은 "누가 샀나" 가 있어야 쓸 수 있다** (2026-09-22).
+   *    지수 등락률만 주면 모델은 *"코스피가 올랐습니다"* 밖에 못 쓴다 —
+   *    그건 사용자가 이미 아는 것이고, **브리핑이 아니라 중계**다.
+   * ⚠️ 국장 브리핑일 때만 부른다(한도 그룹 `MARKET_INDICATOR`, 종목 조회와 다른 통).
+   */
+  const indexFlow = {};
+  if (briefMarkets.includes('kr')) {
+    for (const idx of ['KOSPI', 'KOSDAQ']) {
+      try {
+        const rows = await toss.getIndexInvestorTrading(idx, { interval: '1d', count: 3 });
+        if (rows.length) indexFlow[idx] = rows;
+      } catch (e) {
+        logWarn('analyst.index_flow_failed', { index: idx, kind: e.kind, message: e.message });
+      }
+    }
+  }
+
+  const warnings = {};
+  const supply = {};
+  for (const it of items.slice(0, 6)) {
+    const isKr = String(it.market).toUpperCase() === 'KR';
+    try {
+      const w = await toss.getWarnings(it.symbol);
+      const list = Array.isArray(w) ? w : (w?.warnings || w?.records || []);
+      if (list.length) warnings[it.symbol] = list;
+    } catch (e) {
+      logWarn('analyst.warnings_failed', { symbol: it.symbol, kind: e.kind, message: e.message });
+      warnings[it.symbol] = { error: e.message };
+    }
+    if (!isKr) continue; // 공매도 동향은 **국내 전용**이다
+    try {
+      const rows = await toss.getShortSelling(it.symbol);
+      if (rows.length) supply[it.symbol] = rows.slice(0, 5);
+    } catch (e) {
+      logWarn('analyst.short_selling_failed', { symbol: it.symbol, kind: e.kind, message: e.message });
+    }
+  }
+
   // 보유 종목의 일봉을 모은다 — **계산으로 확인되는 값만** 프롬프트에 싣는다
   const tech = {};
   for (const it of items.slice(0, 8)) {
@@ -642,6 +692,55 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
           + '**없는 종목을 지어내지 마라.**');
     }
     // ⚠️ 종류가 둘 이상이면(이월로 겹친 경우) 둘 다 적는다 — 하나로 뭉뚱그리면 하나가 조용히 사라진다
+  }
+
+  /**
+   * 🔴 **유의사항은 점수보다 먼저 온다** — 100점짜리라도 정리매매면 사면 안 된다.
+   *    그래서 프롬프트에서도 **위쪽**에 놓고, 모델에게 *"매수 제안을 내지 마라"* 를 명시한다.
+   */
+  const flowKeys = Object.keys(indexFlow);
+  if (flowKeys.length) {
+    lines.push('', '## 국내 지수 투자자별 매매대금 (최근 3일)');
+    for (const idx of flowKeys) {
+      for (const r of indexFlow[idx]) {
+        const net = (who) => {
+          const b = Number(r?.[`${who}BuyAmount`] ?? r?.[who]?.buyAmount);
+          const sl = Number(r?.[`${who}SellAmount`] ?? r?.[who]?.sellAmount);
+          if (!Number.isFinite(b) || !Number.isFinite(sl)) return null;
+          return Math.round((b - sl) / 1e8); // 억원
+        };
+        const parts = [['개인', 'individual'], ['외국인', 'foreign'], ['기관', 'institutional']]
+          .map(([ko, k]) => { const n = net(k); return n == null ? null : `${ko} ${n > 0 ? '+' : ''}${n}억`; })
+          .filter(Boolean);
+        if (parts.length) lines.push(`- ${idx} ${String(r?.date || r?.baseDate || '').slice(5)}: ${parts.join(' · ')}`);
+      }
+    }
+    lines.push('⚠️ **순매수(매수−매도) 금액**이다. 지수 등락과 **누가 샀는지**를 붙여서 설명하라 — '
+      + '등락률만 되풀이하면 브리핑이 아니라 중계다.');
+  }
+
+  const warnSyms = Object.keys(warnings).filter((k) => Array.isArray(warnings[k]) && warnings[k].length);
+  if (warnSyms.length) {
+    lines.push('', '## ⚠️ 매수 유의사항 (점수보다 우선한다)');
+    for (const sym of warnSyms) {
+      const kinds = warnings[sym].map((w) => w?.type || w?.code || w?.name || JSON.stringify(w)).slice(0, 5);
+      lines.push(`- **${sym}**: ${kinds.join(' · ')}`);
+    }
+    lines.push('🔴 위 종목은 **정리매매·거래정지·투자경고·과열** 등에 걸려 있다. '
+      + '점수가 높아도 **매수 제안을 내지 마라.** 보유 중이면 위험을 분명히 적어라.');
+  }
+
+  const supplySyms = Object.keys(supply);
+  if (supplySyms.length) {
+    lines.push('', '## 공매도 동향 (국내, 최근 5일)');
+    for (const sym of supplySyms) {
+      const rows = supply[sym].map((r) => {
+        const ratio = r?.shortSellingVolumeRatio ?? r?.volumeRatio ?? r?.ratio;
+        return `${String(r?.date || r?.baseDate || '').slice(5)} ${ratio != null ? `${ratio}%` : '-'}`;
+      });
+      lines.push(`- ${sym}: ${rows.join(' · ')}`);
+    }
+    lines.push('⚠️ 공매도 **비중**이다(거래량 대비). 절대량이 아니라 **추세**로 읽어라.');
   }
 
   const heldSet = new Set(items.map((i) => String(i.symbol).toUpperCase()));

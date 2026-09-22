@@ -800,6 +800,23 @@ function pickLiveCommissions(rows, today = new Date().toISOString().slice(0, 10)
   }));
 }
 
+/**
+ * KRX 지수(KOSPI·KOSDAQ)의 **투자자별 매매대금**. (2026-09-22)
+ *
+ * 🔴 국장 시황 브리핑의 핵심 재료다 — 지수가 왜 움직였는지는 **누가 샀나**에서 나온다.
+ * ⚠️ `symbol` 은 **`KOSPI`/`KOSDAQ` 만** 지원한다(명세). 종목 코드를 넣으면 400 이다.
+ * ⚠️ 한도 그룹 `MARKET_INDICATOR` — 종목 조회(`STOCK`)와 **다른 통**이라 서로 안 깎는다.
+ */
+async function getIndexInvestorTrading(symbol, { interval = '1d', count = 5 } = {}) {
+  const sym = String(symbol || '').toUpperCase();
+  if (sym !== 'KOSPI' && sym !== 'KOSDAQ') {
+    throw new TossError(`지수 투자자별 매매대금은 KOSPI/KOSDAQ 만 됩니다: ${symbol}`, { kind: 'bad-request' });
+  }
+  const q = new URLSearchParams({ interval, count: String(count) });
+  const r = await apiGet(`/api/v1/market-indicators/${encodeURIComponent(sym)}/investor-trading?${q}`);
+  return Array.isArray(r?.records) ? r.records : (Array.isArray(r) ? r : []);
+}
+
 async function getInvestorTrading(symbol) {
   const r = await apiGet(`/api/v1/stocks/${encodeURIComponent(symbol)}/investor-trading`);
   return Array.isArray(r?.records) ? r.records : [];
@@ -878,6 +895,7 @@ module.exports = {
   getCommissions,
   pickLiveCommissions,
   getInvestorTrading,
+  getIndexInvestorTrading,
   getPriceLimits,
   getStockInfo,
   getObservedLimits,
