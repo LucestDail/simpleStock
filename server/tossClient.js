@@ -1,4 +1,11 @@
 const { logInfo, logWarn, logError } = require('./logger');
+/**
+ * 🔴 **그룹별 큐** (2026-09-22 사용자 지시) — 종전엔 429 를 맞으면 그 버킷을 잠그고
+ *    그 사이 호출을 **던져서 거절**했다. 한도는 아꼈지만 **기능이 멈췄다.**
+ *    이제 **기다렸다 보낸다.** 재시도 규칙은 `tossQueue.js` 머리말 참고
+ *    (핵심: **429 만 되꽂는다** — 네트워크 실패는 나갔는지 몰라서 재시도가 위험하다).
+ */
+const tossQueue = require('./tossQueue').createQueue();
 
 /**
  * 토스증권 Open API 클라이언트 (2026-09-21 신설)
@@ -225,23 +232,20 @@ function bucketOf(path) {
   return String(path).split('?')[0];
 }
 
-function backoffActive(path) {
-  const rec = backoff.get(bucketOf(path));
-  if (!rec) return 0;
-  const left = rec.until - Date.now();
-  if (left <= 0) {
-    backoff.delete(bucketOf(path));
-    return 0;
-  }
-  return left;
-}
+/**
+ * ⚠️ **2026-09-22: 이 게이트는 더 이상 호출되지 않는다.** 물러서기는 이제
+ *    `tossQueue` 의 `penaltyUntil` 이 담당한다(그룹별 · 큐 안에서 기다린다).
+ *    🔴 **정본을 둘로 두지 않으려고 남겨 두지 않고 지웠다** — 둘이 각자 판단하면
+ *    한쪽이 풀렸는데 다른 쪽이 막는 상태가 생기고, 그건 로그로 못 가른다.
+ *    `noteRateLimited` 는 **기록만** 남긴다(원인 추적에 값이 있다).
+ */
 
 function noteRateLimited(path) {
   const key = bucketOf(path);
   const prev = backoff.get(key);
   const streak = (prev?.streak || 0) + 1;
   const wait = Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** (streak - 1));
-  backoff.set(key, { until: Date.now() + wait, streak });
+  backoff.set(key, { until: Date.now() + wait, streak }); // 관측용 기록(게이트 아님)
   // 🔴 429 는 증상이 "화면 일부만 빈다" 로 나타나 **원인이 안 보인다.**
   //    어느 경로가 **몇 번째 호출에서** 걸렸는지, 그 경로의 관측 한도가 얼마였는지 함께 남긴다.
   const seen = observedLimits.get(key);
@@ -264,6 +268,9 @@ function noteSuccess(path, res) {
   if (limit) {
     const prev = observedLimits.get(key);
     observedLimits.set(key, { limit: Number(limit), remaining: Number(remaining), at: Date.now() });
+    // 🔴 **배운 한도를 큐에 준다** — 안 주면 큐가 추측값(보수적 기본값)으로만 돌아
+    //    한도가 큰 그룹에서 **쓸데없이 느려진다**(있으나 마나가 아니라 해롭다)
+    tossQueue.setLimit(tossGroupOf(key) || key, Number(limit));
     // 한도가 **바뀌면** 알린다 — 조용히 달라지면 갱신 주기가 근거를 잃는다
     if (prev && prev.limit !== Number(limit)) {
       logWarn('toss.rate_limit_changed', { path: key, from: prev.limit, to: Number(limit) });
@@ -338,17 +345,12 @@ async function getToken({ force = false } = {}) {
  *   `account-not-found` 가 오는데, 그 문구만 보면 "계좌가 없다" 로 읽힌다(실제로는 형식 문제).
  */
 async function apiGet(path, { retriedAuth = false, accountSeq = null } = {}) {
-  const left = backoffActive(path);
-  if (left > 0) {
-    // 물러서는 중에 또 때리면 한도만 태운다. **조용히 빈 값을 주지 않는다**
-    throw new TossError(`요청 제한으로 대기 중입니다 (${Math.ceil(left / 1000)}초 남음)`, {
-      kind: 'rate-limited',
-      path: bucketOf(path),
-    });
-  }
+  // ⚠️ 종전의 "물러서는 중이면 던진다" 를 **없앴다** — 큐가 순서를 지켜 기다렸다 보낸다.
+  //    던지면 호출자는 **데이터 없이** 진행하고, 그게 화면·분석의 빈칸으로 나타난다.
+  return tossQueue.run(tossGroupOf(path) || bucketOf(path), () => apiGetOnce(path, { retriedAuth, accountSeq }));
+}
 
-  callCount += 1;
-  pathCounts.set(bucketOf(path), (pathCounts.get(bucketOf(path)) || 0) + 1);
+async function apiGetOnce(path, { retriedAuth = false, accountSeq = null } = {}) {
   const accessToken = await getToken();
   let res;
   const startedAt = Date.now();
@@ -376,7 +378,7 @@ async function apiGet(path, { retriedAuth = false, accountSeq = null } = {}) {
     // 토큰이 만료된 경우에만 한 번 다시 받는다(무한 재발급 금지)
     logInfo('toss.token.refresh_on_401', { path: bucketOf(path) });
     await getToken({ force: true });
-    return apiGet(path, { retriedAuth: true, accountSeq });
+    return apiGetOnce(path, { retriedAuth: true, accountSeq });
   }
   if (res.status === 403) {
     throw new TossError(
@@ -599,6 +601,14 @@ function decimal(v) {
  *    **오류 코드로** 구분해 돌려준다. 상태코드만 보면 원인을 못 가른다.
  */
 async function apiPost(path, body, { accountSeq, method = 'POST' } = {}) {
+  /**
+   * ⚠️ 주문도 큐를 탄다. **429 재산입은 안전하다** — 서버가 받고 거절한 것이라 처리되지 않았다.
+   *    반면 타임아웃·연결실패는 큐가 **재시도하지 않는다**(`tossQueue` 가 `rate-limited` 만 되꽂는다).
+   */
+  return tossQueue.run(tossGroupOf(path) || bucketOf(path), () => apiPostOnce(path, body, { accountSeq, method }));
+}
+
+async function apiPostOnce(path, body, { accountSeq, method = 'POST' } = {}) {
   const accessToken = await getToken();
   const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
   if (accountSeq != null) headers['X-Tossinvest-Account'] = String(accountSeq);
@@ -889,6 +899,7 @@ function _resetForTest() {
 module.exports = {
   BASE_URL,
   rateLimitSnapshot,
+  queueSnapshot: () => tossQueue.snapshot(),
   // ⚠️ 검증용 노출 — 이 로직은 네트워크 없이 재야 한다(소음 규율은 헤더만으로 판정된다)
   noteRateLimitHeaders,
   tossGroupOf,

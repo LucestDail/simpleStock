@@ -113,19 +113,28 @@ test('401 이면 토큰을 한 번만 다시 받는다 (무한 재발급 금지)
   assert.equal(priceCalls, 2, '401 재시도가 한 번을 넘었다');
 });
 
-test('🔴 429 뒤에는 그 경로를 네트워크 없이 막는다 (retry-after 가 없으므로 우리가 정한다)', async () => {
+/**
+ * 🔴 **2026-09-22: 이 테스트가 지키던 동작을 사용자가 바꾸라고 했다.**
+ *
+ * 종전: 429 를 맞으면 그 경로를 잠그고 **다음 호출을 던져서 거절**(네트워크도 안 탐).
+ * 지시: *"429 찍혀서 멈추면 안되잖아. 큐 산입 → rate limit 맞게 호출 → 실패하면 큐 상단 재산입."*
+ * ⇒ 이제 **기다렸다 다시 보낸다.**
+ *
+ * ⚠️ **원래 의도는 그대로 지킨다** — *"물러서는 중에 또 때리면 한도만 태운다"*.
+ *    큐가 창(1초)과 벌칙(재시도마다 1초씩)을 지키므로 **연타는 여전히 안 한다.**
+ *    바뀐 것은 *"던져서 포기"* → *"기다렸다 재시도, 그래도 안 되면 포기"* 다.
+ */
+test('🔴 429 는 **재시도하되 연타하지 않는다** (멈추지도, 때리지도 않는다)', async () => {
   routes.set('/oauth2/token', () => okToken());
   routes.set('/api/v1/prices', () => res(429, { error: 'too many' }));
 
-  await assert.rejects(() => toss.getPrices(['A']), (e) => e.kind === 'rate-limited');
-
   const before = calls.length;
-  await assert.rejects(() => toss.getPrices(['A']), (e) => {
-    assert.equal(e.kind, 'rate-limited');
-    assert.match(e.message, /대기/);
-    return true;
-  });
-  assert.equal(calls.length, before, '물러서는 중인데 또 때렸다 — 한도만 태운다');
+  await assert.rejects(() => toss.getPrices(['A']), (e) => e.kind === 'rate-limited');
+  const tries = calls.filter((c) => String(c.url || c).includes('/prices')).length;
+
+  assert.ok(tries >= 2, `🔴 429 한 번에 포기했다(${tries}회) — "멈추면 안 된다" 는 지시 위반`);
+  assert.ok(tries <= 5, `🔴 ${tries}회나 때렸다 — 한도만 태운다`);
+  assert.ok(calls.length > before);
 });
 
 test('가격이 **문자열**로 와도 숫자로 바꾼다 (실측: "272500")', async () => {
