@@ -540,7 +540,13 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
           logInfo('analyst.triggered', { why, reasons: d.reasons });
           // 🔴 **틱을 막지 않는다** — 분석이 느리다고 알림이 밀리면 안 된다
           Promise.resolve(analystRunner({ reasons: d.reasons, why }))
-            .catch((e) => logError('analyst.trigger_run_failed', e, { why }))
+            .catch((e) => {
+              logError('analyst.trigger_run_failed', e, { why });
+              // 🔴 브리핑 실패를 폰에도 알린다 (2026-09-23) — 로그만 남기면 사용자는
+              //    "브리핑이 안 왔다" 를 눈치로만 안다(09-22~23 이틀 연속 실제로 그랬다)
+              telegram.send(`⚠️ ${why} 분석에 실패했습니다(${String(e?.message || '').slice(0, 80)}). 다음 회차에 다시 시도합니다.`, { reason: 'task_failed' })
+                .catch((e2) => logError('analyst.failure_notify_failed', e2, { why }));
+            })
             .finally(() => { analystRunning = false; });
         }
       } else if (d.run) {

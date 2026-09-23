@@ -789,6 +789,22 @@ async function generateContent({
         model: effectiveModel,
         streaming: false,
       });
+      /**
+       * 🔴 캡에 잘린 답은 **성공이 아니다** (2026-09-23 dryRun 실증) — JSON 이 중간에 끊겨
+       *    파싱이 fallback 을 돌려주고, 빈 브리핑이 **성공으로 보였다**(타임아웃은 task_failed
+       *    로 알리는데 빈 결과는 아무도 모른다 — 증상만 바뀐 같은 병).
+       *    재시도하지 않는다: 같은 프롬프트는 같은 길이를 또 쓴다(메시지도 재시도 판정에
+       *    안 걸리는 단어로 썼다). 실패로 승격해 통보 경로(task_failed)를 태운다.
+       */
+      const finishReason = String(response?.candidates?.[0]?.finishReason || '').toUpperCase();
+      if (finishReason === 'MAX_TOKENS') {
+        logWarn('ai.generate.truncated', { logLabel, maxOutputTokens: effectiveMaxOutputTokens, attempt });
+        const truncErr = new Error(
+          `AI 출력이 상한(${effectiveMaxOutputTokens}토큰)에 잘려 불완전합니다. 출력을 줄이도록 프롬프트·스키마를 좁혀야 합니다.`
+        );
+        truncErr.kind = 'output_truncated';
+        throw truncErr;
+      }
       return response;
     } catch (error) {
       const retryable = isRetryableAiError(error);
@@ -883,7 +899,12 @@ async function generateContentStream({
   const runtime = readAiRuntime();
   const startedAt = Date.now();
   const maxAttempts = GEMINI_MAX_RETRIES + 1;
-  const config = await buildGenerateConfig({ useGoogleSearch, streamWithThoughts: true });
+  /**
+   * ⚠️ 스트림에도 캡을 건다 (2026-09-23) — 캡 없는 경로가 하나라도 남으면 "형제 하나 빠짐" 이다
+   *    (게이트웨이 실측: 캡 밖 경로가 output 20,634토큰 = 820초 = 회차 ₩4 를 태웠다).
+   *    스트림은 사람이 실시간으로 읽는 경로라 구조적 예산이 없다 — 4,096(약 170초)로 넉넉히.
+   */
+  const config = await buildGenerateConfig({ useGoogleSearch, streamWithThoughts: true, maxOutputTokens: 4096 });
 
   logInfo('ai.generate.start', {
     logLabel,

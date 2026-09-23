@@ -685,6 +685,12 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
 
   const config = {
     systemInstruction: SYSTEM_PROMPT,
+    /**
+     * ⚠️ 출력 캡 (2026-09-23) — 이 스트림은 aiService 를 안 거쳐 자동 유도 캡 밖이었다.
+     *    게이트웨이 실측에서 output 18,921~20,634토큰(445~820초, 회차 ₩4) 요청이 잡혔다.
+     *    채팅 발화는 3,800자 분할 발송이라 4,096토큰(한글 수천 자)이면 충분하다.
+     */
+    maxOutputTokens: 4096,
     // ⚠️ 게이트웨이는 이것을 **무시한다**(실측: functionCall 0개). 그래도 남겨 둔다 —
     //    GEMINI_API_KEY 직결이면 네이티브로 동작하고, 위 루프가 둘 다 받는다.
     tools: [{ functionDeclarations: TOOL_DECLARATIONS }],

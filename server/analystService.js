@@ -92,9 +92,11 @@ const REPORT_SCHEMA = {
   properties: {
     marketView: { type: 'string' },
     momentumRead: { type: 'string' },
-    dataGaps: { type: 'array', items: { type: 'string' } },
+    // 🔴 개수 상한 (2026-09-23) — 출력 길이 = 시간. 상한 없이 6,905~9,762토큰을 써서 캡에 잘렸다
+    dataGaps: { type: 'array', items: { type: 'string' }, maxItems: 8 },
     positions: {
       type: 'array',
+      maxItems: 6,
       items: {
         type: 'object',
         properties: {
@@ -116,6 +118,7 @@ const REPORT_SCHEMA = {
     },
     proposals: {
       type: 'array',
+      maxItems: 4,
       items: {
         type: 'object',
         properties: {
@@ -684,6 +687,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   if (funds.length) {
     lines.push('', '## 보유 ETF·펀드 (기업 채점 대상 아님 — 점수 없음)');
     for (const [sym, r] of funds) {
+      // 🔴 평가가 잘려 r 이 비면 이 줄이 아니라 **분석 전체가 죽는다**(09-23 dryRun 실증: holdIt TypeError)
+      if (!r || r.error) { lines.push(`- ${sym} — 평가를 받지 못했습니다(잘림/실패). 이 종목 평가는 근거로 쓰지 마세요.`); continue; }
       lines.push(
         `- ${r.name}(${sym}) — ${r.typeWhy}`
         + (r.holdIt ? ` · 보유 적합성 **${r.holdIt}**${r.holdWhy ? ` (${String(r.holdWhy).slice(0, 120)})` : ''}` : '')

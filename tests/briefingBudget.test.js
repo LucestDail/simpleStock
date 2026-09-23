@@ -45,6 +45,22 @@ test('aiService 가 캡을 시간예산에서 유도하고, config 에 실제로
   assert.match(aiSrc, /buildGenerateConfig\(\{\s*schema,\s*useGoogleSearch,\s*maxOutputTokens:\s*effectiveMaxOutputTokens\s*\}\)/);
 });
 
+test('캡에 잘린 답은 실패로 승격된다 — 그리고 그 에러는 재시도 판정에 안 걸린다', () => {
+  // 🔴 dryRun 실증: 잘린 JSON 이 fallback 으로 조용히 통과해 **빈 브리핑이 성공으로 보였다**
+  assert.match(aiSrc, /finishReason === 'MAX_TOKENS'/);
+  assert.match(aiSrc, /kind = 'output_truncated'/);
+  // 에러 메시지가 isRetryableAiError 의 재시도 단어에 걸리면 3배 낭비가 재발한다
+  const msgMatch = aiSrc.match(/AI 출력이 상한\([^)]*\)에 잘려[^`']*/);
+  assert.ok(msgMatch, '잘림 에러 메시지를 찾지 못했다');
+  assert.doesNotMatch(msgMatch[0], /(timeout|timed out|network|unavailable|overloaded)/i);
+});
+
+test('스트림 경로(둘 다)에도 캡이 있다 — 캡 밖 경로 하나가 output 20,634토큰을 태웠다', () => {
+  const chatSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystChat.js'), 'utf8');
+  assert.match(aiSrc, /streamWithThoughts: true, maxOutputTokens: 4096/);
+  assert.match(chatSrc, /maxOutputTokens: 4096/);
+});
+
 test('초과 실측 3경로(브리핑·분석·평가) 전부에 길이 지시가 있다', () => {
   const ratingSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'stockRating.js'), 'utf8');
   const analystSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
