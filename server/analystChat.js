@@ -171,6 +171,20 @@ const TOOL_DECLARATIONS = [
     parameters: { type: 'object', properties: {} },
   },
   {
+    name: 'get_my_orders',
+    description: '내 계좌의 주문 내역(접수·체결·취소 상태)을 본다. "내 주문 어떻게 됐어"·"체결됐어?" 류 질문에 쓴다.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_trades',
+    description: '한 종목의 최근 시장 체결 틱(최대 50건)을 본다 — 체결 방향·강도 판단용. ⚠️ 내 계좌 체결이 아니다(그건 get_my_orders).',
+    parameters: {
+      type: 'object',
+      properties: { symbol: { type: 'string', description: '종목 코드 또는 티커' } },
+      required: ['symbol'],
+    },
+  },
+  {
     name: 'recall',
     description: '과거 대화에서 관련된 내용을 찾아온다. 사용자가 전에 한 말·판단을 확인할 때 쓴다.',
     parameters: {
@@ -299,7 +313,8 @@ function decidePrompt() {
     '    · 매수/매도를 **하자고 정했을 때** → propose_order (주문이 아니라 제안 등록이다)',
     '    · "X 도달하면/떨어지면 사줘·팔아줘" 같은 **조건이 붙은 매매** → propose_conditional_order',
     '      (만료일을 사용자가 안 줬으면 도구를 부르지 말고 먼저 물어라)',
-    '    · "예약 주문 뭐 있어" → list_conditional_orders',
+    '    · "예약 주문 뭐 있어" → list_conditional_orders · "내 주문 체결됐어?" → get_my_orders',
+    '    · 한 종목의 단기 체결 강도가 필요할 때 → get_trades',
     '    · 기업의 질·밸류·점수 → rate_stock (10항목 100점 · 유형별 기준)',
     '- 🔴 잡담·인사·감사이거나 **이미 `[도구 결과]` 로 받은 것**이면 `tools` 를 **빈 배열**로 둡니다.',
   ].join('\n');
@@ -669,6 +684,22 @@ async function runTool(name, args = {}, ctx = {}) {
       const r = await toss.listConditionalOrders({ status: 'OPEN' });
       const rows = (Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : []).slice(0, 20);
       return { count: rows.length, rows, note: rows.length ? null : '등록된 예약 주문이 없습니다.' };
+    }
+    case 'get_my_orders': {
+      const toss = require('./tossClient');
+      const r = await toss.listOrders({});
+      const rows = (Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : []).slice(0, 20)
+        .map((o) => ({ symbol: o.symbol, side: o.side ?? o.orderSide, status: o.status, quantity: o.quantity, price: o.price, filledQuantity: o.filledQuantity ?? o.executedQuantity ?? null, at: o.createdAt ?? o.orderedAt ?? null }));
+      return { count: rows.length, rows, note: rows.length ? null : '주문 내역이 없습니다.' };
+    }
+    case 'get_trades': {
+      const toss = require('./tossClient');
+      const r = await toss.getTrades(String(args.symbol || ''), { count: 30 });
+      const rows = (Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : []).slice(0, 30);
+      return {
+        symbol: args.symbol, count: rows.length, rows,
+        note: '시장 전체의 체결 틱이다(내 계좌 아님). 방향(매수/매도 체결)과 규모로 단기 수급을 읽어라.',
+      };
     }
     case 'recall': {
       const hits = recall(String(args.query || ''));

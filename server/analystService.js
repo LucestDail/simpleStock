@@ -518,6 +518,27 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    */
   const indexFlow = {};
   const indexTech = {};
+  /**
+   * 지수 **현재가** (2026-09-23, 명세 배선 마감) — 캔들의 last 는 마지막 봉이라
+   * 장중에는 뒤처진다. 현재가·등락은 이 API 가 실시간으로 준다(200개 1콜).
+   * ⚠️ 심볼 카탈로그에 있는 것만 — 없는 심볼은 실측으로 확인해 목록을 좁힌다.
+   */
+  const indexNow = {};
+  {
+    const want = [
+      ...(briefMarkets.includes('kr') ? ['KOSPI', 'KOSDAQ'] : []),
+      ...(briefMarkets.includes('us') ? ['SPX', 'NDX', 'DJI'] : []),
+    ];
+    if (want.length) {
+      try {
+        for (const r of await toss.getIndexPrices(want)) {
+          if (r?.symbol) indexNow[r.symbol] = r;
+        }
+      } catch (e) {
+        logWarn('analyst.index_prices_failed', { kind: e.kind, message: e.message });
+      }
+    }
+  }
   if (briefMarkets.includes('kr')) {
     for (const idx of ['KOSPI', 'KOSDAQ']) {
       try {
@@ -775,6 +796,16 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    * 🔴 **유의사항은 점수보다 먼저 온다** — 100점짜리라도 정리매매면 사면 안 된다.
    *    그래서 프롬프트에서도 **위쪽**에 놓고, 모델에게 *"매수 제안을 내지 마라"* 를 명시한다.
    */
+  const nowKeys = Object.keys(indexNow);
+  if (nowKeys.length) {
+    lines.push('', '## 지수 현재가 (실시간)');
+    for (const k of nowKeys) {
+      const r = indexNow[k];
+      const chg = r.changePct ?? r.changeRate ?? null;
+      lines.push(`- ${k}: ${r.price ?? r.last ?? '-'}${chg != null ? ` (${Number(chg) > 0 ? '+' : ''}${chg}%)` : ''}`);
+    }
+  }
+
   const techKeys = Object.keys(indexTech);
   if (techKeys.length) {
     lines.push('', '## 국내 지수 기술적 위치');

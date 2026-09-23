@@ -706,6 +706,23 @@ async function listConditionalOrders({ status = 'OPEN', symbol, cursor, limit } 
   return apiGet(`/api/v1/conditional-orders?${q}`, { accountSeq: await withAccount(accountSeq) });
 }
 
+/**
+ * 종목의 최근 체결 틱 (시장 데이터) — ⚠️ **내 계좌의 체결이 아니다.** 내 주문 체결은 `GET /orders` 로 본다.
+ * 체결 방향·강도를 볼 때 쓴다(최대 50건).
+ */
+async function getTrades(symbol, { count = 50 } = {}) {
+  const q = new URLSearchParams({ symbol: String(symbol), count: String(Math.min(50, Math.max(1, count)))});
+  return apiGet(`/api/v1/trades?${q}`);
+}
+
+/** 시장 지표(지수) 현재가 — 심볼 카탈로그의 심볼만(KOSPI,KOSDAQ,SPX,NDX …). 최대 200개 1콜 */
+async function getIndexPrices(symbols) {
+  const list = [...new Set((symbols || []).map((x) => String(x || '').trim()).filter(Boolean))].slice(0, 200);
+  if (!list.length) return [];
+  const rows = await apiGet(`/api/v1/market-indicators/prices?symbols=${encodeURIComponent(list.join(','))}`);
+  return Array.isArray(rows) ? rows : [];
+}
+
 /** 조건주문 상세 */
 async function getConditionalOrder(conditionalOrderId, { accountSeq } = {}) {
   return apiGet(`/api/v1/conditional-orders/${encodeURIComponent(conditionalOrderId)}`, { accountSeq: await withAccount(accountSeq) });
@@ -990,6 +1007,8 @@ module.exports = {
   getProgramTrades,
   getCreditTrades,
   getIndexCandles,
+  getIndexPrices,
+  getTrades,
   getPriceLimits,
   getStockInfo,
   getObservedLimits,
