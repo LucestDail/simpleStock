@@ -58,8 +58,10 @@ test('캡에 잘린 답은 실패로 승격된다 — 그리고 그 에러는 �
 test('구조화 출력은 thinking 을 끈다 — 그리고 모델 이름으로 분기하지 않는다', () => {
   // 🔴 실측(09-23): 출력 예산 2,400 을 생각이 전부 먹어 본문 0. budget 0 만 진짜 끈다
   //    (level 'low' 는 thoughts 413 이 남았다). 이름 분기는 게이트웨이 라우팅 때문에 거짓 전제다.
-  const m = aiSrc.match(/config\.thinkingConfig = ([^;]+);/);
-  assert.ok(m, 'structured 경로의 thinkingConfig 설정을 찾지 못했다');
+  // ⚠️ thinkingConfig 는 스트림 분기에도 있다(includeThoughts) — schema 블록만 본다:
+  //    그 블록은 thinkingConfig 직후에 responseMimeType 설정이 따라온다
+  const m = aiSrc.match(/config\.thinkingConfig = ([^;]+);[\s\S]{0,600}config\.responseMimeType = 'application\/json'/);
+  assert.ok(m, 'structured 경로의 thinkingConfig 설정을 찾지 못했다(형태가 바뀌어 자가 못 읽는다)');
   assert.match(m[1], /thinkingBudget:\s*0/);
   assert.doesNotMatch(m[1], /isGemini3Model|thinkingLevel/);
 });
