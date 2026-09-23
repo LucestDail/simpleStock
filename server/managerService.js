@@ -25,9 +25,13 @@ const BRIEFING_SCHEMA = {
   properties: {
     summary: { type: 'string', description: '오늘 시장 전반 한 문단 요약(한국어)' },
     marketOutlook: { type: 'string', description: '관전 포인트/전망 한 문단' },
-    tickerSignals: { type: 'array', items: { type: 'string' }, description: '관심종목별 주목 시그널(등락·특이사항)' },
-    riskChecks: { type: 'array', items: { type: 'string' }, description: '리스크·체크할 이벤트' },
-    themeNotes: { type: 'array', items: { type: 'string' }, description: '테마/섹터 코멘트' },
+    /**
+     * 🔴 개수 상한 (2026-09-23) — 출력 길이가 곧 시간이다(초당 ~24토큰 고정, 게이트웨이 실측).
+     *    상한 없이는 3,115~3,550토큰을 써서 120초×3 전부 타임아웃, 이틀 연속 브리핑이 폰에 안 갔다.
+     */
+    tickerSignals: { type: 'array', items: { type: 'string' }, maxItems: 8, description: '관심종목별 주목 시그널(등락·특이사항) — 보유·급등락 우선 최대 8개, 각 한 문장' },
+    riskChecks: { type: 'array', items: { type: 'string' }, maxItems: 5, description: '리스크·체크할 이벤트 — 최대 5개, 각 한 문장' },
+    themeNotes: { type: 'array', items: { type: 'string' }, maxItems: 5, description: '테마/섹터 코멘트 — 최대 5개, 각 한 문장' },
   },
   required: ['summary'],
 };
@@ -142,13 +146,23 @@ async function runManagerReview(trigger = 'manual', options = {}) {
     extraContext ? `\n# 추가 지시\n${extraContext}` : '',
     '',
     '위 관심종목을 바탕으로 오늘의 시장 브리핑을 작성하세요.',
+    /**
+     * 🔴 길이 규율 (2026-09-23) — 생성 속도가 초당 ~24토큰 고정이라 출력 길이가 곧 시간이다.
+     *    이 규율 없이 3,115~3,550토큰을 써서 120초×3 전부 타임아웃 → 이틀 연속 폰 미발송.
+     *    (스키마 maxItems 는 게이트웨이가 무시할 수 있어 지시로도 이중 방어. 하드캡은 aiService.)
+     */
+    '⚠️ 시간 예산이 120초뿐입니다. **전체 출력 2,000토큰(한글 약 1,300자) 이내**로 끝내세요:',
+    '- summary·marketOutlook 각 3문장 이내',
+    '- tickerSignals 최대 8개(보유 종목·급등락 우선), riskChecks·themeNotes 각 최대 5개',
+    '- 배열 항목은 각각 한 문장(90자 이내). 모든 종목을 다루려 하지 마세요 — 중요한 것만.',
     '반드시 아래 JSON 형식으로만, 키 이름을 정확히 그대로 사용해 한국어로 답하세요(다른 키 금지):',
     '{"summary":"시장 요약 한 문단","marketOutlook":"관전 포인트 한 문단","tickerSignals":["관심종목별 시그널", "..."],"riskChecks":["리스크 체크", "..."],"themeNotes":["테마/섹터 코멘트", "..."]}',
   ].join('\n');
 
   const fallback = { summary: '', marketOutlook: '', tickerSignals: [], riskChecks: [], themeNotes: [] };
   const result = await generateStructuredOutput(
-    { systemPrompt, userPrompt, schema: BRIEFING_SCHEMA, useGoogleSearch: false, logLabel: 'market_briefing' },
+    // maxOutputTokens 2400 ≈ 100초 — 프롬프트 지시(2,000)의 안전망. 잘리면 파싱 실패 → 재시도가 감당
+    { systemPrompt, userPrompt, schema: BRIEFING_SCHEMA, useGoogleSearch: false, logLabel: 'market_briefing', maxOutputTokens: 2400 },
     fallback
   );
 

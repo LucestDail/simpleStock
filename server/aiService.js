@@ -414,10 +414,18 @@ function budgetToThinkingLevel(budget) {
   return 'high';
 }
 
-async function buildGenerateConfig({ schema = null, useGoogleSearch = false, streamWithThoughts = false }) {
+async function buildGenerateConfig({ schema = null, useGoogleSearch = false, streamWithThoughts = false, maxOutputTokens = null }) {
   const runtime = readAiRuntime();
   const config = {
     ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
+    /**
+     * 🔴 출력 토큰 하드캡 (2026-09-23) — 생성 속도가 초당 ~24토큰으로 고정이라(게이트웨이 실측)
+     *    출력 길이가 곧 시간이다: 120초 예산 ≈ 2,900토큰. 브리핑이 3,115~3,550토큰을 써서
+     *    이틀 연속 3/3 타임아웃했다. 프롬프트 지시가 1차 방어, 이 캡이 2차 안전망이다.
+     * ⚠️ 캡에 잘리면 JSON 이 불완전해 파싱 실패 → 재시도가 감당한다(잘린 시도는 빨리 끝나므로
+     *    타임아웃 3회(364초 소진)보다 훨씬 싸다). 게이트웨이가 이 키를 무시하면 무해하게 없던 일이 된다.
+     */
+    ...(Number(maxOutputTokens) > 0 ? { maxOutputTokens: Math.floor(Number(maxOutputTokens)) } : {}),
   };
 
   if (streamWithThoughts && runtime.includeThoughts && runtime.thinkingBudget > 0) {
@@ -705,6 +713,7 @@ async function generateContent({
   logLabel = 'generate_content',
   modelOverride = null,
   timeoutOverrideMs = null,
+  maxOutputTokens = null,
 }) {
   if (!isAiConfigured()) {
     throw new Error('AI가 설정되지 않아 요청을 처리할 수 없습니다. GEMINI_API_KEY 또는 GEMINI_GATEWAY_BASE_URL을 확인하세요.');
@@ -716,7 +725,19 @@ async function generateContent({
   const effectiveTimeoutMs = timeoutOverrideMs || GEMINI_TIMEOUT_MS;
   const startedAt = Date.now();
   const maxAttempts = GEMINI_MAX_RETRIES + 1;
-  const config = await buildGenerateConfig({ schema, useGoogleSearch });
+  /**
+   * 🔴 출력 캡을 **시간예산에서 유도**한다 (2026-09-23) — 값을 호출부마다 두면
+   *    하나가 빠진 채 "형제 파일 중 하나만 빠졌다" 가 된다(실제로 세 경로 전부 빠져 있었다).
+   *    생성 속도 ~24토큰/초(게이트웨이 실측, 23.9~26.8) × 예산 × 0.9 여유.
+   *    120초 예산이면 2,592토큰 — 이걸 넘는 출력은 어차피 타임아웃으로 통째로 버려지면서
+   *    돈만 태운다(09-23 실측: 하루 지출의 81%가 버려진 토큰이었다).
+   *    호출부가 더 작은 값을 명시하면 그것을 쓴다(큰 값은 예산 밖이라 자동값으로 좁힌다).
+   */
+  const autoCap = Math.floor((effectiveTimeoutMs / 1000) * 24 * 0.9);
+  const effectiveMaxOutputTokens = Number(maxOutputTokens) > 0
+    ? Math.min(Math.floor(Number(maxOutputTokens)), autoCap)
+    : autoCap;
+  const config = await buildGenerateConfig({ schema, useGoogleSearch, maxOutputTokens: effectiveMaxOutputTokens });
 
   logInfo('ai.generate.start', {
     logLabel,

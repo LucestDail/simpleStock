@@ -9,10 +9,21 @@ const {
   runScheduledCustomAnalysis,
 } = require('./aiService');
 const { logInfo, logError } = require('./logger');
+const telegram = require('./telegramService');
 const { buildServerStatusPayload } = require('./payloadService');
 const { broadcast } = require('./realtimeService');
 
 const scheduledHandles = new Map();
+
+/**
+ * ⚠️ 지연 재시도는 **일부러 없다** (2026-09-23, 실패한 실험 기록).
+ *    정각 브리핑이 이틀 연속 죽어(09-22 06시·09-23 09시, LLM 120초×3 타임아웃)
+ *    "정각 게이트웨이 혼잡 → 15분 뒤 재시도" 를 넣으려 했는데 **가설이 반증됐다**(pm2 실측):
+ *    그 시각 게이트웨이 요청은 simpleStock 뿐이었고(경합 없음), 원인은 **출력 토큰 길이**다 —
+ *    생성 속도가 초당 ~24토큰으로 고정이라 120초 예산 ≈ 2,900토큰인데 브리핑 출력이
+ *    3,115~3,550토큰으로 **구조적으로** 넘었다. 같은 프롬프트는 같은 길이를 또 쓰므로
+ *    재시도는 낭비다(어제 3/3 실패가 증거). ⇒ 처방은 출력 축소(managerService 스키마·지시).
+ */
 
 function stopRemovedTasks(activeIds) {
   for (const [taskId, handle] of scheduledHandles.entries()) {
@@ -177,6 +188,19 @@ async function executeScheduledTask(taskId) {
       taskType: task.taskType,
       title: task.title,
     });
+    /**
+     * 🔴 실패를 폰에도 알린다 (2026-09-23) — 종전엔 로그·화면 이력에만 남아 사용자는
+     *    브리핑이 안 온 것을 눈치로만 알았다(09-22 06시·09-23 09시 이틀 연속).
+     * ⚠️ 통보 실패가 원래 실패를 가리면 안 된다 — 삼키되 로그는 남긴다.
+     */
+    try {
+      await telegram.send(
+        `⚠️ ${task.title} 생성에 실패했습니다(${String(error?.message || '').slice(0, 80)}). 웹 화면에서 수동 실행할 수 있습니다.`,
+        { reason: 'task_failed' }
+      );
+    } catch (e) {
+      logError('task.failure_notify_failed', e, { taskId });
+    }
   }
 }
 
