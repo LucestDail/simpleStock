@@ -894,6 +894,12 @@ async function getIndexCandles(symbol, { interval = '1d', count = 60 } = {}) {
     t: c.timestamp, o: Number(c.openPrice), h: Number(c.highPrice),
     l: Number(c.lowPrice), c: Number(c.closePrice), v: Number(c.volume),
   }));
+  /**
+   * 🔴 지수 캔들은 **최신이 앞**으로 온다(2026-09-23 실측: rows[0]=오늘. 종목 캔들은 반대).
+   *    정렬 없이 쓰면 ma20 이 "가장 오래된 20개" 가 되고 당일 등락이 70일 전 대비(-19.5%)로
+   *    계산된다 — 국면 데몬 첫 실판정에서 잡았다. **받는 자리에서** 시간 오름차순으로 정본화.
+   */
+  rows.sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
   return { rows };
 }
 

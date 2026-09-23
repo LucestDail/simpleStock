@@ -12,6 +12,15 @@ const regime = require('../server/regimeService');
 /** n 개의 종가를 등차로 — 상승/하락 추세 합성 */
 const ramp = (start, step, n) => Array.from({ length: n }, (_, i) => start + step * i);
 
+test('🔴 지수 캔들은 받는 자리에서 시간순 정렬된다 — 역순이면 ma20 이 "가장 오래된 20개" 가 된다', () => {
+  // 실측(2026-09-23): 지수 캔들은 최신이 앞, 종목 캔들은 반대(reverse 처리 기존재).
+  // 첫 실판정에서 KOSPI 당일 등락이 -19.5%(70일 전 대비)로 나와 잡았다.
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'server', 'tossClient.js'), 'utf8');
+  const idx = src.indexOf('async function getIndexCandles');
+  const body = src.slice(idx, src.indexOf('\n}', idx));
+  assert.ok(/rows\.sort\(.*Date\.parse\(a\.t\) - Date\.parse\(b\.t\)/.test(body), 'getIndexCandles 에 시간순 정렬이 없다');
+});
+
 test('추세 판정은 산수다 — up/down/side, 데이터 부족은 null(횡보가 아니다)', () => {
   assert.equal(regime.judgeMarket({ closes: ramp(100, 1, 70) }).trend, 'up');
   assert.equal(regime.judgeMarket({ closes: ramp(170, -1, 70) }).trend, 'down');
