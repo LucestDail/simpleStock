@@ -310,6 +310,14 @@ function extractUsageFromResponse(response) {
     promptTokens: Number(usage.promptTokenCount || usage.prompt_tokens || 0),
     candidatesTokens: Number(usage.candidatesTokenCount || usage.candidates_tokens || 0),
     totalTokens: Number(usage.totalTokenCount || usage.total_tokens || 0),
+    /**
+     * 🔴 thinking 토큰 (2026-09-23) — maxOutputTokens 예산을 **생각이** 먹는지 **답이** 먹는지
+     *    이게 없으면 영영 못 가른다(잘림 9연발의 원인 후보). 없으면 0 이 아니라 null —
+     *    "안 쟀다" 와 "0 이다" 는 다르다.
+     */
+    thoughtsTokens: usage.thoughtsTokenCount != null || usage.thoughts_token_count != null
+      ? Number(usage.thoughtsTokenCount ?? usage.thoughts_token_count)
+      : null,
   };
 }
 
@@ -445,6 +453,18 @@ async function buildGenerateConfig({ schema = null, useGoogleSearch = false, str
   if (!schema) {
     return config;
   }
+
+  /**
+   * 🔴 구조화 출력은 thinking 을 최소로 (2026-09-23) — 종전엔 thinkingConfig 를 안 보내
+   *    모델 기본(dynamic thinking ON)이 됐고, Gemini 는 **thinking 을 maxOutputTokens 에
+   *    포함해서 센다.** prompt 553짜리 fund_rating 이 출력 2,592 에 닿는 미스터리와
+   *    프롬프트 자수 지시 3전 3패(답이 아니라 생각이 길면 자수 지시는 무력)의 유력 원인.
+   * ⚠️ 게이트웨이가 이 키를 무시하면 무해하게 없던 일이 된다.
+   */
+  const runtimeForSchema = readAiRuntime();
+  config.thinkingConfig = isGemini3Model(runtimeForSchema.model)
+    ? { thinkingLevel: 'low' }
+    : { thinkingBudget: 0 };
 
   const { Type } = await getGoogleGenAiModule();
   config.responseMimeType = 'application/json';
@@ -771,6 +791,7 @@ async function generateContent({
       // ⚠️ 헤더가 없으면 null 이다. **요청한 이름으로 메우지 않는다.**
       if (servedBy) lastServedBy = servedBy;
 
+      const usageNow = extractUsageFromResponse(response);
       logInfo('ai.generate.finish', {
         logLabel,
         attempt,
@@ -778,6 +799,10 @@ async function generateContent({
         attemptDurationMs: Date.now() - attemptStartedAt,
         outputPreview: extractTextFromResponse(response).slice(0, 200),
         groundingSourceCount: getGroundingSources(response).length,
+        // 🔴 생각/답 분해 — maxOutputTokens 를 누가 먹는지 앱 로그에서도 갈리게 (null = 안 재짐)
+        promptTokens: usageNow.promptTokens,
+        candidatesTokens: usageNow.candidatesTokens,
+        thoughtsTokens: usageNow.thoughtsTokens,
       });
 
       await trackAiUsage(response, logLabel);

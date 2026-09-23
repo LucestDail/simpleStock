@@ -43,14 +43,37 @@ function formatQuote(ticker) {
   return `${ticker.name}(${ticker.symbol}/${ticker.market}) ${q.price}${q.currency || ''} ${pct}`.trim();
 }
 
+/**
+ * 🔴 전 종목을 싣지 않는다 (2026-09-23) — 관심종목이 332개가 되자 이 컨텍스트가
+ *    prompt 7,996토큰을 만들었고, 332개를 주고 "8개만 말해" 라는 구조가 모델에게
+ *    긴 사고를 시켜 출력이 예산(2,900토큰)을 구조적으로 넘겼다(브리핑 이틀 연속 실패의
+ *    입력 쪽 원인). ⇒ **감시 표시(watch) 전부 + 나머지 중 |당일 등락| 상위** 만 싣는다.
+ */
+const BRIEFING_MOVER_LIMIT = 15;
+
 function buildWatchlistContext(watchlist) {
-  const lines = [];
+  const all = [];
   for (const group of watchlist.groups || []) {
-    if (!group.tickers || group.tickers.length === 0) continue;
-    lines.push(`■ ${group.name}`);
-    for (const ticker of group.tickers) {
-      lines.push(`  - ${formatQuote(ticker)}`);
-    }
+    for (const ticker of group.tickers || []) all.push({ ...ticker, groupName: group.name });
+  }
+  const watched = all.filter((t) => t.watch);
+  const movers = all
+    .filter((t) => !t.watch && Number.isFinite(t.quote?.changePct))
+    .sort((a, b) => Math.abs(b.quote.changePct) - Math.abs(a.quote.changePct))
+    .slice(0, BRIEFING_MOVER_LIMIT);
+
+  const lines = [];
+  if (watched.length) {
+    lines.push('■ 감시 종목(사용자 지정)');
+    for (const t of watched) lines.push(`  - ${formatQuote(t)} [${t.groupName}]`);
+  }
+  if (movers.length) {
+    lines.push(`■ 오늘 크게 움직인 종목(나머지 ${all.length - watched.length}개 중 상위 ${movers.length})`);
+    for (const t of movers) lines.push(`  - ${formatQuote(t)} [${t.groupName}]`);
+  }
+  // ⚠️ 뺀 것을 뺐다고 말한다 — 모델이 "이게 전부" 로 읽으면 테마 서술이 왜곡된다
+  if (all.length > watched.length + movers.length) {
+    lines.push(`■ (나머지 ${all.length - watched.length - movers.length}개 종목은 큰 변동이 없어 생략)`);
   }
   const fx = watchlist.fx?.USDKRW;
   if (fx && fx.rate != null) {
