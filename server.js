@@ -634,6 +634,38 @@ app.post('/api/orders/proposals/:id/execute', async (req, res) => {
   return res.status(r.ok ? 200 : 400).json(r);
 });
 
+// ── 예약(조건부) 주문 (2026-09-23) ─────────────────────────────
+app.get('/api/orders/conditional', async (req, res) => {
+  try {
+    const status = String(req.query.status || 'OPEN').toUpperCase() === 'CLOSED' ? 'CLOSED' : 'OPEN';
+    const r = await tossClient.listConditionalOrders({ status });
+    const items = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
+    return res.json({ status, items });
+  } catch (error) {
+    logError('conditional.list_failed', error, { kind: error.kind });
+    return res.status(502).json({ error: error.message, kind: error.kind || 'unknown' });
+  }
+});
+
+/**
+ * 예약 취소 — HITL 승인 없이 즉시 실행한다. 취소는 포지션을 여는 게 아니라 **예약을 없애는 것**이고
+ * 되돌릴 수 있다(다시 걸면 된다). 다만 감사에는 남는다.
+ * 🔴 명세: 정정·취소는 멱등키가 없다 ⇒ 타임아웃이면 **재시도하지 말고** 목록으로 확정해야 한다.
+ */
+app.post('/api/orders/conditional/:id/cancel', async (req, res) => {
+  try {
+    await tossClient.cancelConditionalOrder(req.params.id);
+    orderService.auditExternal('conditional_canceled', { conditionalOrderId: req.params.id, via: 'web' });
+    return res.json({ ok: true });
+  } catch (error) {
+    logError('conditional.cancel_failed', error, { kind: error.kind });
+    const note = error.kind === 'unknown' || error.kind === 'timeout'
+      ? '취소가 접수됐는지 알 수 없습니다 — 재시도하지 말고 목록을 새로고침해 확인하세요.'
+      : null;
+    return res.status(502).json({ ok: false, error: error.message, kind: error.kind || 'unknown', note });
+  }
+});
+
 // ── 대시보드 (한 화면에 필요한 것을 한 번에) ──────────────────
 app.get('/api/dashboard', async (req, res) => {
   if (!tossPortfolio.isEnabled()) {

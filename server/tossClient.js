@@ -695,15 +695,28 @@ async function modifyOrder(orderId, body, { accountSeq } = {}) {
   return apiPost(`/api/v1/orders/${encodeURIComponent(orderId)}/modify`, body, { accountSeq: await withAccount(accountSeq) });
 }
 
-/** 조건주문 생성(손절 등). `orderRules.buildStopLoss()` 가 본문을 만든다 */
-async function createConditionalOrder(body, { accountSeq } = {}) {
-  return apiPost('/api/v1/conditional-orders', body, { accountSeq: await withAccount(accountSeq) });
+/** 조건주문 생성(예약 매매·손절). `orderRules.buildConditionalSingle()`/`buildStopLoss()` 가 본문을 만든다 */
+async function createConditionalOrder(body, { accountSeq, deadlineAt = null } = {}) {
+  return apiPost('/api/v1/conditional-orders', body, { accountSeq: await withAccount(accountSeq), deadlineAt });
 }
 
 /** 조건주문 목록. ⚠️ `status` 가 **필수**다(OPEN|CLOSED) */
 async function listConditionalOrders({ status = 'OPEN', symbol, cursor, limit } = {}, { accountSeq } = {}) {
   const q = new URLSearchParams(Object.entries({ status, symbol, cursor, limit }).filter(([, v]) => v != null && v !== ''));
   return apiGet(`/api/v1/conditional-orders?${q}`, { accountSeq: await withAccount(accountSeq) });
+}
+
+/** 조건주문 상세 */
+async function getConditionalOrder(conditionalOrderId, { accountSeq } = {}) {
+  return apiGet(`/api/v1/conditional-orders/${encodeURIComponent(conditionalOrderId)}`, { accountSeq: await withAccount(accountSeq) });
+}
+
+/**
+ * 조건주문 수정. 🔴 명세: **전체 재설정**이다 — 유지할 조건도 함께 보내야 한다(부분 수정 아님).
+ * ⚠️ 정정·취소에는 멱등키가 없다(명세) ⇒ 자동 재시도 금지, 타임아웃이면 조회로 확정.
+ */
+async function modifyConditionalOrder(conditionalOrderId, body, { accountSeq } = {}) {
+  return apiPost(`/api/v1/conditional-orders/${encodeURIComponent(conditionalOrderId)}/modify`, body, { accountSeq: await withAccount(accountSeq) });
 }
 
 /** 조건주문 취소. ⚠️ 성공이 **204 No Content** 다(일반 주문 취소와 다르다) */
@@ -963,6 +976,8 @@ module.exports = {
   createConditionalOrder,
   listConditionalOrders,
   cancelConditionalOrder,
+  getConditionalOrder,
+  modifyConditionalOrder,
   getAccountSeq,
   getBuyingPower,
   getSellableQuantity,

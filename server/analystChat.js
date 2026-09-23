@@ -144,6 +144,33 @@ const TOOL_DECLARATIONS = [
     },
   },
   {
+    name: 'propose_conditional_order',
+    description:
+      '예약(조건부) 매매 제안을 등록한다 — "가격이 X에 도달하면 Y에 매도/매수" 형태.'
+      + ' 즉시 주문이 아니라 거래소가 감시가를 지켜보다 발동한다. 사람이 승인해야 예약이 등록된다.'
+      + ' 예: "100불 도달하면 100.5 지정가로 전량 매도" → triggerPrice 100, orderPrice 100.5, side SELL.'
+      + ' 값을 하나라도 모르면 지어내지 말고 사람에게 물어라(특히 expireDate — 사용자가 기간을 안 줬으면 물어라).',
+    parameters: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: '종목 코드 또는 티커' },
+        side: { type: 'string', description: 'BUY 또는 SELL' },
+        quantity: { type: 'number', description: '수량(주). 매도는 보유 수량 이내' },
+        triggerPrice: { type: 'number', description: '감시가 — 이 가격에 닿으면 주문이 나간다' },
+        orderPrice: { type: 'number', description: '주문가(지정가). 시장가면 생략' },
+        orderType: { type: 'string', description: 'LIMIT(기본) 또는 MARKET' },
+        expireDate: { type: 'string', description: '예약 만료일 YYYY-MM-DD — 사용자가 말한 기간. 없으면 묻는다' },
+        reason: { type: 'string', description: '왜 이 예약인지 한두 문장' },
+      },
+      required: ['symbol', 'side', 'quantity', 'triggerPrice', 'expireDate', 'reason'],
+    },
+  },
+  {
+    name: 'list_conditional_orders',
+    description: '등록된 예약(조건부) 주문 목록을 본다. "내 예약 주문 뭐 있어" 류 질문에 쓴다.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
     name: 'recall',
     description: '과거 대화에서 관련된 내용을 찾아온다. 사용자가 전에 한 말·판단을 확인할 때 쓴다.',
     parameters: {
@@ -270,6 +297,9 @@ function decidePrompt() {
     '    · 뉴스·최근 소식·전망 → web_search',
     '    · 예전에 한 얘기 → recall',
     '    · 매수/매도를 **하자고 정했을 때** → propose_order (주문이 아니라 제안 등록이다)',
+    '    · "X 도달하면/떨어지면 사줘·팔아줘" 같은 **조건이 붙은 매매** → propose_conditional_order',
+    '      (만료일을 사용자가 안 줬으면 도구를 부르지 말고 먼저 물어라)',
+    '    · "예약 주문 뭐 있어" → list_conditional_orders',
     '    · 기업의 질·밸류·점수 → rate_stock (10항목 100점 · 유형별 기준)',
     '- 🔴 잡담·인사·감사이거나 **이미 `[도구 결과]` 로 받은 것**이면 `tools` 를 **빈 배열**로 둡니다.',
   ].join('\n');
@@ -591,6 +621,54 @@ async function runTool(name, args = {}, ctx = {}) {
         proposalId: r.proposal.id,
         note: '상단 HITL 목록에 등록했습니다. **아직 주문이 아닙니다** — 사람이 승인해야 진행됩니다.',
       };
+    }
+    case 'propose_conditional_order': {
+      /**
+       * 🔴 예약도 **계좌로 먼저 막는다** — 즉시 주문과 같은 규율(문이 둘인데 하나만 막으면 안 막는 것).
+       *    예산 검사의 가격은 주문가(없으면 감시가) 기준 — 발동 시 그 가격 근처에서 체결된다.
+       */
+      const chk = await orderService.checkAccountLimits({
+        symbol: args.symbol,
+        side: String(args.side || '').toUpperCase(),
+        quantity: args.quantity,
+        price: args.orderPrice ?? args.triggerPrice,
+      });
+      if (!chk.ok) {
+        return {
+          ok: false, error: chk.error, kind: chk.kind,
+          note: chk.kind === 'unknown'
+            ? '계좌를 확인하지 못해 예약 제안을 만들지 않았다. 추측해서 다시 시도하지 말고 사용자에게 알려라.'
+            : '계좌 한도를 넘어 예약 제안을 만들지 않았다. 수량을 줄이거나 사용자에게 알려라.',
+        };
+      }
+      const r = orderService.propose(
+        {
+          symbol: args.symbol,
+          side: String(args.side || '').toUpperCase(),
+          type: 'LIMIT',
+          quantity: args.quantity,
+          reason: args.reason,
+          conditional: {
+            triggerPrice: args.triggerPrice,
+            orderPrice: args.orderPrice ?? null,
+            orderType: String(args.orderType || 'LIMIT').toUpperCase(),
+            expireDate: args.expireDate,
+          },
+        },
+        { source: 'chat' }
+      );
+      if (!r.ok) return { ok: false, error: r.error, missing: r.missing };
+      return {
+        ok: true,
+        proposalId: r.proposal.id,
+        note: '예약 제안을 등록했습니다. **사람이 승인해야 거래소에 예약이 걸립니다** — 승인 후에도 감시가 도달 전엔 체결되지 않습니다.',
+      };
+    }
+    case 'list_conditional_orders': {
+      const toss = require('./tossClient');
+      const r = await toss.listConditionalOrders({ status: 'OPEN' });
+      const rows = (Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : []).slice(0, 20);
+      return { count: rows.length, rows, note: rows.length ? null : '등록된 예약 주문이 없습니다.' };
     }
     case 'recall': {
       const hits = recall(String(args.query || ''));

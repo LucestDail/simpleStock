@@ -180,6 +180,55 @@ function idempotencyKeyFor(proposalId) {
  * ⚠️ OCO 는 둘 다 `SELL` 이고 `first 감시가 > 현재가 > second 감시가` 이며 `LIMIT` 만 된다.
  * ⚠️ `expireDate` 가 **필수**다 — 안 주면 거부된다.
  */
+/**
+ * 조건주문(SINGLE) 일반형 — 매수·매도 양방향 (2026-09-23).
+ *
+ * 사용자 예시: *"100불 도달하면 100불보다 비싸게 지정가로 QLD 전량 매도"*
+ *  ⇒ SINGLE + SELL + triggerPrice 100 + LIMIT orderPrice 100.5
+ *
+ * 🔴 명세 규칙 (틀리면 거부되거나 **뜻이 달라진다**):
+ *  - `expireDate` 필수 (만료일까지 미충족 시 자동 만료)
+ *  - `orderType` MARKET 이면 `orderPrice` 를 **보내면 안 된다** / LIMIT 이면 필수
+ *  - 수량·가격은 **문자열**(정밀도)
+ *  - OCO/OTO 는 LIMIT 전용 — 여기서는 SINGLE 만 만든다(둘은 필요해지면 따로)
+ * ⚠️ 방향 상식 검증은 하지 않는다(매도인데 감시가가 현재가보다 아래인 "손절" 도,
+ *    위인 "익절" 도 다 정당하다) — 현재가 대비 경고는 호출자(계좌 검증)가 붙인다.
+ */
+function buildConditionalSingle({ symbol, side, quantity, triggerPrice, orderPrice, orderType = 'LIMIT', expireDate, clientOrderId } = {}) {
+  const errors = [];
+  const s = String(side || '').toUpperCase();
+  const ot = String(orderType || 'LIMIT').toUpperCase();
+  if (!symbol) errors.push('symbol 이 없습니다.');
+  if (s !== 'BUY' && s !== 'SELL') errors.push('side 는 BUY/SELL 이어야 합니다.');
+  if (!(Number(quantity) > 0)) errors.push('quantity 가 필요합니다.');
+  if (!(Number(triggerPrice) > 0)) errors.push('triggerPrice(감시가) 가 필요합니다.');
+  if (ot !== 'LIMIT' && ot !== 'MARKET') errors.push('orderType 은 LIMIT/MARKET 이어야 합니다.');
+  if (ot === 'LIMIT' && !(Number(orderPrice) > 0)) errors.push('LIMIT 조건주문은 orderPrice(주문가)가 필요합니다.');
+  if (ot === 'MARKET' && orderPrice != null) errors.push('MARKET 조건주문에는 orderPrice 를 보내면 안 됩니다.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(expireDate || ''))) errors.push('expireDate(YYYY-MM-DD) 가 필요합니다(명세상 필수).');
+  if (isKr(symbol) && !Number.isInteger(Number(quantity))) errors.push('국내 주식은 소수점 수량을 쓸 수 없습니다.');
+  if (clientOrderId != null && !CLIENT_ORDER_ID_RE.test(String(clientOrderId))) {
+    errors.push('clientOrderId 는 영숫자·하이픈·밑줄 36자 이내여야 합니다.');
+  }
+  if (errors.length) return { ok: false, errors };
+  return {
+    ok: true,
+    body: {
+      symbol: String(symbol),
+      type: 'SINGLE',
+      orderType: ot,
+      quantity: String(quantity),
+      expireDate: String(expireDate),
+      first: {
+        orderSide: s,
+        triggerPrice: String(triggerPrice),
+        ...(ot === 'LIMIT' ? { orderPrice: String(orderPrice) } : {}),
+      },
+      ...(clientOrderId ? { clientOrderId: String(clientOrderId) } : {}),
+    },
+  };
+}
+
 function buildStopLoss({ symbol, quantity, triggerPrice, orderPrice, expireDate, clientOrderId } = {}) {
   const errors = [];
   if (!symbol) errors.push('symbol 이 없습니다.');
@@ -208,6 +257,7 @@ function buildStopLoss({ symbol, quantity, triggerPrice, orderPrice, expireDate,
 
 module.exports = {
   validateOrderRequest,
+  buildConditionalSingle,
   buildStopLoss,
   idempotencyKeyFor,
   krTickSize,

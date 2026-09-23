@@ -71,15 +71,23 @@ async function api(method, body) {
 
 /** 제안 하나를 **승인/거절 버튼과 함께** 보낸다 */
 async function sendProposal(p) {
+  const sideKo = p.side === 'BUY' ? '매수' : '매도';
+  /**
+   * 조건부(예약)와 즉시 주문은 **문구가 갈려야 한다** (2026-09-23) — 예약을 즉시 주문처럼
+   * 보여주면 사용자가 "지금 팔린다" 로 읽는다. 승인해도 **감시가 도달 전엔 돈이 안 움직인다.**
+   */
+  const c = p.conditional;
   const text = [
-    '🟡 매매 제안 (승인 필요)',
+    c ? '🟡 예약 주문 제안 (승인 필요 — 지금 체결되지 않습니다)' : '🟡 매매 제안 (승인 필요)',
     '',
-    `${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol}`,
-    `수량 ${p.quantity}주 · 지정가 ${Number(p.price).toLocaleString('ko-KR')}`,
-    `평가금액 ${Number(p.quantity * p.price).toLocaleString('ko-KR')}`,
+    `${sideKo} ${p.symbol}`,
+    c
+      ? `감시가 ${Number(c.triggerPrice).toLocaleString('ko-KR')} 도달 시 → ${c.orderType === 'MARKET' ? '시장가' : `지정가 ${Number(c.orderPrice).toLocaleString('ko-KR')}`} ${sideKo} ${p.quantity}주`
+      : `수량 ${p.quantity}주 · 지정가 ${Number(p.price).toLocaleString('ko-KR')}`,
+    c ? `예약 만료일 ${c.expireDate} (미도달 시 자동 소멸)` : `평가금액 ${Number(p.quantity * p.price).toLocaleString('ko-KR')}`,
     p.reason ? `\n${p.reason}` : '',
     '',
-    `⏳ ${new Date(p.expiresAt).toLocaleTimeString('ko-KR')} 까지`,
+    `⏳ 이 승인 요청은 ${new Date(p.expiresAt).toLocaleTimeString('ko-KR')} 까지`,
   ].filter(Boolean).join('\n');
 
   return telegram.send(text, {

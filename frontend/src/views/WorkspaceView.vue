@@ -373,6 +373,7 @@ async function sendChat() {
         // 🔴 채팅이 제안을 등록하면 **상단 HITL 목록**에 바로 뜨게 한다
         //    (사용자 지시: "상단 HITL 에 토픽으로 등록"). 새로고침을 사람이 하게 두지 않는다.
         if (data.name === 'propose_order' && data.ok) loadProposals();
+        if (data.name === 'propose_conditional_order' && data.ok) loadProposals();
         const t = reply.tools.find((x) => x.id === data.id);
         // ⚠️ 실패를 조용히 성공으로 만들지 않는다 — 화면에 그대로 남긴다
         if (t) { t.state = data.ok ? 'ok' : 'fail'; t.detail = data.ok ? data.preview : data.error; }
@@ -474,12 +475,50 @@ async function runAnalyst() {
     }
     report.value = await res.json();
     await loadProposals();
+    await loadConditionals();
     await loadActivity();
   } catch (e) {
     analystError.value = e.message || '분석 실패';
   } finally {
     analystLoading.value = false;
     stopStages();
+  }
+}
+
+/** 거래소에 걸린 예약(조건부) 주문 — 제안과 별개로, **이미 등록돼 감시 중**인 것들 */
+const conditionalOrders = ref([]);
+const conditionalError = ref('');
+
+async function loadConditionals() {
+  try {
+    const res = await apiFetch('/api/orders/conditional');
+    if (res.ok) {
+      const body = await res.json();
+      conditionalOrders.value = body.items || [];
+      conditionalError.value = '';
+    } else {
+      const body = await res.json().catch(() => ({}));
+      // ⚠️ 실패를 빈 목록으로 그리지 않는다 — "예약 없음" 과 "못 읽음" 은 다르다
+      conditionalError.value = body.error || `조회 실패(${res.status})`;
+    }
+  } catch (e) {
+    conditionalError.value = e?.message || '조회 실패';
+  }
+}
+
+async function cancelConditional(o) {
+  const id = o.conditionalOrderId || o.id;
+  if (!id) return;
+  if (!window.confirm(`${o.symbol || ''} 예약을 취소할까요? (취소 후 다시 걸 수 있습니다)`)) return;
+  try {
+    const res = await apiFetch(`/api/orders/conditional/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      // 🔴 타임아웃이면 "재시도 금지·목록으로 확정" — 서버가 준 note 를 그대로 보인다
+      window.alert(body.note || body.error || '취소에 실패했습니다.');
+    }
+  } finally {
+    await loadConditionals();
   }
 }
 
@@ -833,6 +872,7 @@ onMounted(async () => {
   await loadPortfolio();
   await loadDashboard();
   await loadProposals();
+  await loadConditionals();
   restartDashTimer();
   clockTimer = setInterval(() => {
     clock.value = formatMarketClock();
@@ -1153,11 +1193,18 @@ onUnmounted(() => {
               <h3 class="panel__h">매매 제안 <small>승인해야 진행됩니다</small></h3>
               <article v-for="p in proposals" :key="p.id" class="prop" :class="`prop--${p.side.toLowerCase()}`">
                 <header class="prop__head">
-                  <span class="prop__side">{{ p.side === 'BUY' ? '매수' : '매도' }}</span>
+                  <span class="prop__side">{{ p.conditional ? '예약 ' : '' }}{{ p.side === 'BUY' ? '매수' : '매도' }}</span>
                   <span class="prop__sym">{{ p.symbol }}</span>
                   <span class="prop__status">{{ statusLabel(p) }}</span>
                 </header>
-                <dl class="prop__grid">
+                <!-- 예약(조건부)은 즉시 주문과 다르게 그린다 — 승인해도 감시가 도달 전엔 체결되지 않는다 -->
+                <dl v-if="p.conditional" class="prop__grid">
+                  <div><dt>감시가</dt><dd class="mono-num">{{ p.conditional.triggerPrice }}</dd></div>
+                  <div><dt>{{ p.conditional.orderType === 'MARKET' ? '시장가' : '주문가' }}</dt><dd class="mono-num">{{ p.conditional.orderType === 'MARKET' ? '—' : p.conditional.orderPrice }}</dd></div>
+                  <div><dt>수량</dt><dd class="mono-num">{{ p.quantity }}</dd></div>
+                  <div><dt>예약 만료</dt><dd class="mono-num">{{ p.conditional.expireDate }}</dd></div>
+                </dl>
+                <dl v-else class="prop__grid">
                   <div><dt>수량</dt><dd class="mono-num">{{ p.quantity }}</dd></div>
                   <div><dt>지정가</dt><dd class="mono-num">{{ p.price }}</dd></div>
                   <div><dt>평가금액</dt><dd class="mono-num">{{ (p.quantity * p.price).toLocaleString() }}</dd></div>
@@ -1179,6 +1226,28 @@ onUnmounted(() => {
                   >{{ ordersMode === 'live' ? '🔴 실주문 전송' : '실행(모의)' }}</button>
                 </div>
                 <p v-else-if="p.result" class="prop__note">{{ p.result.note }}</p>
+              </article>
+            </div>
+
+            <!-- 거래소에 걸려 감시 중인 예약(조건부) 주문 — 제안과 다른 층이다 -->
+            <div v-if="conditionalOrders.length || conditionalError" class="props">
+              <h3 class="panel__h">예약 주문 <small>거래소가 감시가 도달을 지켜보는 중</small></h3>
+              <p v-if="conditionalError" class="prop__rej">⚠️ {{ conditionalError }}</p>
+              <article v-for="o in conditionalOrders" :key="o.conditionalOrderId || o.id" class="prop">
+                <header class="prop__head">
+                  <span class="prop__side">예약 {{ (o.first?.orderSide || o.orderSide) === 'BUY' ? '매수' : '매도' }}</span>
+                  <span class="prop__sym">{{ o.symbol }}</span>
+                  <span class="prop__status">{{ o.status || 'OPEN' }}</span>
+                </header>
+                <dl class="prop__grid">
+                  <div><dt>감시가</dt><dd class="mono-num">{{ o.first?.triggerPrice ?? '—' }}</dd></div>
+                  <div><dt>주문가</dt><dd class="mono-num">{{ o.first?.orderPrice ?? '시장가' }}</dd></div>
+                  <div><dt>수량</dt><dd class="mono-num">{{ o.quantity }}</dd></div>
+                  <div><dt>만료</dt><dd class="mono-num">{{ o.expireDate ?? '—' }}</dd></div>
+                </dl>
+                <div class="prop__act">
+                  <button class="btn btn--sm" @click="cancelConditional(o)">예약 취소</button>
+                </div>
               </article>
             </div>
 

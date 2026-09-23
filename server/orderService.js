@@ -320,6 +320,20 @@ function propose(input = {}, { source = 'manual', notify = true } = {}) {
   const quantity = num(input.quantity);
   const price = type === 'MARKET' ? null : num(input.price);
 
+  /**
+   * 🔴 조건부(예약) 제안 (2026-09-23) — 사용자: *"100불 도달하면 100불보다 비싸게
+   *    지정가로 QLD 전량 매도"*. 즉시 주문이 아니라 **거래소가 감시가를 지켜보다 발동**한다.
+   *    승인·집행·감사는 즉시 주문과 **같은 HITL 흐름**을 탄다(문이 하나 더 생기는 게 아니다).
+   */
+  const conditional = input.conditional
+    ? {
+        triggerPrice: num(input.conditional.triggerPrice),
+        orderPrice: input.conditional.orderPrice != null ? num(input.conditional.orderPrice) : null,
+        orderType: String(input.conditional.orderType || 'LIMIT').trim().toUpperCase(),
+        expireDate: String(input.conditional.expireDate || '').trim(),
+      }
+    : null;
+
   const missing = [];
   if (!symbol) missing.push('symbol');
   if (!SIDES.has(side)) missing.push('side(BUY|SELL)');
@@ -327,7 +341,16 @@ function propose(input = {}, { source = 'manual', notify = true } = {}) {
   if (!(quantity > 0)) missing.push('quantity>0');
   // ⚠️ 지정가인데 가격이 없으면 **거부한다.** 사람이 승인 화면에서 채우게 하면
   //    그 화면이 곧 주문 화면이 되고, "승인" 의 의미가 사라진다
-  if (type === 'LIMIT' && !(price > 0)) missing.push('price>0 (지정가)');
+  if (!conditional && type === 'LIMIT' && !(price > 0)) missing.push('price>0 (지정가)');
+  if (conditional) {
+    // 보내기 전 모양 검증을 **제안 시점에** 한다 — 승인 눌렀는데 형식으로 막히면 신뢰가 깎인다
+    const pre = require('./orderRules').buildConditionalSingle({
+      symbol, side, quantity,
+      triggerPrice: conditional.triggerPrice, orderPrice: conditional.orderPrice,
+      orderType: conditional.orderType, expireDate: conditional.expireDate,
+    });
+    if (!pre.ok) missing.push(...pre.errors);
+  }
 
   if (missing.length) {
     audit('proposal_rejected', { symbol, side, type, missing, source });
@@ -348,6 +371,8 @@ function propose(input = {}, { source = 'manual', notify = true } = {}) {
     type,
     quantity,
     price,
+    // 조건부(예약)면 감시가·주문가·만료일이 여기 산다 — null 이면 즉시 주문 제안
+    conditional,
     reason: String(input.reason || '').slice(0, 500),
     source,
     createdAt: new Date(now).toISOString(),
@@ -359,7 +384,10 @@ function propose(input = {}, { source = 'manual', notify = true } = {}) {
   };
   proposals.set(proposal.id, proposal);
   persist();
-  audit('proposed', { id: proposal.id, symbol, side, type, quantity, price, source });
+  audit('proposed', {
+    id: proposal.id, symbol, side, type, quantity, price, source,
+    ...(conditional ? { conditional } : {}),
+  });
   /**
    * 🔴 제안이 생기면 **밖으로 알린다**(텔레그램 승인 버튼).
    * ⚠️ 여기서 `require` 를 위로 올리면 **순환 참조**가 된다
@@ -473,7 +501,15 @@ async function execute(id) {
    */
   const rules = require('./orderRules');
   const key = rules.idempotencyKeyFor(p.id);
-  const built = rules.validateOrderRequest({
+  // 조건부(예약)와 즉시 주문은 **모양 검증과 전송 API 만 다르고** 나머지 안전망은 같다
+  const built = p.conditional
+    ? rules.buildConditionalSingle({
+        symbol: p.symbol, side: p.side, quantity: p.quantity,
+        triggerPrice: p.conditional.triggerPrice, orderPrice: p.conditional.orderPrice,
+        orderType: p.conditional.orderType, expireDate: p.conditional.expireDate,
+        clientOrderId: key,
+      })
+    : rules.validateOrderRequest({
     symbol: p.symbol, side: p.side, orderType: p.type,
     quantity: p.quantity, price: p.type === 'LIMIT' ? p.price : undefined,
     clientOrderId: key,
@@ -519,7 +555,9 @@ async function execute(id) {
      *    안 넘기면 *"제안은 EXPIRED 인데 주문은 나간"* 상태가 생긴다 — 상태가 갈리면
      *    사람이 무엇을 취소해야 하는지 모른다.
      */
-    created = await toss.createOrder(built.body, { deadlineAt: Date.parse(p.expiresAt) || null });
+    created = p.conditional
+      ? await toss.createConditionalOrder(built.body, { deadlineAt: Date.parse(p.expiresAt) || null })
+      : await toss.createOrder(built.body, { deadlineAt: Date.parse(p.expiresAt) || null });
   } catch (e) {
     if (e.kind === 'unknown') {
       /**
@@ -564,6 +602,24 @@ async function execute(id) {
    * 🔴 **응답에 `orderId` 만 온다** — 체결됐는지는 **모른다.**
    *    여기서 "성공" 이라고 적으면 사용자는 체결된 줄 안다 ⇒ **SENT** 로 두고 상태를 따로 확인한다.
    */
+  if (p.conditional) {
+    /**
+     * 조건주문은 **등록 = 감시 시작**이다(체결이 아니다). 거래소가 감시가 도달 시 주문을 낸다.
+     * ⚠️ 만료일까지 미도달이면 자동 소멸 — 그것도 정상 결말이다(사용자에게 만료일을 보인다).
+     */
+    const conditionalOrderId = created?.conditionalOrderId || created?.id || null;
+    p.status = 'SENT';
+    p.conditionalOrderId = conditionalOrderId;
+    p.executedAt = new Date().toISOString();
+    p.result = {
+      mode: 'live-conditional', conditionalOrderId, clientOrderId: key,
+      note: `예약이 등록됐습니다. 감시가 ${p.conditional.triggerPrice} 도달 시 ${p.conditional.orderType === 'MARKET' ? '시장가' : `지정가 ${p.conditional.orderPrice}`} ${p.side === 'SELL' ? '매도' : '매수'} 주문이 나갑니다(만료 ${p.conditional.expireDate}).`,
+    };
+    persist();
+    audit('conditional_sent', { id, conditionalOrderId, clientOrderId: key, conditional: p.conditional });
+    return { ok: true, proposal: p, conditionalOrderId };
+  }
+
   const orderId = created?.orderId || created?.id || null;
   p.status = 'SENT';
   p.orderId = orderId;
@@ -688,6 +744,8 @@ function reconcile(proposalId, { status, orderId, observedAt, why } = {}) {
 
 module.exports = {
   propose,
+  /** 제안 밖에서 일어난 돈 관련 사건(예: 예약 취소)을 같은 감사 파일에 남긴다 */
+  auditExternal: (event, payload) => audit(event, payload),
   cancelLiveOrder,
   reconcile,
   checkAccountLimits,

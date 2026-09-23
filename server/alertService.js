@@ -645,7 +645,10 @@ async function onProposal(p) {
     // 🔴 메시지 id 를 제안에 붙인다 — **이게 없으면 나중에 버튼을 못 지운다**
     if (r?.messageId != null) require('./orderService').attachNotice(p.id, { messageId: r.messageId });
     logInfo('alerts.proposal_sent', { id: p.id, symbol: p.symbol, sent: Boolean(r.sent), messageId: r?.messageId ?? null });
-    activity.record('proposal', `${p.side === 'BUY' ? '매수' : '매도'} 제안 ${p.symbol} ${p.quantity}주 @ ${p.price}`,
+    activity.record('proposal',
+      p.conditional
+        ? `예약 ${p.side === 'BUY' ? '매수' : '매도'} 제안 ${p.symbol} ${p.quantity}주 · 감시가 ${p.conditional.triggerPrice}`
+        : `${p.side === 'BUY' ? '매수' : '매도'} 제안 ${p.symbol} ${p.quantity}주 @ ${p.price}`,
       { proposalId: p.id, symbol: p.symbol, side: p.side, telegram: Boolean(r.sent) });
     return r;
   } catch (e) {
