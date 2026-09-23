@@ -455,16 +455,18 @@ async function buildGenerateConfig({ schema = null, useGoogleSearch = false, str
   }
 
   /**
-   * 🔴 구조화 출력은 thinking 을 최소로 (2026-09-23) — 종전엔 thinkingConfig 를 안 보내
-   *    모델 기본(dynamic thinking ON)이 됐고, Gemini 는 **thinking 을 maxOutputTokens 에
-   *    포함해서 센다.** prompt 553짜리 fund_rating 이 출력 2,592 에 닿는 미스터리와
-   *    프롬프트 자수 지시 3전 3패(답이 아니라 생각이 길면 자수 지시는 무력)의 유력 원인.
+   * 🔴 구조화 출력은 thinking 을 **끈다** (2026-09-23 실측 확정) — 종전엔 안 보내서
+   *    모델 기본(reasoning ON)이 됐고, 출력 예산 2,400 을 **생각이 전부** 먹어 본문이
+   *    0토큰이었다(candidates == thoughts == 2400). 프롬프트 자수 지시가 3전 3패한
+   *    이유다 — 자수 지시는 답을 줄이지 생각을 못 줄인다.
+   * 🔴 **모델 이름으로 분기하지 않는다** — 앱이 부르는 이름(gemini-3.5-flash)과 실제
+   *    모델(deepseek-v4-flash)이 다르다(게이트웨이가 라우팅). isGemini3Model 분기로
+   *    thinkingLevel:'low' 를 보냈더니 "적게 생각"일 뿐 안 꺼졌다(실측: low → thoughts 413 /
+   *    budget 0 → thoughts 0, 8.8초 → 2.3초). 진짜 Gemini 직결 경로가 생기면 그때
+   *    servedBy 근거로 예외를 두고 이유를 적을 것.
    * ⚠️ 게이트웨이가 이 키를 무시하면 무해하게 없던 일이 된다.
    */
-  const runtimeForSchema = readAiRuntime();
-  config.thinkingConfig = isGemini3Model(runtimeForSchema.model)
-    ? { thinkingLevel: 'low' }
-    : { thinkingBudget: 0 };
+  config.thinkingConfig = { thinkingBudget: 0 };
 
   const { Type } = await getGoogleGenAiModule();
   config.responseMimeType = 'application/json';

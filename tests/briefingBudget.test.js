@@ -55,6 +55,15 @@ test('캡에 잘린 답은 실패로 승격된다 — 그리고 그 에러는 �
   assert.doesNotMatch(msgMatch[0], /(timeout|timed out|network|unavailable|overloaded)/i);
 });
 
+test('구조화 출력은 thinking 을 끈다 — 그리고 모델 이름으로 분기하지 않는다', () => {
+  // 🔴 실측(09-23): 출력 예산 2,400 을 생각이 전부 먹어 본문 0. budget 0 만 진짜 끈다
+  //    (level 'low' 는 thoughts 413 이 남았다). 이름 분기는 게이트웨이 라우팅 때문에 거짓 전제다.
+  const m = aiSrc.match(/config\.thinkingConfig = ([^;]+);/);
+  assert.ok(m, 'structured 경로의 thinkingConfig 설정을 찾지 못했다');
+  assert.match(m[1], /thinkingBudget:\s*0/);
+  assert.doesNotMatch(m[1], /isGemini3Model|thinkingLevel/);
+});
+
 test('스트림 경로(둘 다)에도 캡이 있다 — 캡 밖 경로 하나가 output 20,634토큰을 태웠다', () => {
   const chatSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystChat.js'), 'utf8');
   assert.match(aiSrc, /streamWithThoughts: true, maxOutputTokens: 4096/);
