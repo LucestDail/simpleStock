@@ -166,6 +166,9 @@ const SYSTEM_PROMPT = [
   '4. **뭉뚱그리지 않습니다.** "관망 필요", "시장 상황에 따라" 같은 말은 답이 아닙니다.',
   '   판단이 안 서면 stance=HOLD 에 confidence=LOW 로 **그렇게 말합니다.**',
   '5. 감정적 표현·과장을 쓰지 않습니다. 한국어로 씁니다.',
+  // 🔴 12:15 실검수: 우리 데이터에 없는 "달러인덱스" 가 marketView 에 등장했다(출처 불투명)
+  '6. 웹검색에서 온 사실은 **"(검색)"** 을 붙여 구분합니다. 검색 결과에도 없는 지표(달러인덱스 등)는',
+  '   언급하지 않습니다 — 어디서도 받지 않은 값은 존재하지 않는 값입니다.',
   '',
   '## proposals (매매 제안)',
   '- **확신이 있을 때만** 냅니다. 없으면 빈 배열이 정답입니다.',
@@ -862,8 +865,13 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
          */
         // `otherCorporation`(기타법인)도 싣는다 — pm2 실응답 확인(2026-09-22). 국내 수급에서
         // 무시 못 할 주체이고, 파싱 구조가 같아 비용이 없다.
+        /**
+         * 🔴 방향 낱말까지 코드가 붙인다 (2026-09-23) — 부호(+/-)만 실었더니 12:15 브리핑이
+         *    개인 순매도를 "개인의 순매수" 로 서술했다(본문 검수에서 발견). 기호 해석을
+         *    모델에 남기면 방향이 뒤집힌다 — 산수도 방향도 코드가 말한다.
+         */
         const parts = [['개인', 'individual'], ['외국인', 'foreigner'], ['기관', 'institution'], ['기타법인', 'otherCorporation']]
-          .map(([ko, k]) => { const n = net(k); return n == null ? null : `${ko} ${n > 0 ? '+' : ''}${n}억`; })
+          .map(([ko, k]) => { const n = net(k); return n == null ? null : `${ko} ${n >= 0 ? '순매수' : '순매도'} ${n > 0 ? '+' : ''}${n}억`; })
           .filter(Boolean);
         if (parts.length) lines.push(`- ${idx} ${String(r?.date || r?.baseDate || '').slice(5)}: ${parts.join(' · ')}`);
       }
