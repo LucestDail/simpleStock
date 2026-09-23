@@ -406,6 +406,25 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
   const failed = [];
 
   /**
+   * 🔴 시장 국면 데몬 (2026-09-23 사용자 지시) — 판정은 산수, **전이만** 알린다(엣지).
+   *    실패해도 틱은 계속 돈다(국면은 곁가지가 아니라 축이지만, 다른 알림을 볼모로 잡지 않는다).
+   */
+  try {
+    const regime = require('./regimeService');
+    const { transitions, scenarios } = await regime.refresh();
+    if (transitions.length && willSend) {
+      const scLine = scenarios.length ? `\n발동 매뉴얼: ${scenarios.map((s) => s.name).join(' · ')}` : '';
+      await telegram.send(`📐 시장 국면 전이\n${transitions.join('\n')}${scLine}`, { reason: 'alert:regime' });
+      out.push({ rule: 'regime', transitions });
+    } else if (transitions.length) {
+      suppressed.push({ rule: 'regime', why: dryRun ? 'dryRun' : 'disabled' });
+    }
+  } catch (e) {
+    failed.push({ rule: 'regime', message: e.message });
+    logWarn('alerts.regime_failed', { message: e.message });
+  }
+
+  /**
    * 🔴 보유는 **한 번만** 받아 규칙들이 나눠 쓴다.
    *    종전에는 `rulePortfolio` 안에서 받았는데, 목표선·폐장 요약이 생기며 **세 번 부를 뻔했다**
    *    (토스 한도 5/s 를 그냥 태우는 짓이다).

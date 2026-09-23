@@ -911,24 +911,41 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
 
   // ── ② 사람에게 하는 답: **여기만 스트리밍** ──────────────────
   //    🔴 사용자 요구가 이것이다 — 이 구간이 REST 로 바뀌면 요구사항 위반이다
-  const stream = await ai.models.generateContentStream({ model: runtime.model, contents, config });
-  for await (const chunk of stream) {
-    for (const part of partsOf(chunk)) {
-      if (typeof part.text !== 'string' || !part.text) continue;
-      if (part.thought) {
-        // 사고 과정은 **답과 섞지 않는다** — 화면이 따로 접어 둘 수 있어야 한다
-        emit('thinking_delta', { text: part.text });
-      } else {
-        answer += part.text;
-        emit('text_delta', { text: part.text });
+  /**
+   * 🔴 "확인하겠습니다" 로 끝나는 턴 게이트 (2026-09-23 실측: 도구 5회 돌고 최종 발화가
+   *    44자 의지 표명 한 문장 — 답이 아니다). 최종 발화가 짧고 미완 선언이면 **딱 한 번**
+   *    "지금 가진 결과로 완결하라" 를 붙여 다시 쓴다(재도구 없음 — 루프·비용 통제).
+   */
+  let retriedFinal = false;
+  for (let pass = 1; pass <= 2; pass += 1) {
+    const stream = await ai.models.generateContentStream({ model: runtime.model, contents, config });
+    for await (const chunk of stream) {
+      for (const part of partsOf(chunk)) {
+        if (typeof part.text !== 'string' || !part.text) continue;
+        if (part.thought) {
+          // 사고 과정은 **답과 섞지 않는다** — 화면이 따로 접어 둘 수 있어야 한다
+          emit('thinking_delta', { text: part.text });
+        } else {
+          answer += part.text;
+          emit('text_delta', { text: part.text });
+        }
       }
     }
+    const stub = answer.trim().length < 200 && /(하겠습니다|해보겠습니다|확인해\s*보겠|드리겠습니다)\s*\.?\s*$/.test(answer.trim());
+    if (!stub || pass === 2) break;
+    retriedFinal = true;
+    logWarn('chat.final_stub_retry', { turnId, chars: answer.trim().length });
+    emit('notice', { text: '답이 미완으로 끝나 한 번 더 완결을 요청합니다.' });
+    contents.push({ role: 'model', parts: [{ text: answer }] });
+    contents.push({ role: 'user', parts: [{ text: '[시스템] 방금 답은 "하겠다" 로 끝났고 내용이 없다. **추가 확인 선언 금지** — 지금까지 받은 [도구 결과] 만으로 완결된 답을 써라.' }] });
+    answer = '';
   }
 
   appendHistory({ at: new Date().toISOString(), turnId, role: 'assistant', text: answer, toolCalls, rounds, tools: toolLog });
   logInfo('chat.turn', {
     turnId, rounds, toolCalls, chars: answer.length, recalled: recalled.length,
     toolFailed: toolLog.filter((t) => !t.ok).length,
+    retriedFinal,
     // ★ 도구가 **실제로 불렸다는 증거**를 지표에 함께 — 0이면 결과가 스스로 알려준다
     decideFailed: decideFailed || null,
     durationMs: Date.now() - startedAt,

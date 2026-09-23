@@ -34,6 +34,7 @@ const refreshing = ref(false);
 
 
 let clockTimer = null;
+let regimeTimer = null;
 let pollTimer = null;
 let es = null;
 
@@ -485,6 +486,32 @@ async function runAnalyst() {
   }
 }
 
+/** 시장 국면(코드 판정) — 데몬이 5분마다 갱신한다. 화면은 읽기만 */
+const regime = ref(null);
+const regimeScenarios = ref([]);
+const TREND_KO = { up: '상승', side: '횡보', down: '하락' };
+const regimeLabel = computed(() => {
+  const s = regime.value;
+  if (!s) return '';
+  const parts = [];
+  if (s.us?.trend) parts.push(`US ${TREND_KO[s.us.trend]}`);
+  if (s.kr?.trend) parts.push(`KR ${TREND_KO[s.kr.trend]}`);
+  if (s.vix?.value != null) parts.push(`VIX ${s.vix.value}`);
+  if (s.kr?.shock || s.us?.shock) parts.push('🔴급락');
+  return parts.join(' · ') || '판정 대기';
+});
+
+async function loadRegime() {
+  try {
+    const res = await apiFetch('/api/regime');
+    if (res.ok) {
+      const body = await res.json();
+      regime.value = body.state;
+      regimeScenarios.value = body.scenarios || [];
+    }
+  } catch { /* 국면 칩은 곁가지 — 실패해도 화면은 산다 */ }
+}
+
 /** 거래소에 걸린 예약(조건부) 주문 — 제안과 별개로, **이미 등록돼 감시 중**인 것들 */
 const conditionalOrders = ref([]);
 const conditionalError = ref('');
@@ -873,6 +900,8 @@ onMounted(async () => {
   await loadDashboard();
   await loadProposals();
   await loadConditionals();
+  await loadRegime();
+  regimeTimer = setInterval(loadRegime, 5 * 60 * 1000);
   restartDashTimer();
   clockTimer = setInterval(() => {
     clock.value = formatMarketClock();
@@ -886,6 +915,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (tapeTimer) clearInterval(tapeTimer);
+  if (regimeTimer) clearInterval(regimeTimer);
   if (activityTimer) clearInterval(activityTimer);
   if (clockTimer) clearInterval(clockTimer);
   if (pollTimer) clearInterval(pollTimer);
@@ -921,6 +951,12 @@ onUnmounted(() => {
         <span class="clockchip__zone">ET</span>
         <span class="clockchip__time mono-num">{{ clock.us.time }}</span>
         <span class="dot" :class="`dot--${sessions?.us?.state || 'closed'}`" aria-hidden="true"></span>
+      </div>
+
+      <!-- 시장 국면 (코드 판정) — 데몬이 5분마다 갱신, 전이는 폰 알림 -->
+      <div v-if="regime" class="clockchip" :title="regimeScenarios.map(s => s.name).join(' · ') || '발동 매뉴얼 없음'">
+        <span class="clockchip__zone">국면</span>
+        <span class="clockchip__time">{{ regimeLabel }}</span>
       </div>
 
       <div class="tape" :class="{ 'tape--stale': tape.stale }">

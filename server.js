@@ -634,6 +634,23 @@ app.post('/api/orders/proposals/:id/execute', async (req, res) => {
   return res.status(r.ok ? 200 : 400).json(r);
 });
 
+// ── 시장 국면 (2026-09-23) — 판정은 코드, 화면은 읽기만 ─────────
+app.get('/api/regime', (req, res) => {
+  const regime = require('./server/regimeService');
+  const state = regime.getState();
+  return res.json({
+    state,
+    scenarios: state ? regime.matchScenarios(state, regime.readPlaybook()).map((s) => ({ id: s.id, name: s.name })) : [],
+  });
+});
+
+/** 수동 국면(지정학 등) — 코드가 판정 못 하는 축은 사람이 켠다 */
+app.post('/api/regime/manual', (req, res) => {
+  if (!Array.isArray(req.body?.tags)) return res.status(400).json({ error: '`tags` 는 문자열 배열이어야 합니다.' });
+  const regime = require('./server/regimeService');
+  return res.json({ manual: regime.setManual(req.body.tags) });
+});
+
 // ── 예약(조건부) 주문 (2026-09-23) ─────────────────────────────
 app.get('/api/orders/conditional', async (req, res) => {
   try {

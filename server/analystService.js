@@ -145,11 +145,11 @@ const SYSTEM_PROMPT = [
    *    자연 출력(6,905~9,762)이 예산(2,592)의 3배라 항목 수가 아니라 길이를 직접 묶어야 한다.
    */
   /**
-   * 🔴 국면 선언 (2026-09-23, PLAN §17.3) — 데이터는 이미 프롬프트에 있다(지수 20/60선·변동성).
-   *    국면 없이 종목만 보면 하락장에서 매수 제안이 나온다. ⚠️ 두 줄로 유지 — 길이 = 시간.
+   * 🔴 국면은 **코드가 판정**해 프롬프트에 싣는다 (2026-09-23, regimeService) —
+   *    모델이 스스로 판정하게 하면 회차마다 흔들린다. ⚠️ 두 줄로 유지 — 길이 = 시간.
    */
-  '먼저 시장 국면을 한 단어로 선언하라(상승추세/횡보/하락추세/급락 — 지수 20·60일선 기준).',
-  '국면 성향을 지켜라: 하락추세면 신규 매수 제안 금지 · 횡보면 레버리지 축소 우선 · 지수 -3% 급락 당일이면 제안 자체를 유보한다.',
+  '"## 시장 국면" 절의 판정을 그대로 쓰라 — 다시 판정하지 마라.',
+  '"## 발동된 매뉴얼" 이 있으면 그 스텝 안에서만 제안하고, 티커는 "## 도구상자" 안에서만 고른다.',
   '',
   '⚠️ 길이 규칙 — 어기면 답이 잘려 **통째로 버려집니다**:',
   '- marketView·momentumRead: 각 2문장 이내',
@@ -805,27 +805,19 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    *    그래서 프롬프트에서도 **위쪽**에 놓고, 모델에게 *"매수 제안을 내지 마라"* 를 명시한다.
    */
   /**
-   * 🔴 공포지수 VIX (2026-09-23 사용자 지시) — 국면 판단의 넷째 축.
-   *    사용자 규칙: 20 넘으면 매수 진입 시작 · 25/30/35 에서 단계적으로 적극 투입.
-   *    ⚠️ 이 규칙은 §17.3 "급락 당일 제안 유보" 의 **명시적 예외**다(사용자가 정했다) —
-   *    공포 구간의 분할 매수 제안은 허용된다. 승인은 여전히 사람(HITL 불변).
+   * 🔴 시장 국면 + 발동 매뉴얼 + 도구상자 (2026-09-23 사용자 지시) — **코드 판정**을 싣는다.
+   *    VIX 사용자 규칙(20/25/30/35)·급락·추세가 전부 regimeService 한 곳에서 판정되고
+   *    (같은 입력 = 같은 판정), playbook.json 의 발동 절과 etf-catalog 의 관련 카테고리만
+   *    함께 실린다. 모델은 판정하지 않는다 — 그 안에서 서술·선정만 한다.
    */
-  let vix = null;
   try {
-    vix = await require('./marketDataService').getVix();
-  } catch { /* getVix 가 자체적으로 null 을 준다 */ }
-  if (vix && Number.isFinite(Number(vix.price))) {
-    const v = Number(vix.price);
-    const band = v >= 35 ? '극단 공포(35+) — 최대 단계 분할 매수 구간'
-      : v >= 30 ? '고공포(30+) — 3단계 분할 매수 구간'
-      : v >= 25 ? '공포 확대(25+) — 2단계 분할 매수 구간'
-      : v >= 20 ? '공포 진입(20+) — 분할 매수 시작 구간'
-      : '평온(20 미만) — VIX 매수 신호 없음';
-    lines.push('', '## 공포지수 VIX (야후 ^VIX)');
-    lines.push(`- 현재 ${v}${vix.changePct != null ? ` (${vix.changePct > 0 ? '+' : ''}${vix.changePct}%)` : ''} → **${band}**`);
-    lines.push('- 사용자 규칙: VIX 20+ 매수 진입 시작 · 25/30/35 단계 확대. 이 구간에선 급락 유보 규칙보다 이 규칙이 우선한다. 매수 제안 시 현금 여력·17.1 배분 안에서.');
-  } else {
-    lines.push('', '## 공포지수 VIX: 확인 못 함 — VIX 기반 판단은 하지 마라(낮다고 가정 금지).');
+    const regime = require('./regimeService');
+    const { state, scenarios } = await regime.refresh();
+    const sec = regime.promptSection(state, scenarios);
+    if (sec) lines.push('', sec);
+  } catch (e) {
+    logWarn('analyst.regime_failed', { message: e.message });
+    lines.push('', '## 시장 국면: 판정 실패 — 국면 기반 판단은 하지 마라(추측 금지).');
   }
 
   const nowKeys = Object.keys(indexNow);
