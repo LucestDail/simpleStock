@@ -803,6 +803,12 @@ async function generateContent({
         promptTokens: usageNow.promptTokens,
         candidatesTokens: usageNow.candidatesTokens,
         thoughtsTokens: usageNow.thoughtsTokens,
+        /**
+         * 🔴 실제로 답한 모델 (2026-09-23) — 요청 모델명(gemini-3.5-flash)과 실제 서빙
+         *    모델(deepseek-v4-flash)이 **다르다**(게이트웨이 라우팅). 이걸 안 찍어서
+         *    "gemini 의 thinking 을 끄자" 며 대상이 틀린 처방을 반나절 논했다.
+         */
+        servedBy: servedBy ? `${servedBy.provider || ''}/${servedBy.model || ''}` : null,
       });
 
       await trackAiUsage(response, logLabel);
