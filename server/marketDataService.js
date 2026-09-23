@@ -311,6 +311,24 @@ function getMarketStateFromTimestamp(timestampSeconds) {
   return 'closed';
 }
 
+/**
+ * 🔴 공포지수 VIX (2026-09-23 사용자 지시) — *"20 넘으면 매수 진입 시작, 25/30/35 적극 투입"*.
+ *    토스 카탈로그에 없어(실측 400) 야후 ^VIX 를 쓴다. 5분 캐시 — 지수라 초단위로 안 변한다.
+ *    ⚠️ 실패는 null — "확인 못 함" 과 "낮음" 은 다르다(분석이 빈 값으로 안심하면 안 된다).
+ */
+let vixCache = null; // { at, quote }
+async function getVix() {
+  if (vixCache && Date.now() - vixCache.at < 5 * 60 * 1000) return vixCache.quote;
+  try {
+    const q = await fetchYahooChartQuote('^VIX');
+    vixCache = { at: Date.now(), quote: q };
+    return q;
+  } catch (e) {
+    logWarn('market.vix_failed', { message: e.message });
+    return null;
+  }
+}
+
 async function fetchYahooChartQuote(symbol) {
   const data = await fetchJson(
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d&includePrePost=true`
@@ -1106,6 +1124,7 @@ function getMarketSnapshot() {
 
 module.exports = {
   MARKET_EVENT_TYPES,
+  getVix,
   HOLDING_MARKET_FIELDS,
   getMarketProviderConfig,
   getMarketSessionSnapshot,

@@ -311,6 +311,9 @@ function decidePrompt() {
     '    · 뉴스·최근 소식·전망 → web_search',
     '    · 예전에 한 얘기 → recall',
     '    · 매수/매도를 **하자고 정했을 때** → propose_order (주문이 아니라 제안 등록이다)',
+    '    🔴 propose 계열은 사용자가 **명시적으로 요청**했을 때만("사줘/팔아줘/제안해줘/걸어줘").',
+    '      "뭘 사겠냐/어떻게 생각하냐/판다면 뭘로" 는 **질문**이다 — 답만 하고 제안을 만들지 마라.',
+    '      (실측 2026-09-23: 가정형 질문에 제안 3건을 등록해 사용자 폰에 승인 버튼이 갔다)',
     '    · "X 도달하면/떨어지면 사줘·팔아줘" 같은 **조건이 붙은 매매** → propose_conditional_order',
     '      (만료일을 사용자가 안 줬으면 도구를 부르지 말고 먼저 물어라)',
     '    · "예약 주문 뭐 있어" → list_conditional_orders · "내 주문 체결됐어?" → get_my_orders',
@@ -803,9 +806,15 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
     // ⚠️ 게이트웨이는 이것을 **무시한다**(실측: functionCall 0개). 그래도 남겨 둔다 —
     //    GEMINI_API_KEY 직결이면 네이티브로 동작하고, 위 루프가 둘 다 받는다.
     tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+    /**
+     * 🔴 thinking 을 끈다 (2026-09-23 실측: chars **1** — 답이 1자였다). 어제 structured
+     *    경로에서 잡은 그 병이 여기 남아 있었다: thinkingConfig 를 안 보내면 모델 기본
+     *    (reasoning ON)이고 생각이 maxOutputTokens 4096 을 먹어 **본문이 안 나온다.**
+     *    includeThoughts 스트림은 게이트웨이가 지원하지 않으므로 budget 0 고정이 맞다.
+     */
     ...(runtime.includeThoughts && runtime.thinkingBudget > 0
       ? { thinkingConfig: { includeThoughts: true, thinkingBudget: runtime.thinkingBudget } }
-      : {}),
+      : { thinkingConfig: { thinkingBudget: 0 } }),
   };
 
   let answer = '';

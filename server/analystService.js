@@ -804,6 +804,30 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    * 🔴 **유의사항은 점수보다 먼저 온다** — 100점짜리라도 정리매매면 사면 안 된다.
    *    그래서 프롬프트에서도 **위쪽**에 놓고, 모델에게 *"매수 제안을 내지 마라"* 를 명시한다.
    */
+  /**
+   * 🔴 공포지수 VIX (2026-09-23 사용자 지시) — 국면 판단의 넷째 축.
+   *    사용자 규칙: 20 넘으면 매수 진입 시작 · 25/30/35 에서 단계적으로 적극 투입.
+   *    ⚠️ 이 규칙은 §17.3 "급락 당일 제안 유보" 의 **명시적 예외**다(사용자가 정했다) —
+   *    공포 구간의 분할 매수 제안은 허용된다. 승인은 여전히 사람(HITL 불변).
+   */
+  let vix = null;
+  try {
+    vix = await require('./marketDataService').getVix();
+  } catch { /* getVix 가 자체적으로 null 을 준다 */ }
+  if (vix && Number.isFinite(Number(vix.price))) {
+    const v = Number(vix.price);
+    const band = v >= 35 ? '극단 공포(35+) — 최대 단계 분할 매수 구간'
+      : v >= 30 ? '고공포(30+) — 3단계 분할 매수 구간'
+      : v >= 25 ? '공포 확대(25+) — 2단계 분할 매수 구간'
+      : v >= 20 ? '공포 진입(20+) — 분할 매수 시작 구간'
+      : '평온(20 미만) — VIX 매수 신호 없음';
+    lines.push('', '## 공포지수 VIX (야후 ^VIX)');
+    lines.push(`- 현재 ${v}${vix.changePct != null ? ` (${vix.changePct > 0 ? '+' : ''}${vix.changePct}%)` : ''} → **${band}**`);
+    lines.push('- 사용자 규칙: VIX 20+ 매수 진입 시작 · 25/30/35 단계 확대. 이 구간에선 급락 유보 규칙보다 이 규칙이 우선한다. 매수 제안 시 현금 여력·17.1 배분 안에서.');
+  } else {
+    lines.push('', '## 공포지수 VIX: 확인 못 함 — VIX 기반 판단은 하지 마라(낮다고 가정 금지).');
+  }
+
   const nowKeys = Object.keys(indexNow);
   if (nowKeys.length) {
     lines.push('', '## 지수 현재가 (실시간)');
