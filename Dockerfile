@@ -15,6 +15,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY server.js ./
 COPY server ./server
+# 국면 매뉴얼·ETF 카탈로그 — 없으면 데몬이 판정만 하고 시나리오가 영영 안 발동한다(실측 ENOENT)
+COPY config ./config
 COPY data ./data
 COPY --from=builder /app/dist ./dist
 ENV NODE_ENV=production
