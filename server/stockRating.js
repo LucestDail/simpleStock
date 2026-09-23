@@ -176,8 +176,11 @@ function systemPrompt(type) {
     '당신은 기업·주식 분석 전용 평가자입니다. **좋은 이야기보다 좋은 숫자**,',
     '**싼 회사보다 강한 회사**, 구조적 우위 있는 1등 기업, 장기 보유 논리가 있는 기업을 우선합니다.',
     '**좋은 회사와 좋은 주식은 반드시 구분**해서 설명합니다.',
-    // 🔴 출력 길이 = 시간(초당 ~24토큰). 상한 없이는 120초 예산을 구조적으로 넘겨 답이 통째로 버려진다
-    '⚠️ **전체 출력 2,000토큰 이내** — 각 항목 근거는 1문장, strengths/weaknesses 는 각 3개 이내.',
+    // 🔴 총량 지시는 flash 가 무시한다(dryRun 실증) — 필드별 자수로 직접 묶는다. 길이 = 시간(초당 ~24토큰)
+    '⚠️ 길이 규칙 — 어기면 답이 잘려 통째로 버려집니다:',
+    '- 각 항목의 근거(why): **1문장(60자 이내)**',
+    '- strengths/weaknesses: 각 3개 이내, 한 문장씩 · oneLiner: 1문장',
+    '- unverified: 항목당 10자 이내',
     '',
     `## 이 종목의 평가 유형: **${type}**`,
     '아래 10개 항목을 **각 10점 만점**으로 매깁니다. 항목 이름을 **그대로** 쓰세요.',
@@ -503,13 +506,13 @@ function statsBlock(s) {
 const FUND_SCHEMA = {
   type: 'object',
   properties: {
-    whatItTracks: { type: 'string' },
+    whatItTracks: { type: 'string', description: '1문장(80자 이내)' },
     holdIt: { type: 'string', enum: ['장기 보유 가능', '중기까지', '단기 전용'] },
-    holdWhy: { type: 'string' },
-    strengths: { type: 'string' },
-    weaknesses: { type: 'string' },
-    oneLiner: { type: 'string' },
-    unverified: { type: 'array', items: { type: 'string' } },
+    holdWhy: { type: 'string', description: '1문장(80자 이내)' },
+    strengths: { type: 'string', description: '2가지 이내, 한 문장씩' },
+    weaknesses: { type: 'string', description: '2가지 이내, 한 문장씩' },
+    oneLiner: { type: 'string', description: '1문장(80자 이내)' },
+    unverified: { type: 'array', items: { type: 'string' }, maxItems: 6, description: '항목당 10자 이내' },
   },
   required: ['whatItTracks', 'oneLiner'],
 };
@@ -542,7 +545,12 @@ async function rateFund(stats, cls, newsText) {
       '',
       '## 🔴 지어내지 마세요',
       '보수율·추적오차·AUM·구성종목 비중은 **주어지지 않았습니다.** 추측하지 말고 `unverified` 에 적으세요.',
-      '총점·점수는 쓰지 않습니다. 한국어로, 과장 없이. **전체 출력 1,200토큰 이내 — 각 절 1~2문장.**',
+      '총점·점수는 쓰지 않습니다. 한국어로, 과장 없이.',
+      // 🔴 총량("1,200토큰") 지시는 flash 가 무시했다(잘림 2/2) — 필드별 자수로 직접 묶는다
+      '⚠️ 길이 규칙 — 어기면 답이 잘려 통째로 버려집니다:',
+      '- whatItTracks·oneLiner·holdWhy: 각 1문장(80자 이내)',
+      '- strengths·weaknesses: 각 2가지 이내, 한 문장씩',
+      '- unverified: 항목당 10자 이내(예: "보수율")',
     ].join('\n'),
     userPrompt: [
       `# ${stats.name} (${stats.symbol})`,

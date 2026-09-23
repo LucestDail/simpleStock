@@ -61,13 +61,17 @@ test('스트림 경로(둘 다)에도 캡이 있다 — 캡 밖 경로 하나가
   assert.match(chatSrc, /maxOutputTokens: 4096/);
 });
 
-test('초과 실측 3경로(브리핑·분석·평가) 전부에 길이 지시가 있다', () => {
+test('초과 실측 경로 전부에 **필드별 자수** 지시가 있다 — 총량 지시는 flash 가 무시했다(dryRun 잘림 3/3)', () => {
   const ratingSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'stockRating.js'), 'utf8');
   const analystSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
-  assert.match(managerSrc, /전체 출력 2,000토큰/); // market_briefing
-  assert.match(analystSrc, /전체 출력 2,000토큰 이내/); // trade_analyst
-  assert.match(ratingSrc, /전체 출력 2,000토큰 이내/); // 기업 rating
-  assert.match(ratingSrc, /전체 출력 1,200토큰 이내/); // fund_rating
+  assert.match(managerSrc, /각각 한 문장\(90자 이내\)/); // market_briefing — 유일하게 잘림 0 이던 형식
+  assert.match(analystSrc, /rationale: 2문장/); // trade_analyst
+  assert.match(analystSrc, /40자 이내 인용/);
+  assert.match(ratingSrc, /1문장\(60자 이내\)/); // 기업 rating
+  assert.match(ratingSrc, /1문장\(80자 이내\)/); // fund_rating
+  // 총량 지시로 되돌아가면 실패 — 그 형식은 무시된다는 것이 실측이다
+  assert.doesNotMatch(analystSrc, /전체 출력 2,000토큰 이내/);
+  assert.doesNotMatch(ratingSrc, /전체 출력 [12],[02]00토큰 이내/);
 });
 
 test('스키마와 프롬프트 양쪽에 개수 상한이 있다 (게이트웨이가 스키마를 무시해도 지시가 남는다)', () => {

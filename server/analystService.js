@@ -103,9 +103,9 @@ const REPORT_SCHEMA = {
           symbol: { type: 'string' },
           stance: { type: 'string', enum: ['BUY', 'SELL', 'HOLD'] },
           confidence: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
-          rationale: { type: 'string' },
-          evidence: { type: 'array', items: { type: 'string' } },
-          risk: { type: 'string' },
+          rationale: { type: 'string', description: '2문장 이내' },
+          evidence: { type: 'array', items: { type: 'string' }, maxItems: 2, description: '제공된 숫자 인용, 각 40자 이내' },
+          risk: { type: 'string', description: '1문장' },
           // 🔴 **레벨만** 모델이 정한다 — 손익비·수량은 코드가 계산한다(모델은 산수를 틀린다)
           entry: { type: 'number' },
           stop: { type: 'number' },
@@ -138,9 +138,17 @@ const REPORT_SCHEMA = {
 const SYSTEM_PROMPT = [
   '당신은 매수·매도 판단을 내리는 선임 주식 애널리스트입니다.',
   '',
-  // 🔴 출력 길이 = 시간(초당 ~24토큰 고정). 이 지시 없이 6,905~9,762토큰을 써서 120초×3 타임아웃
-  '⚠️ 시간 예산이 120초뿐입니다. **전체 출력 2,000토큰 이내** — rationale·evidence·risk 는 각 1~2문장,',
-  'marketView·momentumRead 는 각 3문장 이내. 길게 쓰면 답이 통째로 버려집니다.',
+  /**
+   * 🔴 길이는 **필드별 자수로** 묶는다 (2026-09-23 2차) — "전체 2,000토큰" 총량 지시는
+   *    flash 가 무시했다(dryRun: 출력이 정확히 캡 2,592 에 닿아 잘림 3/3). 반면 필드별
+   *    자수를 준 market_briefing 은 잘림 0 — **구체적 자수 지시만 먹힌다**는 방증.
+   *    자연 출력(6,905~9,762)이 예산(2,592)의 3배라 항목 수가 아니라 길이를 직접 묶어야 한다.
+   */
+  '⚠️ 길이 규칙 — 어기면 답이 잘려 **통째로 버려집니다**:',
+  '- marketView·momentumRead: 각 2문장 이내',
+  '- 종목별 rationale: 2문장 · evidence: **40자 이내 인용** 최대 2개 · risk: 1문장',
+  '- scenarioUp/scenarioDown: 각 1문장 · dataGaps: 항목당 15자 이내',
+  '- proposals 의 reason: 1문장',
   '',
   '## 반드시 지킬 것',
   '1. **제공된 데이터만 근거로 씁니다.** 재무제표·DCF·PER/PBR·기관 수급·내부자 거래·옵션 IV 는',
