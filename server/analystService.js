@@ -532,10 +532,11 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    */
   const indexNow = {};
   {
-    const want = [
-      ...(briefMarkets.includes('kr') ? ['KOSPI', 'KOSDAQ'] : []),
-      ...(briefMarkets.includes('us') ? ['SPX', 'NDX', 'DJI'] : []),
-    ];
+    /**
+     * ⚠️ **KR 지수만** — US 는 카탈로그에 없다(2026-09-23 실측: SPX·NDX·DJI·IXIC·GSPC·
+     *    NASDAQ·SP500·DOW 전부 400. KOSPI·KOSDAQ 만 200). US 지수 위치는 QLD 캔들이 대신한다.
+     */
+    const want = briefMarkets.includes('kr') ? ['KOSPI', 'KOSDAQ'] : [];
     if (want.length) {
       try {
         for (const r of await toss.getIndexPrices(want)) {
@@ -808,8 +809,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     lines.push('', '## 지수 현재가 (실시간)');
     for (const k of nowKeys) {
       const r = indexNow[k];
-      const chg = r.changePct ?? r.changeRate ?? null;
-      lines.push(`- ${k}: ${r.price ?? r.last ?? '-'}${chg != null ? ` (${Number(chg) > 0 ? '+' : ''}${chg}%)` : ''}`);
+      // ⚠️ 실측 필드는 lastPrice(문자열) 다 — price/changePct 는 안 온다(추측 키 금지 규율)
+      lines.push(`- ${k}: ${r.lastPrice ?? '-'}`);
     }
   }
 
