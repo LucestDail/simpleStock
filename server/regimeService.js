@@ -328,6 +328,39 @@ async function candidateSection(scenarios, { heldSymbols = [], summarize, getCan
   ].join('\n');
 }
 
+/**
+ * 🔴 VIX 공포 사다리 — **코드가 제안을 만든다** (2026-09-24 백테스트 실증).
+ *
+ * 백테스트에서 VIX 27(2단계) 정면인데 모델이 매수를 안 냈고, 그 미집행이 -14.7% vs
+ * 벤치 -0.7% 의 큰 몫이었다(회복 구간을 현금으로 구경). 프롬프트 강화는 3전 3패 —
+ * 사다리는 **기계적 규칙**(밴드 상승 전이 × 단계 금액 × 1배 광범위)이라 LLM 판단이
+ * 필요 없는 자리다. 판단은 코드, 승인은 사람(HITL 불변 — 이 함수는 제안 내용만 만든다).
+ *
+ * @returns [{symbol, side:'BUY', budget, band, reason}] — 수량·가격은 호출자가 시세로 확정
+ * ⚠️ 전이(prev<next)에서만 — 같은 밴드에 머무는 동안 반복 제안하지 않는다(엣지 규율).
+ * ⚠️ 사용자 확정(09-24): 단계 금액 = 가용 현금의 10/20/30/40%.
+ */
+const LADDER_PCT = [null, 0.10, 0.20, 0.30, 0.40];
+function ladderProposals({ prevBand = null, band = null, cashUsd = 0 } = {}) {
+  if (band == null || prevBand == null || band <= prevBand) return [];
+  if (!(cashUsd > 0)) return [];
+  const out = [];
+  // 여러 밴드를 한 번에 건너뛰면(22→33) 지나간 단계도 각각 — 단 금액은 그 시점 잔여 현금 기준 순차 차감
+  let cash = cashUsd;
+  for (let b = prevBand + 1; b <= band; b += 1) {
+    const pct = LADDER_PCT[b];
+    if (!pct) continue;
+    const budget = Math.floor(cash * pct);
+    if (budget < 10) continue;
+    cash -= budget;
+    out.push({
+      symbol: 'QQQ', side: 'BUY', budget, band: b,
+      reason: `VIX 공포 사다리 ${b}단계(사용자 규칙) — 가용 현금의 ${pct * 100}% 를 1배 광범위에 분할 매수`,
+    });
+  }
+  return out;
+}
+
 /** 수동 국면(지정학 등) 토글 — 코드가 판정할 수 없는 축은 사람이 발동한다 */
 function setManual(tags) {
   const state = current || loadState() || compute({});
@@ -341,6 +374,6 @@ function getState() { return current || loadState(); }
 
 module.exports = {
   compute, judgeMarket, vixBandOf, matchScenarios, diffTransitions, promptSection,
-  refresh, getState, setManual, readPlaybook, readCatalog, candidateSection,
+  refresh, getState, setManual, readPlaybook, readCatalog, candidateSection, ladderProposals,
   VIX_BAND_LABEL, TREND_KO,
 };

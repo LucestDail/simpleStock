@@ -104,3 +104,16 @@ test('🔴 인버스 게이트 — 동작으로 잰다(구조 grep 아님) + 실
   const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
   assert.ok((src.match(/inverseGate\(/g) || []).length >= 3, 'inverseGate 호출이 2곳 미만 — 한쪽이 게이트를 안 탄다');
 });
+
+test('🔴 VIX 사다리 — 코드가 제안을 만든다(백테스트 실증: LLM 은 공포에서 안 산다)', () => {
+  // 전이에서만 · 단계 금액 10/20/30/40% · 밴드 건너뛰면 각 단계 순차(잔여 현금 기준)
+  assert.deepEqual(regime.ladderProposals({ prevBand: 0, band: 0, cashUsd: 1000 }), []);
+  assert.deepEqual(regime.ladderProposals({ prevBand: 1, band: 1, cashUsd: 1000 }), []); // 같은 밴드 반복 금지
+  assert.deepEqual(regime.ladderProposals({ prevBand: 2, band: 1, cashUsd: 1000 }), []); // 하강은 아님
+  const one = regime.ladderProposals({ prevBand: 0, band: 1, cashUsd: 1000 });
+  assert.equal(one.length, 1); assert.equal(one[0].budget, 100); assert.equal(one[0].side, 'BUY');
+  const jump = regime.ladderProposals({ prevBand: 0, band: 3, cashUsd: 1000 });
+  assert.deepEqual(jump.map((x) => x.budget), [100, 180, 216]); // 10% → 잔여의 20% → 잔여의 30%
+  assert.deepEqual(regime.ladderProposals({ prevBand: 0, band: 2, cashUsd: 0 }), []); // 현금 0 이면 없음
+  assert.deepEqual(regime.ladderProposals({ prevBand: null, band: 2, cashUsd: 1000 }), []); // 기준 없으면 안 쏨(재기동 오발 방지)
+});

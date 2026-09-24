@@ -450,7 +450,43 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
    */
   try {
     const regime = require('./regimeService');
-    const { transitions, scenarios } = await regime.refresh();
+    const prevBand = st.lastVixBand ?? null;
+    const { state: rgState, transitions, scenarios } = await regime.refresh();
+    const nowBand = rgState?.vix?.band ?? null;
+    st.lastVixBand = nowBand;
+    /**
+     * 🔴 VIX 사다리 = 코드가 제안 (2026-09-24 백테스트 실증 — LLM 은 공포에서 안 산다).
+     *    밴드 **상승 전이**에서만, 가용 달러 현금 기준. 승인은 폰(HITL 불변).
+     */
+    if (willSend && nowBand != null && prevBand != null && nowBand > prevBand) {
+      try {
+        const h = await tossPortfolio.getHoldings({});
+        const cashUsd = Number(h?.summary?.cash?.usd?.amount || 0);
+        const lp = regime.ladderProposals({ prevBand, band: nowBand, cashUsd });
+        if (lp.length) {
+          const pr = await toss.getPrices(lp.map((x) => x.symbol));
+          const orderService = require('./orderService');
+          for (const l of lp) {
+            const price = pr.get(l.symbol)?.price;
+            if (!(price > 0)) { logWarn('alerts.ladder_no_price', { symbol: l.symbol }); continue; }
+            const qty = Math.floor(l.budget / price);
+            if (qty <= 0) continue;
+            // 🔴 살 수 없는 제안을 만들지 않는다 — 구조 가드가 이 누락을 잡았다(propose 호출부는 계좌 검증 필수)
+            const chk = await orderService.checkAccountLimits({ symbol: l.symbol, side: 'BUY', quantity: qty, price });
+            if (!chk.ok) { logWarn('alerts.ladder_blocked', { symbol: l.symbol, kind: chk.kind, error: chk.error }); continue; }
+            const r = orderService.propose(
+              { symbol: l.symbol, side: 'BUY', type: 'LIMIT', quantity: qty, price: Math.round(price * 100) / 100, reason: l.reason },
+              { source: 'vix-ladder' }
+            );
+            logInfo('alerts.ladder_proposed', { band: l.band, symbol: l.symbol, qty, ok: r.ok });
+            if (r.ok) out.push({ rule: 'vix-ladder', band: l.band, symbol: l.symbol });
+          }
+        }
+      } catch (e) {
+        failed.push({ rule: 'vix-ladder', message: e.message });
+        logWarn('alerts.ladder_failed', { message: e.message });
+      }
+    }
     if (transitions.length && willSend) {
       const scLine = scenarios.length ? `\n발동 매뉴얼: ${scenarios.map((s) => s.name).join(' · ')}` : '';
       await telegram.send(`📐 시장 국면 전이\n${transitions.join('\n')}${scLine}`, { reason: 'alert:regime' });
