@@ -289,8 +289,8 @@ async function candidateSection(scenarios, { heldSymbols = [], summarize, getCan
       for (const key of Object.keys(catalog.categories || {})) {
         if (!st.includes(key)) continue;
         for (const e of catalog.categories[key].etfs) {
-          // 1배 우선(레버리지 신규는 매뉴얼이 따로 다룬다) · 미보유 · KR 은 원화 현금이 있어야 의미
-          if (e.leverage !== 1 || held.has(e.symbol) || e.market === 'KR') continue;
+          // 1배(정방향·인버스 -1 포함 — 인버스 헤지는 사용자 결정 09-24) · 미보유 · KR 은 원화 현금이 있어야 의미
+          if (Math.abs(e.leverage) !== 1 || held.has(e.symbol) || e.market === 'KR') continue;
           if (!wanted.some((w) => w.symbol === e.symbol)) wanted.push({ symbol: e.symbol, name: e.name, category: catalog.categories[key].name });
         }
       }

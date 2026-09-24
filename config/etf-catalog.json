@@ -10,101 +10,223 @@
       "name": "기술주 광범위",
       "role": "공격 축 — 상승추세·저VIX 구간",
       "etfs": [
-        { "symbol": "QQQ", "name": "Invesco QQQ (나스닥100)", "leverage": 1 },
-        { "symbol": "QLD", "name": "ProShares Ultra QQQ", "leverage": 2 },
-        { "symbol": "TQQQ", "name": "ProShares UltraPro QQQ", "leverage": 3 },
-        { "symbol": "XLK", "name": "Technology Select SPDR", "leverage": 1 }
+        {
+          "symbol": "QQQ",
+          "name": "Invesco QQQ (나스닥100)",
+          "leverage": 1
+        },
+        {
+          "symbol": "QLD",
+          "name": "ProShares Ultra QQQ",
+          "leverage": 2
+        },
+        {
+          "symbol": "TQQQ",
+          "name": "ProShares UltraPro QQQ",
+          "leverage": 3
+        },
+        {
+          "symbol": "XLK",
+          "name": "Technology Select SPDR",
+          "leverage": 1
+        }
       ]
     },
     "semiconductor": {
       "name": "반도체",
       "role": "공격 축 — 사이클 판단(D램 고정거래가·HBM) 필수",
       "etfs": [
-        { "symbol": "SOXX", "name": "iShares Semiconductor", "leverage": 1 },
-        { "symbol": "SMH", "name": "VanEck Semiconductor", "leverage": 1 },
-        { "symbol": "SOXL", "name": "Direxion Semi Bull 3X", "leverage": 3 },
-        { "symbol": "RAM", "name": "Roundhill 2X DRAM", "leverage": 2 }
+        {
+          "symbol": "SOXX",
+          "name": "iShares Semiconductor",
+          "leverage": 1
+        },
+        {
+          "symbol": "SMH",
+          "name": "VanEck Semiconductor",
+          "leverage": 1
+        },
+        {
+          "symbol": "SOXL",
+          "name": "Direxion Semi Bull 3X",
+          "leverage": 3
+        },
+        {
+          "symbol": "RAM",
+          "name": "Roundhill 2X DRAM",
+          "leverage": 2
+        }
       ]
     },
     "staples": {
       "name": "생필품(필수소비재)",
       "role": "방어 축 — 하락추세·고VIX 에서 비중 확대",
       "etfs": [
-        { "symbol": "XLP", "name": "Consumer Staples SPDR", "leverage": 1 },
-        { "symbol": "VDC", "name": "Vanguard Consumer Staples", "leverage": 1 }
+        {
+          "symbol": "XLP",
+          "name": "Consumer Staples SPDR",
+          "leverage": 1
+        },
+        {
+          "symbol": "VDC",
+          "name": "Vanguard Consumer Staples",
+          "leverage": 1
+        }
       ]
     },
     "defense": {
       "name": "방산",
       "role": "지정학 이벤트·분쟁 국면 대응",
       "etfs": [
-        { "symbol": "ITA", "name": "iShares US Aerospace & Defense", "leverage": 1 },
-        { "symbol": "PPA", "name": "Invesco Aerospace & Defense", "leverage": 1 },
-        { "symbol": "449450", "name": "PLUS K방산(KR)", "leverage": 1, "market": "KR" }
+        {
+          "symbol": "ITA",
+          "name": "iShares US Aerospace & Defense",
+          "leverage": 1
+        },
+        {
+          "symbol": "PPA",
+          "name": "Invesco Aerospace & Defense",
+          "leverage": 1
+        },
+        {
+          "symbol": "449450",
+          "name": "PLUS K방산(KR)",
+          "leverage": 1,
+          "market": "KR"
+        }
       ]
     },
     "financials": {
       "name": "금융",
       "role": "금리 상승 국면·경기 회복 초입",
       "etfs": [
-        { "symbol": "XLF", "name": "Financial Select SPDR", "leverage": 1 },
-        { "symbol": "KBE", "name": "SPDR S&P Bank", "leverage": 1 }
+        {
+          "symbol": "XLF",
+          "name": "Financial Select SPDR",
+          "leverage": 1
+        },
+        {
+          "symbol": "KBE",
+          "name": "SPDR S&P Bank",
+          "leverage": 1
+        }
       ]
     },
     "energy": {
       "name": "에너지",
       "role": "인플레·유가 상승 국면",
       "etfs": [
-        { "symbol": "XLE", "name": "Energy Select SPDR", "leverage": 1 }
+        {
+          "symbol": "XLE",
+          "name": "Energy Select SPDR",
+          "leverage": 1
+        }
       ]
     },
     "healthcare": {
       "name": "헬스케어",
       "role": "방어 축 — 경기 둔화 국면",
       "etfs": [
-        { "symbol": "XLV", "name": "Health Care Select SPDR", "leverage": 1 }
+        {
+          "symbol": "XLV",
+          "name": "Health Care Select SPDR",
+          "leverage": 1
+        }
       ]
     },
     "bonds": {
       "name": "채권",
       "role": "위험 회피 — 하락추세·급락·고VIX 대피처",
       "etfs": [
-        { "symbol": "TLT", "name": "iShares 20+yr Treasury", "leverage": 1 },
-        { "symbol": "SHY", "name": "iShares 1-3yr Treasury (현금 대용)", "leverage": 1 }
+        {
+          "symbol": "TLT",
+          "name": "iShares 20+yr Treasury",
+          "leverage": 1
+        },
+        {
+          "symbol": "SHY",
+          "name": "iShares 1-3yr Treasury (현금 대용)",
+          "leverage": 1
+        }
       ]
     },
     "gold": {
       "name": "금",
       "role": "위험 회피·달러 약세 국면",
       "etfs": [
-        { "symbol": "GLD", "name": "SPDR Gold Shares", "leverage": 1 },
-        { "symbol": "132030", "name": "KODEX 골드선물(KR)", "leverage": 1, "market": "KR" }
+        {
+          "symbol": "GLD",
+          "name": "SPDR Gold Shares",
+          "leverage": 1
+        },
+        {
+          "symbol": "132030",
+          "name": "KODEX 골드선물(KR)",
+          "leverage": 1,
+          "market": "KR"
+        }
       ]
     },
     "dividend": {
       "name": "배당",
       "role": "횡보 국면 — 감쇠 없는 인컴",
       "etfs": [
-        { "symbol": "SCHD", "name": "Schwab US Dividend Equity", "leverage": 1 },
-        { "symbol": "JEPI", "name": "JPMorgan Equity Premium Income", "leverage": 1 }
+        {
+          "symbol": "SCHD",
+          "name": "Schwab US Dividend Equity",
+          "leverage": 1
+        },
+        {
+          "symbol": "JEPI",
+          "name": "JPMorgan Equity Premium Income",
+          "leverage": 1
+        }
       ]
     },
     "kr_broad": {
       "name": "국내 광범위",
       "role": "KR 시장 노출 — KOSPI 추세 따라",
       "etfs": [
-        { "symbol": "069500", "name": "KODEX 200", "leverage": 1, "market": "KR" },
-        { "symbol": "122630", "name": "KODEX 레버리지", "leverage": 2, "market": "KR" },
-        { "symbol": "229200", "name": "KODEX 코스닥150", "leverage": 1, "market": "KR" }
+        {
+          "symbol": "069500",
+          "name": "KODEX 200",
+          "leverage": 1,
+          "market": "KR"
+        },
+        {
+          "symbol": "122630",
+          "name": "KODEX 레버리지",
+          "leverage": 2,
+          "market": "KR"
+        },
+        {
+          "symbol": "229200",
+          "name": "KODEX 코스닥150",
+          "leverage": 1,
+          "market": "KR"
+        }
       ]
     },
     "inverse_hedge": {
       "name": "인버스·헤지",
-      "role": "⚠️ 하락 베팅 — 사용자 명시 요청 없이는 제안 금지(방향 베팅은 사람 결정)",
+      "role": "⚠️ 하락 베팅 — 확정 하락추세(종가<20<60)에서 1배만 헤지 제안 가능(평가액 10% 상한, 사용자 결정 09-24). 3배는 명시 요청만",
       "etfs": [
-        { "symbol": "SQQQ", "name": "ProShares UltraPro Short QQQ", "leverage": -3 },
-        { "symbol": "PSQ", "name": "ProShares Short QQQ", "leverage": -1 },
-        { "symbol": "114800", "name": "KODEX 인버스(KR)", "leverage": -1, "market": "KR" }
+        {
+          "symbol": "SQQQ",
+          "name": "ProShares UltraPro Short QQQ",
+          "leverage": -3
+        },
+        {
+          "symbol": "PSQ",
+          "name": "ProShares Short QQQ",
+          "leverage": -1
+        },
+        {
+          "symbol": "114800",
+          "name": "KODEX 인버스(KR)",
+          "leverage": -1,
+          "market": "KR"
+        }
       ]
     }
   }
