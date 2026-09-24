@@ -238,6 +238,15 @@ test('🔴 buildQuery 가 시장 주제에 **다른 질의**를 낸다 — 그�
   assert.match(block, /증시 마감 시황/, '🔴 시황 질의가 없다');
   // 실측(09-24): "주가 뉴스 전망" 질의는 5/5 가 점술·토론방 댓글·광고였다 — 질의 문구가 곧 소스 품질이다
   assert.doesNotMatch(block, /주가 뉴스 전망/, '🔴 SEO 자석 질의로 회귀했다');
+  // 실측(09-24 pm2): 맨 티커 'QLD' 는 퀸즐랜드가 이긴다 — 정식명(officialName) 우선이 처방
+  assert.match(block, /subject\?\.officialName/, '🔴 정식명 우선이 사라졌다 — US ETF 티커가 딴 뜻에 진다');
+});
+
+test('buildQuery: officialName 이 있으면 그것으로, 없으면 name/symbol 폴백', () => {
+  const { buildQuery } = require('../server/mcpClient');
+  assert.equal(buildQuery({ name: 'QLD', symbol: 'QLD', officialName: 'PROSHARES TRUST PSHS ULTRA QQQ' }), 'PROSHARES TRUST PSHS ULTRA QQQ');
+  assert.equal(buildQuery({ name: '삼성전자', symbol: '005930' }), '삼성전자');
+  assert.equal(buildQuery({ symbol: 'XOM' }), 'XOM');
 });
 
 /** 🔴 개인정보 가드가 약해지지 않았는가 — 자유 질의를 받게 열면 호출부로 샌다 */

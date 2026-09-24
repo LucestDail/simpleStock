@@ -97,7 +97,7 @@ const TOOL_DECLARATIONS = [
   },
   {
     name: 'web_search',
-    description: '최신 뉴스·시장 정보를 웹에서 찾는다. 종목명이나 주제어를 넣는다.',
+    description: '최신 뉴스·시장 정보를 웹에서 찾는다. 🔴 티커가 아니라 **정식 종목명**으로 검색하라(get_portfolio 의 officialName — "QLD" 는 호주 퀸즐랜드가, "RAM" 은 PC 램이 이긴다).',
     parameters: {
       type: 'object',
       properties: { query: { type: 'string', description: '검색어. 보유 수량·금액은 절대 넣지 않는다.' } },

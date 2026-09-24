@@ -284,7 +284,15 @@ function buildQuery(subject) {
    *    더 잘 든다(어제 실측: 단독 en 질의 100건 vs "전망" 포함 0건과 같은 계열).
    */
   if (subject?.market) return `${name || symbol} 증시 마감 시황`;
-  return `${name || symbol}`;
+  /**
+   * 🔴 맨 티커는 뉴스 인덱스에서 **다른 뜻이 이긴다** (2026-09-24 pm2 실측):
+   *    'QLD' → 퀸즐랜드 럭비·경찰 / 'RAM stock' → PC 램 품귀. US ETF 는 name 이 곧
+   *    티커라 이 구멍에 빠진다. 정식명은 4/4 금융('ProShares Ultra QQQ'·'Roundhill DRAM').
+   *    ⇒ **officialName(종목 정체, 어제 신설) 우선** — 보유 items 에는 이미 붙어 있다.
+   *    ⚠️ 여기도 정해진 칸만 읽는다(officialName·name·symbol) — 자유 질의 금지 불변.
+   */
+  const official = String(subject?.officialName || '').trim();
+  return official || name || symbol;
 }
 
 /**
