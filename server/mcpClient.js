@@ -278,8 +278,13 @@ function buildQuery(subject) {
    * ⚠️ 여기도 **`name`·`market` 두 칸만** 읽는다 — 자유 문자열 질의를 받게 열어 두면
    *    수량·금액을 안 싣는다는 보장이 **호출부로 새어 나간다**.
    */
-  if (subject?.market) return `${name || symbol} 증시 시황 마감 주요 이슈 뉴스`;
-  return `${name || symbol} 주가 뉴스 전망`;
+  /**
+   * 🔴 "주가 뉴스 전망" 은 SEO 자석이다 (2026-09-24 실측) — 그 질의로 온 5건이 전부
+   *    점술 사이트·종목토론방 댓글·광고·포털 링크였다(실증 0). 짧은 질의가 뉴스 소스에서
+   *    더 잘 든다(어제 실측: 단독 en 질의 100건 vs "전망" 포함 0건과 같은 계열).
+   */
+  if (subject?.market) return `${name || symbol} 증시 마감 시황`;
+  return `${name || symbol}`;
 }
 
 /**
@@ -372,8 +377,18 @@ function buildArgs(tool, query) {
     const strings = required.filter((k) => props[k]?.type === 'string');
     if (strings.length === 1) queryKey = strings[0];
   }
-  if (!queryKey) return fillRequired(props, required, { query });
-  return fillRequired(props, required, { [queryKey]: query });
+  const filled = { [queryKey || 'query']: query };
+  /**
+   * 🔴 recency 를 스키마가 받으면 채운다 (2026-09-24) — 시장 뉴스는 신선도가 곧 실증성이다.
+   *    안 채우면 my-computer 가 일반 웹 검색으로 가서 SEO 상위(점술·포털)가 이긴다(실측 5/5).
+   *    ⚠️ 필수만 채우는 fillRequired 와 별개 — 이건 **옵션이라도 아는 필드는 값으로** 의사표시.
+   */
+  if (props.recency?.type === 'string') {
+    filled.recency = Array.isArray(props.recency.enum) && props.recency.enum.length
+      ? (props.recency.enum.includes('1d') ? '1d' : props.recency.enum[0])
+      : '1d';
+  }
+  return fillRequired(props, required, filled);
 }
 
 function _resetForTest() {

@@ -231,11 +231,13 @@ test('🔴 검색 호출에 시장 주제가 **실제로 실린다**', () => {
     '⚠️ 시장 주제가 **앞에** 와야 maxSubjects 로 잘릴 때 시황이 먼저 살아남는다');
 });
 
-test('🔴 buildQuery 가 시장 주제에 **다른 질의**를 낸다', () => {
+test('🔴 buildQuery 가 시장 주제에 **다른 질의**를 낸다 — 그리고 SEO 자석 문구로 돌아가지 않는다', () => {
   const i = MCP.indexOf('function buildQuery');
-  const block = MCP.slice(i, i + 500);
-  assert.match(block, /subject\?\.market/, '🔴 시장 주제를 구분 안 한다 — "코스피 주가 뉴스 전망" 이 된다');
-  assert.match(block, /증시 시황/, '🔴 시황 질의가 없다');
+  const block = MCP.slice(i, i + 900);
+  assert.match(block, /subject\?\.market/, '🔴 시장 주제를 구분 안 한다');
+  assert.match(block, /증시 마감 시황/, '🔴 시황 질의가 없다');
+  // 실측(09-24): "주가 뉴스 전망" 질의는 5/5 가 점술·토론방 댓글·광고였다 — 질의 문구가 곧 소스 품질이다
+  assert.doesNotMatch(block, /주가 뉴스 전망/, '🔴 SEO 자석 질의로 회귀했다');
 });
 
 /** 🔴 개인정보 가드가 약해지지 않았는가 — 자유 질의를 받게 열면 호출부로 샌다 */
