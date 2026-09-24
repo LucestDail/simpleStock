@@ -15,11 +15,37 @@ let seed = 42;
 const rand = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648 - 0.5; };
 
 // ── 세계 생성: 기초지수 일일 수익률 경로 ─────────────────────
-const PHASES = [
-  { label: '상승 A', days: 25, drift: 0.55, noise: 0.9, vix: (i, n) => 16 - (i / n) * 3 },
-  { label: '하락',   days: 25, drift: -0.95, noise: 1.4, vix: (i, n) => 17 + (i / n) * 14, shockAt: 12, shockPct: -4.2 },
-  { label: '상승 B', days: 25, drift: 0.65, noise: 0.9, vix: (i, n) => 30 - (i / n) * 16 },
-];
+const SCENARIOS = {
+  vshape: [
+    { label: '상승 A', days: 25, drift: 0.55, noise: 0.9, vix: (i, n) => 16 - (i / n) * 3 },
+    { label: '하락',   days: 25, drift: -0.95, noise: 1.4, vix: (i, n) => 17 + (i / n) * 14, shockAt: 12, shockPct: -4.2 },
+    { label: '상승 B', days: 25, drift: 0.65, noise: 0.9, vix: (i, n) => 30 - (i / n) * 16 },
+  ],
+  bull: [ // 지속 상승 — 추세추종이 유리해야 정상
+    { label: '상승 1', days: 25, drift: 0.6, noise: 0.9, vix: () => 14 },
+    { label: '상승 2', days: 25, drift: 0.5, noise: 1.0, vix: () => 15 },
+    { label: '상승 3', days: 25, drift: 0.7, noise: 0.9, vix: () => 13 },
+  ],
+  bear: [ // 지속 하락 — 방어·인버스·현금이 벤치를 이겨야 정상
+    { label: '하락 1', days: 25, drift: -0.5, noise: 1.0, vix: (i, n) => 18 + (i / n) * 6 },
+    { label: '하락 2', days: 25, drift: -0.8, noise: 1.3, vix: (i, n) => 24 + (i / n) * 8, shockAt: 10, shockPct: -4.5 },
+    { label: '하락 3', days: 25, drift: -0.6, noise: 1.2, vix: (i, n) => 32 + (i / n) * 5 },
+  ],
+  chop: [ // 횡보 — 감쇠 회피·인컴이 관건
+    { label: '횡보 1', days: 25, drift: 0.05, noise: 1.1, vix: () => 17 },
+    { label: '횡보 2', days: 25, drift: -0.05, noise: 1.2, vix: () => 19 },
+    { label: '횡보 3', days: 25, drift: 0.0, noise: 1.0, vix: () => 18 },
+  ],
+};
+const argOf = (name, dflt) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : dflt; };
+const SCENARIO = String(argOf('--scenario', 'vshape'));
+/**
+ * 현금 바닥 가드(개선 A/B 대상): 매수 체결이 현금을 초기 자산의 N% 미만으로 떨어뜨리면
+ * 수량을 자동 축소 — 사다리 실탄 보전. 0 = 끔(현행).
+ */
+const CASH_FLOOR_PCT = Number(argOf('--cash-floor', '0'));
+const PHASES = SCENARIOS[SCENARIO];
+if (!PHASES) { console.error('unknown scenario'); process.exit(1); }
 const WARMUP = { days: 70, drift: 0.35, noise: 0.7, vix: () => 15 };
 
 function buildWorld() {
@@ -131,7 +157,8 @@ const fmt = (v) => (v == null ? '-' : Number(v).toFixed(2));
       let qty = Math.floor(Number(p.quantity) || 0);
       if (qty <= 0) continue;
       if (String(p.side).toUpperCase() === 'BUY') {
-        const maxQ = Math.floor(port.cash / price);
+        const floorUsd = 10000 * (CASH_FLOOR_PCT / 100);
+        const maxQ = Math.floor(Math.max(0, port.cash - floorUsd) / price);
         if (qty > maxQ) { fills.push(`⚠️ ${sym} 수량 ${qty}→${maxQ}(현금 한도)`); qty = maxQ; }
         if (qty <= 0) continue;
         const o = port.pos[sym] || { qty: 0, avg: 0 };
@@ -155,7 +182,7 @@ const fmt = (v) => (v == null ? '-' : Number(v).toFixed(2));
   const T = rets.length - 1;
   const final = value(T);
   const bhQQQ = 10000 / px.QQQ[points[0]] * px.QQQ[T];
-  console.log('\n════════ 백테스트: 상승 A(25d) → 하락(25d, 중간 -4.2% 급락) → 상승 B(25d) ════════');
+  console.log(`\n════════ 백테스트 [${SCENARIO}] cash-floor=${CASH_FLOOR_PCT}% ════════`);
   for (const h of history) {
     console.log(`\n[t=${h.t} · ${h.phase} · VIX ${h.vix} · 발동 ${h.scenarios || '없음'}] 자산 $${fmt(h.value)}`);
     console.log(`  판단: ${String(h.oneLiner || '').slice(0, 100)}`);
@@ -170,4 +197,5 @@ const fmt = (v) => (v == null ? '-' : Number(v).toFixed(2));
   console.log(`simpleStock 판단 운용: $10,000 → $${fmt(final)} (${fmt((final / 10000 - 1) * 100)}%)`);
   console.log(`벤치마크 QQQ 단순보유:  $10,000 → $${fmt(bhQQQ)} (${fmt((bhQQQ / 10000 - 1) * 100)}%)`);
   console.log(`참고 TQQQ 단순보유:     $10,000 → $${fmt(10000 / px.TQQQ[points[0]] * px.TQQQ[T])} (감쇠 실증)`);
+  console.log(`SUMMARY ${SCENARIO} floor=${CASH_FLOOR_PCT} final=${fmt(final)} bench=${fmt(bhQQQ)} ladders=${ladderFills.length}`);
 })();
