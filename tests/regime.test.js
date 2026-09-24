@@ -86,3 +86,16 @@ test('프롬프트 절 — 판정·발동 매뉴얼·관련 도구상자만 싣�
   const noVix = regime.promptSection(regime.compute({ us: { closes: ramp(100, 1, 70) } }));
   assert.match(noVix, /확인 못 함/);
 });
+
+test('🔴 인버스 게이트가 코드에 실재하고 분석 제안 경로에 있다 — 프롬프트만 믿지 않는다', () => {
+  // 스펙트럼 시뮬 실증(09-24): 규칙이 프롬프트에 있는데 모델이 횡보에서 PSQ 매수를 냈다
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
+  const i = src.indexOf('inverse_hedge');
+  assert.ok(i > 0, '인버스 게이트가 없다');
+  const block = src.slice(i - 200, i + 900);
+  assert.match(block, /trend === 'down'/, '확정 하락추세 조건이 없다');
+  assert.match(block, /Math\.abs\(hit\.leverage\) !== 1/, '1배 제한이 없다');
+  assert.match(block, /rejected\.push/, '막고 조용하면 사용자가 이유를 모른다');
+  // checkAccountLimits **앞**에 있어야 한다 — 뒤면 계좌 호출만 낭비
+  assert.ok(i < src.indexOf('const chk = await orderService.checkAccountLimits'), '게이트가 계좌 검증 뒤에 있다');
+});

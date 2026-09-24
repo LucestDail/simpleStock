@@ -1229,6 +1229,30 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
      *    사용자가 승인을 누르고 나서야 실패를 안다. 그건 HITL 이 아니라 헛수고다.
      * ⚠️ 못 물어봤으면(`unknown`) **통과가 아니다** — 막고 이유를 화면에 적는다.
      */
+    /**
+     * 🔴 인버스 게이트 — 사용자 규칙(09-24)을 **코드로** 강제한다. 스펙트럼 시뮬 실증:
+     *    횡보 케이스에서 모델이 "추세 붕괴 확인되어 소액 헤지" 라며 PSQ 매수를 냈다 —
+     *    규칙(확정 하락추세에서만·1배만)이 프롬프트에 있는데도 어겼다. 프롬프트로 못
+     *    지키는 규칙은 코드가 정본이다(뭉뚱그림 걸러내기와 같은 가족).
+     * ⚠️ 분석(analyst) 제안만 막는다 — 채팅의 사용자 명시 요청은 사람 의사라 통과.
+     */
+    {
+      const inv = require('./regimeService').readCatalog().categories?.inverse_hedge?.etfs || [];
+      const hit = inv.find((e) => e.symbol === String(p.symbol).toUpperCase());
+      if (hit && String(p.side).toUpperCase() === 'BUY') {
+        const st = require('./regimeService').getState();
+        const mkt = hit.market === 'KR' ? 'kr' : 'us';
+        const trendDown = st?.[mkt]?.trend === 'down';
+        if (Math.abs(hit.leverage) !== 1 || !trendDown) {
+          const why = Math.abs(hit.leverage) !== 1
+            ? `${hit.leverage}x 인버스는 명시 요청으로만 (사용자 규칙)`
+            : `${mkt.toUpperCase()} 가 확정 하락추세가 아니다(현재 ${st?.[mkt]?.trend ?? '판정불가'}) — 인버스는 확정 하락에서만 (사용자 규칙)`;
+          rejected.push({ symbol: p.symbol, side: p.side, error: why });
+          logWarn('analyst.inverse_blocked', { symbol: p.symbol, leverage: hit.leverage, trend: st?.[mkt]?.trend ?? null });
+          continue;
+        }
+      }
+    }
     const chk = await orderService.checkAccountLimits({
       symbol: p.symbol, side: p.side, quantity: p.quantity, price: p.price,
     });
