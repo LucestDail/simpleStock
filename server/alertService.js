@@ -113,34 +113,73 @@ function setAnalystRunner(fn) { analystRunner = typeof fn === 'function' ? fn : 
  * ⚠️ 과거 일봉은 **하루 한 번만** 받아 상태에 캐시한다 — 틱마다 받으면 5분에 한 번씩
  *    토스 한도를 태운다(그 종목의 어제까지 분포는 오늘 안 바뀐다).
  */
+/**
+ * 🔴 감시 종목도 **실시간 등락**으로 판정한다 (2026-09-24 사용자 지적 후 수정).
+ *
+ * 종전: 보유만 실시간(dailyRate), 감시는 "일봉 마지막 변화" 를 **하루 1회 캐시** —
+ * 미장이 밤새 움직여도 감시 41종의 change 는 아침 값 그대로였다. **장중 급등락을
+ * 원리상 못 봤고**, 실측으로 미장 내내 모멘텀 후보 0 이 그 증거였다(IonQ +9.8% 인 날에도).
+ *
+ * 지금: 틱마다 감시 심볼 전체를 `getPrices` **1콜**(200종목/콜·15콜/s — 비용 무시 수준)로
+ * 받아 **전일 확정 종가 대비**를 계산한다. 전일 종가는 캔들에서 — ⚠️ 마지막 봉이
+ * "오늘 진행 중 봉" 인지 "어제 확정 봉" 인지는 **봉 타임스탬프의 날짜로 판정**한다
+ * (추측하면 US 종목이 KST 날짜 경계에서 하루 밀린다). 분포(hist)도 확정 봉만 담는다.
+ * getPrices 실패 시 종전 방식으로 폴백하되 warn — 조용히 눈멀지 않는다.
+ */
 async function collectMomentumRows(st, universe, items, now) {
   const bySymbol = new Map((items || []).map((it) => [String(it.symbol).toUpperCase(), it]));
   const day = new Date(now).toISOString().slice(0, 10);
   st.candleCache = st.candleCache || {};
   const rows = [];
 
+  // ① 감시(미보유) 심볼의 실시간가 — 한 콜로
+  const unheld = Object.keys(universe || {}).filter((s) => !bySymbol.has(s));
+  let liveMap = new Map();
+  if (unheld.length) {
+    try {
+      liveMap = await toss.getPrices(unheld);
+    } catch (e) {
+      logWarn('analyst.trigger_live_prices_failed', { symbols: unheld.length, kind: e?.kind, message: e?.message });
+    }
+  }
+
   for (const [sym, meta] of Object.entries(universe || {})) {
-    let hist = st.candleCache[sym]?.day === day ? st.candleCache[sym].changes : null;
-    if (!hist) {
+    let cached = st.candleCache[sym]?.day === day ? st.candleCache[sym] : null;
+    if (!cached || !Array.isArray(cached.bars)) {
       try {
         const c = await toss.getCandles(sym, { interval: '1d', count: 60 });
-        const closes = (c.rows || []).map((r) => r.c).filter(Number.isFinite);
-        hist = [];
-        for (let i = 1; i < closes.length; i += 1) hist.push(((closes[i] - closes[i - 1]) / closes[i - 1]) * 100);
-        st.candleCache[sym] = { day, changes: hist.slice(-40) };
-        hist = st.candleCache[sym].changes;
+        const bars = (c.rows || [])
+          .filter((r) => Number.isFinite(r.c))
+          .map((r) => ({ t: String(r.t || '').slice(0, 10), c: r.c }));
+        st.candleCache[sym] = { day, bars: bars.slice(-45) };
+        cached = st.candleCache[sym];
       } catch (e) {
         // 🔴 못 받으면 **판정하지 않는다** — 빈 분포로 z 를 내면 아무 날이나 이상해 보인다
         logWarn('analyst.trigger_history_failed', { symbol: sym, kind: e?.kind, message: e?.message });
         continue;
       }
     }
+
     const held = bySymbol.get(sym);
-    // 보유 중이면 **실시간 등락**, 아니면 어제 종가 대비(일 단위) — 되살 후보는 그 정도면 된다
-    const change = held?.dailyRate != null ? Number(held.dailyRate) : hist[hist.length - 1];
+    const live = held?.dailyRate != null ? null : liveMap.get(sym);
+    // 진행 중 봉 판정: 시세 타임스탬프(없으면 지금)의 **현지 날짜**와 마지막 봉 날짜가 같으면 진행 봉
+    const liveDay = String(live?.at || new Date(now).toISOString()).slice(0, 10);
+    let bars = cached.bars;
+    if (bars.length && bars[bars.length - 1].t === liveDay) bars = bars.slice(0, -1); // 확정 봉만
+    const closes = bars.map((b) => b.c);
+    const hist = [];
+    for (let i = 1; i < closes.length; i += 1) hist.push(((closes[i] - closes[i - 1]) / closes[i - 1]) * 100);
+
+    let change = null;
+    if (held?.dailyRate != null) {
+      change = Number(held.dailyRate); // 보유 = 증권사가 준 실시간 등락
+    } else if (live?.price != null && closes.length) {
+      change = ((live.price - closes[closes.length - 1]) / closes[closes.length - 1]) * 100; // 감시 = 실시간가 vs 전일 확정 종가
+    } else if (hist.length) {
+      change = hist[hist.length - 1]; // 폴백: 종전 방식(확정 봉 변화) — warn 은 위에서 이미 남았다
+    }
     if (!Number.isFinite(change)) continue;
-    // ⚠️ 오늘 값은 분포에서 뺀다 — 자기 자신을 포함해 재면 z 가 줄어든다
-    rows.push({ symbol: sym, dailyChangePct: change, history: hist.slice(0, -1), role: meta.role });
+    rows.push({ symbol: sym, dailyChangePct: Math.round(change * 100) / 100, history: hist, role: meta.role });
   }
   // 캐시에서 감시 대상 밖은 버린다
   for (const k of Object.keys(st.candleCache)) if (!universe[k]) delete st.candleCache[k];
@@ -684,4 +723,6 @@ function _resetForTest() {
 }
 
 module.exports = {
-  onProposalSettled, setAnalystRunner, tick, start, stop, status, onProposal, isQuiet, STATE_FILE, _resetForTest };
+  onProposalSettled, setAnalystRunner, tick, start, stop, status, onProposal, isQuiet, STATE_FILE, _resetForTest,
+  // 시뮬레이션·검증용 — 모멘텀 평가가 무엇을 보는지 밖에서 잴 수 있어야 한다(질문에 로그로만 답하지 않는다)
+  collectMomentumRows };
