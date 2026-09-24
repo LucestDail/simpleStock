@@ -251,6 +251,15 @@ function promptSection(state = current, scenarios = null) {
     for (const sc of active) {
       // via = 발동 근원 — 디커플링에서 "이 매뉴얼은 어느 시장 얘기인가" 를 모델이 안다
       lines.push(`### ${sc.name}${sc.via ? ` — 발동: ${sc.via}` : ''}${sc.via && sc.via !== 'VIX' && sc.via.length <= 5 ? ' (이 시장에만 적용)' : ''}`);
+      /**
+       * 국면별 모델 포트폴리오 기준선 (2026-09-24) — 제안은 이 기준선과의 괴리를 줄이는 방향.
+       * ⚠️ 울타리가 아니라 나침반(사용자 결정: 비율 상한 강제 없음).
+       */
+      if (sc.modelPortfolio) {
+        const mp = Object.entries(sc.modelPortfolio).filter(([k]) => k !== '_설명');
+        lines.push(`  기준 배분: ${mp.map(([k, v]) => `${k} ${v}`).join(' · ')}`);
+        if (sc.modelPortfolio._설명) lines.push(`  (${sc.modelPortfolio._설명})`);
+      }
       for (const st of sc.steps) {
         lines.push(`- ${st}`);
         for (const key of Object.keys(catalog.categories || {})) if (st.includes(key)) wantCats.add(key);

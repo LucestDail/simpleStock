@@ -87,15 +87,20 @@ test('프롬프트 절 — 판정·발동 매뉴얼·관련 도구상자만 싣�
   assert.match(noVix, /확인 못 함/);
 });
 
-test('🔴 인버스 게이트가 코드에 실재하고 분석 제안 경로에 있다 — 프롬프트만 믿지 않는다', () => {
+test('🔴 인버스 게이트 — 동작으로 잰다(구조 grep 아님) + 실전·백테스트가 같은 함수를 탄다', () => {
   // 스펙트럼 시뮬 실증(09-24): 규칙이 프롬프트에 있는데 모델이 횡보에서 PSQ 매수를 냈다
+  const { inverseGate } = require('../server/analystService');
+  const down = { us: { trend: 'down' }, kr: { trend: 'side' } };
+  const side = { us: { trend: 'side' }, kr: { trend: 'side' } };
+  // 발동: 횡보에서 PSQ 매수 차단(그 시뮬 그대로) · 3배는 하락에서도 차단 · KR 인버스는 KR 추세를 본다
+  assert.equal(inverseGate({ symbol: 'PSQ', side: 'BUY' }, side).ok, false);
+  assert.equal(inverseGate({ symbol: 'SQQQ', side: 'BUY' }, down).ok, false);
+  assert.equal(inverseGate({ symbol: '114800', side: 'BUY' }, down).ok, false); // kr 은 side
+  // 오탐 없음: 확정 하락 1배 통과 · 인버스 매도(청산)는 언제나 통과 · 일반 종목 무관
+  assert.equal(inverseGate({ symbol: 'PSQ', side: 'BUY' }, down).ok, true);
+  assert.equal(inverseGate({ symbol: 'PSQ', side: 'SELL' }, side).ok, true);
+  assert.equal(inverseGate({ symbol: 'QQQ', side: 'BUY' }, side).ok, true);
+  // 🔴 게이트 한 벌: 실전 루프와 decideOnContext 둘 다 inverseGate( 를 부른다(두 벌이면 갈라진다)
   const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
-  const i = src.indexOf('inverse_hedge');
-  assert.ok(i > 0, '인버스 게이트가 없다');
-  const block = src.slice(i - 200, i + 900);
-  assert.match(block, /trend === 'down'/, '확정 하락추세 조건이 없다');
-  assert.match(block, /Math\.abs\(hit\.leverage\) !== 1/, '1배 제한이 없다');
-  assert.match(block, /rejected\.push/, '막고 조용하면 사용자가 이유를 모른다');
-  // checkAccountLimits **앞**에 있어야 한다 — 뒤면 계좌 호출만 낭비
-  assert.ok(i < src.indexOf('const chk = await orderService.checkAccountLimits'), '게이트가 계좌 검증 뒤에 있다');
+  assert.ok((src.match(/inverseGate\(/g) || []).length >= 3, 'inverseGate 호출이 2곳 미만 — 한쪽이 게이트를 안 탄다');
 });

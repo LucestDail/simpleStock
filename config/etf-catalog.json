@@ -1,232 +1,131 @@
 {
   "_readme": [
-    "카테고리별 ETF 도구상자 (2026-09-23, 사용자 지시 — '시장별 도구처럼 구성').",
+    "카테고리별 ETF 도구상자 v2 (2026-09-24 확대 — 사용자 지시: 3배 계열 포함, 각 항목 상세 설명).",
     "🔴 LLM 은 티커를 지어낸다 — 제안·시나리오의 티커는 이 카탈로그 안에서만 고른다.",
-    "leverage: 1 = 현물 추종 · 2/3 = 일일 리밸런싱(횡보 감쇠) · -1 = 인버스.",
+    "leverage: 1 = 현물 추종 · 2/3 = 일일 리밸런싱(횡보 감쇠) · 음수 = 인버스.",
+    "desc: 무엇을 추종하고 언제 쓰는지 — 프롬프트에 실려 모델의 선택 근거가 된다.",
     "⚠️ 티커 추가·삭제는 사람이 한다(이 파일 편집). 시세·거래 가능 여부는 토스가 정본."
+  ],
+  "_combinationGuide": [
+    "🔴 배수 = 보유 기간이다: 1배 = 기간 제한 없음 · 2배 = 추세 확신 구간만(횡보 감쇠) · 3배 = 단기 전용(수일~수주, 횡보에서 빠르게 녹는다)",
+    "같은 방향을 배수만 다르게 중복 보유하지 않는다(QQQ+QLD+TQQQ 동시 보유 = 사실상 고배수 한 종목) — 배수를 올리려면 교체, 내리려면 부분 전환",
+    "정방향과 인버스를 같은 지수에 동시 보유하지 않는다(수수료·감쇠만 이중 부담) — 헤지는 축소가 우선, 인버스는 그 다음",
+    "테마(방산·에너지 등)는 위성 — 코어(광범위 1배)가 있는 상태에서 얹는다",
+    "3배 진입은 두 조건 동시: ①해당 방향 추세 확정(종가·20·60일선 정배열) ②VIX 가 방향과 모순되지 않음(롱 3배는 VIX<20, 인버스 3배는 명시 요청만)"
   ],
   "categories": {
     "tech_broad": {
-      "name": "기술주 광범위",
-      "role": "공격 축 — 상승추세·저VIX 구간",
+      "name": "기술주 광범위 (나스닥100 계열)",
+      "role": "공격 축 — 상승추세·저VIX 구간의 주력",
       "etfs": [
-        {
-          "symbol": "QQQ",
-          "name": "Invesco QQQ (나스닥100)",
-          "leverage": 1
-        },
-        {
-          "symbol": "QLD",
-          "name": "ProShares Ultra QQQ",
-          "leverage": 2
-        },
-        {
-          "symbol": "TQQQ",
-          "name": "ProShares UltraPro QQQ",
-          "leverage": 3
-        },
-        {
-          "symbol": "XLK",
-          "name": "Technology Select SPDR",
-          "leverage": 1
-        }
+        { "symbol": "QQQ", "name": "Invesco QQQ", "leverage": 1, "desc": "나스닥100 현물 추종. 기술주 코어 — 기간 제한 없음" },
+        { "symbol": "QLD", "name": "ProShares Ultra QQQ", "leverage": 2, "desc": "나스닥100 일일 2배. 상승 확신 구간 전용 — 횡보에서 감쇠" },
+        { "symbol": "TQQQ", "name": "ProShares UltraPro QQQ", "leverage": 3, "desc": "나스닥100 일일 3배. 단기 모멘텀 전용(수일~수주) — 횡보·변동성 구간에서 빠르게 녹는다" },
+        { "symbol": "XLK", "name": "Technology Select SPDR", "leverage": 1, "desc": "S&P 기술 섹터 현물. QQQ 보다 대형 기술주 집중" }
+      ]
+    },
+    "sp_broad": {
+      "name": "S&P500 광범위",
+      "role": "코어 축 — 시장 전체 노출. 기술주 집중을 분산할 때",
+      "etfs": [
+        { "symbol": "SPY", "name": "SPDR S&P 500", "leverage": 1, "desc": "S&P500 현물. 가장 넓은 미국 코어 — 기간 제한 없음" },
+        { "symbol": "SSO", "name": "ProShares Ultra S&P500", "leverage": 2, "desc": "S&P500 일일 2배. 지수 상승 확신 구간 전용" },
+        { "symbol": "UPRO", "name": "ProShares UltraPro S&P500", "leverage": 3, "desc": "S&P500 일일 3배. 단기 전용 — TQQQ 보다 변동성은 낮지만 같은 감쇠 구조" }
       ]
     },
     "semiconductor": {
       "name": "반도체",
-      "role": "공격 축 — 사이클 판단(D램 고정거래가·HBM) 필수",
+      "role": "공격 위성 — 사이클 판단(D램 고정거래가·HBM) 필수",
       "etfs": [
-        {
-          "symbol": "SOXX",
-          "name": "iShares Semiconductor",
-          "leverage": 1
-        },
-        {
-          "symbol": "SMH",
-          "name": "VanEck Semiconductor",
-          "leverage": 1
-        },
-        {
-          "symbol": "SOXL",
-          "name": "Direxion Semi Bull 3X",
-          "leverage": 3
-        },
-        {
-          "symbol": "RAM",
-          "name": "Roundhill 2X DRAM",
-          "leverage": 2
-        }
+        { "symbol": "SOXX", "name": "iShares Semiconductor", "leverage": 1, "desc": "필라델피아 반도체 현물. 반도체 코어" },
+        { "symbol": "SMH", "name": "VanEck Semiconductor", "leverage": 1, "desc": "반도체 현물 — SOXX 보다 TSMC·엔비디아 비중 큼" },
+        { "symbol": "SOXL", "name": "Direxion Semi Bull 3X", "leverage": 3, "desc": "반도체 일일 3배 롱. 사이클 상승 확정 + 단기만 — 변동성이 가장 큰 축" },
+        { "symbol": "RAM", "name": "Roundhill 2X DRAM", "leverage": 2, "desc": "DRAM(메모리) 일일 2배. 초협소 테마 — 상장 2026-06, 이력 짧음" }
       ]
     },
     "staples": {
       "name": "생필품(필수소비재)",
       "role": "방어 축 — 하락추세·고VIX 에서 비중 확대",
       "etfs": [
-        {
-          "symbol": "XLP",
-          "name": "Consumer Staples SPDR",
-          "leverage": 1
-        },
-        {
-          "symbol": "VDC",
-          "name": "Vanguard Consumer Staples",
-          "leverage": 1
-        }
+        { "symbol": "XLP", "name": "Consumer Staples SPDR", "leverage": 1, "desc": "필수소비재 현물. 경기 둔화에 수요가 안 꺾이는 방어주" },
+        { "symbol": "VDC", "name": "Vanguard Consumer Staples", "leverage": 1, "desc": "XLP 와 유사 — 더 넓은 편입, 수수료 낮음" }
       ]
     },
     "defense": {
       "name": "방산",
-      "role": "지정학 이벤트·분쟁 국면 대응",
+      "role": "지정학 이벤트·분쟁 국면 대응 (수동 발동 국면)",
       "etfs": [
-        {
-          "symbol": "ITA",
-          "name": "iShares US Aerospace & Defense",
-          "leverage": 1
-        },
-        {
-          "symbol": "PPA",
-          "name": "Invesco Aerospace & Defense",
-          "leverage": 1
-        },
-        {
-          "symbol": "449450",
-          "name": "PLUS K방산(KR)",
-          "leverage": 1,
-          "market": "KR"
-        }
+        { "symbol": "ITA", "name": "iShares US Aerospace & Defense", "leverage": 1, "desc": "미 방산·항공우주 현물" },
+        { "symbol": "PPA", "name": "Invesco Aerospace & Defense", "leverage": 1, "desc": "ITA 와 유사 — 편입 더 분산" },
+        { "symbol": "449450", "name": "PLUS K방산(KR)", "leverage": 1, "market": "KR", "desc": "한국 방산(한화에어로·KAI 등). 원화 계좌 필요" }
       ]
     },
     "financials": {
       "name": "금융",
       "role": "금리 상승 국면·경기 회복 초입",
       "etfs": [
-        {
-          "symbol": "XLF",
-          "name": "Financial Select SPDR",
-          "leverage": 1
-        },
-        {
-          "symbol": "KBE",
-          "name": "SPDR S&P Bank",
-          "leverage": 1
-        }
+        { "symbol": "XLF", "name": "Financial Select SPDR", "leverage": 1, "desc": "미 금융 섹터 현물 — 금리 상승 수혜" },
+        { "symbol": "KBE", "name": "SPDR S&P Bank", "leverage": 1, "desc": "은행 집중 — XLF 보다 금리 민감도 큼" }
       ]
     },
     "energy": {
       "name": "에너지",
       "role": "인플레·유가 상승 국면",
       "etfs": [
-        {
-          "symbol": "XLE",
-          "name": "Energy Select SPDR",
-          "leverage": 1
-        }
+        { "symbol": "XLE", "name": "Energy Select SPDR", "leverage": 1, "desc": "미 에너지 섹터 현물 — 유가·인플레 헤지 성격" }
       ]
     },
     "healthcare": {
       "name": "헬스케어",
       "role": "방어 축 — 경기 둔화 국면",
       "etfs": [
-        {
-          "symbol": "XLV",
-          "name": "Health Care Select SPDR",
-          "leverage": 1
-        }
+        { "symbol": "XLV", "name": "Health Care Select SPDR", "leverage": 1, "desc": "미 헬스케어 현물. 경기 무관 수요 — 방어 코어" }
       ]
     },
     "bonds": {
       "name": "채권",
-      "role": "위험 회피 — 하락추세·급락·고VIX 대피처",
+      "role": "위험 회피 — 하락추세·급락·고VIX 대피처. ⚠️ 금리 상승기엔 주식과 동반 하락 가능",
       "etfs": [
-        {
-          "symbol": "TLT",
-          "name": "iShares 20+yr Treasury",
-          "leverage": 1
-        },
-        {
-          "symbol": "SHY",
-          "name": "iShares 1-3yr Treasury (현금 대용)",
-          "leverage": 1
-        }
+        { "symbol": "TLT", "name": "iShares 20+yr Treasury", "leverage": 1, "desc": "미 장기국채 현물. 금리 하락(위험회피) 수혜 — 금리 상승기엔 역효과" },
+        { "symbol": "SHY", "name": "iShares 1-3yr Treasury", "leverage": 1, "desc": "단기국채 — 사실상 현금 대용. 변동 최소" }
       ]
     },
     "gold": {
       "name": "금",
       "role": "위험 회피·달러 약세 국면",
       "etfs": [
-        {
-          "symbol": "GLD",
-          "name": "SPDR Gold Shares",
-          "leverage": 1
-        },
-        {
-          "symbol": "132030",
-          "name": "KODEX 골드선물(KR)",
-          "leverage": 1,
-          "market": "KR"
-        }
+        { "symbol": "GLD", "name": "SPDR Gold Shares", "leverage": 1, "desc": "금 현물 추종 — 주식·채권과 상관 낮은 분산 축" },
+        { "symbol": "132030", "name": "KODEX 골드선물(KR)", "leverage": 1, "market": "KR", "desc": "금 선물 추종(원화). 환헤지 아님" }
       ]
     },
     "dividend": {
       "name": "배당",
       "role": "횡보 국면 — 감쇠 없는 인컴",
       "etfs": [
-        {
-          "symbol": "SCHD",
-          "name": "Schwab US Dividend Equity",
-          "leverage": 1
-        },
-        {
-          "symbol": "JEPI",
-          "name": "JPMorgan Equity Premium Income",
-          "leverage": 1
-        }
+        { "symbol": "SCHD", "name": "Schwab US Dividend Equity", "leverage": 1, "desc": "배당 성장주 — 횡보·완만한 하락에서 상대 강세" },
+        { "symbol": "JEPI", "name": "JPMorgan Equity Premium Income", "leverage": 1, "desc": "커버드콜 인컴 — 횡보 최적, 급등장에선 상승 제한" }
       ]
     },
     "kr_broad": {
       "name": "국내 광범위",
-      "role": "KR 시장 노출 — KOSPI 추세 따라",
+      "role": "KR 시장 노출 — KOSPI 추세 따라. ⚠️ 원화 현금 필요",
       "etfs": [
-        {
-          "symbol": "069500",
-          "name": "KODEX 200",
-          "leverage": 1,
-          "market": "KR"
-        },
-        {
-          "symbol": "122630",
-          "name": "KODEX 레버리지",
-          "leverage": 2,
-          "market": "KR"
-        },
-        {
-          "symbol": "229200",
-          "name": "KODEX 코스닥150",
-          "leverage": 1,
-          "market": "KR"
-        }
+        { "symbol": "069500", "name": "KODEX 200", "leverage": 1, "market": "KR", "desc": "KOSPI200 현물. 국내 코어" },
+        { "symbol": "122630", "name": "KODEX 레버리지", "leverage": 2, "market": "KR", "desc": "KOSPI200 일일 2배 — 상승 확신 구간만" },
+        { "symbol": "229200", "name": "KODEX 코스닥150", "leverage": 1, "market": "KR", "desc": "코스닥150 현물 — 중소형 성장주 축" }
       ]
     },
     "inverse_hedge": {
       "name": "인버스·헤지",
-      "role": "⚠️ 하락 베팅 — 확정 하락추세(종가<20<60)에서 1배만 헤지 제안 가능(평가액 10% 상한, 사용자 결정 09-24). 3배는 명시 요청만",
+      "role": "⚠️ 하락 베팅 — 확정 하락추세(종가<20<60)에서 1배만 헤지 제안 가능(평가액 10% 상한, 사용자 결정 09-24). 2배 이상은 명시 요청만. 코드 게이트가 강제한다",
       "etfs": [
-        {
-          "symbol": "SQQQ",
-          "name": "ProShares UltraPro Short QQQ",
-          "leverage": -3
-        },
-        {
-          "symbol": "PSQ",
-          "name": "ProShares Short QQQ",
-          "leverage": -1
-        },
-        {
-          "symbol": "114800",
-          "name": "KODEX 인버스(KR)",
-          "leverage": -1,
-          "market": "KR"
-        }
+        { "symbol": "PSQ", "name": "ProShares Short QQQ", "leverage": -1, "desc": "나스닥100 일일 -1배. 유일하게 자동 제안 가능한 인버스(하락추세 확정 시)" },
+        { "symbol": "SH", "name": "ProShares Short S&P500", "leverage": -1, "desc": "S&P500 일일 -1배. PSQ 와 같은 조건" },
+        { "symbol": "QID", "name": "ProShares UltraShort QQQ", "leverage": -2, "desc": "나스닥 -2배 — 명시 요청만" },
+        { "symbol": "SQQQ", "name": "ProShares UltraPro Short QQQ", "leverage": -3, "desc": "나스닥 -3배 — 명시 요청만. 감쇠 최악(양방향 손실 위험)" },
+        { "symbol": "SPXU", "name": "ProShares UltraPro Short S&P500", "leverage": -3, "desc": "S&P -3배 — 명시 요청만" },
+        { "symbol": "SOXS", "name": "Direxion Semi Bear 3X", "leverage": -3, "desc": "반도체 -3배 — 명시 요청만. 변동성 극대" },
+        { "symbol": "114800", "name": "KODEX 인버스(KR)", "leverage": -1, "market": "KR", "desc": "KOSPI200 -1배(원화). 국내 하락추세 확정 시" }
       ]
     }
   }

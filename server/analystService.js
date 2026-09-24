@@ -1237,20 +1237,11 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
      * ⚠️ 분석(analyst) 제안만 막는다 — 채팅의 사용자 명시 요청은 사람 의사라 통과.
      */
     {
-      const inv = require('./regimeService').readCatalog().categories?.inverse_hedge?.etfs || [];
-      const hit = inv.find((e) => e.symbol === String(p.symbol).toUpperCase());
-      if (hit && String(p.side).toUpperCase() === 'BUY') {
-        const st = require('./regimeService').getState();
-        const mkt = hit.market === 'KR' ? 'kr' : 'us';
-        const trendDown = st?.[mkt]?.trend === 'down';
-        if (Math.abs(hit.leverage) !== 1 || !trendDown) {
-          const why = Math.abs(hit.leverage) !== 1
-            ? `${hit.leverage}x 인버스는 명시 요청으로만 (사용자 규칙)`
-            : `${mkt.toUpperCase()} 가 확정 하락추세가 아니다(현재 ${st?.[mkt]?.trend ?? '판정불가'}) — 인버스는 확정 하락에서만 (사용자 규칙)`;
-          rejected.push({ symbol: p.symbol, side: p.side, error: why });
-          logWarn('analyst.inverse_blocked', { symbol: p.symbol, leverage: hit.leverage, trend: st?.[mkt]?.trend ?? null });
-          continue;
-        }
+      const gate = inverseGate(p, require('./regimeService').getState());
+      if (!gate.ok) {
+        rejected.push({ symbol: p.symbol, side: p.side, error: gate.why });
+        logWarn('analyst.inverse_blocked', { symbol: p.symbol, why: gate.why });
+        continue;
       }
     }
     const chk = await orderService.checkAccountLimits({
@@ -1522,4 +1513,47 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   };
 }
 
-module.exports = { analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport, computeTrade, REPORT_SCHEMA, SYSTEM_PROMPT };
+/**
+ * 🔴 인버스 게이트 — 사용자 규칙(09-24)을 코드로 강제한다. 스펙트럼 시뮬 실증:
+ *    프롬프트에 규칙이 있는데도 모델이 횡보에서 PSQ 매수를 냈다.
+ *    실전(analyze)과 백테스트(decideOnContext)가 **같은 함수**를 태운다 — 게이트가 두 벌이면 갈라진다.
+ */
+function inverseGate(p, regimeState) {
+  const inv = require('./regimeService').readCatalog().categories?.inverse_hedge?.etfs || [];
+  const hit = inv.find((e) => e.symbol === String(p.symbol).toUpperCase());
+  if (!hit || String(p.side).toUpperCase() !== 'BUY') return { ok: true };
+  const mkt = hit.market === 'KR' ? 'kr' : 'us';
+  const trend = regimeState?.[mkt]?.trend ?? null;
+  if (Math.abs(hit.leverage) !== 1) return { ok: false, why: `${hit.leverage}x 인버스는 명시 요청으로만 (사용자 규칙)` };
+  if (trend !== 'down') return { ok: false, why: `${mkt.toUpperCase()} 가 확정 하락추세가 아니다(현재 ${trend ?? '판정불가'}) — 인버스는 확정 하락에서만 (사용자 규칙)` };
+  return { ok: true };
+}
+
+/**
+ * 🔴 제품 판단 진입점 (2026-09-24, 사용자 지시 — 백테스트가 "simpleStock 의 판단" 을 그대로 쓰게).
+ *
+ * analyze() 는 실데이터 수집·제안 등록·발송이 결합돼 있어 가상 세계를 태울 수 없다.
+ * 이 함수는 **판단만** 한다: 같은 SYSTEM_PROMPT · 같은 REPORT_SCHEMA · 같은 shapeReport ·
+ * 같은 인버스 게이트. 컨텍스트(국면·후보·보유·현금)는 호출자가 준다 — 실전은 실데이터,
+ * 백테스트는 합성 세계. **판단 코드가 한 벌**이라 백테스트 결과가 실전을 대표한다.
+ * ⚠️ 부작용 0: 제안을 등록하지 않는다(orderService 를 안 부른다) — 반환만.
+ */
+async function decideOnContext({ contextText, regimeState = null }) {
+  const raw = await generateStructuredOutput({
+    systemPrompt: SYSTEM_PROMPT,
+    userPrompt: String(contextText || ''),
+    schema: REPORT_SCHEMA,
+    logLabel: 'trade_analyst_ctx',
+  }, { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] });
+  const report = shapeReport(raw);
+  const accepted = [];
+  const rejected = [];
+  for (const p of report.proposals || []) {
+    const gate = inverseGate(p, regimeState);
+    if (gate.ok) accepted.push(p);
+    else rejected.push({ ...p, error: gate.why });
+  }
+  return { report, proposals: accepted, rejected };
+}
+
+module.exports = { analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport, computeTrade, decideOnContext, inverseGate, REPORT_SCHEMA, SYSTEM_PROMPT };
