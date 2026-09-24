@@ -148,3 +148,21 @@ test('🔴 현금 버퍼 15%(사용자 확정 09-24) — 바닥을 깨는 매수
   const ladder = await o.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 9, price: 100, exemptCashFloor: true });
   assert.equal(ladder.ok, true, ladder.error);
 });
+
+test('🔴 가격-현재가 괴리 게이트(±2.5%) — 체결 불가능한 지정가는 조건주문으로 안내', async () => {
+  // 실물(09-23): 제안 3건 전부 당일 고가 옆(현재가 +2~6%) — TTL 10분 안에 체결 불가
+  const o = freshOrders({
+    getPrices: async () => new Map([['SPY', { price: 100 }]]),
+    getBuyingPower: CASH('100000'),
+    getSellableQuantity: SELLABLE('100'),
+    getPriceLimits: async () => ({}),
+  });
+  const far = await o.checkAccountLimits({ symbol: 'SPY', side: 'SELL', quantity: 1, price: 104 });
+  assert.equal(far.ok, false);
+  assert.equal(far.kind, 'price-drift');
+  assert.match(far.error, /조건주문/);
+  const near = await o.checkAccountLimits({ symbol: 'SPY', side: 'SELL', quantity: 1, price: 101.5 });
+  assert.equal(near.ok, true, near.error);
+  const farBuy = await o.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 1, price: 95 });
+  assert.equal(farBuy.kind, 'price-drift');
+});

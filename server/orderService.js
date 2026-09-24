@@ -42,6 +42,8 @@ const AUDIT_FILE = path.join(DATA_DIR, 'orders-audit.jsonl');
 const ORDERS_ENABLED = String(process.env.ORDERS_ENABLED || '').trim().toLowerCase() === 'true';
 /** 🔴 현금 버퍼 %(2026-09-24 사용자 확정 15) — VIX 사다리 실탄 보전. 0 이면 끔 */
 const CASH_FLOOR_PCT = Math.max(0, Number(process.env.CASH_FLOOR_PCT ?? 15));
+/** 🔴 즉시 제안 지정가의 현재가 괴리 상한 % — 넘으면 조건주문으로 안내(2026-09-24) */
+const PRICE_DRIFT_PCT = Math.max(0.5, Number(process.env.PRICE_DRIFT_PCT ?? 2.5));
 
 /** 실행을 실제 API 로 보낼지. ORDERS_ENABLED 와 **둘 다** 켜져야 한다(두 겹) */
 const ORDERS_LIVE = String(process.env.ORDERS_LIVE || '').trim().toLowerCase() === 'true';
@@ -283,6 +285,31 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency, exe
         }
       } catch (e) {
         logWarn('orders.price_limit_check_failed', { symbol: sym, kind: e.kind, message: e.message });
+      }
+    }
+    /**
+     * 🔴 가격-현재가 괴리 게이트 (2026-09-24 사용자 지적 "제안이 정상적인 가격을 추적하지
+     *    않는다" — 실측: 어제 제안 3건 전부 당일 고가 옆 지정가 = 현재가보다 2~6% 위,
+     *    10분 TTL 안에 체결 불가능. 모델이 target 레벨을 제안가로 쓰는 패턴).
+     *    즉시 제안(TTL 10분)은 **체결 가능 가격**이어야 한다 — 멀리 있는 가격은
+     *    조건주문(예약)이 맞는 수단이다. ⚠️ 조회 실패는 막지 않는다(보조 축·오탐 방지).
+     */
+    if (Number.isFinite(px) && px > 0) {
+      try {
+        const pm = await toss.getPrices([sym]);
+        const now = Number(pm.get(sym)?.price);
+        if (now > 0) {
+          const driftPct = ((px - now) / now) * 100;
+          if (Math.abs(driftPct) > PRICE_DRIFT_PCT) {
+            return {
+              ok: false, kind: 'price-drift',
+              error: `지정가 ${px} 가 현재가 ${now} 에서 ${driftPct.toFixed(1)}% 떨어져 있습니다 — 10분 안에 체결될 수 없는 가격입니다. 이 가격을 원하면 **조건주문(예약)** 으로 내세요.`,
+              currentPrice: now,
+            };
+          }
+        }
+      } catch (e) {
+        logWarn('orders.price_drift_check_failed', { symbol: sym, message: e.message });
       }
     }
     if (up === 'SELL') {

@@ -916,6 +916,8 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
    *    44자 의지 표명 한 문장 — 답이 아니다). 최종 발화가 짧고 미완 선언이면 **딱 한 번**
    *    "지금 가진 결과로 완결하라" 를 붙여 다시 쓴다(재도구 없음 — 루프·비용 통제).
    */
+  // 🔴 도구 단계 종료 선언 — 이게 없으면 모델이 최종 발화에서도 도구 호출을 "흉내" 낸다(실물 노출 사고)
+  contents.push({ role: 'user', parts: [{ text: '[시스템] 도구 단계는 끝났다. 지금부터는 사용자 보고만 쓴다 — ①핵심 결론 ②근거(받은 숫자 인용) ③리스크/확인 못 한 것 ④다음 행동. 도구 호출 표기·사죄·중간 과정 서술 금지. 결론 문장으로 시작하라.' }] });
   let retriedFinal = false;
   for (let pass = 1; pass <= 2; pass += 1) {
     const stream = await ai.models.generateContentStream({ model: runtime.model, contents, config });
@@ -931,13 +933,20 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
         }
       }
     }
-    const stub = answer.trim().length < 200 && /(하겠습니다|해보겠습니다|확인해\s*보겠|드리겠습니다)\s*\.?\s*$/.test(answer.trim());
+    /**
+     * 🔴 확장(2026-09-24 실물): 모델이 "[도구 호출] …" 흉내 텍스트·"(도구 호출 —" 메타·
+     *    "죄송합니다…실행하겠습니다" 사죄+중간과정을 **답변 본문에** 그대로 썼다 —
+     *    사용자: "중간 과정 보여주지 말고 체계화된 브리핑으로". 짧은 미완만이 아니라
+     *    이 패턴들도 재작성 대상이다(길어도).
+     */
+    const fake = /\[도구 호출\]|\(도구 호출|\[도구 결과\]/.test(answer);
+    const stub = fake || (answer.trim().length < 200 && /(하겠습니다|해보겠습니다|확인해\s*보겠|드리겠습니다)\s*\.?\s*$/.test(answer.trim()));
     if (!stub || pass === 2) break;
     retriedFinal = true;
     logWarn('chat.final_stub_retry', { turnId, chars: answer.trim().length });
     emit('notice', { text: '답이 미완으로 끝나 한 번 더 완결을 요청합니다.' });
     contents.push({ role: 'model', parts: [{ text: answer }] });
-    contents.push({ role: 'user', parts: [{ text: '[시스템] 방금 답은 "하겠다" 로 끝났고 내용이 없다. **추가 확인 선언 금지** — 지금까지 받은 [도구 결과] 만으로 완결된 답을 써라.' }] });
+    contents.push({ role: 'user', parts: [{ text: '[시스템] 방금 답은 미완이거나 도구 호출 흉내·중간과정이 섞였다. 다시 써라 — **결론부터 시작하는 완결 보고만**: ①핵심 결론 ②근거(숫자 인용) ③리스크/모르는 것 ④다음 행동. "[도구 호출]"·"(도구 호출" 표기·사죄·과정 서술 절대 금지.' }] });
     answer = '';
   }
 
