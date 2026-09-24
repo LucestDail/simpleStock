@@ -472,7 +472,7 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
             const qty = Math.floor(l.budget / price);
             if (qty <= 0) continue;
             // 🔴 살 수 없는 제안을 만들지 않는다 — 구조 가드가 이 누락을 잡았다(propose 호출부는 계좌 검증 필수)
-            const chk = await orderService.checkAccountLimits({ symbol: l.symbol, side: 'BUY', quantity: qty, price });
+            const chk = await orderService.checkAccountLimits({ symbol: l.symbol, side: 'BUY', quantity: qty, price, exemptCashFloor: true });
             if (!chk.ok) { logWarn('alerts.ladder_blocked', { symbol: l.symbol, kind: chk.kind, error: chk.error }); continue; }
             const r = orderService.propose(
               { symbol: l.symbol, side: 'BUY', type: 'LIMIT', quantity: qty, price: Math.round(price * 100) / 100, reason: l.reason },

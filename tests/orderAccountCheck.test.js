@@ -127,3 +127,24 @@ test('🔴 propose() 를 부르는 곳은 계좌 검증도 부른다', () => {
   assert.ok(callers >= 2, `🔴 검사한 호출자가 ${callers}곳뿐이다 — 자가 헛돈다(분석·라우트 둘은 있어야 한다)`);
   assert.deepEqual(problems, [], `\n🔴 이 경로로는 살 수 없는 제안이 나간다:\n${problems.join('\n')}`);
 });
+
+test('🔴 현금 버퍼 15%(사용자 확정 09-24) — 바닥을 깨는 매수는 거부, 사다리는 면제', async () => {
+  // 현금 1000 · 보유(USD) 1000 → 평가 2000 · 버퍼 300. 700 초과 매수는 거부돼야 한다
+  for (const k of Object.keys(require.cache)) {
+    if (/orderService|tossClient|tossPortfolio/.test(k)) delete require.cache[k];
+  }
+  const tp = require.resolve('../server/tossClient');
+  require.cache[tp] = { id: tp, filename: tp, loaded: true, exports: { ...require(tp), getBuyingPower: CASH('1000'), getPriceLimits: async () => ({}) } };
+  const pp = require.resolve('../server/tossPortfolio');
+  require.cache[pp] = { id: pp, filename: pp, loaded: true, exports: { getHoldings: async () => ({ summary: {}, items: [{ symbol: 'QQQ', currency: 'USD', marketValue: 1000 }] }) } };
+  const o = require('../server/orderService');
+  const over = await o.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 8, price: 100 }); // 800 > 700
+  assert.equal(over.ok, false);
+  assert.equal(over.kind, 'cash-floor');
+  assert.equal(over.maxQuantity, 7); // (1000-300)/100
+  const under = await o.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 7, price: 100 });
+  assert.equal(under.ok, true, under.error);
+  // 🔴 사다리 면제 — 공포에 실탄 소진이 취지(백테스트: floor 는 LLM 매수에만)
+  const ladder = await o.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 9, price: 100, exemptCashFloor: true });
+  assert.equal(ladder.ok, true, ladder.error);
+});

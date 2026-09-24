@@ -40,6 +40,9 @@ const AUDIT_FILE = path.join(DATA_DIR, 'orders-audit.jsonl');
 
 /** 🔴 기본 꺼짐. **없어도 꺼짐**이다 — 미설정이 켜짐이 되면 안 된다 */
 const ORDERS_ENABLED = String(process.env.ORDERS_ENABLED || '').trim().toLowerCase() === 'true';
+/** 🔴 현금 버퍼 %(2026-09-24 사용자 확정 15) — VIX 사다리 실탄 보전. 0 이면 끔 */
+const CASH_FLOOR_PCT = Math.max(0, Number(process.env.CASH_FLOOR_PCT ?? 15));
+
 /** 실행을 실제 API 로 보낼지. ORDERS_ENABLED 와 **둘 다** 켜져야 한다(두 겹) */
 const ORDERS_LIVE = String(process.env.ORDERS_LIVE || '').trim().toLowerCase() === 'true';
 
@@ -252,7 +255,7 @@ function num(v) {
  *    *"검사하지 않은 것" 과 "통과한 것" 을 구분하지 못하는 자를 만들지 말 것* 의 돈 버전이다.
  * ⚠️ 금액·수량은 **문자열**로 온다(정밀도) — 비교만 숫자로 하고 표시는 원문을 쓴다.
  */
-async function checkAccountLimits({ symbol, side, quantity, price, currency } = {}) {
+async function checkAccountLimits({ symbol, side, quantity, price, currency, exemptCashFloor = false } = {}) {
   const sym = String(symbol || '').trim();
   const qty = Number(quantity);
   const px = Number(price);
@@ -304,6 +307,34 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency } = 
     const need = qty * px;
     if (need > cash) {
       return { ok: false, kind: 'insufficient', error: `현금이 부족합니다 (필요 ${need.toFixed(2)} ${cur} > 가능 ${bp.cash.raw}).`, available: bp.cash.raw, currency: cur };
+    }
+    /**
+     * 🔴 현금 버퍼 (2026-09-24 사용자 확정 15%) — VIX 사다리 실탄 보전.
+     *    백테스트 근거: V자 -5.1% → +9.9%(버퍼 덕에 사다리 3/3 전탄 집행) · 상승장 -4.2%p ·
+     *    하락장 중립 — 비대칭 유리. 기준은 **총 평가액**(현금+주식, 같은 통화 환산은 없음 —
+     *    통화별 자산 기준. 백테스트의 "초기 자산" 을 실전에선 평가액으로 옮긴 것).
+     * ⚠️ exemptCashFloor(사다리 전용): 사다리 취지가 공포에 실탄 소진이라 버퍼 면제 —
+     *    백테스트도 같은 구조였다(floor 는 LLM 매수에만).
+     */
+    if (!exemptCashFloor && CASH_FLOOR_PCT > 0) {
+      try {
+        const h = await require('./tossPortfolio').getHoldings({});
+        const holdingsVal = (h.items || [])
+          .filter((it) => String(it.currency || '').toUpperCase() === cur)
+          .reduce((s, it) => s + (Number(it.marketValue) || 0), 0);
+        const floor = (cash + holdingsVal) * (CASH_FLOOR_PCT / 100);
+        if (cash - need < floor) {
+          const maxQty = Math.max(0, Math.floor((cash - floor) / px));
+          return {
+            ok: false, kind: 'cash-floor',
+            error: `매수 후 현금이 버퍼(평가액의 ${CASH_FLOOR_PCT}% = ${floor.toFixed(0)} ${cur}) 밑으로 떨어집니다 — VIX 사다리 실탄 보전(사용자 규칙). 가능 수량 ${maxQty}주.`,
+            maxQuantity: maxQty, currency: cur,
+          };
+        }
+      } catch (e) {
+        // 버퍼 계산 실패가 정당한 매수를 막으면 오탐 게이트다 — 기본 현금 검증은 위에서 이미 통과
+        logWarn('orders.cash_floor_check_failed', { message: e.message });
+      }
     }
     return { ok: true, available: bp.cash.raw, currency: cur };
   } catch (e) {
