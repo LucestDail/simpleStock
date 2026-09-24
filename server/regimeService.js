@@ -291,13 +291,19 @@ async function candidateSection(scenarios, { heldSymbols = [], summarize, getCan
         for (const e of catalog.categories[key].etfs) {
           // 1배(정방향·인버스 -1 포함 — 인버스 헤지는 사용자 결정 09-24) · 미보유 · KR 은 원화 현금이 있어야 의미
           if (Math.abs(e.leverage) !== 1 || held.has(e.symbol) || e.market === 'KR') continue;
-          if (!wanted.some((w) => w.symbol === e.symbol)) wanted.push({ symbol: e.symbol, name: e.name, category: catalog.categories[key].name });
+          /**
+           * 🔴 카테고리당 1개 (2026-09-24 시뮬 실측) — 생필품이 XLP·VDC 로 두 자리를 먹어
+           *    상한에 인버스(PSQ)가 **항상 잘렸다.** 같은 카테고리 둘은 정보가 거의 같다 —
+           *    다양성이 상한 안에서 우선이다.
+           */
+          if (wanted.some((w) => w.categoryKey === key)) break;
+          if (!wanted.some((w) => w.symbol === e.symbol)) wanted.push({ symbol: e.symbol, name: e.name, category: catalog.categories[key].name, categoryKey: key });
         }
       }
     }
   }
   const lines = [];
-  for (const w of wanted.slice(0, 4)) {
+  for (const w of wanted.slice(0, 6)) {
     try {
       const c = await getCandles(w.symbol, { interval: '1d', count: 120 });
       const t = summarize(c.rows || []);
