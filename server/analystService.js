@@ -468,9 +468,15 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     .filter((r) => BRIEF_KINDS.has(r?.kind) && MARKET_NAME[r?.key])
     .map((r) => r.key))];
   /** 그 시장에 보유·감시 종목이 하나도 없으면 **시장 자체**를 검색 주제로 넣는다 */
+  /**
+   * 🔴 시장 주제 표식은 **전용 필드(isMarket)** 다 (2026-09-24 인수 검증에서 발견) —
+   *    종전엔 `market` 필드로 갈랐는데 **보유 items 에도 market('US'/'KR')이 있어서**
+   *    09-22 부터 모든 종목 질의가 "QLD 증시 마감 시황" 꼴 시장 질의로 나가고 있었다.
+   *    (officialName 우선도 그래서 한 번도 안 탔다 — 분기가 먼저 걸렸다.)
+   */
   const marketSubjects = briefMarkets
     .filter((m) => !items.some((i) => (m === 'kr') === (String(i.market).toUpperCase() === 'KR')))
-    .map((m) => ({ symbol: m.toUpperCase(), name: MARKET_NAME[m], market: m }));
+    .map((m) => ({ symbol: m.toUpperCase(), name: MARKET_NAME[m], isMarket: true }));
 
   let web = null;
   if (useWebSearch) {

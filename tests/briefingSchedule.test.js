@@ -220,7 +220,8 @@ test('🔴 시장 단위 검색 주제를 만든다 (보유 0인 시장)', () =>
   assert.ok(i > 0, '🔴 시장 주제가 없다 — 보유 없는 시장은 검색이 빈다');
   const block = ANALYST.slice(i, i + 400);
   assert.match(block, /!items\.some/, '🔴 "보유가 없는 시장" 을 가리지 않는다');
-  assert.match(block, /market: m/, '🔴 시장 표시가 없어 종목 질의로 만들어진다');
+  // 🔴 표식은 isMarket 전용 — market 필드는 보유 items 에도 있어 종목이 시장 질의로 빠진다(09-24 실측)
+  assert.match(block, /isMarket: true/, '🔴 시장 전용 표식이 없어 종목 질의로 만들어진다');
 });
 
 test('🔴 검색 호출에 시장 주제가 **실제로 실린다**', () => {
@@ -234,7 +235,9 @@ test('🔴 검색 호출에 시장 주제가 **실제로 실린다**', () => {
 test('🔴 buildQuery 가 시장 주제에 **다른 질의**를 낸다 — 그리고 SEO 자석 문구로 돌아가지 않는다', () => {
   const i = MCP.indexOf('function buildQuery');
   const block = MCP.slice(i, i + 900);
-  assert.match(block, /subject\?\.market/, '🔴 시장 주제를 구분 안 한다');
+  assert.match(block, /subject\?\.isMarket === true/, '🔴 시장 주제 전용 표식이 없다');
+  // 실측(09-24): market 필드로 가르면 보유 items 의 market('US') 이 걸려 종목이 전부 시장 질의가 된다
+  assert.doesNotMatch(block, /if \(subject\?\.market\)/, '🔴 market 필드 분기로 회귀 — 종목이 시장 질의로 빠진다');
   assert.match(block, /증시 마감 시황/, '🔴 시황 질의가 없다');
   // 실측(09-24): "주가 뉴스 전망" 질의는 5/5 가 점술·토론방 댓글·광고였다 — 질의 문구가 곧 소스 품질이다
   assert.doesNotMatch(block, /주가 뉴스 전망/, '🔴 SEO 자석 질의로 회귀했다');
@@ -247,6 +250,9 @@ test('buildQuery: officialName 이 있으면 그것으로, 없으면 name/symbol
   assert.equal(buildQuery({ name: 'QLD', symbol: 'QLD', officialName: 'PROSHARES TRUST PSHS ULTRA QQQ' }), 'PROSHARES TRUST PSHS ULTRA QQQ');
   assert.equal(buildQuery({ name: '삼성전자', symbol: '005930' }), '삼성전자');
   assert.equal(buildQuery({ symbol: 'XOM' }), 'XOM');
+  // 🔴 보유 종목엔 market('US')이 있어도 **종목 질의**여야 한다 / 시장 주제는 isMarket 으로만
+  assert.equal(buildQuery({ name: 'QLD', symbol: 'QLD', market: 'US', officialName: 'PROSHARES TRUST PSHS ULTRA QQQ' }), 'PROSHARES TRUST PSHS ULTRA QQQ');
+  assert.equal(buildQuery({ name: '코스피', symbol: 'KR', isMarket: true }), '코스피 증시 마감 시황');
 });
 
 /** 🔴 개인정보 가드가 약해지지 않았는가 — 자유 질의를 받게 열면 호출부로 샌다 */

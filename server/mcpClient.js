@@ -283,7 +283,9 @@ function buildQuery(subject) {
    *    점술 사이트·종목토론방 댓글·광고·포털 링크였다(실증 0). 짧은 질의가 뉴스 소스에서
    *    더 잘 든다(어제 실측: 단독 en 질의 100건 vs "전망" 포함 0건과 같은 계열).
    */
-  if (subject?.market) return `${name || symbol} 증시 마감 시황`;
+  // 🔴 `market` 필드로 가르면 안 된다 — 보유 items 에도 market('US')이 있어 종목이 전부
+  //    시장 질의("QLD 증시 마감 시황")로 빠졌다(09-22~24 잠복, 인수 검증이 잡음). 전용 표식만.
+  if (subject?.isMarket === true) return `${name || symbol} 증시 마감 시황`;
   /**
    * 🔴 맨 티커는 뉴스 인덱스에서 **다른 뜻이 이긴다** (2026-09-24 pm2 실측):
    *    'QLD' → 퀸즐랜드 럭비·경찰 / 'RAM stock' → PC 램 품귀. US ETF 는 name 이 곧
