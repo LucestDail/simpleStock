@@ -100,18 +100,28 @@ function compute({ kr = null, us = null, vix = null, manual = [] } = {}) {
  */
 function matchScenarios(state, playbook) {
   const out = [];
-  const anyTrend = [state?.kr?.trend, state?.us?.trend].filter(Boolean);
   const anyShock = Boolean(state?.kr?.shock || state?.us?.shock);
   const band = state?.vix?.band;
   for (const sc of playbook?.scenarios || []) {
     const m = sc.match || {};
-    if (m.manual) { if (state.manual?.includes(m.manual)) out.push(sc); continue; }
-    if (m.trend && !anyTrend.includes(m.trend)) continue;
+    if (m.manual) { if (state.manual?.includes(m.manual)) out.push({ ...sc, via: '수동' }); continue; }
+    /**
+     * 🔴 어느 시장이 발동시켰는지 남긴다 (2026-09-24 시뮬레이션에서 발견) —
+     *    디커플링(미장 하락·국장 상승)이면 상반된 매뉴얼 둘이 같이 실리는데,
+     *    발동 근원이 없으면 모델이 US 에 상승 성향을 적용하는 식으로 섞어 읽는다.
+     */
+    let via = null;
+    if (m.trend) {
+      const hit = ['us', 'kr'].filter((k) => state?.[k]?.trend === m.trend);
+      if (!hit.length) continue;
+      via = hit.map((k) => k.toUpperCase()).join('·');
+    }
     if (m.shock === true && !anyShock) continue;
     if (m.shock === false && anyShock) continue;
+    if (m.shock === true) via = ['us', 'kr'].filter((k) => state?.[k]?.shock).map((k) => k.toUpperCase()).join('·') || via;
     if (m.vixBandMin != null && !(band != null && band >= m.vixBandMin)) continue;
     if (m.vixBandMax != null && !(band != null && band <= m.vixBandMax)) continue;
-    out.push(sc);
+    out.push({ ...sc, via: via || (m.vixBandMin != null ? 'VIX' : via) });
   }
   return out;
 }
@@ -239,7 +249,8 @@ function promptSection(state = current, scenarios = null) {
     const catalog = readCatalog();
     const wantCats = new Set();
     for (const sc of active) {
-      lines.push(`### ${sc.name}`);
+      // via = 발동 근원 — 디커플링에서 "이 매뉴얼은 어느 시장 얘기인가" 를 모델이 안다
+      lines.push(`### ${sc.name}${sc.via ? ` — 발동: ${sc.via}` : ''}${sc.via && sc.via !== 'VIX' && sc.via.length <= 5 ? ' (이 시장에만 적용)' : ''}`);
       for (const st of sc.steps) {
         lines.push(`- ${st}`);
         for (const key of Object.keys(catalog.categories || {})) if (st.includes(key)) wantCats.add(key);
@@ -249,8 +260,10 @@ function promptSection(state = current, scenarios = null) {
       lines.push('', '## 도구상자 (티커는 이 안에서만 — 지어내지 마라)');
       for (const key of wantCats) {
         const cat = catalog.categories[key];
-        lines.push(`- ${cat.name}: ${cat.etfs.map((e) => `${e.symbol}(${e.leverage}x)`).join(' · ')}`);
+        // market 표기 — 시뮬 실측: 모델이 달러 현금으로 KR 종목 매수를 제안했다(통화 불일치)
+        lines.push(`- ${cat.name}: ${cat.etfs.map((e) => `${e.symbol}(${e.leverage}x${e.market === 'KR' ? '·KR원화' : ''})`).join(' · ')}`);
       }
+      lines.push('⚠️ 이 목록 밖 티커·현금 통화와 다른 시장의 매수 제안은 **계좌 검증이 거부한다** — 내지 마라.');
     }
   }
   return lines.join('\n');
