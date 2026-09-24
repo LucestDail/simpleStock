@@ -841,6 +841,13 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     const { state, scenarios } = await regime.refresh();
     const sec = regime.promptSection(state, scenarios);
     if (sec) lines.push('', sec);
+    // 🔴 매수 후보 실데이터 — 이름만 주면 모델이 정직하게 침묵한다(시뮬 E: 현금 있어도 제안 0)
+    const cand = await regime.candidateSection(scenarios, {
+      heldSymbols: items.map((i) => i.symbol),
+      summarize: summarizeCandles,
+      getCandles: (sym, o) => toss.getCandles(sym, o),
+    });
+    if (cand) lines.push('', cand);
   } catch (e) {
     logWarn('analyst.regime_failed', { message: e.message });
     lines.push('', '## 시장 국면: 판정 실패 — 국면 기반 판단은 하지 마라(추측 금지).');

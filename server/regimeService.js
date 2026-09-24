@@ -269,6 +269,50 @@ function promptSection(state = current, scenarios = null) {
   return lines.join('\n');
 }
 
+/**
+ * 🔴 발동 매뉴얼이 가리키는 **매수 후보의 실데이터** (2026-09-24 시뮬 E 실증).
+ *
+ * 도구상자에 티커 이름만 실었더니 — 상승장 + 현금 $5,000 에서도 **매수 제안 0**.
+ * 모델이 "확인 안 된 값을 지어내지 마라" 규율에 눌려 정직하게 침묵한 것이다(그게 맞다).
+ * ⇒ 이름이 아니라 **시세·추세**를 준다: 발동 카테고리의 1배 ETF(미보유·US 우선 4개)를
+ *    캔들로 요약해 "매수 후보 기술 위치" 절을 만든다. 판단 함수는 호출자(analystService)의
+ *    summarizeCandles 를 **그대로 받아 쓴다** — 자를 새로 만들지 않는다.
+ * ⚠️ 실패한 후보는 건너뛴다(빈 값 지어내기 금지) · 후보 수 상한 4(길이 = 시간).
+ */
+async function candidateSection(scenarios, { heldSymbols = [], summarize, getCandles } = {}) {
+  if (!scenarios?.length || typeof summarize !== 'function' || typeof getCandles !== 'function') return '';
+  const catalog = readCatalog();
+  const held = new Set(heldSymbols.map((s) => String(s).toUpperCase()));
+  const wanted = [];
+  for (const sc of scenarios) {
+    for (const st of sc.steps || []) {
+      for (const key of Object.keys(catalog.categories || {})) {
+        if (!st.includes(key)) continue;
+        for (const e of catalog.categories[key].etfs) {
+          // 1배 우선(레버리지 신규는 매뉴얼이 따로 다룬다) · 미보유 · KR 은 원화 현금이 있어야 의미
+          if (e.leverage !== 1 || held.has(e.symbol) || e.market === 'KR') continue;
+          if (!wanted.some((w) => w.symbol === e.symbol)) wanted.push({ symbol: e.symbol, name: e.name, category: catalog.categories[key].name });
+        }
+      }
+    }
+  }
+  const lines = [];
+  for (const w of wanted.slice(0, 4)) {
+    try {
+      const c = await getCandles(w.symbol, { interval: '1d', count: 120 });
+      const t = summarize(c.rows || []);
+      if (!t) continue;
+      lines.push(`- ${w.symbol}(${w.category} · ${w.name}): 현재 ${t.last} · 20일선 ${t.ma20 ? t.ma20.toFixed(2) : '-'} · 60일선 ${t.ma60 ? t.ma60.toFixed(2) : '-'} · ${t.bars}일 고점대비 ${t.fromHighPct != null ? t.fromHighPct.toFixed(1) : '-'}%`);
+    } catch { /* 못 받은 후보는 싣지 않는다 — 지어내기 금지 */ }
+  }
+  if (!lines.length) return '';
+  return [
+    '## 매수 후보 기술 위치 (도구상자 실데이터 — 미보유·1배)',
+    ...lines,
+    '현금이 있고 매뉴얼이 매수를 허용하는 국면이면, 이 중 추세가 선(종가>20>60) 후보로 **구체적 매수 제안을 내라.** 근거는 위 숫자 인용.',
+  ].join('\n');
+}
+
 /** 수동 국면(지정학 등) 토글 — 코드가 판정할 수 없는 축은 사람이 발동한다 */
 function setManual(tags) {
   const state = current || loadState() || compute({});
@@ -282,6 +326,6 @@ function getState() { return current || loadState(); }
 
 module.exports = {
   compute, judgeMarket, vixBandOf, matchScenarios, diffTransitions, promptSection,
-  refresh, getState, setManual, readPlaybook, readCatalog,
+  refresh, getState, setManual, readPlaybook, readCatalog, candidateSection,
   VIX_BAND_LABEL, TREND_KO,
 };
