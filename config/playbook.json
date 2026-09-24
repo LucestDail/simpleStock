@@ -11,27 +11,34 @@
     {
       "id": "bull_calm",
       "name": "상승추세 · 평온",
-      "match": { "trend": "up", "vixBandMax": 0 },
+      "match": {
+        "trend": "up",
+        "vixBandMax": 0
+      },
       "steps": [
-        "공격 축(tech_broad·semiconductor) 유지·확대 허용 — 단 17.1 레버리지 합계 상한(50%) 안에서",
-        "보유 수익 종목은 손절선을 끌어올린다(스윙로우 갱신 시 예약 매도 갱신 제안)",
-        "현금 하한(15%)은 지킨다 — 전량 투입 제안 금지"
+        "공격 축(tech_broad·semiconductor) 유지·확대 허용 — ⚠️ 배분 상한 없음(사용자 결정 09-24: 비율 규칙 없이 운영)",
+        "보유 수익 종목은 손절선을 끌어올린다(스윙로우 갱신 시 예약 매도 갱신 제안)"
       ]
     },
     {
       "id": "side_grind",
       "name": "횡보 · 방향 없음",
-      "match": { "trend": "side" },
+      "match": {
+        "trend": "side"
+      },
       "steps": [
         "🔴 레버리지(2x/3x)는 횡보에서 감쇠한다 — 보유 레버리지의 축소·1배 전환(예: QLD→QQQ, RAM→SOXX)을 우선 제안",
-        "신규 매수는 배당(dividend)·방어(staples·healthcare) 카테고리 위주 소액만",
+        "이행 방침(사용자 결정 09-24): **점진 — 기술적 반등 지점에서 분할 매도 제안**(즉시 전량 아님)",
         "예약 매매(감시가) 활용 — 박스 하단 매수·상단 매도 예약을 사람에게 제시"
       ]
     },
     {
       "id": "bear_trend",
       "name": "하락추세",
-      "match": { "trend": "down", "shock": false },
+      "match": {
+        "trend": "down",
+        "shock": false
+      },
       "steps": [
         "신규 매수 제안 금지(VIX 층이 발동하지 않는 한) — 반등 시 공격 축 축소 제안",
         "방어 카테고리(staples·healthcare·bonds·gold) 비중 확대를 제시",
@@ -42,7 +49,10 @@
     {
       "id": "shock_day",
       "name": "급락 당일 (지수 -3%)",
-      "match": { "shock": true, "vixBandMax": 0 },
+      "match": {
+        "shock": true,
+        "vixBandMax": 0
+      },
       "steps": [
         "🔴 VIX 가 아직 평온이면 제안 유보 — 하루 재평가(충동 방지, §17.3)",
         "보유 손절선 점검만 제시(예약 매도가 걸려 있으면 그대로 둔다)"
@@ -51,18 +61,22 @@
     {
       "id": "fear_ladder",
       "name": "공포 사다리 (VIX 20+) — 사용자 규칙",
-      "match": { "vixBandMin": 1 },
+      "match": {
+        "vixBandMin": 1
+      },
       "steps": [
         "🔴 사용자 규칙: VIX 20+ 분할 매수 시작 · 25+ 2단계 · 30+ 3단계 · 35+ 최대 — 급락 유보보다 우선",
-        "매수 대상은 1배 광범위(QQQ·SPY 계열·kr_broad 1배) 우선 — 공포 구간에서 레버리지 신규 진입은 밴드 3(30+) 이상에서만 제시",
-        "단계별 투입 금액: ⚠️ 사용자 결정 대기(§17.5-5) — 결정 전에는 '현금의 25%씩' 을 기본 제시",
+        "단계별 투입(사용자 확정 09-24): 가용 현금의 **10% / 20% / 30% / 40%** (공포가 깊을수록 크게)",
+        "매수 대상은 1배 광범위(QQQ·SPY 계열·kr_broad 1배) 우선 — 레버리지 신규는 밴드 3(30+) 이상에서만",
         "각 단계는 예약 매수(감시가)로 거는 것을 함께 제시 — VIX 는 급등락하므로 지정가 필수"
       ]
     },
     {
       "id": "war_geopolitics",
       "name": "지정학 이벤트 (수동 발동)",
-      "match": { "manual": "geopolitics" },
+      "match": {
+        "manual": "geopolitics"
+      },
       "steps": [
         "방산(defense)·에너지(energy)·금(gold) 카테고리 검토 제시",
         "⚠️ 이벤트 국면은 코드가 판정할 수 없다 — 사용자가 채팅으로 '지정학 모드' 라고 발동한다"

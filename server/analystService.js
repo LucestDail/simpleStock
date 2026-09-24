@@ -684,6 +684,23 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   const identity = stockIdentity.sectionFromItems(items);
   if (identity) lines.push('', identity);
 
+  /**
+   * 🔴 사용자 보유 방침 (2026-09-24 결정 — §17.5) — 모델이 사용자 의사에 반하는 제안을
+   *    반복하면 신뢰가 깎인다. ⚠️ 날짜 조건부는 **코드가** 만료시킨다(지난 방침이 낡은 채
+   *    프롬프트에 남으면 "문서가 거짓이 되는" 그 병이다).
+   */
+  {
+    const policy = [
+      'RAM: 사용자가 **보유 유지**를 정했다(평단 19.08 회복 대기, 16.0 근접 시 매도 검토 — 목표선 알림 설정됨).',
+      '  급락·구조 악화가 아니면 RAM SELL 제안을 반복하지 마라. 16.0 접근 시에는 매도 검토 제안 허용.',
+      '이행 방침: 레버리지 축소는 **점진** — 기술적 반등 지점에서 분할 매도 제안(즉시 전량 아님).',
+    ];
+    if (Date.now() < Date.parse('2026-09-28T00:00:00+09:00')) {
+      policy.push('9/28(월) 삼성전자 특별배당락 — 사용자가 그 전까지 관망 방침. 큰 포지션 변경 제안은 자제.');
+    }
+    lines.push('', '## 사용자 방침 (결정권자의 지시 — 판단보다 우선)', ...policy.map((x) => `- ${x}`));
+  }
+
   lines.push('', '## 보유 종목');
   for (const h of items) {
     const t = tech[h.symbol];
