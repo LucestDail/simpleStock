@@ -179,9 +179,32 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
     const cur = String(s.state || '');
     const was = st.sessions[key];
     st.sessions[key] = cur;
+    /**
+     * 🔴 마감은 **놓쳐도 보낸다** (2026-09-25 — 실측: 09-24 15:30 KRX 마감이 배포 재기동에
+     *    삼켜져 트리거 0건, 마감 브리핑이 통째로 소실됐다. 전이 감지는 재기동을 못 넘는다).
+     *    중간(mid)과 다르다 — "장 끝난 뒤 중간보고" 는 거짓이지만 **마감 요약은 사후에도 유효**하다.
+     *    같은 날 중복은 ①여기 lastCloseDay ②발송단 briefKey 지문, 두 겹이 막는다.
+     */
+    st.lastCloseDay = { ...(st.lastCloseDay || {}) };
+    const regEnd = Number(s?.regular?.end);
+    if (cur === 'closed' && Number.isFinite(regEnd) && now >= regEnd) {
+      const closeDay = new Date(regEnd).toISOString().slice(0, 10);
+      if (st.lastCloseDay[key] !== closeDay) {
+        st.lastCloseDay[key] = closeDay;
+        reasons.push({ kind: 'close', key, label: s.label || key });
+        st.sessions[key] = cur;
+        continue; // 전이 검사와 중복 발화 방지
+      }
+    }
     // 🔴 첫 실행은 기준선일 뿐 "바뀐 것" 이 아니다(alertService.ruleSessions 와 같은 규율)
     if (!was || was === cur) continue;
-    if (cur === 'closed') reasons.push({ kind: 'close', key, label: s.label || key });
+    if (cur === 'closed') {
+      // 전이 close — 위 캘린더 경로가 이미 오늘치를 보냈으면 중복 금지
+      const closeDay = Number.isFinite(regEnd) ? new Date(regEnd).toISOString().slice(0, 10) : null;
+      if (closeDay && st.lastCloseDay[key] === closeDay) continue;
+      if (closeDay) st.lastCloseDay[key] = closeDay;
+      reasons.push({ kind: 'close', key, label: s.label || key });
+    }
     /**
      * 🔴 **개장 브리핑** (2026-09-22 사용자 지시 — 하루 6회 정기 브리핑).
      *    `open` 은 **정규장(데이장)** 시작이다. 프리마켓은 `open` 이 아니라 `pre` 라

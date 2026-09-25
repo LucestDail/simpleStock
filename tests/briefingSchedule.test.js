@@ -272,3 +272,22 @@ test('🔴 보유 없는 시장이면 프롬프트가 **시황을 요구**한다
   assert.match(block, /전반적 시황/, '🔴 시황을 요구하지 않는다');
   assert.match(block, /지어내지 마라/, '🔴 없는 종목을 지어낼 여지를 남긴다');
 });
+
+test('🔴 마감은 놓쳐도 보낸다 — 재기동(빈 상태)으로 전이를 삼켜도 캘린더가 살린다 (09-24 실사고)', () => {
+  // 재기동 직후: 상태가 비어 있고(기준선 없음) 장은 이미 닫힌 뒤
+  const after = T('2026-09-22T16:10:00+09:00');
+  let d = trigger.decide({ now: after, sessions: [sess('kr', 'closed', KR)], symbols: [], state: {} });
+  assert.deepEqual(kinds(d), ['close'], '🔴 재기동이 마감 브리핑을 삼켰다(그 실사고 그대로)');
+  // 같은 날 다음 틱 — 두 번은 안 보낸다
+  d = trigger.decide({ now: after + 5 * 60_000, sessions: [sess('kr', 'closed', KR)], symbols: [], state: d.state });
+  assert.deepEqual(kinds(d), [], '🔴 마감이 반복 발송된다');
+  // 정상 전이(open→closed)도 여전히 한 번만
+  let st = trigger.decide({ now: KR.start, sessions: [sess('kr', 'open', KR)], symbols: [] }).state;
+  d = trigger.decide({ now: KR.end, sessions: [sess('kr', 'closed', KR)], symbols: [], state: st });
+  assert.deepEqual(kinds(d).filter((k) => k === 'close'), ['close']);
+  d = trigger.decide({ now: KR.end + 5 * 60_000, sessions: [sess('kr', 'closed', KR)], symbols: [], state: d.state });
+  assert.ok(!kinds(d).includes('close'), '🔴 전이+캘린더 두 경로가 이중 발송한다');
+  // ⚠️ regular 를 모르면(캘린더 실패) 옛 동작 그대로 — 추측으로 마감을 지어내지 않는다
+  d = trigger.decide({ now: after, sessions: [sess('kr', 'closed', null)], symbols: [], state: {} });
+  assert.deepEqual(kinds(d), [], '🔴 시간대를 모르는데 마감이라고 판단했다');
+});
