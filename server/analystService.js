@@ -1327,6 +1327,17 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    */
   const gaps = [...(report.dataGaps || [])];
   const notApplicable = [];
+  /**
+   * 🔴 구조적 부재는 결손이 아니다 (2026-09-25 — 실측: 매 회차 gapsMissing 5~8 이
+   *    전부 "5년 재무·PER/PBR·기관 수급·내부자·옵션 IV·목표주가 미제공" 고정 문구였다.
+   *    SYSTEM_PROMPT 가 "이 시스템에 없다" 고 명시한 축을 모델이 성실히 받아 적은 것 —
+   *    설계이지 결손이 아니다. missing 에 섞이면 **진짜 결손(뉴스 실패·캔들 실패)이 묻힌다.**
+   * ⚠️ 목표주가는 pm2 소스 판정 후 채울 수도 있다 — 그때 이 목록에서 뺀다.
+   */
+  const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 IV|목표주가/;
+  for (const g of report.dataGaps || []) {
+    if (STRUCTURAL.test(String(g))) notApplicable.push(g);
+  }
   for (const [sym, r] of Object.entries(ratings)) {
     if (r?.error) gaps.push(`${sym} 기업 평가 실패 — ${r.error}`);
     else if (r?.isFund) {
