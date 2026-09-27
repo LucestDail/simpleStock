@@ -352,3 +352,14 @@ test('⚠️ 저장된 lastRunAt 이 ISO 문자열이어도 쿨다운이 산다'
   });
   assert.equal(d.run, false, '🔴 문자열 lastRunAt 을 못 읽어 쿨다운이 통째로 풀린다');
 });
+
+test('🔴 모멘텀은 z 와 **절대 크기** 둘 다 필요 — SGOV -0.23%(3.68σ) 실사고', () => {
+  // 초저변동 이력(±0.03%)에서 -0.23% 는 z 로는 거대하지만 경제적으론 노이즈다
+  const flat = Array.from({ length: 30 }, (_, i) => (i % 2 ? 0.03 : -0.03));
+  const d = decide({ now: Date.now(), sessions: [], symbols: [{ symbol: 'SGOV', dailyChangePct: -0.23, history: flat }], state: {} });
+  assert.ok(!d.reasons.some((r) => r.kind === 'momentum'), '🔴 노이즈가 분석을 깨운다(LLM 비용)');
+  // 진짜 모멘텀(크고 이상치)은 그대로 발동
+  const normal = Array.from({ length: 30 }, (_, i) => (i % 2 ? 1 : -1));
+  const d2 = decide({ now: Date.now(), sessions: [], symbols: [{ symbol: 'MSFT', dailyChangePct: 10.8, history: normal }], state: {} });
+  assert.ok(d2.reasons.some((r) => r.kind === 'momentum'), '🔴 진짜 급등을 놓친다');
+});

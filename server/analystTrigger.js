@@ -49,6 +49,8 @@
 
 /** 기본 문턱 — `이 종목치고` 얼마나 이상해야 부를 것인가 */
 const DEFAULT_Z = Number(process.env.ANALYST_MOMENTUM_Z) || 2;
+/** 모멘텀 최소 절대 등락 % — z 만으로는 초저변동 자산(단기채 등)의 노이즈가 발동한다 */
+const MIN_MOVE_PCT = Math.max(0, Number(process.env.ANALYST_MOMENTUM_MIN_PCT ?? 1.5));
 /**
  * 🔴 **되돌아오는 기준은 더 낮게 둔다**(히스테리시스).
  * 문턱 하나로 켜고 끄면 z 가 1.99↔2.01 을 오갈 때마다 **매번 새 사건**이 된다 —
@@ -245,7 +247,12 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
       // ⚠️ **판정 불가를 "평범함" 으로 읽지 않는다** — 표시를 지우면 다음에 새 사건이 된다
       continue;
     }
-    if (zv >= z) {
+    /**
+     * 🔴 절대 변화 하한 (2026-09-27 실전 실증) — SGOV(초단기채, 변동성 ~0.02%)가 **-0.23% 로
+     *    3.68σ** 를 넘어 분석을 깨웠다. 초저변동 자산은 티끌도 통계적 이상치다 —
+     *    z(그 종목답지 않음) AND 절대 크기(경제적 유의미)를 함께 요구한다.
+     */
+    if (zv >= z && Math.abs(Number(row.dailyChangePct)) >= MIN_MOVE_PCT) {
       if (!mark) {
         st.momentum[sym] = { at: now, z: Number(zv.toFixed(2)) };
         reasons.push({
