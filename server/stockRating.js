@@ -789,6 +789,10 @@ async function rate(symbol, { newsText = '', withProse = true } = {}) {
       trailingPE: stats.trailingPE, forwardPE: stats.forwardPE, pegRatio: stats.pegRatio,
       priceToSales: stats.priceToSales, priceToBook: stats.priceToBook,
       evToRevenue: stats.evToRevenue, evToEbitda: stats.evToEbitda,
+      // 🔴 목표주가를 **소비자에게도** 준다 (2026-09-27) — 프롬프트엔 넣었는데 반환 요약에 빠져
+      //    채팅 도구·화면이 못 봤다("수집해 놓고 안 쓰는" 패턴의 한 겹 더). ETF 는 null 이 정상
+      targetMeanPrice: stats.targetMeanPrice, targetLowPrice: stats.targetLowPrice,
+      targetHighPrice: stats.targetHighPrice, analystCount: stats.analystCount,
     },
     at: new Date().toISOString(),
   };
