@@ -185,6 +185,15 @@ const TOOL_DECLARATIONS = [
     },
   },
   {
+    name: 'read_article',
+    description: '뉴스 검색 결과의 URL 에서 **기사 본문**을 읽는다. 헤드라인 요약만으로 부족할 때 — 본문 근거로 판단·인용하라. 실패(JS 렌더링·봇 차단)하면 본문 없이 판단하지 말 것.',
+    parameters: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'web_search 결과에 나온 기사 URL' } },
+      required: ['url'],
+    },
+  },
+  {
     name: 'recall',
     description: '과거 대화에서 관련된 내용을 찾아온다. 사용자가 전에 한 말·판단을 확인할 때 쓴다.',
     parameters: {
@@ -318,6 +327,7 @@ function decidePrompt() {
     '      (만료일을 사용자가 안 줬으면 도구를 부르지 말고 먼저 물어라)',
     '    · "예약 주문 뭐 있어" → list_conditional_orders · "내 주문 체결됐어?" → get_my_orders',
     '    · 한 종목의 단기 체결 강도가 필요할 때 → get_trades',
+    '    · 검색 헤드라인만으로 부족하면 → read_article(URL) 로 **본문**을 읽고 판단하라',
     '    · 기업의 질·밸류·점수 → rate_stock (10항목 100점 · 유형별 기준)',
     '- 🔴 잡담·인사·감사이거나 **이미 `[도구 결과]` 로 받은 것**이면 `tools` 를 **빈 배열**로 둡니다.',
   ].join('\n');
@@ -703,6 +713,12 @@ async function runTool(name, args = {}, ctx = {}) {
         symbol: args.symbol, count: rows.length, rows,
         note: '시장 전체의 체결 틱이다(내 계좌 아님). 방향(매수/매도 체결)과 규모로 단기 수급을 읽어라.',
       };
+    }
+    case 'read_article': {
+      // pm2 실측(09-27): 한국 경제지 12도메인 본문 1.7k~12k자 양호 · 실패 3(조선비즈 추출·SBS JS·블룸버그 403)
+      const r = await mcp.readArticle(String(args.url || ''));
+      if (!r.ok) return { ok: false, error: r.error };
+      return { ok: true, chars: r.chars, text: r.text, note: '본문 전문이다 — 숫자·발언을 직접 인용해 근거로 쓰라.' };
     }
     case 'recall': {
       const hits = recall(String(args.query || ''));

@@ -407,11 +407,31 @@ function _resetForTest() {
   nextId = 1;
 }
 
+/**
+ * 기사 본문 읽기 (2026-09-27 — pm2 실측 후 부착: 한국 경제지 12도메인 양호 1.7k~12k자).
+ * 🔴 실패를 본문인 척 돌려주지 않는다 — biz.chosun 204자·bloomberg 403 같은 것을
+ *    요약하면 헤드라인만 보고 판단한 것과 같다(pm2 권고 그대로).
+ */
+async function readArticle(url) {
+  const u = String(url || '').trim();
+  if (!/^https?:\/\//.test(u)) return { ok: false, error: 'URL 이 아닙니다.' };
+  const tools = await listTools();
+  const tool = (tools || []).find((t) => /readwebpage|read_web_page/i.test(t.name));
+  if (!tool) return { ok: false, error: 'my-computer 에 readWebPage 도구가 없습니다.' };
+  const text = await callTool(tool.name, buildArgs(tool, u));
+  const body = String(text || '').trim();
+  if (body.length < 500) {
+    return { ok: false, error: `본문 확보 실패(${body.length}자) — JS 렌더링이거나 봇 차단 도메인일 수 있습니다. 헤드라인만으로 판단하지 마세요.`, chars: body.length };
+  }
+  return { ok: true, chars: body.length, text: body.slice(0, 6000) };
+}
+
 module.exports = {
   isConfigured,
   status,
   listTools,
   callTool,
+  readArticle,
   searchMarketNews,
   parseBody,
   pick,
