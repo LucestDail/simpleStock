@@ -1059,6 +1059,14 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   const webHits = (web?.results || []).filter((r) => r.text);
   if (webHits.length) {
     lines.push('', '## 웹 검색 (my-computer 경유 · 최신 시장 정보)');
+    /**
+     * 🔴 **품질 저하는 실패가 아니다** (2026-09-27, pm2 실측) — Brave 월 쿼터가 마르거나
+     *    장애가 나면 searxng 등 대체 소스로 넘어간다. 검색 자체는 됐으니 `dataGaps`(실패 축)엔
+     *    안 넣는다 — 대신 **이 절 머리**에서 모델에게 알려 인용 전에 스스로 걸러 읽게 한다.
+     */
+    if (web?.degraded) {
+      lines.push('⚠️ 뉴스가 대체 검색 소스(품질 낮음)에서 왔다 — 출처·날짜를 특히 확인하라');
+    }
     lines.push('⚠️ 아래는 외부 검색 결과입니다. **날짜와 출처를 확인하고** 인용하세요.');
     for (const r of webHits) {
       lines.push('', `### ${r.name || r.symbol}`, r.text.slice(0, 2500));

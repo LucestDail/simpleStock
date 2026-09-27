@@ -337,6 +337,56 @@ test('buildQuery 는 이름·티커 외에는 읽지 않는다', () => {
   assert.ok(q.includes('삼성전자'));
 });
 
+// ── 검색 출처 감지(degraded) ─────────────────────────────────
+
+/**
+ * 🔴 pm2 실측: my-computer 검색 결과 첫 줄에 "… 출처 brave-news):" / "… 출처 searxng):" 가
+ *    찍힌다. 지금까진 이걸 안 읽어서 "정상" 과 "대체 소스(품질 저하)" 를 구분 못 했다.
+ */
+test('첫 줄 출처 표기로 source 를 뽑는다(brave 계열은 degraded:false)', async () => {
+  install((b) =>
+    handshake(b, (bb) =>
+      bb.method === 'tools/list'
+        ? sse({ jsonrpc: '2.0', id: bb.id, result: TOOLS_WITH_SEARCH })
+        : sse({ jsonrpc: '2.0', id: bb.id, result: { content: [{ type: 'text', text: "🔎 '삼성전자' 검색 결과 (2건 · 출처 brave-news):\n\n1. 기사" }] } })
+    )
+  );
+  const r = await mcp.searchMarketNews([{ symbol: '005930', name: '삼성전자' }]);
+  assert.equal(r.results[0].source, 'brave-news');
+  assert.equal(r.degraded, false);
+});
+
+test('대체 소스(searxng)로 오면 degraded:true 다', async () => {
+  install((b) =>
+    handshake(b, (bb) =>
+      bb.method === 'tools/list'
+        ? sse({ jsonrpc: '2.0', id: bb.id, result: TOOLS_WITH_SEARCH })
+        : sse({ jsonrpc: '2.0', id: bb.id, result: { content: [{ type: 'text', text: "🔎 '삼성전자' 검색 결과 (1건 · 출처 searxng):\n\n1. 기사" }] } })
+    )
+  );
+  const r = await mcp.searchMarketNews([{ symbol: '005930', name: '삼성전자' }]);
+  assert.equal(r.results[0].source, 'searxng');
+  assert.equal(r.degraded, true);
+});
+
+/**
+ * 🔴 표기가 없으면 "정상" 도 "저하" 도 **가정하지 않는다** — source:null·degraded:false.
+ *    "표기 없으면 brave(정상)로 가정" 했으면 이 테스트는 그 실수를 못 잡는다 — 그래서
+ *    이 축을 별도로 잠근다(요구사항의 핵심 축).
+ */
+test('출처 표기가 없으면 source:null 이고 degraded 로 단정하지 않는다', async () => {
+  install((b) =>
+    handshake(b, (bb) =>
+      bb.method === 'tools/list'
+        ? sse({ jsonrpc: '2.0', id: bb.id, result: TOOLS_WITH_SEARCH })
+        : sse({ jsonrpc: '2.0', id: bb.id, result: { content: [{ type: 'text', text: '일반 뉴스 본문입니다. 별다른 표시가 없습니다.' }] } })
+    )
+  );
+  const r = await mcp.searchMarketNews([{ symbol: '005930', name: '삼성전자' }]);
+  assert.equal(r.results[0].source, null);
+  assert.equal(r.degraded, false);
+});
+
 /** 한 종목이 실패해도 나머지는 간다 — 조각 실패를 전체 실패로 만들지 않는다 */
 test('종목 하나가 실패해도 나머지 결과는 살아 있다', async () => {
   let n = 0;

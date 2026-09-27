@@ -139,6 +139,43 @@ test('URL 형식이 아니면 MCP 를 부르지 않고 즉시 실패한다', asy
   assert.equal(calls.length, 0);
 });
 
+/**
+ * 🔴 15초 상한(2026-09-27, pm2 실측 최악 421ms 대비 35배 여유) — my-computer 응답이
+ *    느리면 `readArticle` 이 그동안 기댔던 일반 MCP 타임아웃(기본 20초)까지 그대로
+ *    기다렸다. 이제는 그보다 먼저 끊고 `{ok:false, kind:'timeout'}` 로 **resolve** 해야 한다
+ *    (reject 하면 안 된다 — 위 "throw 하지 않는다" 계약과 같은 축).
+ *
+ * ⚠️ 실제로 15초를 기다리지 않는다("가짜 지연") — 내부 타이머(`setTimeout`)만 이 테스트
+ *    동안 지연 0 으로 발화하게 바꿔서 "20초짜리 느린 호출" 을 빠르게 흉내낸다.
+ *    상한 상수(15000ms)·에러 문구는 프로덕션 그대로 검사한다.
+ */
+test('callTool 이 상한을 넘겨 걸리면(가짜 지연) ok:false·kind:timeout 으로 resolve 한다(reject 아님)', async () => {
+  const realSetTimeout = global.setTimeout;
+  global.setTimeout = (fn) => realSetTimeout(fn, 0);
+
+  install((b) =>
+    handshake(b, (bb) => {
+      if (bb.method === 'tools/list') return sse({ jsonrpc: '2.0', id: bb.id, result: TOOLS_WITH_READ });
+      // tools/call — 20초짜리 느린 호출을 흉내낸다. 이 프라미스는 이 테스트 안에서
+      // 절대 안 끝난다(끝날 필요가 없다 — 상한 타이머가 먼저 이긴다)
+      return new Promise(() => {});
+    })
+  );
+
+  let r;
+  try {
+    await assert.doesNotReject(async () => {
+      r = await mcp.readArticle('https://example.com/slow-article');
+    });
+  } finally {
+    global.setTimeout = realSetTimeout;
+  }
+
+  assert.equal(r.ok, false);
+  assert.equal(r.kind, 'timeout');
+  assert.match(r.error, /15초를 넘겨 중단했습니다/);
+});
+
 /** 정상 경로(긴 본문) — 기존 반환 모양({ok:true,chars,text})이 그대로인지 */
 test('정상 경로: 긴 본문은 chars·text 를 그대로 담아 ok:true', async () => {
   const longBody = '가'.repeat(600);

@@ -241,6 +241,17 @@ function unwrapJsonString(text) {
 }
 
 /**
+ * 검색 결과 첫 줄에서 "출처 <이름>" 을 뽑는다(예: "… (2건 · 출처 brave-news):").
+ * 🔴 못 찾으면 **null** — 'brave-news' 로 가정하지 않는다. 모르는 것은 모른다고 남겨야
+ *    호출자가 "정상" 과 "표기 없음" 을 안 섞는다.
+ */
+function extractSource(text) {
+  const firstLine = String(text || '').split(/\r?\n/, 1)[0] || '';
+  const m = /출처\s*([a-z0-9][a-z0-9._-]*)/i.exec(firstLine);
+  return m ? m[1] : null;
+}
+
+/**
  * 도구를 부른다. 결과의 `content` 에서 텍스트만 뽑는다.
  * @returns {string}
  */
@@ -327,7 +338,7 @@ async function searchMarketNews(subjects, { maxSubjects = 5 } = {}) {
       const query = buildQuery(s);
       try {
         const text = await callTool(tool.name, buildArgs(tool, query));
-        results.push({ symbol: s.symbol, name: s.name, query, text: String(text).slice(0, 4000) });
+        results.push({ symbol: s.symbol, name: s.name, query, text: String(text).slice(0, 4000), source: extractSource(text) });
       } catch (e) {
         // 한 종목이 실패해도 나머지는 간다 — 조각 실패를 전체 실패로 만들지 않는다
         logWarn('mcp.search_failed', { symbol: s.symbol, kind: e?.kind, message: e?.message });
@@ -335,8 +346,16 @@ async function searchMarketNews(subjects, { maxSubjects = 5 } = {}) {
       }
     }
     const failed = results.filter((r) => r.error).length;
-    logInfo('mcp.search_done', { tool: tool.name, asked: results.length, failed });
-    return { ok: true, tool: tool.name, results, failedCount: failed };
+    /**
+     * 🔴 **대체 소스(품질 저하)와 실패는 다른 축이다** (2026-09-27, pm2 실측).
+     *    Brave 월 쿼터가 마르거나 장애가 나면 searxng·gnews·ddg 로 넘어가는데 그건 실패가 아니다
+     *    (검색은 됐다) — 그런데 신선도·품질이 다르다. 지금까진 그 구분을 **안 읽고 있었다.**
+     *    ⚠️ source 가 없으면(첫 줄에 "출처 …" 표기가 없으면) **저하로 단정하지 않는다** —
+     *       모르는 것을 "정상" 으로 가정하는 것도, "저하" 로 가정하는 것도 둘 다 추측이다.
+     */
+    const degraded = results.some((r) => r.source && !/^brave/i.test(r.source));
+    logInfo('mcp.search_done', { tool: tool.name, asked: results.length, failed, degraded });
+    return { ok: true, tool: tool.name, results, failedCount: failed, degraded };
   } catch (e) {
     logError('mcp.search_error', e, {});
     return { ok: false, tool: null, results: [], error: e.message, kind: e.kind || 'transport' };
@@ -418,6 +437,22 @@ function _resetForTest() {
  *    ⇒ 둘 다 감싸서 항상 `{ok:false, ...}` 로 접는다. `kind` 는 McpError 의 것을
  *    그대로 살려 호출자가 timeout/auth/no-tool 등을 갈라 읽게 한다.
  */
+/**
+ * 🔴 pm2 실측 최악 421ms(2.5MB 페이지) — 15초면 35배 여유다. 이 채팅 도구엔 그동안
+ *    상한이 없어서, my-computer 쪽이 멈추면 `callTool` 의 일반 MCP 타임아웃(기본 20초, `TIMEOUT_MS`)
+ *    까지 그대로 기다렸다. 여기만 따로 더 짧게 끊는다 — 기사 하나가 채팅 응답 전체를 물고 늘어지지 않게.
+ */
+const READ_ARTICLE_TIMEOUT_MS = 15000;
+
+/** `promise` 가 `ms` 안에 안 끝나면 McpError(kind:'timeout') 로 거절한다. */
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new McpError(message, 'timeout')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function readArticle(url) {
   const u = String(url || '').trim();
   if (!/^https?:\/\//.test(u)) return { ok: false, error: 'URL 이 아닙니다.' };
@@ -435,7 +470,11 @@ async function readArticle(url) {
 
   let text;
   try {
-    text = await callTool(tool.name, buildArgs(tool, u));
+    text = await withTimeout(
+      callTool(tool.name, buildArgs(tool, u)),
+      READ_ARTICLE_TIMEOUT_MS,
+      '기사 본문 읽기가 15초를 넘겨 중단했습니다.'
+    );
   } catch (e) {
     logWarn('mcp.read_article_failed', { kind: e?.kind, message: e?.message });
     return { ok: false, error: e?.message || '기사 본문을 가져오지 못했습니다.', kind: e?.kind || 'transport' };
@@ -462,6 +501,7 @@ module.exports = {
   action,
   buildQuery,
   unwrapJsonString,
+  extractSource,
   SEARCH_HINTS,
   FETCH_HINTS,
   NEVER,

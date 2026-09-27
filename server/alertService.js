@@ -248,7 +248,7 @@ function status() {
     indexPct: INDEX_PCT,
     quiet: `${QUIET_FROM}:00~${QUIET_TO}:00`,
     // 🔴 무엇을 못 보내는지도 함께 — 사용자가 "왜 어닝콜은 안 오지" 를 겪지 않게
-    rules: ['개장/폐장(+마감 요약)', '지수 급변', '보유 급변', '목표가·손절선', '종목 경고', '매매 제안'],
+    rules: ['개장/폐장(+마감 요약)', '지수 급변', '보유 급변', '목표가·손절선', '종목 경고', '매매 제안', '예약(조건부) 주문 발동/만료'],
     unsupported: ['어닝콜 — 일정 데이터 출처가 없다(토스·야후 모두 미제공)'],
     marks: Object.keys(st).length,
   };
@@ -403,6 +403,197 @@ async function rulePortfolio(items, st, now, out, sup) {
 }
 
 /**
+ * 🔭 예약(조건부) 주문 감시 — 전이만 알린다 (2026-09-27)
+ *
+ * `propose_conditional_order` → HITL 승인 → `createConditionalOrder` 로 거래소에
+ * 건 뒤를 아무도 안 보고 있었다. 감시가에 닿아 **실제로 주문이 나갔는지**,
+ * 만료일이 지나 **조용히 사라졌는지** 사용자가 몰랐다. 여기서 매 틱 열린 목록을
+ * 직전과 비교해 **사라진 것만** 사유를 갈라 알린다(엣지 규율 — 다른 규칙들과 같다).
+ *
+ * 🔴 **`getConditionalOrder` 의 status 필드명은 실물로 확인된 적이 없다.**
+ *    여러 후보 필드·값을 넉넉히 훑되, 확신 없는 값은 절대 '발동' 으로 단정하지 않는다
+ *    (모르는 것을 발동이라 말하면 돈이 움직인 것처럼 읽힌다 — 이 파일의 지배 규율).
+ *    대신 사라질 때마다 **원본 응답을 통째로 로그에 남긴다**(`alerts.conditional_detail`) —
+ *    실물이 확인되면 위 후보 목록을 그 필드로 좁힐 것.
+ */
+function classifyConditionalOutcome(raw) {
+  if (!raw || typeof raw !== 'object') return 'unknown';
+  const s = String(raw.status ?? raw.state ?? raw.orderStatus ?? raw.conditionalStatus ?? '').toUpperCase();
+  if (!s) return 'unknown';
+  if (['TRIGGER', 'EXECUT', 'FILL', 'SENT', 'ORDERED', 'COMPLETE'].some((k) => s.includes(k))) return 'triggered';
+  if (['EXPIR', 'CANCEL', 'DELET', 'CLOS', 'WITHDRAW'].some((k) => s.includes(k))) return 'ended';
+  return 'unknown'; // 🔴 모르면 모른다고 한다 — '발동' 의 기본값이 아니다
+}
+
+/** 목록 응답 한 행에서 감시에 필요한 값만 뽑는다. 필드명은 후보를 넉넉히 본다(§위 주석과 같은 이유) */
+function extractConditionalMeta(row) {
+  const id = row?.conditionalOrderId ?? row?.id;
+  if (id == null) return null;
+  return {
+    id: String(id),
+    symbol: row?.symbol ?? row?.first?.symbol ?? '(알수없음)',
+    triggerPrice: row?.first?.triggerPrice ?? row?.triggerPrice ?? row?.condition?.triggerPrice ?? null,
+    expireDate: row?.expireDate ?? row?.expiryDate ?? null,
+  };
+}
+
+async function ruleConditionalWatch(st, now, out, sup) {
+  const listResp = await toss.listConditionalOrders({ status: 'OPEN' });
+  // ⚠️ 목록 응답 모양도 실물 미확인 — `list_conditional_orders`(analystChat.js) 와 같은 방식으로 넉넉히 본다
+  const rows = Array.isArray(listResp?.items) ? listResp.items : Array.isArray(listResp) ? listResp : [];
+  const current = {};
+  for (const row of rows) {
+    const meta = extractConditionalMeta(row);
+    if (meta) current[meta.id] = meta;
+  }
+
+  const prev = st.conditionalOpen;
+  if (!prev) {
+    // 🔴 첫 실행(직전 상태 없음) — 기준선만 잡는다. 재기동 때 있던 예약을 '끝났다' 로 오인하면 안 된다
+    st.conditionalOpen = current;
+    sup.push('예약 감시 기준선 설정');
+  } else {
+    const vanished = Object.keys(prev).filter((id) => !(id in current));
+    for (const id of vanished) {
+      const info = prev[id];
+      let detail = null;
+      let failedFetch = false;
+      try {
+        detail = await toss.getConditionalOrder(id);
+      } catch (e) {
+        failedFetch = true;
+        logWarn('alerts.conditional_detail_failed', { id, symbol: info.symbol, message: e.message });
+      }
+      if (failedFetch) {
+        out.push({ text: `예약 ${info.symbol} 이 목록에서 사라졌는데 사유를 확인하지 못했습니다.`, kind: 'conditional-unknown' });
+        continue;
+      }
+      // 🔴 원본을 통째로 남긴다 — status 필드명이 확인되면 위 classifyConditionalOutcome 을 좁힐 근거
+      logInfo('alerts.conditional_detail', { id, symbol: info.symbol, raw: detail });
+      const outcome = classifyConditionalOutcome(detail);
+      if (outcome === 'triggered') {
+        out.push({ text: `🎯 예약 발동 — ${info.symbol} 감시가 ${info.triggerPrice ?? '?'} 도달, 주문 나갔습니다`, kind: 'conditional-triggered' });
+      } else if (outcome === 'ended') {
+        out.push({ text: `⏳ 예약 만료 — ${info.symbol}, 감시가 미도달로 소멸했습니다`, kind: 'conditional-expired' });
+      } else {
+        logWarn('alerts.conditional_status_unknown', { id, symbol: info.symbol, status: detail?.status ?? detail?.state ?? null });
+        out.push({ text: `예약 ${info.symbol} 이 목록에서 사라졌는데 사유를 확인하지 못했습니다.`, kind: 'conditional-unknown' });
+      }
+    }
+    st.conditionalOpen = current;
+  }
+
+  // ⏰ 만료 임박 — 오늘 만료되는 열린 예약이 있으면 하루 한 번(날짜 키 — idx 규칙과 같은 패턴)
+  const day = kstDay(now);
+  const expiringToday = Object.values(current).filter((v) => v.expireDate === day);
+  if (expiringToday.length) {
+    const mark = `condExpireWarn:${day}`;
+    if (st[mark]) {
+      sup.push('오늘 만료 예약 경고 (오늘 이미 알림)');
+    } else {
+      st[mark] = 1;
+      out.push({
+        text: `⏰ 오늘 만료되는 예약이 있습니다: ${expiringToday.map((v) => `${v.symbol}(감시가 ${v.triggerPrice ?? '?'})`).join(', ')}`,
+        kind: 'conditional-expiring',
+      });
+    }
+  }
+}
+
+/**
+ * 🩺 정기 브리핑 누락 감시 (2026-09-27, pm1 위임 — worker3)
+ *
+ * 배경: 09-24 15:30 KRX 마감 브리핑이 배포 재기동에 삼켜져 트리거 자체가 **0건**이었다.
+ * 위 `analyst.trigger_run_failed` catch 는 "돌다가 실패" 만 잡는다 — "애초에 안 돌았다"
+ * 는 잡지 못하고, 그날 사용자에게 간 알림도 **0건**이었다(실패 통보 경로 자체가 안 불렸다).
+ *
+ * 🔴 **왜 `st.analyst`(analystTrigger 의 내부 전이 상태)로 판정하지 않나** — 그 상태 자체가
+ *    "전이 감지를 놓치면 같이 놓친다"(정확히 09-24 사고의 그 축이다). 감시가 감시 대상과
+ *    같은 실패 지점을 공유하면 바로 그 실패를 못 본다.
+ * ⇒ **독립된 신호**를 쓴다: `analystService.readLast()` — 분석이 **실제로 끝나 저장까지
+ *    마쳐야만** 갱신되는 산출물이라, 트리거·틱이 죽어도 이건 그냥 "안 갱신됨" 으로 남는다.
+ * ⚠️ **한계(의도적으로 오탐 쪽으로 기운다)** — `analyst-last.json` 은 이어붙이기가 아니라
+ *    마지막 1건만 남는다. 이 회차의 reasons 가 마지막 스냅샷에 없어도 `at` 이 기대 시각
+ *    이후면 "그사이 뭔가는 돌았다"(시스템은 살아 있다) 로 보고 **알리지 않는다** —
+ *    이 파일 첫머리의 규율(소음을 만들면 사람이 알림을 끈다)을 여기서도 따른다.
+ */
+const BRIEF_GRACE_MS = 20 * 60_000;
+const BRIEF_STALE_MS = 4 * 24 * 60 * 60_000; // 표시 정리 — st.briefWatch 가 무한히 자라지 않게
+const BRIEF_KIND_LABEL = { open: '개장', mid: '중간', close: '마감' };
+
+function briefClock(ms) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: APP_TIMEZONE, hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(ms));
+}
+
+/**
+ * 캘린더 `regular{start,end}` 에서 오늘의 기대 회차 3개(개장·중간·마감)를 유도한다.
+ * ⚠️ 고정 시각 하드코딩 금지 — `regular` 가 없으면(휴장일 또는 캘린더 폴백) **회차가 없다**.
+ *    폴백일 때 중간 브리핑을 안 돌리는 `analystTrigger.decide` 와 같은 규율이다.
+ */
+function briefOccasions(sessions) {
+  const out = [];
+  for (const s of sessions || []) {
+    const reg = s?.regular;
+    if (!reg || !Number.isFinite(reg.start) || !Number.isFinite(reg.end)) continue;
+    out.push({ market: s.key, label: s.label, kind: 'open', at: reg.start });
+    out.push({ market: s.key, label: s.label, kind: 'mid', at: reg.start + (reg.end - reg.start) / 2 });
+    out.push({ market: s.key, label: s.label, kind: 'close', at: reg.end });
+  }
+  return out;
+}
+
+async function ruleBriefWatch(st, now, out, sup) {
+  const analystService = require('./analystService');
+  st.briefWatch = st.briefWatch || {};
+  const nowMs = now instanceof Date ? now.getTime() : Number(now);
+  /**
+   * 🔴 **첫 실행엔 기준선만** — `ruleSessions` 와 같은 규율. 이 표시가 없다는 건 이 기능이
+   *    방금 배포됐다는 뜻이지, 오늘 회차가 실제로 빠졌다는 뜻이 아니다. 소급 경고하면
+   *    배포 직후 그날 지난 회차 전부가 한꺼번에 쏟아진다.
+   */
+  const firstRun = !st.briefWatchSeeded;
+  st.briefWatchSeeded = true;
+
+  const sessions = await sessionsFor({}, now);
+  for (const o of briefOccasions(sessions)) {
+    if (nowMs < o.at + BRIEF_GRACE_MS) continue; // 아직 유예 시간 안 — 판정을 미룬다
+    const mark = `${o.market}:${o.kind}:${o.at}`;
+    if (st.briefWatch[mark]) continue; // 이 회차는 이미 판정을 끝냈다(정상이든 경고든) — 같은 회차 재알림 금지
+    if (firstRun) { st.briefWatch[mark] = 'seeded'; continue; }
+
+    let ranAfter = false;
+    try {
+      const last = analystService.readLast();
+      const lastAt = last?.at ? Date.parse(last.at) : NaN;
+      ranAfter = Number.isFinite(lastAt) && lastAt >= o.at;
+    } catch (e) {
+      // 읽기 자체가 실패하면 "안 돌았다" 로 단정하지 않는다 — 판정을 다음 틱으로 미룬다(표시 안 남김)
+      logWarn('alerts.brief_watch_read_failed', { message: e.message });
+      continue;
+    }
+
+    if (ranAfter) {
+      st.briefWatch[mark] = 'ok';
+      sup.push(`${o.label} ${BRIEF_KIND_LABEL[o.kind]} 브리핑 확인됨`);
+      continue;
+    }
+    st.briefWatch[mark] = 'alerted';
+    out.push({
+      text: `⚠️ ${o.label} ${BRIEF_KIND_LABEL[o.kind]} 브리핑이 예정 시각(${briefClock(o.at)})에 돌지 않았습니다 — 트리거 누락 가능`,
+      kind: 'brief_missing',
+    });
+  }
+
+  // 오래된 표시는 지운다(무한히 자라지 않게) — 키 끝의 epoch 로 나이를 잰다(마크 포맷: market:kind:epoch)
+  for (const k of Object.keys(st.briefWatch)) {
+    const ts = Number(k.slice(k.lastIndexOf(':') + 1));
+    if (Number.isFinite(ts) && nowMs - ts > BRIEF_STALE_MS) delete st.briefWatch[k];
+  }
+}
+
+/**
  * 한 바퀴. 🔴 **부분 실패를 전체 실패로 만들지 않는다** — 규칙 하나가 죽어도 나머지는 돈다.
  */
 /**
@@ -552,6 +743,7 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
     ['indices', ruleIndices],
     ['portfolio', (a, b, c, d) => rulePortfolio(items, a, b, c, d)],
     ['targets', (a, b, c, d) => ruleTargets(items, a, c, d)],
+    ['conditional', ruleConditionalWatch],
   ]) {
     try {
       await fn(st, now, out, suppressed);
@@ -651,6 +843,14 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
       failed.push('analyst_trigger');
       logWarn('analyst.trigger_failed', { message: e.message });
     }
+  }
+
+  // 🩺 정기 브리핑 누락 감시 — 홀딩 성공 여부와 무관하게 독립으로 돈다(위 ruleBriefWatch 참조)
+  try {
+    await ruleBriefWatch(st, now, out, suppressed);
+  } catch (e) {
+    failed.push('brief_watch');
+    logWarn('alerts.brief_watch_failed', { message: e.message });
   }
 
   // 조용한 시간에는 **묶어서 미루지 않고 그냥 건너뛴다** — 아침에 어제 것이 쏟아지면 그게 더 나쁘다
