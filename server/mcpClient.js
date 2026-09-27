@@ -411,14 +411,36 @@ function _resetForTest() {
  * 기사 본문 읽기 (2026-09-27 — pm2 실측 후 부착: 한국 경제지 12도메인 양호 1.7k~12k자).
  * 🔴 실패를 본문인 척 돌려주지 않는다 — biz.chosun 204자·bloomberg 403 같은 것을
  *    요약하면 헤드라인만 보고 판단한 것과 같다(pm2 권고 그대로).
+ *
+ * 🔴 **형제 함수(`searchMarketNews`)는 절대 throw 하지 않는데 이것만 그랬다.**
+ *    my-computer 가 죽거나 느리면 listTools()/callTool() 이 McpError 를 던지고,
+ *    그게 그대로 호출자(analystChat.js)까지 올라가 도구 호출 전체가 죽는다.
+ *    ⇒ 둘 다 감싸서 항상 `{ok:false, ...}` 로 접는다. `kind` 는 McpError 의 것을
+ *    그대로 살려 호출자가 timeout/auth/no-tool 등을 갈라 읽게 한다.
  */
 async function readArticle(url) {
   const u = String(url || '').trim();
   if (!/^https?:\/\//.test(u)) return { ok: false, error: 'URL 이 아닙니다.' };
-  const tools = await listTools();
+
+  let tools;
+  try {
+    tools = await listTools();
+  } catch (e) {
+    logWarn('mcp.read_article_failed', { kind: e?.kind, message: e?.message });
+    return { ok: false, error: e?.message || 'MCP 도구 목록을 가져오지 못했습니다.', kind: e?.kind || 'transport' };
+  }
+
   const tool = (tools || []).find((t) => /readwebpage|read_web_page/i.test(t.name));
   if (!tool) return { ok: false, error: 'my-computer 에 readWebPage 도구가 없습니다.' };
-  const text = await callTool(tool.name, buildArgs(tool, u));
+
+  let text;
+  try {
+    text = await callTool(tool.name, buildArgs(tool, u));
+  } catch (e) {
+    logWarn('mcp.read_article_failed', { kind: e?.kind, message: e?.message });
+    return { ok: false, error: e?.message || '기사 본문을 가져오지 못했습니다.', kind: e?.kind || 'transport' };
+  }
+
   const body = String(text || '').trim();
   if (body.length < 500) {
     return { ok: false, error: `본문 확보 실패(${body.length}자) — JS 렌더링이거나 봇 차단 도메인일 수 있습니다. 헤드라인만으로 판단하지 마세요.`, chars: body.length };
