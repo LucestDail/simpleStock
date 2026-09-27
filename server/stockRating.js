@@ -479,6 +479,10 @@ function statsBlock(s) {
   return [
     '## Yahoo Finance Statistics (Current)',
     `주가: ${fmtNum(s.price)} ${s.currency || ''}`,
+    // 목표주가(2026-09-27) — financialData 가 이미 주던 것. ETF 는 커버리지가 없어 안 싣는다
+    s.targetMeanPrice != null
+      ? `애널리스트 목표주가: 평균 ${fmtNum(s.targetMeanPrice)} (범위 ${fmtNum(s.targetLowPrice)}~${fmtNum(s.targetHighPrice)}, ${s.analystCount ?? '?'}명)`
+      : null,
     `시가총액: ${fmtBig(s.marketCap)}`,
     `Enterprise Value: ${fmtBig(s.enterpriseValue)}`,
     `Trailing P/E: ${fmtNum(s.trailingPE)}`,
@@ -500,7 +504,7 @@ function statsBlock(s) {
     s.missing.length
       ? `⚠️ **받지 못한 밸류 지표**: ${s.missing.join(', ')} — 이 항목들은 없는 채로 판단하세요.`
       : '모든 밸류 지표를 받았습니다.',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 const FUND_SCHEMA = {

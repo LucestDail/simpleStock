@@ -131,6 +131,15 @@ async function getStats(symbol, { force = false } = {}) {
     industry: r.summaryProfile?.industry || null,
     // 사양이 지정한 항목 — 이름을 그대로 쓴다
     price: raw(px, 'regularMarketPrice'),
+    /**
+     * 🔴 목표주가 (2026-09-27, pm2 발견) — financialData 모듈을 **이미 요청**하면서
+     *    이 4필드만 안 꺼내고 있었다("수집해 놓고 안 쓰는" 패턴). 네트워크·crumb·쿼터 0 추가.
+     *    ⚠️ ETF 는 애널리스트 커버리지가 없어 null 이 정상(quoteType 으로 갈라 읽는다).
+     */
+    targetMeanPrice: raw(fd, 'targetMeanPrice'),
+    targetLowPrice: raw(fd, 'targetLowPrice'),
+    targetHighPrice: raw(fd, 'targetHighPrice'),
+    analystCount: raw(fd, 'numberOfAnalystOpinions'),
     marketCap: raw(px, 'marketCap') ?? raw(sd, 'marketCap'),
     enterpriseValue: raw(ks, 'enterpriseValue'),
     trailingPE: raw(sd, 'trailingPE'),

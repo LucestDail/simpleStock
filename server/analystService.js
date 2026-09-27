@@ -1334,7 +1334,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    *    설계이지 결손이 아니다. missing 에 섞이면 **진짜 결손(뉴스 실패·캔들 실패)이 묻힌다.**
    * ⚠️ 목표주가는 pm2 소스 판정 후 채울 수도 있다 — 그때 이 목록에서 뺀다.
    */
-  const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 IV|목표주가/;
+  // 목표주가는 09-27 부터 제공(yahooStats financialData) — 구조적 부재 목록에서 뺐다(기업 종목의 진짜 실패가 숨지 않게)
+const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 IV/;
   for (const g of report.dataGaps || []) {
     if (STRUCTURAL.test(String(g))) notApplicable.push(g);
   }
