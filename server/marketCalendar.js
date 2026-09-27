@@ -75,12 +75,20 @@ function normalizeCalendarDay(day) {
  */
 function sessionFromCalendar(nowMs, days) {
   const today = normalizeCalendarDay(days?.today);
+  /**
+   * 🔴 **`preSpan` 을 함께 싣는다** (2026-09-27 — 프리마켓 개장 브리핑). `normalizeCalendarDay`
+   *    는 이미 `pre` 를 파싱해 두고 있었는데 이 함수가 반환에서 버리고 있었다(또 "수집해 놓고
+   *    안 쓰는" 패턴). ⚠️ 항상 **오늘(`today`) 기준** — `open` 판정이 어제/내일 캔들에서
+   *    나올 수 있어도 프리장은 "오늘 정규장이 열리기 전" 만 의미가 있다.
+   *    휴장일(`today.pre` 없음)엔 `null` — **"안 여는 날" 을 "곧 연다" 로 말하지 않는다.**
+   */
+  const preSpan = today?.pre || null;
   const list = [days?.previousBusinessDay, days?.today, days?.nextBusinessDay]
     .map(normalizeCalendarDay).filter(Boolean);
   if (!list.length) return null;
   for (const d of list) {
     if (d.regular && nowMs >= d.regular.start && nowMs < d.regular.end) {
-      return { state: 'open', source: 'calendar', regular: d.regular, date: d.date };
+      return { state: 'open', source: 'calendar', regular: d.regular, preSpan, date: d.date };
     }
   }
   /**
@@ -88,13 +96,16 @@ function sessionFromCalendar(nowMs, days) {
    * **"안 여는 날" 을 "곧 연다" 로 말하지 않는다.**
    */
   if (today?.regular && nowMs < today.regular.start) {
-    return { state: 'pre', source: 'calendar', regular: today.regular, date: today.date };
+    return { state: 'pre', source: 'calendar', regular: today.regular, preSpan, date: today.date };
   }
   /**
    * 어느 구간에도 안 들면 **닫혀 있다.** 다만 *"캘린더를 못 읽어서 모른다"* 와는 다르다 —
    * 여기 왔다는 건 캘린더를 읽었고 그중 어디에도 안 든다는 뜻이다.
    */
-  return { state: 'closed', source: 'calendar', regular: null, date: list.find((d) => d.date)?.date || null };
+  return {
+    state: 'closed', source: 'calendar', regular: null, preSpan,
+    date: list.find((d) => d.date)?.date || null,
+  };
 }
 
 /**

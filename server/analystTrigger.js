@@ -216,6 +216,37 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
   }
 
   /**
+   * 🔴 **프리장 개장 브리핑** (2026-09-27 사용자 지시 — 월요일 실전).
+   *
+   * 정규장 개장(09:00 KST) 전, 프리마켓 창(KR 08:00~09:00)에 들어서면 하루 한 번.
+   * 밤사이 미국장 결과를 국내장이 열리기 전에 받기 위함이다(지금은 정규장 개장부터라
+   * 못 받는다).
+   *
+   * ⚠️ **KR 만** — 사용자가 "한국장 프리장" 만 요청했다. US 프리(17:00 KST)까지 켜면
+   *    LLM 회차가 하루 1번 더 는다(비용은 사용자 관심사). **US 도 켜려면** 아래
+   *    `key !== 'kr'` 조건만 지우면 된다 — `preSpan` 은 이미 양쪽 시장에 실려 오므로
+   *    나머지 로직은 그대로 동작한다.
+   * ⚠️ **재기동으로 놓쳐도 보낸다**(마감과 같은 취급, `mid` 과 같은 패턴 — 전이가 아니라
+   *    "오늘 이 창에 들어섰는가+ 아직 안 보냈는가" 로만 판정한다). 08:00~09:00 사이에
+   *    재시작돼도 프리장 브리핑은 살아야 한다. 정규장이 시작되면(`now >= reg.start`)
+   *    더 이상 "프리장" 이 아니므로 보내지 않는다.
+   */
+  st.lastPreopenDay = { ...(st.lastPreopenDay || {}) };
+  for (const s of sessions) {
+    const key = String(s?.key || '');
+    if (key !== 'kr') continue; // ⚠️ KR 만 — 위 주석 참조
+    const pre = s?.preSpan;
+    const reg = s?.regular;
+    if (!pre || !Number.isFinite(pre.start) || !reg || !Number.isFinite(reg.start)) continue;
+    const day = new Date(pre.start).toISOString().slice(0, 10);
+    if (st.lastPreopenDay[key] === day) continue;
+    if (now < pre.start) continue;
+    if (now >= reg.start) continue; // 정규장이 이미 시작됐다 — 더는 "프리장" 이 아니다
+    st.lastPreopenDay[key] = day;
+    reasons.push({ kind: 'preopen', key, label: s.label || key });
+  }
+
+  /**
    * 🔴 **중간 브리핑** — 정규장 **중간 지점**에서 하루 한 번.
    *
    * ⚠️ 고정 시각을 쓰지 않는다. `regular{start,end}` 에서 유도하므로
@@ -297,7 +328,7 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
 
 /** 사람이 읽는 한 줄 — 활동 기록·로그에 그대로 쓴다 */
 /** 브리핑 종류 이름 — 로그·텔레그램·프롬프트가 같은 낱말을 쓰게 한 곳에 둔다 */
-const KIND_LABEL = { open: '개장', mid: '장중', close: '마감' };
+const KIND_LABEL = { preopen: '프리장 개장', open: '개장', mid: '장중', close: '마감' };
 
 function describe(reasons) {
   return (reasons || []).map((r) => (KIND_LABEL[r.kind]

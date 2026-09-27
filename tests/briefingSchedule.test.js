@@ -162,9 +162,14 @@ test('🔴 실행에 들어가면 이월분을 **비운다**(영원히 반복되
 
 /** ⚠️ `sessionsFor` 가 시간대를 넘겨야 중간점을 계산할 수 있다 */
 test('⚠️ sessionsFor 가 regular{start,end} 를 넘긴다', () => {
-  const i = ALERTS.indexOf('out.push({ key: k');
-  const block = ALERTS.slice(i, i + 200);
+  // ⚠️ 앵커를 `out.push({ key: k` 한 줄로 잡았더니 워커가 줄바꿈하자 indexOf=-1 이 되어
+  //    **엉뚱한 구간을 보고 빨간불**을 냈다(2026-09-27 — 제품은 멀쩡했다). 포맷이 아니라
+  //    **함수 블록**을 기준으로 본다: 구조 가드는 서식에 민감하면 안 된다.
+  const i = ALERTS.indexOf('function sessionsFor');
+  assert.ok(i > 0, 'sessionsFor 를 못 찾았다 — 자가 대상을 잃었다(통과가 아니라 실패다)');
+  const block = ALERTS.slice(i, ALERTS.indexOf('\n}', i));
   assert.match(block, /regular/, '🔴 시간대를 버린다 — 중간 브리핑이 원리상 불가능해진다');
+  assert.match(block, /preSpan/, '🔴 프리장 구간을 안 넘긴다 — 프리장 브리핑이 원리상 불가능해진다');
 });
 
 /**

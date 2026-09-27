@@ -862,6 +862,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    * ⚠️ 같은 데이터로 **다른 질문**에 답하게 하는 것이지, 데이터를 바꾸는 게 아니다.
    */
   const BRIEF_JOB = {
+    preopen: '**프리장 개장 브리핑**이다. 밤사이 미국장 결과와 오늘 국내장 계획을 정리하라. '
+      + '정규장 시작 전이라 **지금은 체결이 안 되는 시간대**임을 전제로, 개장 직후 대응안을 제시하라.',
     open: '**개장 브리핑**이다. 직전 세션(밤사이 해외장 포함)에서 넘어온 흐름과 **시가 갭**을 먼저 짚고, '
       + '오늘 이 종목들에서 **무엇을 지켜볼 것인지**를 말하라. 지금 당장의 매매보다 **관전 포인트**가 중심이다.',
     mid: '**장중 브리핑**이다. 개장 이후 흐름이 **개장 때 본 그림과 같은지 달라졌는지**를 먼저 말하라. '
@@ -1504,7 +1506,7 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
    * ⚠️ **모멘텀은 넣지 않는다** — 같은 판단으로 두 번 튀는 건 여전히 새 소식이 아니다.
    * ⚠️ 날짜를 넣는 이유: 안 넣으면 **어제 개장과 오늘 개장이 같은 지문**이라 이튿날이 막힌다.
    */
-  const SCHEDULED = new Set(['open', 'mid', 'close']);
+  const SCHEDULED = new Set(['preopen', 'open', 'mid', 'close']);
   // ⚠️ `trigger` 는 이 함수의 **구조분해 인자**다. 처음에 `opts?.trigger` 라 썼는데
   //    `opts` 는 선언된 적이 없어 **ReferenceError** 다 — 옵셔널 체이닝은 미선언 변수를 못 막는다.
   const brief = (trigger?.reasons || [])

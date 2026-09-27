@@ -224,7 +224,8 @@ async function sessionsFor(universe, now) {
      * ⚠️ 폴백 경로에는 `regular` 가 **없다** ⇒ 중간 브리핑은 캘린더가 살아 있을 때만 돈다.
      *    그게 맞다 — 시각을 추측해서 중간이라고 우기면 조기폐장일에 **장 끝난 뒤 "중간 보고"** 가 나간다.
      */
-    out.push({ key: k, label: spec[k][0], state: r.state, source: r.source, regular: r.regular || null });
+    // 🔴 preSpan 도 함께 넘긴다(2026-09-27, 프리장 브리핑) — 폴백 경로엔 없다(regular 와 같은 사정)
+    out.push({ key: k, label: spec[k][0], state: r.state, source: r.source, regular: r.regular || null, preSpan: r.preSpan || null });
   }
   return out;
 }
@@ -794,7 +795,7 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
        * ⇒ 실행이 막힌 회차의 **예정 브리핑만** 들고 있다가 다음 틱에 얹는다.
        * ⚠️ **모멘텀은 이월하지 않는다** — 지나간 순간의 돌파를 나중에 알리는 건 거짓이다.
        */
-      const SCHEDULED = new Set(['open', 'mid', 'close']);
+      const SCHEDULED = new Set(['preopen', 'open', 'mid', 'close']);
       const carried = Array.isArray(st.analystCarry) ? st.analystCarry : [];
       if (carried.length) {
         d.reasons = [...carried, ...d.reasons];
