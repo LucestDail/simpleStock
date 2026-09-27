@@ -285,6 +285,65 @@ function asProposal(o) {
   return { symbol, side, quantity, price, reason: pickString(o, ['reason', 'rationale', 'why']) };
 }
 
+/**
+ * 같은 종목이 서로 다른(또는 같은) 판단으로 두 번 나오는 것을 막는다.
+ *
+ * 🔴 2026-09-27 실측(pm1, 라이브 dryRun) — `positions` 에 QLD·RAM 이 각각 HOLD 와
+ *    SELL 로 **동시에** 나왔다(보유2+후보2=4건이 정상인데 6건). 그날 웹검색이 막혀
+ *    있어 모델이 후보 절까지 끌어다 같은 종목을 두 번 판단한 것으로 보인다. 이 배열은
+ *    폰 브리핑·화면에 그대로 나가 사용자가 "팔라는 건가 들라는 건가" 를 모르게 된다.
+ *
+ * ⚠️ **먼저 나온 것을 남긴다** — 모델이 보유를 먼저 판단하는 순서를 존중한다.
+ * 🔴 **모순이면 지우지 않고 흔적을 남긴다** — stance 가 다른 중복은 그 자체가 정보다.
+ *    조용히 지우면 사용자는 흔들린 판단을 확신으로 읽는다. 남긴 쪽의 confidence 를
+ *    LOW 로 낮추고 rationale 앞에 경고를 붙인다. 같은 stance 의 완전 중복은 confidence 를
+ *    건드리지 않는다 — 모순이 아니기 때문이다.
+ */
+function dedupePositions(positions) {
+  const kept = [];
+  const indexBySymbol = new Map();
+  for (const p of positions) {
+    if (!indexBySymbol.has(p.symbol)) {
+      indexBySymbol.set(p.symbol, kept.length);
+      kept.push({ ...p });
+      continue;
+    }
+    const idx = indexBySymbol.get(p.symbol);
+    const original = kept[idx];
+    logWarn('analyst.duplicate_stance', { symbol: p.symbol, kept: original.stance, dropped: p.stance });
+    if (p.stance !== original.stance && !original._conflicted) {
+      kept[idx] = {
+        ...original,
+        confidence: 'LOW',
+        rationale: `⚠️ 모델이 이 종목에 상반된 판단을 함께 냈다(다른 하나: ${p.stance}). 확신도를 낮춤. ${original.rationale || ''}`.trim(),
+        _conflicted: true,
+      };
+    }
+  }
+  // 내부 판정용 플래그(_conflicted)는 반환 모양에 새지 않는다
+  return kept.map(({ _conflicted, ...rest }) => rest);
+}
+
+/**
+ * `proposals` 의 **완전 동일 중복**(같은 symbol+side)만 거른다.
+ * 같은 종목의 BUY/SELL 동시 제안은 `inverseGate` 등 다른 게이트가 이미 잡으므로
+ * 여기서는 건드리지 않는다 — 이건 그 앞의 순수 중복 제거다.
+ */
+function dedupeProposals(proposals) {
+  const seen = new Set();
+  const kept = [];
+  for (const p of proposals) {
+    const key = `${p.symbol}:${p.side}`;
+    if (seen.has(key)) {
+      logWarn('analyst.duplicate_proposal', { symbol: p.symbol, side: p.side });
+      continue;
+    }
+    seen.add(key);
+    kept.push(p);
+  }
+  return kept;
+}
+
 /** 어떤 모양으로 오든 리포트로 만든다 */
 function shapeReport(out) {
   const o = out && typeof out === 'object' ? out : {};
@@ -305,14 +364,17 @@ function shapeReport(out) {
     || longestProse(o, new Set(['momentumRead', 'momentum']));
   const mom = pickString(o, ['momentumRead', 'momentum_read', 'momentum', 'momentumSummary']);
 
+  const dedupedPositions = dedupePositions(positions);
+  const dedupedProposals = dedupeProposals(proposals);
+
   return {
     marketView: view,
     momentumRead: mom,
     dataGaps: gaps.slice(0, 12),
-    positions,
-    proposals,
+    positions: dedupedPositions,
+    proposals: dedupedProposals,
     // 🔴 아무것도 못 읽었으면 **그 사실을 남긴다** — 조용히 빈 리포트를 내지 않는다
-    _unreadable: !view && !positions.length && !gaps.length ? JSON.stringify(o).slice(0, 300) : null,
+    _unreadable: !view && !dedupedPositions.length && !gaps.length ? JSON.stringify(o).slice(0, 300) : null,
   };
 }
 

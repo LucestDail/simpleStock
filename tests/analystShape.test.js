@@ -103,3 +103,82 @@ test('빈 응답·null 도 터지지 않는다', () => {
     assert.ok(Array.isArray(r.positions));
   }
 });
+
+// ── 🔴 같은 종목이 두 번 판단되는 것 (2026-09-27 라이브 dryRun 실측) ──────
+
+/**
+ * 🔴 라이브에서 실제로 나온 배열: QLD·RAM 이 각각 HOLD 와 SELL 로 **동시에** 나왔다
+ *    (보유2+후보2=4건이 정상인데 6건). "팔라는 건가 들라는 건가" 를 사용자가 모른다.
+ */
+test('같은 종목이 상반된 판단으로 중복되면 1건만 남고 확신도가 낮아진다', () => {
+  const r = shapeReport({
+    marketView: 'v',
+    positions: [
+      { symbol: 'QLD', stance: 'HOLD', confidence: 'MEDIUM', rationale: '20일선 위' },
+      { symbol: 'RAM', stance: 'HOLD', confidence: 'MEDIUM', rationale: '손실 방어' },
+      { symbol: 'SOXX', stance: 'BUY', confidence: 'MEDIUM', rationale: '신규 후보' },
+      { symbol: 'QQQ', stance: 'BUY', confidence: 'MEDIUM', rationale: '신규 후보2' },
+      { symbol: 'RAM', stance: 'SELL', confidence: 'HIGH', rationale: '손절가 이탈' },
+      { symbol: 'QLD', stance: 'SELL', confidence: 'HIGH', rationale: '추세 이탈' },
+    ],
+  });
+
+  assert.equal(r.positions.length, 4, '중복이 걸러지지 않았다');
+  const bySymbol = Object.fromEntries(r.positions.map((p) => [p.symbol, p]));
+
+  // 먼저 나온 stance(HOLD)를 남긴다 — 모델이 보유를 먼저 판단하는 순서를 존중
+  assert.equal(bySymbol.QLD.stance, 'HOLD');
+  assert.equal(bySymbol.RAM.stance, 'HOLD');
+  // 모순(HOLD vs SELL)이므로 남긴 쪽의 확신도를 낮춘다
+  assert.equal(bySymbol.QLD.confidence, 'LOW');
+  assert.equal(bySymbol.RAM.confidence, 'LOW');
+  assert.match(bySymbol.QLD.rationale, /상반된 판단/);
+  assert.match(bySymbol.QLD.rationale, /SELL/);
+  assert.match(bySymbol.QLD.rationale, /20일선 위/, '원래 rationale 을 지우지 않고 붙였다');
+  // 모순 없는 종목은 그대로
+  assert.equal(bySymbol.SOXX.confidence, 'MEDIUM');
+  assert.equal(bySymbol.QQQ.confidence, 'MEDIUM');
+});
+
+test('같은 종목·같은 stance 중복은 1건만 남고 확신도는 원래대로다(모순이 아니므로)', () => {
+  const r = shapeReport({
+    marketView: 'v',
+    positions: [
+      { symbol: 'QLD', stance: 'HOLD', confidence: 'MEDIUM', rationale: '20일선 위' },
+      { symbol: 'QLD', stance: 'HOLD', confidence: 'MEDIUM', rationale: '20일선 위(재확인)' },
+    ],
+  });
+  assert.equal(r.positions.length, 1);
+  assert.equal(r.positions[0].confidence, 'MEDIUM', '모순이 아닌데 확신도를 낮췄다');
+  assert.equal(r.positions[0].rationale, '20일선 위', '모순이 아닌데 경고 문구를 붙였다');
+});
+
+/** 🔴 오탐 0 축 — 중복이 없으면 아무것도 바뀌면 안 된다 */
+test('중복 없는 정상 입력은 그대로다', () => {
+  const r = shapeReport({
+    marketView: 'v',
+    positions: [
+      { symbol: 'QLD', stance: 'HOLD', confidence: 'MEDIUM', rationale: '20일선 위' },
+      { symbol: 'SOXX', stance: 'BUY', confidence: 'HIGH', rationale: '신규 후보' },
+    ],
+  });
+  assert.equal(r.positions.length, 2);
+  assert.equal(r.positions[0].confidence, 'MEDIUM');
+  assert.equal(r.positions[1].confidence, 'HIGH');
+  assert.equal(r.positions[0].rationale, '20일선 위');
+});
+
+test('proposals 의 완전 동일 중복(같은 symbol+side)은 1건만 남는다', () => {
+  const r = shapeReport({
+    marketView: 'v',
+    orders: [
+      { symbol: 'QLD', side: 'BUY', quantity: 10, price: 90, reason: 'r1' },
+      { symbol: 'QLD', side: 'BUY', quantity: 10, price: 90, reason: 'r1(중복)' },
+      { symbol: 'RAM', side: 'SELL', quantity: 5, price: 20, reason: 'r2' },
+    ],
+  });
+  assert.equal(r.proposals.length, 2, '완전 동일 중복이 안 걸러졌다');
+  assert.equal(r.proposals[0].symbol, 'QLD');
+  assert.equal(r.proposals[0].reason, 'r1', '먼저 나온 것을 남겨야 한다');
+  assert.equal(r.proposals[1].symbol, 'RAM');
+});
