@@ -317,13 +317,24 @@ function getMarketStateFromTimestamp(timestampSeconds) {
  *    ⚠️ 실패는 null — "확인 못 함" 과 "낮음" 은 다르다(분석이 빈 값으로 안심하면 안 된다).
  */
 let vixCache = null; // { at, quote }
+/** 야후 간헐 429(09-27 실측: 같은 IP 연타로 몇 분~몇십 분 눌린다) 대비 stale 유예 */
+const VIX_STALE_MAX_MS = 60 * 60 * 1000;
 async function getVix() {
   if (vixCache && Date.now() - vixCache.at < 5 * 60 * 1000) return vixCache.quote;
   try {
     const q = await fetchYahooChartQuote('^VIX');
-    vixCache = { at: Date.now(), quote: q };
-    return q;
+    vixCache = { at: Date.now(), quote: { ...q, stale: false } };
+    return vixCache.quote;
   } catch (e) {
+    /**
+     * 🔴 실패 시 마지막 성공값을 60분까지 stale 로 쓴다 (2026-09-27) — VIX 가 null 이면
+     *    공포 사다리·국면의 눈이 통째로 먼다. VIX 는 분 단위로 급변하지 않으므로 한 시간
+     *    안의 값은 "모름" 보다 훨씬 낫다. ⚠️ stale 표시를 단다 — 낡은 값을 새 값인 척하지 않는다.
+     */
+    if (vixCache && Date.now() - vixCache.at < VIX_STALE_MAX_MS) {
+      logWarn('market.vix_stale_reuse', { ageMin: Math.round((Date.now() - vixCache.at) / 60000), message: e.message });
+      return { ...vixCache.quote, stale: true };
+    }
     logWarn('market.vix_failed', { message: e.message });
     return null;
   }
