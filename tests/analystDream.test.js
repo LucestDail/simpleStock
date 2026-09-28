@@ -27,10 +27,12 @@ let llmCalls = 0;
 let llmReply = { insights: [] };
 let llmThrows = null;
 let saved = [];
+let warnCalls = [];
+let infoCalls = [];
 
 function fresh() {
   for (const k of Object.keys(require.cache)) {
-    if (/analystDream|analystChat|aiService|memoryService/.test(k)) delete require.cache[k];
+    if (/analystDream|analystChat|aiService|memoryService|logger/.test(k)) delete require.cache[k];
   }
   // aiService 는 무겁다 — 스텁으로 갈아끼운다(대상은 dreaming 의 흐름이지 LLM 이 아니다)
   const aiPath = require.resolve('../server/aiService');
@@ -49,6 +51,17 @@ function fresh() {
       createLongTermMemory: async ({ text, kind }) => { saved.push({ text, kind }); return { id: 'x' }; },
     },
   };
+  // 🔴 dream.bad_shape 가 실제로 나가는지(그리고 정상일 때 0건인지) 재려면 logger 를 가로채야 한다 —
+  //    analystDream.js 가 `const { logWarn } = require('./logger')` 로 **구조분해**해서 값을 이미
+  //    붙들기 때문에, require 되기 전에 캐시를 갈아끼워야 한다(analystChat.test.js 의 같은 함정 메모 참조).
+  const loggerPath = require.resolve('../server/logger');
+  require.cache[loggerPath] = {
+    id: loggerPath, filename: loggerPath, loaded: true, exports: {
+      logInfo: (event, context = {}) => { infoCalls.push({ event, context }); },
+      logWarn: (event, context = {}) => { warnCalls.push({ event, context }); },
+      logError: () => {},
+    },
+  };
   return require('../server/analystDream');
 }
 
@@ -63,6 +76,7 @@ function seedTurns(n) {
 
 beforeEach(() => {
   llmCalls = 0; saved = []; llmReply = { insights: [] }; llmThrows = null;
+  warnCalls = []; infoCalls = [];
   backupHist = fs.existsSync(HIST) ? fs.readFileSync(HIST) : null;
   backupState = fs.existsSync(STATE) ? fs.readFileSync(STATE) : null;
   for (const f of [HIST, STATE]) if (fs.existsSync(f)) fs.rmSync(f);
@@ -189,4 +203,89 @@ test('force 는 꺼져 있어도 한 번 돌린다(점검용)', async () => {
   const r = await d.dream({ force: true });
   assert.equal(r.ran, true);
   assert.equal(llmCalls, 1);
+});
+
+// ── 🔴 2026-09-28 pm1 위임 — "파싱은 됐는데 모양이 아닌 것" ──────────────────
+//
+// 폴백(같은 날 위치인자 수정)은 **파싱 실패**만 막는다. JSON.parse 가 성공하되
+// null·배열·문자열·숫자처럼 **모양이 아닌 값**을 그대로 뱉으면 `out.insights`(167행)가
+// out===null/undefined 일 때 크래시하고, 그 밖의 모양이면 "정상인데 0건" 과 구분 안 되게
+// 조용히 사라진다. 여기서는 크래시 안 함 + 정확히 1건의 `dream.bad_shape` 경고를 잰다.
+// ⚠️ 오탐 축(정상 모양엔 경고가 늘면 안 된다)이 크래시 축보다 더 중요하다 — pm1 의 명시적 지시.
+
+test('🔴 모델이 JSON null 을 그대로 뱉으면 크래시하지 않고 dream.bad_shape 경고를 남긴다', async () => {
+  process.env.ANALYST_DREAM_ENABLED = 'true';
+  const d = fresh();
+  seedTurns(50);
+  llmReply = null;
+
+  const r = await d.dream(); // 던지면 이 await 에서 테스트가 그대로 실패한다
+  assert.equal(r.ran, true, '크래시 대신 정상 반환이어야 한다');
+  assert.equal(r.insights, 0);
+  const badShape = warnCalls.filter((w) => w.event === 'dream.bad_shape');
+  assert.equal(badShape.length, 1, `bad_shape 경고가 정확히 1건이어야 하는데: ${JSON.stringify(warnCalls)}`);
+  assert.equal(badShape[0].context.type, 'null');
+  delete process.env.ANALYST_DREAM_ENABLED;
+});
+
+test('🔴 모델이 배열을 그대로 뱉어도 크래시하지 않고 dream.bad_shape 경고를 남긴다', async () => {
+  process.env.ANALYST_DREAM_ENABLED = 'true';
+  const d = fresh();
+  seedTurns(50);
+  llmReply = [{ text: '엉뚱한 모양으로 온 인사이트' }]; // 래핑 객체 없이 배열 자체
+
+  const r = await d.dream();
+  assert.equal(r.ran, true, '크래시 대신 정상 반환이어야 한다');
+  assert.equal(r.insights, 0);
+  const badShape = warnCalls.filter((w) => w.event === 'dream.bad_shape');
+  assert.equal(badShape.length, 1, `bad_shape 경고가 정확히 1건이어야 하는데: ${JSON.stringify(warnCalls)}`);
+  assert.equal(badShape[0].context.type, 'array');
+  delete process.env.ANALYST_DREAM_ENABLED;
+});
+
+test('🔴 모델이 문자열/숫자를 뱉어도 크래시하지 않고 dream.bad_shape 경고를 남긴다', async () => {
+  process.env.ANALYST_DREAM_ENABLED = 'true';
+  const d = fresh();
+  seedTurns(50);
+  llmReply = 'hello';
+  const r1 = await d.dream();
+  assert.equal(r1.ran, true);
+  assert.equal(warnCalls.filter((w) => w.event === 'dream.bad_shape').length, 1);
+
+  seedTurns(50 + d.MIN_NEW_TURNS); // 새 대화를 쌓아야 다시 돈다(변한 게 없으면 스킵)
+  warnCalls = [];
+  llmReply = 42;
+  const r2 = await d.dream();
+  assert.equal(r2.ran, true);
+  const badShape = warnCalls.filter((w) => w.event === 'dream.bad_shape');
+  assert.equal(badShape.length, 1, `bad_shape 경고가 정확히 1건이어야 하는데: ${JSON.stringify(warnCalls)}`);
+  assert.equal(badShape[0].context.type, 'number');
+  delete process.env.ANALYST_DREAM_ENABLED;
+});
+
+test('⚠️ 오탐 없음(중요): 정상 {insights:[]} 는 여전히 dream.bad_shape 0건이다', async () => {
+  process.env.ANALYST_DREAM_ENABLED = 'true';
+  const d = fresh();
+  seedTurns(50);
+  llmReply = { insights: [] };
+
+  const r = await d.dream();
+  assert.equal(r.ran, true);
+  assert.equal(r.insights, 0);
+  assert.equal(warnCalls.filter((w) => w.event === 'dream.bad_shape').length, 0, '정상 모양인데 오탐이 났다');
+  delete process.env.ANALYST_DREAM_ENABLED;
+});
+
+test('⚠️ 오탐 없음: 정상 모양에 실제 insight 가 있어도 dream.bad_shape 0건이다', async () => {
+  process.env.ANALYST_DREAM_ENABLED = 'true';
+  const d = fresh();
+  seedTurns(50);
+  llmReply = { insights: [{ text: '패턴 발견', kind: 'pattern', evidence: '근거' }] };
+
+  const r = await d.dream();
+  assert.equal(r.ran, true);
+  assert.equal(r.insights, 1);
+  assert.equal(saved.length, 1);
+  assert.equal(warnCalls.filter((w) => w.event === 'dream.bad_shape').length, 0, '정상 모양인데 오탐이 났다');
+  delete process.env.ANALYST_DREAM_ENABLED;
 });

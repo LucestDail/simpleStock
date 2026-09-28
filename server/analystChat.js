@@ -342,13 +342,15 @@ async function decideTools(transcript, injected = null) {
   let out = injected;
   try {
     if (out) return shapeToolCalls(out);
-    out = await generateStructuredOutput({
-      systemPrompt: decidePrompt(),
-      userPrompt: transcript,
-      schema: DECIDE_SCHEMA,
-      logLabel: 'analyst_decide',
-      fallback: { tools: [] },
-    });
+    out = await generateStructuredOutput(
+      {
+        systemPrompt: decidePrompt(),
+        userPrompt: transcript,
+        schema: DECIDE_SCHEMA,
+        logLabel: 'analyst_decide',
+      },
+      { tools: [] }
+    );
   } catch (e) {
     logWarn('chat.decide_failed', { message: e.message });
     return { tools: [], error: e.message };

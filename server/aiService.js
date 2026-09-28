@@ -1114,10 +1114,43 @@ async function generateStructuredOutput(options, fallback, extraOptions = {}) {
     ...options,
     logLabel: options.logLabel || 'structured_output',
   });
-  return safeParseJson(extractTextFromResponse(response), fallback, {
+  const logLabel = options.logLabel || 'structured_output';
+  const parsed = safeParseJson(extractTextFromResponse(response), fallback, {
     throwOnFailure: Boolean(extraOptions.throwOnParseFailure),
-    logLabel: options.logLabel || 'structured_output',
+    logLabel,
   });
+
+  /**
+   * 🔴 JSON 파싱은 성공했는데 결과가 "객체가 아닌" 경우 (2026-09-28) — 모델이 최상위로
+   *    null·문자열·숫자·불리언을 뱉으면 `JSON.parse` 는 성공하고 그 값이 그대로 호출부로
+   *    간다. 호출부는 `result.summary` 처럼 속성을 바로 읽어 TypeError 로 크래시한다
+   *    (정적 분석 확정 9곳: aiService/managerService/stockRating).
+   *
+   *    배열은 다르게 다룬다 — 배열은 크래시가 아니라 조용한 `undefined` 를 만들 뿐이고,
+   *    배열 응답을 정상 처리하는 호출부(예: analystChat 의 shapeToolCalls)가 실재하므로
+   *    폴백으로 바꾸면 **정상 응답을 잃는다.** 그래서 배열은 로그만 남기고 그대로 통과시킨다.
+   */
+  const fallbackIsObject = typeof fallback === 'object' && fallback !== null;
+
+  if (Array.isArray(parsed)) {
+    logWarn('ai.json_shape_array', {
+      logLabel,
+      receivedType: 'array',
+      preview: JSON.stringify(parsed).slice(0, 240),
+    });
+    return parsed;
+  }
+
+  if (fallbackIsObject && (parsed === null || typeof parsed !== 'object')) {
+    logWarn('ai.json_shape_mismatch', {
+      logLabel,
+      receivedType: parsed === null ? 'null' : typeof parsed,
+      preview: JSON.stringify(parsed).slice(0, 240),
+    });
+    return fallback;
+  }
+
+  return parsed;
 }
 
 function buildFallbackPlan(userInput, context) {

@@ -149,17 +149,34 @@ async function dream({ force = false } = {}) {
 
   let out;
   try {
-    out = await generateStructuredOutput({
-      systemPrompt: SYSTEM_PROMPT,
-      userPrompt: `## 대화 기록 (${window.length}턴)\n${transcript}`,
-      schema: SCHEMA,
-      logLabel: 'analyst_dream',
-      fallback: { insights: [] },
-    });
+    out = await generateStructuredOutput(
+      {
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt: `## 대화 기록 (${window.length}턴)\n${transcript}`,
+        schema: SCHEMA,
+        logLabel: 'analyst_dream',
+      },
+      { insights: [] }
+    );
   } catch (e) {
     // 실패를 "꿈이 없었다" 로 만들지 않는다
     logWarn('dream.failed', { message: e.message });
     return { ran: false, why: 'llm_failed', saw: window.length, error: e.message };
+  }
+
+  /**
+   * 🔴 폴백은 "파싱 실패" 만 막는다 — 파싱은 됐는데 `null`/배열/문자열/숫자처럼
+   * **모양이 아닌 것**은 못 막는다(safeParseJson 은 JSON.parse 가 성공하면 그 값을 그대로 준다).
+   * `out.insights` 를 여기서 정규화하지 않으면 `out===null`/`undefined` 일 때 아래에서
+   * 그대로 크래시하고, `out` 이 배열·문자열·객체(키 없음)여도 "정상인데 0건" 과
+   * 구분 안 되게 조용히 사라진다 — 여기서 한 번만 남긴다.
+   */
+  if (!(out && typeof out === 'object' && !Array.isArray(out) && Array.isArray(out.insights))) {
+    logWarn('dream.bad_shape', {
+      type: out === null ? 'null' : Array.isArray(out) ? 'array' : typeof out,
+      preview: JSON.stringify(out ?? null).slice(0, 200),
+    });
+    out = { insights: [] };
   }
 
   const picked = (out.insights || []).slice(0, MAX_INSIGHTS);

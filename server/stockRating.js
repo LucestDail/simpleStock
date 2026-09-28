@@ -533,44 +533,46 @@ const FUND_SCHEMA = {
  */
 async function rateFund(stats, cls, newsText) {
   const lv = cls.leverage || { leveraged: false, hints: [], why: null };
-  const out = await generateStructuredOutput({
-    systemPrompt: [
-      '당신은 ETF·펀드 분석자입니다. **기업 분석을 하지 마세요** — 이 종목은 회사가 아니라 펀드입니다.',
-      '매출·영업이익·해자 같은 기업 항목을 논하지 말고, **무엇을 추종하고 어떻게 굴러가는지**만 봅니다.',
-      '',
-      '## 답할 것',
-      '- `whatItTracks`: 무엇을 추종하는가(지수·섹터·자산). **모르면 모른다고 쓰세요.**',
-      '- `holdIt`: `장기 보유 가능` / `중기까지` / `단기 전용` 중 하나 + `holdWhy` 근거',
-      '- `strengths` / `weaknesses` / `oneLiner`',
-      '',
-      '## 🔴 레버리지·인버스면 반드시 짚으세요',
-      '일일 리밸런싱 상품은 **횡보장에서 가치가 깎입니다**(변동성 감쇠). 방향이 맞아도 손실이 날 수 있습니다.',
-      '장기 보유 전제가 성립하지 않으므로 `holdIt` 을 후하게 주지 마세요.',
-      '',
-      '## 🔴 지어내지 마세요',
-      '보수율·추적오차·AUM·구성종목 비중은 **주어지지 않았습니다.** 추측하지 말고 `unverified` 에 적으세요.',
-      '총점·점수는 쓰지 않습니다. 한국어로, 과장 없이.',
-      // 🔴 총량("1,200토큰") 지시는 flash 가 무시했다(잘림 2/2) — 필드별 자수로 직접 묶는다
-      '⚠️ 길이 규칙 — 어기면 답이 잘려 통째로 버려집니다:',
-      '- whatItTracks·oneLiner·holdWhy: 각 1문장(80자 이내)',
-      '- strengths·weaknesses: 각 2가지 이내, 한 문장씩',
-      '- unverified: 항목당 10자 이내(예: "보수율")',
-    ].join('\n'),
-    userPrompt: [
-      `# ${stats.name} (${stats.symbol})`,
-      `유형: ETF·펀드${lv.leveraged ? ` — ${lv.hints.join(' · ')} (${lv.why})` : ''}`,
-      `주가: ${fmtNum(stats.price)} ${stats.currency || ''}`,
-      stats.exchange ? `거래소: ${stats.exchange}` : '',
-      `베타: ${fmtNum(stats.quality?.beta)}`,
-      `배당수익률: ${fmtPct(stats.quality?.dividendYield)}`,
-      '',
-      '⚠️ 시가총액·PER·PBR 등 기업 지표는 **펀드에 존재하지 않습니다.** 없다고 지적하지 마세요.',
-      newsText ? `\n## 최근 뉴스\n${newsText.slice(0, 2000)}` : '',
-    ].filter(Boolean).join('\n'),
-    schema: FUND_SCHEMA,
-    logLabel: 'fund_rating',
-    fallback: { whatItTracks: '', oneLiner: '' },
-  });
+  const out = await generateStructuredOutput(
+    {
+      systemPrompt: [
+        '당신은 ETF·펀드 분석자입니다. **기업 분석을 하지 마세요** — 이 종목은 회사가 아니라 펀드입니다.',
+        '매출·영업이익·해자 같은 기업 항목을 논하지 말고, **무엇을 추종하고 어떻게 굴러가는지**만 봅니다.',
+        '',
+        '## 답할 것',
+        '- `whatItTracks`: 무엇을 추종하는가(지수·섹터·자산). **모르면 모른다고 쓰세요.**',
+        '- `holdIt`: `장기 보유 가능` / `중기까지` / `단기 전용` 중 하나 + `holdWhy` 근거',
+        '- `strengths` / `weaknesses` / `oneLiner`',
+        '',
+        '## 🔴 레버리지·인버스면 반드시 짚으세요',
+        '일일 리밸런싱 상품은 **횡보장에서 가치가 깎입니다**(변동성 감쇠). 방향이 맞아도 손실이 날 수 있습니다.',
+        '장기 보유 전제가 성립하지 않으므로 `holdIt` 을 후하게 주지 마세요.',
+        '',
+        '## 🔴 지어내지 마세요',
+        '보수율·추적오차·AUM·구성종목 비중은 **주어지지 않았습니다.** 추측하지 말고 `unverified` 에 적으세요.',
+        '총점·점수는 쓰지 않습니다. 한국어로, 과장 없이.',
+        // 🔴 총량("1,200토큰") 지시는 flash 가 무시했다(잘림 2/2) — 필드별 자수로 직접 묶는다
+        '⚠️ 길이 규칙 — 어기면 답이 잘려 통째로 버려집니다:',
+        '- whatItTracks·oneLiner·holdWhy: 각 1문장(80자 이내)',
+        '- strengths·weaknesses: 각 2가지 이내, 한 문장씩',
+        '- unverified: 항목당 10자 이내(예: "보수율")',
+      ].join('\n'),
+      userPrompt: [
+        `# ${stats.name} (${stats.symbol})`,
+        `유형: ETF·펀드${lv.leveraged ? ` — ${lv.hints.join(' · ')} (${lv.why})` : ''}`,
+        `주가: ${fmtNum(stats.price)} ${stats.currency || ''}`,
+        stats.exchange ? `거래소: ${stats.exchange}` : '',
+        `베타: ${fmtNum(stats.quality?.beta)}`,
+        `배당수익률: ${fmtPct(stats.quality?.dividendYield)}`,
+        '',
+        '⚠️ 시가총액·PER·PBR 등 기업 지표는 **펀드에 존재하지 않습니다.** 없다고 지적하지 마세요.',
+        newsText ? `\n## 최근 뉴스\n${newsText.slice(0, 2000)}` : '',
+      ].filter(Boolean).join('\n'),
+      schema: FUND_SCHEMA,
+      logLabel: 'fund_rating',
+    },
+    { whatItTracks: '', oneLiner: '' }
+  );
 
   const notes = [];
   if (lv.leveraged) {
@@ -639,19 +641,21 @@ async function rate(symbol, { newsText = '', withProse = true } = {}) {
   // 🔴 ETF·펀드는 **기업 채점을 하지 않는다** — 없는 축을 재면 지어낸 숫자가 나온다
   if (type === TYPES.FUND) return rateFund(stats, cls, newsText);
 
-  const out = await generateStructuredOutput({
-    systemPrompt: systemPrompt(type),
-    userPrompt: [
-      `# ${stats.name} (${stats.symbol})`,
-      stats.sector ? `섹터: ${stats.sector} / ${stats.industry || '-'}` : '',
-      '',
-      statsBlock(stats),
-      newsText ? `\n## 최근 뉴스(외부 검색 — 날짜와 출처를 확인하고 쓰세요)\n${newsText.slice(0, 2500)}` : '',
-    ].filter(Boolean).join('\n'),
-    schema: SCHEMA,
-    logLabel: 'stock_rating',
-    fallback: { items: [], confidence: '낮음', oneLiner: '' },
-  });
+  const out = await generateStructuredOutput(
+    {
+      systemPrompt: systemPrompt(type),
+      userPrompt: [
+        `# ${stats.name} (${stats.symbol})`,
+        stats.sector ? `섹터: ${stats.sector} / ${stats.industry || '-'}` : '',
+        '',
+        statsBlock(stats),
+        newsText ? `\n## 최근 뉴스(외부 검색 — 날짜와 출처를 확인하고 쓰세요)\n${newsText.slice(0, 2500)}` : '',
+      ].filter(Boolean).join('\n'),
+      schema: SCHEMA,
+      logLabel: 'stock_rating',
+    },
+    { items: [], confidence: '낮음', oneLiner: '' }
+  );
 
   // 🔴 **합계·의견은 코드가 낸다** — 사양: "점수와 투자의견 구간이 절대 어긋나면 안 된다"
   const names = RUBRICS[type];
@@ -676,37 +680,39 @@ async function rate(symbol, { newsText = '', withProse = true } = {}) {
   const proseAllowed = withProse && String(process.env.RATING_PROSE || '').toLowerCase() !== 'off';
   if (scoredCount === names.length && proseEmpty && proseAllowed) {
     logWarn('rating.prose_missing', { symbol: stats.symbol, scored: scoredCount });
-    const p = await generateStructuredOutput({
-      systemPrompt: [
-        '당신은 기업·주식 분석 평가자입니다. **점수는 이미 매겨졌습니다 — 다시 매기지 마세요.**',
-        '아래 점수를 **근거로** 서술만 채우세요. 점수와 어긋나는 말을 쓰면 안 됩니다.',
-        '한국어로, 숫자 중심으로, 과장 없이. 주어지지 않은 숫자는 `unverified` 에 적으세요.',
-      ].join('\n'),
-      userPrompt: [
-        `# ${stats.name} (${stats.symbol}) · ${type}`,
-        '',
-        '## 확정된 항목 점수',
-        ...items.map((x) => `- ${x.name}: ${x.score}/10`),
-        '',
-        statsBlock(stats),
-      ].join('\n'),
-      schema: {
-        type: 'object',
-        properties: {
-          description: { type: 'string' },
-          strengths: { type: 'string' },
-          weaknesses: { type: 'string' },
-          interpretation: { type: 'string' },
-          oneLiner: { type: 'string' },
-          confidence: { type: 'string', enum: ['매우 높음', '높음', '중간~높음', '중간', '낮음'] },
-          confidenceWhy: { type: 'string' },
-          unverified: { type: 'array', items: { type: 'string' } },
+    const p = await generateStructuredOutput(
+      {
+        systemPrompt: [
+          '당신은 기업·주식 분석 평가자입니다. **점수는 이미 매겨졌습니다 — 다시 매기지 마세요.**',
+          '아래 점수를 **근거로** 서술만 채우세요. 점수와 어긋나는 말을 쓰면 안 됩니다.',
+          '한국어로, 숫자 중심으로, 과장 없이. 주어지지 않은 숫자는 `unverified` 에 적으세요.',
+        ].join('\n'),
+        userPrompt: [
+          `# ${stats.name} (${stats.symbol}) · ${type}`,
+          '',
+          '## 확정된 항목 점수',
+          ...items.map((x) => `- ${x.name}: ${x.score}/10`),
+          '',
+          statsBlock(stats),
+        ].join('\n'),
+        schema: {
+          type: 'object',
+          properties: {
+            description: { type: 'string' },
+            strengths: { type: 'string' },
+            weaknesses: { type: 'string' },
+            interpretation: { type: 'string' },
+            oneLiner: { type: 'string' },
+            confidence: { type: 'string', enum: ['매우 높음', '높음', '중간~높음', '중간', '낮음'] },
+            confidenceWhy: { type: 'string' },
+            unverified: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['oneLiner'],
         },
-        required: ['oneLiner'],
+        logLabel: 'stock_rating_prose',
       },
-      logLabel: 'stock_rating_prose',
-      fallback: {},
-    });
+      {}
+    );
     /**
      * 🔴 보충 응답도 **모양으로 읽는다** — 키가 회차마다 다르다(라이브 6회 전부 달랐다).
      * ⚠️ `items` 는 위에서 확정됐다. 여기서 **점수는 안 건드리고 코멘트만** 채운다 —

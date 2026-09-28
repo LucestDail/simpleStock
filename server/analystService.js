@@ -1237,13 +1237,15 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   if (userInstruction) lines.push('', `## 사용자 추가 지시`, userInstruction);
 
   const started = Date.now();
-  const raw = await generateStructuredOutput({
-    systemPrompt: SYSTEM_PROMPT,
-    userPrompt: lines.join('\n'),
-    schema: REPORT_SCHEMA,
-    logLabel: 'trade_analyst',
-    fallback: { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] },
-  });
+  const raw = await generateStructuredOutput(
+    {
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: lines.join('\n'),
+      schema: REPORT_SCHEMA,
+      logLabel: 'trade_analyst',
+    },
+    { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
+  );
 
   // 🔴 키가 아니라 **모양**으로 읽는다(위 shapeReport 주석 참조)
   let report = shapeReport(raw);
@@ -1271,21 +1273,23 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       (s) => !report.positions.some((p) => String(p.symbol).toUpperCase() === s)
     );
     logWarn('analyst.positions_short', { got: report.positions.length, need: heldSymbols.length, missing });
-    const retryRaw = await generateStructuredOutput({
-      systemPrompt: SYSTEM_PROMPT,
-      userPrompt: [
-        lines.join('\n'),
-        '',
-        '## 🔴 직전 답변이 규격에 안 맞았습니다 — 다시 답하세요',
-        `보유 종목 **${heldSymbols.length}개 전부**에 대해 판단이 필요한데 ${missing.join(', ')} 이(가) 빠졌습니다.`,
-        '줄글 하나로 묶지 말고, **종목마다 한 건씩** 아래 항목을 채운 객체를 `positions` 배열에 넣으세요.',
-        '`symbol`(티커) · `stance`(BUY|SELL|HOLD) · `confidence`(HIGH|MEDIUM|LOW) · `rationale` · `risk`',
-        '판단이 "그대로 보유" 여도 `stance: "HOLD"` 로 **명시**하세요. 빠뜨리지 마세요.',
-      ].join('\n'),
-      schema: REPORT_SCHEMA,
-      logLabel: 'trade_analyst_retry',
-      fallback: { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] },
-    });
+    const retryRaw = await generateStructuredOutput(
+      {
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt: [
+          lines.join('\n'),
+          '',
+          '## 🔴 직전 답변이 규격에 안 맞았습니다 — 다시 답하세요',
+          `보유 종목 **${heldSymbols.length}개 전부**에 대해 판단이 필요한데 ${missing.join(', ')} 이(가) 빠졌습니다.`,
+          '줄글 하나로 묶지 말고, **종목마다 한 건씩** 아래 항목을 채운 객체를 `positions` 배열에 넣으세요.',
+          '`symbol`(티커) · `stance`(BUY|SELL|HOLD) · `confidence`(HIGH|MEDIUM|LOW) · `rationale` · `risk`',
+          '판단이 "그대로 보유" 여도 `stance: "HOLD"` 로 **명시**하세요. 빠뜨리지 마세요.',
+        ].join('\n'),
+        schema: REPORT_SCHEMA,
+        logLabel: 'trade_analyst_retry',
+      },
+      { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
+    );
     const retried = shapeReport(retryRaw);
     logInfo('analyst.retry_done', { before: report.positions.length, after: retried.positions.length });
     // 되물어서 더 잡혔을 때만 바꾼다. 시황은 **있는 쪽을** 남긴다(재요청이 시황을 비우기도 한다)
