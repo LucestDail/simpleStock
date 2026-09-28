@@ -36,6 +36,8 @@
  * ⚠️ `MARKET_INFO` 한도가 **3/s** 로 좁다 ⇒ **하루 한 번만** 받아 캐시한다.
  */
 
+const { APP_TIMEZONE } = require('./time');
+
 /**
  * 캘린더 응답에서 **정규장 구간**을 꺼낸다. 순수 함수 — 네트워크 없이 검증한다.
  *
@@ -116,7 +118,19 @@ const calCache = new Map(); // market → { day, days, at }
 
 async function loadCalendar(market, { toss = require('./tossClient'), now = Date.now() } = {}) {
   const m = String(market || '').toUpperCase();
-  const today = new Date(now).toISOString().slice(0, 10);
+  /**
+   * 🔴 **캐시 키는 앱 시간대(KST) 날짜다 — UTC 가 아니다** (2026-09-28 라이브 장애 실측).
+   *    `toISOString().slice(0,10)` 은 **UTC 날짜**라 KST 00:00~09:00 구간은 UTC 로
+   *    아직 전날이다 ⇒ 캐시 키가 안 바뀌어 앱이 **일요일 캘린더를 들고 월요일 아침을
+   *    맞았고** KR 세션이 `closed` 로 굳었다. 그 결과 그 창과 겹치는 프리장(08:00~09:00
+   *    KST) 브리핑은 **원리상 절대** 못 떴다(프리장 창은 UTC 로 항상 전날이다) — 정규장
+   *    09:00 알림은 우연히 UTC 자정과 겹쳐 살아남았을 뿐, 구조는 똑같이 깨져 있었다.
+   *    ⇒ `alertService.kstDay()` 와 같은 방식(`en-CA` = YYYY-MM-DD)으로 통일한다.
+   * ⚠️ **시장과 무관하게 같은(KST) 날짜를 쓴다.** 이 캐시가 재는 '하루'는 시장의 개장일이
+   *    아니라 **"우리가 하루에 한 번만 받는다" 는 사용자(한국) 쪽 하루**다. 시장별로
+   *    나누면 미국장은 또 다른 시간대 경계에서 같은 병을 앓는다.
+   */
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE }).format(new Date(now));
   const hit = calCache.get(m);
   if (hit && hit.day === today) return hit.days;
   const days = await toss.getMarketCalendar(m);
