@@ -698,7 +698,19 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
       try {
         const h = await tossPortfolio.getHoldings({});
         const cashUsd = Number(h?.summary?.cash?.usd?.amount || 0);
-        const lp = regime.ladderProposals({ prevBand, band: nowBand, cashUsd });
+        /**
+         * 🔴 **VIX stale/나이를 사다리 제안에도 넘긴다** (2026-09-28, pm1 위임).
+         *    `rgState.vix` 는 `regimeService.compute()` 가 만든 그 값 그대로다 — 여기서
+         *    새로 추측하지 않는다. `rgState`/`rgState.vix` 가 없을 수 있어(국면 갱신 실패)
+         *    옵셔널 체이닝으로 막는다(없으면 `ladderProposals` 기본값 false/null 이 먹어
+         *    종전과 동일하게 동작 — 회귀 없음).
+         */
+        const lp = regime.ladderProposals({
+          prevBand, band: nowBand, cashUsd,
+          vixValue: rgState?.vix?.value ?? null,
+          vixStale: Boolean(rgState?.vix?.stale),
+          vixAgeMin: rgState?.vix?.ageMin ?? null,
+        });
         if (lp.length) {
           const pr = await toss.getPrices(lp.map((x) => x.symbol));
           const orderService = require('./orderService');

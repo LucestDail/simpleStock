@@ -332,8 +332,15 @@ async function getVix() {
      *    안의 값은 "모름" 보다 훨씬 낫다. ⚠️ stale 표시를 단다 — 낡은 값을 새 값인 척하지 않는다.
      */
     if (vixCache && Date.now() - vixCache.at < VIX_STALE_MAX_MS) {
-      logWarn('market.vix_stale_reuse', { ageMin: Math.round((Date.now() - vixCache.at) / 60000), message: e.message });
-      return { ...vixCache.quote, stale: true };
+      /**
+       * 🔴 **나이(분)도 값에 싣는다** (2026-09-28, pm1 지시) — 종전엔 `ageMin` 이 이 로그에만
+       *    있었다. 유일한 소비자(`regimeService.js`)가 `stale` 표시 자체를 버리고 있었고,
+       *    그 값이 그대로 사다리 매수 제안(HITL 승인 문구)까지 흘러가 **최대 60분 낡은
+       *    공포지수로 낸 제안인지 사람이 알 방법이 없었다.** 값에 실어야 아래가 쓸 수 있다.
+       */
+      const ageMin = Math.round((Date.now() - vixCache.at) / 60000);
+      logWarn('market.vix_stale_reuse', { ageMin, message: e.message });
+      return { ...vixCache.quote, stale: true, ageMin };
     }
     logWarn('market.vix_failed', { message: e.message });
     return null;

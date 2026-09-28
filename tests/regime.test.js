@@ -117,3 +117,83 @@ test('🔴 VIX 사다리 — 코드가 제안을 만든다(백테스트 실증: 
   assert.deepEqual(regime.ladderProposals({ prevBand: 0, band: 2, cashUsd: 0 }), []); // 현금 0 이면 없음
   assert.deepEqual(regime.ladderProposals({ prevBand: null, band: 2, cashUsd: 1000 }), []); // 기준 없으면 안 쏨(재기동 오발 방지)
 });
+
+/**
+ * 🔴 VIX stale 가시성 (2026-09-28, pm1 지시) — `marketDataService.getVix()` 가 야후 429 때
+ * 최대 60분 낡은 값을 `stale:true` 로 재사용하는데, 유일한 소비자(`refresh()`)가 그 표시를
+ * 버려서 **최대 60분 낡은 공포지수로 낸 매수 제안인지 사람이 알 방법이 없었다.**
+ *
+ * ⚠️ **설계 결정(바꾸지 않는다)**: 사다리 발화 조건·현금 계산은 그대로다. stale 이어도
+ * 그대로 발화한다 — HITL 승인이 최종 결정이므로 우리가 할 일은 판단을 막는 게 아니라
+ * **사실을 보여주는 것**뿐이다.
+ */
+test('🔴 VIX stale 메타는 밴드 판정을 안 바꾼다(같은 입력 → 같은 band)', () => {
+  const fresh = regime.compute({ vix: 26 });
+  const stale = regime.compute({ vix: 26, vixStale: true, vixAgeMin: 38 });
+  assert.equal(fresh.vix.band, stale.vix.band, 'stale 메타가 밴드 판정 산수를 흔들었다');
+  assert.equal(fresh.vix.band, 2);
+  assert.equal(fresh.vix.stale, false);
+  assert.equal(stale.vix.stale, true);
+  assert.equal(stale.vix.ageMin, 38);
+});
+
+test('vixStaleNote — 신선하면 빈 문자열(오탐 0), stale 이면 값·나이를 적고 나이 모르면 "확인 불가"', () => {
+  assert.equal(regime.vixStaleNote({ stale: false, value: 26, ageMin: 38 }), '');
+  assert.equal(regime.vixStaleNote(null), ''); // vix 자체가 없어도 깨지지 않는다
+  assert.equal(regime.vixStaleNote({ stale: true, value: 26.4, ageMin: 38 }), ' (VIX 26.4 — 38분 전 값, 갱신 실패)');
+  assert.equal(regime.vixStaleNote({ stale: true, value: 26.4, ageMin: null }), ' (VIX 26.4 — 확인 불가, 갱신 실패)');
+});
+
+test('🔴 사다리 reason — 신선하면 문구 그대로(군더더기 금지), stale 이면 나이가 붙고 몰라도 문장이 깨지지 않는다', () => {
+  const fresh = regime.ladderProposals({ prevBand: 0, band: 1, cashUsd: 1000 });
+  assert.equal(fresh[0].reason, 'VIX 공포 사다리 1단계(사용자 규칙) — 가용 현금의 10% 를 1배 광범위에 분할 매수');
+
+  const stale = regime.ladderProposals({
+    prevBand: 0, band: 1, cashUsd: 1000, vixValue: 26.4, vixStale: true, vixAgeMin: 38,
+  });
+  assert.equal(
+    stale[0].reason,
+    'VIX 공포 사다리 1단계(사용자 규칙) — 가용 현금의 10% 를 1배 광범위에 분할 매수 (VIX 26.4 — 38분 전 값, 갱신 실패)'
+  );
+
+  // stale 인데 나이를 모르는 경우도 문장이 성립해야 한다
+  const staleUnknownAge = regime.ladderProposals({
+    prevBand: 0, band: 1, cashUsd: 1000, vixValue: 26.4, vixStale: true, vixAgeMin: null,
+  });
+  assert.match(staleUnknownAge[0].reason, /확인 불가/);
+
+  // 🔴 stale 이어도 사다리 발화·금액 산수는 그대로다(설계 결정 — 억제 로직을 넣지 않았다)
+  assert.equal(stale.length, fresh.length);
+  assert.equal(stale[0].budget, fresh[0].budget);
+  assert.equal(stale[0].band, fresh[0].band);
+});
+
+test('🔴 국면 전이 알림 문장에도 stale 표시가 붙는다(밴드 문구는 그대로, 뒤에 덧붙는다)', () => {
+  const a = regime.compute({ us: { closes: ramp(100, 1, 70) }, vix: 14 });
+  const bFresh = regime.compute({ us: { closes: ramp(100, 1, 70) }, vix: 26 });
+  const bStale = regime.compute({ us: { closes: ramp(100, 1, 70) }, vix: 26, vixStale: true, vixAgeMin: 12 });
+
+  const tFresh = regime.diffTransitions(a, bFresh).find((x) => /VIX/.test(x));
+  const tStale = regime.diffTransitions(a, bStale).find((x) => /VIX/.test(x));
+  assert.ok(tFresh, '신선한 VIX 전이 문장이 없다');
+  assert.ok(tStale, 'stale VIX 전이 문장이 없다');
+  assert.doesNotMatch(tFresh, /갱신 실패/, '신선한 전이에 stale 문구가 붙었다(오탐)');
+  assert.match(tStale, /12분 전 값, 갱신 실패/);
+  // 밴드 라벨(판정)은 stale 여부와 무관하게 같다 — 메타만 덧붙었다
+  assert.equal(tStale.replace(/ \(VIX.*\)$/, ''), tFresh);
+});
+
+test('🔴 옛 regime.json(새 필드 없음)을 읽어도 예외 없이 돈다 — prev 에 stale/ageMin 이 없는 경우', () => {
+  // 배포 전 저장된 형태를 흉내 낸다(마이그레이션 없이 그대로 읽는 것이 요구사항)
+  const legacyPrev = {
+    at: '2026-09-27T00:00:00.000Z',
+    kr: null,
+    us: { trend: 'up', shock: false, dayPct: 1, price: 101, ma20: 100, ma60: 99 },
+    vix: { value: 14, band: 0 }, // ⚠️ stale·ageMin 필드 자체가 없다
+    manual: [],
+  };
+  const next = regime.compute({ us: { closes: ramp(100, 1, 70) }, vix: 26 });
+  assert.doesNotThrow(() => regime.diffTransitions(legacyPrev, next));
+  const t = regime.diffTransitions(legacyPrev, next);
+  assert.ok(t.some((x) => /VIX/.test(x)), t.join(' | '));
+});

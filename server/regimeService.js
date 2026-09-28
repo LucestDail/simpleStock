@@ -83,15 +83,38 @@ function vixBandOf(v) {
 const VIX_BAND_LABEL = ['평온(<20)', '공포 진입(20+) — 분할 매수 1단계', '공포 확대(25+) — 2단계', '고공포(30+) — 3단계', '극단 공포(35+) — 최대 단계'];
 const TREND_KO = { up: '상승추세', side: '횡보', down: '하락추세' };
 
-/** 시장별 판정 + VIX 를 한 상태로 */
-function compute({ kr = null, us = null, vix = null, manual = [] } = {}) {
+/**
+ * 시장별 판정 + VIX 를 한 상태로.
+ *
+ * 🔴 **`stale`·`ageMin` 은 메타다 — 밴드 판정 산수(`vixBandOf`)는 그대로다** (2026-09-28,
+ *    pm1 지시). `marketDataService.getVix()` 가 야후 429 때 최대 60분까지 낡은 값을 재사용
+ *    하며 `stale: true` + `ageMin` 을 이미 달아 주는데, 유일한 소비자(`refresh()`)가 그
+ *    표시를 버리고 있었다 — 그 값이 그대로 공포 사다리 매수 제안(HITL 승인 문구)까지
+ *    흘러가는데, 승인 버튼을 누르는 사람은 그게 낡은 값인지 알 방법이 없었다.
+ * ⚠️ `vix` 는 **여전히 숫자(또는 null)**다 — 기존 `compute({vix:26})` 호출부·테스트가
+ *    그대로 통과해야 한다(하위호환). stale·나이는 별도 파라미터로 받는다.
+ */
+function compute({ kr = null, us = null, vix = null, vixStale = false, vixAgeMin = null, manual = [] } = {}) {
   return {
     at: new Date().toISOString(),
     kr: kr ? judgeMarket(kr) : null,
     us: us ? judgeMarket(us) : null,
-    vix: vix != null ? { value: Number(vix), band: vixBandOf(vix) } : { value: null, band: null },
+    vix: vix != null
+      ? { value: Number(vix), band: vixBandOf(vix), stale: Boolean(vixStale), ageMin: vixAgeMin ?? null }
+      : { value: null, band: null, stale: false, ageMin: null },
     manual: Array.isArray(manual) ? manual : [],
   };
+}
+
+/**
+ * VIX 가 낡았을 때 사람이 읽는 문장에 붙이는 안내 — **여기 한 곳**에서만 만든다(전이
+ * 알림·사다리 제안 reason 이 같은 문구를 쓴다. 따로 두면 다음에 한쪽만 바뀐다).
+ * ⚠️ 나이를 몰라도(`ageMin` 없음) 문장이 성립해야 한다 — "확인 불가" 로 완성한다.
+ */
+function vixStaleNote(vix) {
+  if (!vix?.stale) return '';
+  const age = vix.ageMin != null ? `${vix.ageMin}분 전 값` : '확인 불가';
+  return ` (VIX ${vix.value ?? '?'} — ${age}, 갱신 실패)`;
 }
 
 /**
@@ -156,7 +179,8 @@ function diffTransitions(prev, next) {
     if (sb && !sa) t.push(`${mkt.toUpperCase()} 급락(${next[mkt].dayPct}%)`);
   }
   const va = prev?.vix?.band, vb = next?.vix?.band;
-  if (vb != null && va != null && va !== vb) t.push(`VIX ${VIX_BAND_LABEL[va]} → ${VIX_BAND_LABEL[vb]}`);
+  // 🔴 밴드 판정은 그대로 — stale 표시는 사람이 읽는 문장에만 덧붙인다(vixStaleNote 참조)
+  if (vb != null && va != null && va !== vb) t.push(`VIX ${VIX_BAND_LABEL[va]} → ${VIX_BAND_LABEL[vb]}${vixStaleNote(next?.vix)}`);
   return t;
 }
 
@@ -187,6 +211,9 @@ async function refresh() {
   try {
     const v = await market.getVix();
     inputs.vix = v?.price ?? null;
+    // 🔴 표시를 버리지 않는다 — v?.stale/ageMin 이 여기서 사라지면 아래로 전달할 방법이 없다
+    inputs.vixStale = Boolean(v?.stale);
+    inputs.vixAgeMin = v?.ageMin ?? null;
   } catch { /* getVix 가 null 을 준다 */ }
 
   const prev = current || loadState();
@@ -339,12 +366,24 @@ async function candidateSection(scenarios, { heldSymbols = [], summarize, getCan
  * @returns [{symbol, side:'BUY', budget, band, reason}] — 수량·가격은 호출자가 시세로 확정
  * ⚠️ 전이(prev<next)에서만 — 같은 밴드에 머무는 동안 반복 제안하지 않는다(엣지 규율).
  * ⚠️ 사용자 확정(09-24): 단계 금액 = 가용 현금의 10/20/30/40%.
+ *
+ * 🔴 **stale 이어도 그대로 발화한다 — 발화 조건은 바꾸지 않는다** (2026-09-28, pm1 설계 결정).
+ *    사다리의 존재 이유가 "LLM 은 공포에서 안 산다" 라 막으면 제일 필요한 순간에 안 산다.
+ *    최종 결정은 HITL(사람 승인)이다 — 우리가 할 일은 판단을 대신하는 게 아니라 **사실을
+ *    보여주는 것**이다. ⇒ `vixValue`/`vixStale`/`vixAgeMin` 을 받으면 `reason` 에 낡은
+ *    정도를 적는다(신선하면 문구는 그대로 — 군더더기 금지).
+ * ⚠️ **실제 호출부(`alertService.js`)는 아직 이 파라미터를 안 넘긴다** — 그 파일은 범위
+ *    밖이라 여기서는 건드리지 않는다(보고 참조). 안 넘기면 `vixStale` 기본값 false 라
+ *    reason 은 종전과 동일하다(회귀 없음).
  */
 const LADDER_PCT = [null, 0.10, 0.20, 0.30, 0.40];
-function ladderProposals({ prevBand = null, band = null, cashUsd = 0 } = {}) {
+function ladderProposals({
+  prevBand = null, band = null, cashUsd = 0, vixValue = null, vixStale = false, vixAgeMin = null,
+} = {}) {
   if (band == null || prevBand == null || band <= prevBand) return [];
   if (!(cashUsd > 0)) return [];
   const out = [];
+  const staleNote = vixStaleNote({ stale: vixStale, value: vixValue, ageMin: vixAgeMin });
   // 여러 밴드를 한 번에 건너뛰면(22→33) 지나간 단계도 각각 — 단 금액은 그 시점 잔여 현금 기준 순차 차감
   let cash = cashUsd;
   for (let b = prevBand + 1; b <= band; b += 1) {
@@ -355,7 +394,7 @@ function ladderProposals({ prevBand = null, band = null, cashUsd = 0 } = {}) {
     cash -= budget;
     out.push({
       symbol: 'QQQ', side: 'BUY', budget, band: b,
-      reason: `VIX 공포 사다리 ${b}단계(사용자 규칙) — 가용 현금의 ${pct * 100}% 를 1배 광범위에 분할 매수`,
+      reason: `VIX 공포 사다리 ${b}단계(사용자 규칙) — 가용 현금의 ${pct * 100}% 를 1배 광범위에 분할 매수${staleNote}`,
     });
   }
   return out;
@@ -375,5 +414,5 @@ function getState() { return current || loadState(); }
 module.exports = {
   compute, judgeMarket, vixBandOf, matchScenarios, diffTransitions, promptSection,
   refresh, getState, setManual, readPlaybook, readCatalog, candidateSection, ladderProposals,
-  VIX_BAND_LABEL, TREND_KO,
+  vixStaleNote, VIX_BAND_LABEL, TREND_KO,
 };
