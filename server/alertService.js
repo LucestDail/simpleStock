@@ -1064,21 +1064,50 @@ async function onProposalSettled(p, why) {
 
 async function onProposal(p) {
   if (!ENABLED) return { ok: false, why: 'disabled' };
+  let r;
   try {
-    const r = await bot.sendProposal(p);
+    r = await bot.sendProposal(p);
     // 🔴 메시지 id 를 제안에 붙인다 — **이게 없으면 나중에 버튼을 못 지운다**
     if (r?.messageId != null) require('./orderService').attachNotice(p.id, { messageId: r.messageId });
-    logInfo('alerts.proposal_sent', { id: p.id, symbol: p.symbol, sent: Boolean(r.sent), messageId: r?.messageId ?? null });
-    activity.record('proposal',
-      p.conditional
-        ? `예약 ${p.side === 'BUY' ? '매수' : '매도'} 제안 ${p.symbol} ${p.quantity}주 · 감시가 ${p.conditional.triggerPrice}`
-        : `${p.side === 'BUY' ? '매수' : '매도'} 제안 ${p.symbol} ${p.quantity}주 @ ${p.price}`,
-      { proposalId: p.id, symbol: p.symbol, side: p.side, telegram: Boolean(r.sent) });
-    return r;
   } catch (e) {
     logError('alerts.proposal_failed', e, { id: p.id });
-    return { ok: false, error: e.message };
+    r = { ok: false, sent: false, error: e.message };
   }
+  logInfo('alerts.proposal_sent', { id: p.id, symbol: p.symbol, sent: Boolean(r.sent), messageId: r?.messageId ?? null });
+
+  /**
+   * 🔴 **승인 버튼이 실제로 안 갔으면 사용자가 그 사실을 안다** (2026-09-28, pm1 지시 —
+   *    브리핑 문구 "승인 버튼이 곧 옵니다" 는 약속인데, 이 발송이 실패하면(예외든
+   *    `sent:false` 든) 로그만 남고 사용자는 기다리다 10분 TTL 로 조용히 만료됐다.
+   *    `orderService.js:89~92` 의 그 거울상 — "있다고 했는데 안 왔다").
+   * ⚠️ **예외와 `sent:false` 를 한 곳에서 같이 본다** — 위 catch 가 실패를 `r.sent=false`
+   *    로 접어 넣으므로, 아래 이 한 검사가 **둘 다** 잡는다. 따로 두면 한쪽만 고치기 쉽다.
+   * ⚠️ **후속 알림도 실패할 수 있다**(텔레그램 자체가 죽은 경우) — 더 쫓지 않고 `logError`
+   *    로 끝낸다. 그리고 그 실패를 **"보냈다" 로 기록하지 않는다** — 이번 사고의 핵심이다.
+   */
+  if (!r?.sent) {
+    try {
+      const fu = await telegram.send(
+        `⚠️ ${p.symbol} 제안의 승인 버튼을 보내지 못했습니다 — 앱에서 확인해 주세요`,
+        { reason: 'proposal_button_failed' }
+      );
+      if (!fu?.sent) logError('alerts.proposal_followup_failed', new Error(fu?.error || 'unknown'), { id: p.id });
+    } catch (e2) {
+      logError('alerts.proposal_followup_failed', e2, { id: p.id });
+    }
+  }
+
+  /**
+   * 🔴 **`telegram` 값은 버튼 성공 여부만 말한다** — 후속 알림 성공을 여기 섞으면
+   *    "가렸다고 로그에 찍혔는데 실제론 원본이 나갔다"(pm2 가 오늘 잡은 사고)와 같은
+   *    모양이 된다. `r` 은 위에서 후속 알림과 무관하게 유지되므로 그대로 쓴다.
+   */
+  activity.record('proposal',
+    p.conditional
+      ? `예약 ${p.side === 'BUY' ? '매수' : '매도'} 제안 ${p.symbol} ${p.quantity}주 · 감시가 ${p.conditional.triggerPrice}`
+      : `${p.side === 'BUY' ? '매수' : '매도'} 제안 ${p.symbol} ${p.quantity}주 @ ${p.price}`,
+    { proposalId: p.id, symbol: p.symbol, side: p.side, telegram: Boolean(r.sent) });
+  return r;
 }
 
 function _resetForTest() {
