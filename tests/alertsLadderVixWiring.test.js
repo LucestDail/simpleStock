@@ -119,3 +119,56 @@ test('신선한 VIX — vixStale 이 명시적으로 false 로 넘어간다(평�
   assert.equal(captured[0].vixStale, false, 'vixStale 이 false 로 명시되지 않았다(생략이 아니라 값으로)');
   assert.equal(captured[0].vixAgeMin, null);
 });
+
+// ── 🔴 이름 어긋남 감지 (2026-09-28, pm1 재지시) ─────────────────────────
+//
+// 위 두 테스트는 `regime.refresh()` 를 손으로 적은 리터럴 `{value, stale, ageMin}` 로
+// 갈아끼운다. 그래서 `regimeService.compute()` 가 실제로 만드는 키 이름이 바뀌어도
+// (worker3 교차 변이 실측: `ageMin` → `ageMinutes`) **못 잡는다** — 스텁과 배선이
+// 같은 문자열을 각자 손으로 타이핑한 우연으로 통과했을 뿐이다.
+//
+// 그래서 이 테스트는 `compute()` 를 **실물로** 불러 그 산출물을 그대로 `refresh()` 의
+// 반환값에 흘려보낸다. 🔴 기대값은 그 산출물에서 **같은 이름으로 다시 읽어오지 않는다**
+// (그러면 양쪽이 undefined 로 우연히 같아질 수 있다) — 대신 우리가 `compute()` 에
+// **넣은 원본 리터럴**과 비교한다. `compute()` 나 `alertService` 어느 쪽이든 필드
+// 이름이 어긋나면 그 값은 원본과 달라지므로(대개 null/false) 반드시 깨진다.
+
+test('🔴 이름 어긋남 감지 — compute() 실물 산출물을 흘려보내도 원본 입력값이 그대로 나온다', async () => {
+  const captured = [];
+  const VIX_INPUT = 26.4; // 실사고 라이브 메시지("VIX 26.4 — 38분 전 값")와 같은 값
+  const AGE_MIN_INPUT = 38;
+
+  const a = freshAlerts({ ALERTS_ENABLED: 'true' }, () => {
+    require('../server/tossPortfolio').getHoldings = async () => ({
+      items: [], summary: { cash: { usd: { amount: 5000 } } },
+    });
+    require('../server/settingsService').getDashboardSettings = () => ({ targets: {} });
+    const regime = require('../server/regimeService');
+    // 🔴 손으로 만든 객체가 아니라 **실제 compute() 호출 결과**를 그대로 쓴다
+    const baseline = regime.compute({ vix: 18 }); // 낮은 밴드 — 기준선
+    const rising = regime.compute({ vix: VIX_INPUT, vixStale: true, vixAgeMin: AGE_MIN_INPUT }); // 높은 밴드 + stale
+    const sequence = [baseline, rising];
+    let call = 0;
+    regime.refresh = async () => {
+      const state = sequence[Math.min(call, sequence.length - 1)];
+      call += 1;
+      return { state, transitions: [], scenarios: [] };
+    };
+    regime.ladderProposals = (args) => { captured.push(args); return []; };
+  });
+
+  await a.tick(); // 기준선
+  assert.equal(captured.length, 0, '기준선 틱에서 사다리가 불렸다');
+
+  await a.tick(); // 밴드 전이(compute() 실물 판정으로 vixBandOf(18) < vixBandOf(26.4) 여야 한다)
+  assert.equal(captured.length, 1,
+    '밴드 전이인데 사다리가 안 불렸다 — compute() 가 만드는 band 이름이 alertService 가 읽는 이름과 어긋났을 수 있다');
+  // ⚠️ 아래는 rising.vix.value/stale/ageMin 을 "다시 읽어" 비교하지 않는다(그러면 양쪽이 같은
+  //    이름을 잃어도 undefined===undefined 로 통과해 버린다). 원본 입력 리터럴과 비교한다.
+  assert.equal(captured[0].vixValue, VIX_INPUT,
+    'vixValue 파이프가 끊겼다 — compute() 산출 키와 alertService 읽기 키 이름이 어긋난다');
+  assert.equal(captured[0].vixStale, true,
+    'vixStale 파이프가 끊겼다 — compute() 산출 키와 alertService 읽기 키 이름이 어긋난다');
+  assert.equal(captured[0].vixAgeMin, AGE_MIN_INPUT,
+    'vixAgeMin 파이프가 끊겼다 — compute() 산출 키와 alertService 읽기 키 이름이 어긋난다(예: ageMin→ageMinutes)');
+});
