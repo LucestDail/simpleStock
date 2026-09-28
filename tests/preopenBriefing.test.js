@@ -135,6 +135,18 @@ test('🔴 analystService: BRIEF_JOB 에 preopen 성격 문구가 있다', () =>
   assert.match(block, /preopen\s*:/, '🔴 preopen 브리핑 성격 문구가 없다 — open 과 같은 글이 나간다');
 });
 
+/**
+ * 🔴 2026-09-28 실사고 — 이 파일이 SCHEDULED·BRIEF_JOB 은 이미 지켰는데 **BRIEF_KINDS 는
+ * 안 지켰다.** 정확히 그 자리만 preopen 갱신을 놓쳐, 프리장·장중 브리핑에서 "대상 시장 …
+ * 판단하라" 지시가 통째로 빠졌다(더 철저한 교차 검사는 `tests/analystBriefKinds.test.js`).
+ */
+test('🔴 analystService: 회차 게이트(BRIEF_KINDS)에 preopen 이 없으면 "판단하라" 지시가 프리장에서 통째로 빠진다', () => {
+  const i = ANALYST.indexOf('const BRIEF_KINDS');
+  assert.ok(i > 0, 'BRIEF_KINDS 를 못 찾았다');
+  const block = ANALYST.slice(i, i + 120);
+  assert.match(block, /'preopen'/, '🔴 BRIEF_KINDS 에 preopen 이 없다 — 대상 시장 판단 지시가 프리장에서 통째로 빠진다');
+});
+
 test('🔴 alertService: 이월(SCHEDULED) 집합에 preopen 이 없으면 겹친 회차에서 사라진다', () => {
   const i = ALERTS.indexOf('const SCHEDULED');
   assert.ok(i > 0, 'SCHEDULED 를 못 찾았다');

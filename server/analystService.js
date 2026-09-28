@@ -526,7 +526,13 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    *    사용자 지시: *"국장도 국장 관련 종합적인 웹 검색 및 종목 없으면 전반적인 시황 브리핑"*.
    *    보유가 없는 시장은 종목 질의가 **하나도 안 만들어져** 검색이 통째로 비어 있었다.
    */
-  const BRIEF_KINDS = new Set(['open', 'mid', 'close']);
+  /**
+   * 🔴 **`preopen` 이 빠져 있었다** (2026-09-28 실사고 — 프리장·장중 브리핑 2회 연속
+   *    "대상 시장: … 판단하라" 지시가 통째로 안 실렸다). 회차 종류 열거가 `BRIEF_JOB`·
+   *    `SCHEDULED`·여기 셋으로 흩어져 있고 이 자리만 갱신을 놓쳤다. ⇒ `tests/analystBriefKinds.test.js`
+   *    가 세 열거를 소스에서 직접 대조해 어긋나면 빨간불을 낸다(손으로 맞추는 한 또 어긋난다).
+   */
+  const BRIEF_KINDS = new Set(['preopen', 'open', 'mid', 'close']);
   const MARKET_NAME = { kr: '한국 증시(코스피·코스닥)', us: '미국 증시(S&P500·나스닥)' };
   const briefMarkets = [...new Set((trigger?.reasons || [])
     .filter((r) => BRIEF_KINDS.has(r?.kind) && MARKET_NAME[r?.key])
@@ -1550,6 +1556,18 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     if (report.momentumRead) lines.push('', `[모멘텀] ${report.momentumRead}`);
     for (const ps of report.positions || []) {
       lines.push('', `· ${ps.symbol} ${ps.stance}/${ps.confidence} — ${ps.rationale}`);
+    }
+    /**
+     * 🔴 **보유가 있는데 재시도(위 1262~1295행) 후에도 판단이 통째로 비면 조용히 넘어가지
+     *    않는다** (2026-09-28 실사고 — 08:47·12:17 두 회차가 시황만 오고 종목 판단이
+     *    아예 없이 "정상 발송" 됐다). 사용자는 이걸 "브리핑이 왔다" 로 받아서 실패로 안
+     *    보였다. ⇒ 폰으로 가는 이 본문에 직접 적는다.
+     * ⚠️ **보유가 0 이면 아무 말도 안 한다** — 그건 정상이다(보유가 없으면 판단도 없다).
+     *    오탐하면 매 회차 울린다.
+     */
+    if (heldSymbols.length && !report.positions.length) {
+      lines.push('', `⚠️ 보유 ${heldSymbols.length}종(${heldSymbols.join('·')}) 판단을 받지 못했습니다`);
+      logWarn('analyst.positions_missing_in_brief', { symbols: heldSymbols });
     }
     // 제안은 `orderService` 가 **승인 버튼과 함께** 따로 쏘므로 여기서는 건수만 적는다
     if (created.length) lines.push('', `🟡 매매 제안 ${created.length}건 — 승인 버튼이 곧 옵니다`);
