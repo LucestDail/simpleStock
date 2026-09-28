@@ -249,7 +249,7 @@ async function sessionsFor(universe, now) {
      *    그게 맞다 — 시각을 추측해서 중간이라고 우기면 조기폐장일에 **장 끝난 뒤 "중간 보고"** 가 나간다.
      */
     // 🔴 preSpan 도 함께 넘긴다(2026-09-27, 프리장 브리핑) — 폴백 경로엔 없다(regular 와 같은 사정)
-    out.push({ key: k, label: spec[k][0], state: r.state, source: r.source, regular: r.regular || null, preSpan: r.preSpan || null });
+    out.push({ key: k, label: spec[k][0], state: r.state, source: r.source, why: r.why || null, regular: r.regular || null, preSpan: r.preSpan || null });
   }
   return out;
 }
@@ -589,6 +589,37 @@ function briefOccasions(sessions) {
   return out;
 }
 
+/**
+ * 🔴 **"확인된 휴장" 과 "캘린더를 못 읽어서 모른다" 를 가른다** (2026-09-28, 09-24·25 KR
+ * 침묵 조사 후속 — pm1 승인).
+ *
+ * `briefOccasions` 는 `s.regular` 유무만 보고 회차를 만드는데, 그 둘은 원인이 다르다:
+ * ```
+ * source:'calendar' + regular:null   캘린더를 읽었고 오늘은 거래일이 아니다 — 확인된 휴장
+ * source:'fallback'  + regular:null  캘린더를 못 읽었다(레이트리밋 등) — **모른다**
+ * ```
+ * 앞쪽은 회차가 없는 게 맞다(조용해야 한다 — 09-24·25 추석이 그랬다). 뒤쪽은 조용하면 안
+ * 된다 — 09-24·25 는 실제로 휴장이었지만, **캘린더가 실패했을 때도 겉보기 증상이 똑같아서**
+ * "휴장인가 보다" 로 오판하기 쉽다(그날 캘린더의 `MARKET_INFO` 버킷은 limit 3 이라 소진되면
+ * 실제로 실패한다). ⇒ `source !== 'calendar'` 인데 `regular` 가 없으면 별도로 경고한다.
+ *
+ * ⚠️ **`source` 값을 열거하지 않는다(fail-loud)** — 알려진 값은 `'calendar'` 뿐이고,
+ *    `resolveSessionLive`(marketCalendar.js)가 내는 다른 모든 값(`'fallback'` 포함, 미래에
+ *    생길 수 있는 제3의 값도)은 "확인 안 됨" 으로 취급해 경고 쪽에 붙인다. `'fallback'` 을
+ *    열거해 막으면 다음에 새 값이 생길 때 또 뚫린다.
+ */
+// 하루 한 번만 — occasion 마크(market:kind:epoch)와 같은 정리 규율을 타도록 날짜도 epoch 로
+function kstDayEpoch(nowMs) {
+  return Date.parse(`${kstDay(nowMs)}T00:00:00+09:00`);
+}
+function calendarUnknownMark(key, nowMs) {
+  return `${key}:calendar_unknown:${kstDayEpoch(nowMs)}`;
+}
+/** `unconfigured` 면제 자체를 로그로 남기는 하루 1회 표시 — 위 마크와 **키를 가른다**(같으면 하나가 다른 하나를 덮는다) */
+function calendarUnconfiguredMark(key, nowMs) {
+  return `${key}:calendar_unconfigured_skip:${kstDayEpoch(nowMs)}`;
+}
+
 async function ruleBriefWatch(st, now, out, sup) {
   const analystService = require('./analystService');
   st.briefWatch = st.briefWatch || {};
@@ -602,6 +633,48 @@ async function ruleBriefWatch(st, now, out, sup) {
   st.briefWatchSeeded = true;
 
   const sessions = await sessionsFor({}, now);
+
+  /**
+   * ⚠️ 이 검사는 **위 firstRun 규율을 안 탄다** — 과거 회차를 소급 판단하는 게 아니라
+   *    "지금 이 순간 캘린더를 읽었는가" 를 즉시 관측하는 것이라, 배포 직후 첫 틱이어도
+   *    캘린더를 못 읽었으면 그 사실을 그대로 알리는 게 맞다.
+   */
+  for (const s of sessions || []) {
+    if (s?.regular) continue; // 정규장이 있다 — 확인 여부를 따질 필요가 없다(정상 거래일)
+    const key = String(s?.key || '');
+    if (!key) continue;
+    if (s.source === 'calendar') continue; // 캘린더를 읽었고 오늘은 거래일이 아니다 — 확인된 휴장, 오탐 금지
+    /**
+     * ⚠️ **`why:'unconfigured'` 는 이 경고의 대상이 아니다** — 토스 자격증명 자체가
+     *    없다는 뜻이라(`tossClient.js` `kind:'unconfigured'`), **캘린더만** 못 읽은 게
+     *    아니라 이 배포 전체가 그 상태로 설정된 것이다(개발·테스트 환경이 전형). 그런
+     *    환경에서 매 틱 이 경고를 울리면 "라이브 캘린더가 죽었다" 신호와 "이 인스턴스는
+     *    원래 자격증명이 없다" 신호가 뒤섞인다 — 실측(합본 스위트)으로 발견: 자격증명을
+     *    안 주는 다른 테스트가 이 경고 때문에 깨졌다.
+     *
+     * ⚠️ **그런데 조용히 넘어가지는 않는다** (2026-09-28, pm1 지시) — 오늘 하루 종일 쫓은
+     *    것이 "침묵이 정상으로 읽힌다" 였는데, 이 면제 자체가 새 침묵이 되면 안 된다.
+     *    폰 알림은 안 내되(그 판단은 그대로 — 매 틱 울릴 소음이다) **로그 한 줄은 하루
+     *    1회** 남긴다. "라이브에서 자격증명이 빠지면 다른 게 먼저 터진다" 는 확인 안 된
+     *    추측이라 그 위에 침묵을 놓지 않는다.
+     */
+    if (s.why === 'unconfigured') {
+      const skipMark = calendarUnconfiguredMark(key, nowMs);
+      if (!st.briefWatch[skipMark]) {
+        st.briefWatch[skipMark] = 'skipped';
+        logWarn('alerts.calendar_unknown_skipped', { market: key, why: s.why });
+      }
+      continue;
+    }
+    const mark = calendarUnknownMark(key, nowMs);
+    if (st.briefWatch[mark]) continue; // 오늘 이미 알렸다
+    st.briefWatch[mark] = 'alerted';
+    out.push({
+      text: `⚠️ ${s.label || key.toUpperCase()} 거래일 확인 불가 — 브리핑 판정을 못 했습니다`,
+      kind: 'calendar_unknown',
+    });
+  }
+
   for (const o of briefOccasions(sessions)) {
     if (nowMs < o.at + BRIEF_GRACE_MS) continue; // 아직 유예 시간 안 — 판정을 미룬다
     const mark = `${o.market}:${o.kind}:${o.at}`;
