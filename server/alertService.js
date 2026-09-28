@@ -9,7 +9,7 @@ const { resolveSession } = require('./marketCalendar');
 const marketCalendar = require('./marketCalendar');
 const trigger = require('./analystTrigger');
 const { getDashboardSettings, updateSettings } = require('./settingsService');
-const { APP_TIMEZONE } = require('./time');
+const { APP_TIMEZONE, kstDay } = require('./time');
 const activity = require('./activityLog');
 const { logInfo, logWarn, logError } = require('./logger');
 
@@ -92,9 +92,7 @@ function writeState(s) {
 function kstHour(now = new Date()) {
   return Number(new Intl.DateTimeFormat('en-GB', { timeZone: APP_TIMEZONE, hour: '2-digit', hour12: false }).format(now));
 }
-function kstDay(now = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE }).format(now);
-}
+// 🔴 kstDay 는 `./time` 로 옮겼다(2026-09-28) — tossClient.js·analystTrigger.js 도 같은 걸 쓴다.
 
 /** 조용한 시간인가. ⚠️ **제안은 예외** — 사람이 기다리는 것이라 늦춰서는 안 된다 */
 /**
@@ -128,7 +126,12 @@ function setAnalystRunner(fn) { analystRunner = typeof fn === 'function' ? fn : 
  */
 async function collectMomentumRows(st, universe, items, now) {
   const bySymbol = new Map((items || []).map((it) => [String(it.symbol).toUpperCase(), it]));
-  const day = new Date(now).toISOString().slice(0, 10);
+  /**
+   * 🔴 **KST 날짜다 — UTC 가 아니다** (2026-09-28 라이브 실측, marketCalendar 캐시 키와
+   *    같은 병). 292·373·488행은 이미 `kstDay(now)` 를 쓰는데 이 캔들 캐시 키만 UTC 였다
+   *    ⇒ KST 08:00 프리장 창엔 **어제 캔들을 그대로 재사용**해 모멘텀 감시가 하루 묵는다.
+   */
+  const day = kstDay(now);
   st.candleCache = st.candleCache || {};
   const rows = [];
 
@@ -518,9 +521,17 @@ async function ruleConditionalWatch(st, now, out, sup) {
  *    이후면 "그사이 뭔가는 돌았다"(시스템은 살아 있다) 로 보고 **알리지 않는다** —
  *    이 파일 첫머리의 규율(소음을 만들면 사람이 알림을 끈다)을 여기서도 따른다.
  */
+/**
+ * ⚠️ **프리장(08:00~09:00 KST, 한 시간)에도 이 유예를 그대로 쓴다** (2026-09-28 확인).
+ *    20분 유예면 판정 시각이 08:20 — 정규장 개장(09:00) 한참 전이라 안전하다. 유예가
+ *    창(1시간)보다 길어지면 판정이 정규장 개장 뒤로 밀리므로, 유예값을 늘릴 일이 있으면
+ *    이 창을 먼저 다시 확인할 것.
+ */
 const BRIEF_GRACE_MS = 20 * 60_000;
 const BRIEF_STALE_MS = 4 * 24 * 60 * 60_000; // 표시 정리 — st.briefWatch 가 무한히 자라지 않게
-const BRIEF_KIND_LABEL = { open: '개장', mid: '중간', close: '마감' };
+// 🔴 preopen 라벨은 analystTrigger.js 의 KIND_LABEL.preopen('프리장 개장')과 같은 문구여야 한다
+//    — 두 곳이 다른 말을 하면 사용자가 다른 사건으로 읽는다.
+const BRIEF_KIND_LABEL = { preopen: '프리장 개장', open: '개장', mid: '중간', close: '마감' };
 
 function briefClock(ms) {
   return new Intl.DateTimeFormat('en-GB', {
@@ -529,13 +540,25 @@ function briefClock(ms) {
 }
 
 /**
- * 캘린더 `regular{start,end}` 에서 오늘의 기대 회차 3개(개장·중간·마감)를 유도한다.
+ * 캘린더 `regular{start,end}` 에서 오늘의 기대 회차(프리장·개장·중간·마감)를 유도한다.
  * ⚠️ 고정 시각 하드코딩 금지 — `regular` 가 없으면(휴장일 또는 캘린더 폴백) **회차가 없다**.
  *    폴백일 때 중간 브리핑을 안 돌리는 `analystTrigger.decide` 와 같은 규율이다.
+ *
+ * 🔴 **프리장(preopen) 회차 — 2026-09-28**: 오늘 KR 프리장 브리핑이 실제로 안 떴는데
+ *    (원인은 캘린더 캐시 UTC 날짜 키 — 이미 고쳐 배포됨) 이 감시는 애초에 프리장을
+ *    기대 회차로 안 세서 **원리상 아무 말도 못 했다**. 침묵이 정상으로 읽혀 더 나빴다.
+ *    ⇒ `preSpan` 이 있을 때만(휴장일·캘린더 폴백·US 는 없음) 회차를 하나 더 만든다 —
+ *    `regular` 없으면 회차를 안 만드는 것과 같은 규율. 시장 이름은 하드코딩하지 않는다
+ *    (`preSpan` 유무로 자연히 KR 만 갈린다 — analystTrigger.js 의 `key !== 'kr'` 과 달리
+ *    여기는 감시라 시장이 늘어도 그대로 따라가는 게 맞다).
  */
 function briefOccasions(sessions) {
   const out = [];
   for (const s of sessions || []) {
+    const pre = s?.preSpan;
+    if (pre && Number.isFinite(pre.start)) {
+      out.push({ market: s.key, label: s.label, kind: 'preopen', at: pre.start });
+    }
     const reg = s?.regular;
     if (!reg || !Number.isFinite(reg.start) || !Number.isFinite(reg.end)) continue;
     out.push({ market: s.key, label: s.label, kind: 'open', at: reg.start });

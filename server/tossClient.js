@@ -1,4 +1,5 @@
 const { logInfo, logWarn, logError } = require('./logger');
+const { kstDay } = require('./time');
 /**
  * 🔴 **그룹별 큐** (2026-09-22 사용자 지시) — 종전엔 429 를 맞으면 그 버킷을 잠그고
  *    그 사이 호출을 **던져서 거절**했다. 한도는 아꼈지만 **기능이 멈췄다.**
@@ -845,8 +846,13 @@ async function getCommissions({ accountSeq } = {}) {
  * @param {Array} rows 원본
  * @param {string} [today] YYYY-MM-DD (테스트용)
  * @param {number} [nowMs] 현재 시각 (테스트용)
+ *
+ * 🔴 **기본 `today` 는 KST 날짜다 — UTC 가 아니다** (2026-09-28, marketCalendar 캐시 키와
+ *    같은 병). `toISOString()` 은 UTC 라 KST 00:00~09:00 엔 하루 이른 행을 고를 수 있다 —
+ *    돈에 닿는 값이라 특히 위험하다. 시그니처·테스트용 주입 파라미터(`today`/`nowMs`)는
+ *    그대로 두고 **기본값만** `kstDay()` 로 바꾼다.
  */
-function pickLiveCommissions(rows, today = new Date().toISOString().slice(0, 10), nowMs = Date.now()) {
+function pickLiveCommissions(rows, today = kstDay(), nowMs = Date.now()) {
   const FOREVER = '9999-12-31';
   return (rows || []).filter((x) => {
     // ⚠️ `9999-12-31` 도 `null` 도 **무기한**이다 — 둘 다 받아야 한다

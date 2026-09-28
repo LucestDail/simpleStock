@@ -33,20 +33,22 @@ const realFetch = global.fetch;
 let sent = [];
 
 /** KR 은 `today.integrated.regularMarket`, US 는 `today.regularMarket`(한 겹 얕다) — marketCalendar.js 규약 */
-function fakeCalendarDay(market, regular) {
-  const body = regular
-    ? { regularMarket: { startTime: new Date(regular.start).toISOString(), endTime: new Date(regular.end).toISOString() } }
-    : {}; // 휴장 흉내 — startTime/endTime 이 없으면 span() 이 null 을 준다
+function fakeCalendarDay(market, regular, pre) {
+  const body = {};
+  if (regular) body.regularMarket = { startTime: new Date(regular.start).toISOString(), endTime: new Date(regular.end).toISOString() };
+  // 🔴 프리장(preMarket) — 2026-09-28. 안 주면(undefined) 종전처럼 키 자체가 없다 → span() 이 null.
+  if (pre) body.preMarket = { startTime: new Date(pre.start).toISOString(), endTime: new Date(pre.end).toISOString() };
   return market === 'KR' ? { date: 'test', integrated: body } : { date: 'test', ...body };
 }
 
 /**
  * @param {{start:number,end:number}|null} kr KR 오늘 정규장(epoch ms) 또는 null(휴장)
  * @param {{start:number,end:number}|null} us US 오늘 정규장(epoch ms) 또는 null(휴장)
+ * @param {{start:number,end:number}|null} [krPre] KR 오늘 프리장(epoch ms) — 생략하면 없음(US 는 애초에 안 준다)
  */
-function stubCalendar(kr, us) {
+function stubCalendar(kr, us, krPre) {
   require('../server/tossClient').getMarketCalendar = async (market) => ({
-    today: fakeCalendarDay(market, market === 'KR' ? kr : us),
+    today: fakeCalendarDay(market, market === 'KR' ? kr : us, market === 'KR' ? krPre : null),
     previousBusinessDay: null,
     nextBusinessDay: null,
   });
@@ -199,6 +201,105 @@ test('오탐: 같은 회차 — 두 번째 틱에서 중복 경고하지 않는�
 });
 
 // ── 첫 실행(상태 없음) ────────────────────────────────────────
+
+// ── 🔴 프리장(preopen) 회차 (2026-09-28) ──────────────────────
+//
+// 09-28 아침 KR 프리장 브리핑이 실제로 안 떴는데(캘린더 캐시 UTC 키 — 이미 고쳐 배포됨)
+// 이 감시는 프리장을 기대 회차로 세지 않아 원리상 아무 말도 못 했다. 침묵이 정상으로
+// 읽혀 더 나빴다. 아래 첫 테스트가 **고치기 전에는 실패**했다(회차 자체가 없어서 조용
+// — 발동/이유 확인 기록은 보고 참조).
+
+test('🔴 발동: 프리장 시각 +25분, 기록 없음 → 프리장 개장 경고 1건', async () => {
+  const refNow = Date.now();
+  const preStart = refNow - 25 * 60_000; // 프리장 개장 25분 전 = 유예(20분) 지남
+  const preEnd = refNow + 5 * 60_000;
+  const regStart = refNow + 30 * 60_000; // 정규장은 아직(개장 회차가 안 걸려야 프리장만 격리된다)
+  const regEnd = refNow + 6 * 60 * 60_000;
+
+  const a = freshAlerts(QUIET_OFF, () => {
+    stubCalendar({ start: regStart, end: regEnd }, null, { start: preStart, end: preEnd });
+    quietOtherRules();
+  });
+  seedSteadyState();
+
+  const r = await a.tick({ force: true, send: true });
+
+  const texts = missingTexts();
+  assert.equal(texts.length, 1, `프리장 경고가 1건이 아니다: ${JSON.stringify(sent.map((x) => x.body.text))}`);
+  assert.match(texts[0], /KRX/);
+  assert.match(texts[0], /프리장 개장/);
+  assert.equal(r.failed.includes('brief_watch'), false);
+});
+
+test('오탐: 프리장 시각 이후에 분석 기록이 있으면 경고하지 않는다', async () => {
+  const refNow = Date.now();
+  const preStart = refNow - 25 * 60_000;
+  const preEnd = refNow + 5 * 60_000;
+  const regStart = refNow + 30 * 60_000;
+  const regEnd = refNow + 6 * 60 * 60_000;
+
+  const a = freshAlerts(QUIET_OFF, () => {
+    stubCalendar({ start: regStart, end: regEnd }, null, { start: preStart, end: preEnd });
+    quietOtherRules();
+  });
+  seedSteadyState();
+
+  const analystService = require('../server/analystService');
+  analystService.saveLast({ at: new Date(preStart + 5 * 60_000).toISOString(), positions: [], created: [] });
+
+  const r = await a.tick({ force: true, send: true });
+
+  assert.equal(missingTexts().length, 0, '프리장 기록이 있는데도 경고했다');
+  assert.ok(r.suppressedWhy.some((s) => /프리장 개장 브리핑 확인됨/.test(s)));
+});
+
+test('오탐: preSpan 이 없으면(US·휴장일) 프리장 회차 자체를 안 만든다', async () => {
+  const refNow = Date.now();
+  /**
+   * ⚠️ 마감 뒤(`now >= regular.end`) 창을 쓰면 `marketCalendar.sessionFromCalendar` 가
+   *    상태를 `closed` 로 접으며 **`regular` 자체를 null 로 되돌린다**(정규장이 있었다는
+   *    사실과 "오늘은 안 연다" 를 구분하려는 설계 — 08:00 프리장 창과는 무관). 그 창을
+   *    썼다가 실제로는 회차 자체가 0건이 되어 이 테스트가 틀린 이유로 실패했었다(직접 확인함).
+   *    ⇒ 기존 "발동" 테스트와 **같은 창**(state=open 유지)을 그대로 재사용한다.
+   */
+  const start = refNow - 25 * 60_000;
+  const end = refNow + 60 * 60_000;
+
+  const a = freshAlerts(QUIET_OFF, () => {
+    stubCalendar({ start, end }, null); // krPre 생략 — preMarket 키 자체가 없다
+    quietOtherRules();
+  });
+  seedSteadyState();
+
+  const r = await a.tick({ force: true, send: true });
+
+  const texts = missingTexts();
+  assert.equal(texts.length, 1, '개장 회차 수가 달라졌다');
+  assert.match(texts[0], /개장/);
+  assert.ok(!texts.some((t) => /프리장/.test(t)), 'preSpan 이 없는데 프리장 경고가 나왔다');
+  assert.equal(r.failed.includes('brief_watch'), false);
+});
+
+test('오탐: 같은 프리장 회차 — 두 번째 틱에서 중복 경고하지 않는다', async () => {
+  const refNow = Date.now();
+  const preStart = refNow - 25 * 60_000;
+  const preEnd = refNow + 5 * 60_000;
+  const regStart = refNow + 30 * 60_000;
+  const regEnd = refNow + 6 * 60 * 60_000;
+
+  const a = freshAlerts(QUIET_OFF, () => {
+    stubCalendar({ start: regStart, end: regEnd }, null, { start: preStart, end: preEnd });
+    quietOtherRules();
+  });
+  seedSteadyState();
+
+  await a.tick({ force: true, send: true });
+  assert.equal(missingTexts().length, 1, '첫 틱에서 프리장 경고가 안 갔다(전제 조건 실패)');
+
+  sent = [];
+  await a.tick({ force: true, send: true });
+  assert.equal(missingTexts().length, 0, '같은 프리장 회차를 두 번째 틱에서 또 경고했다');
+});
 
 test('🔴 첫 실행(상태 없음)엔 과거 회차를 소급 경고하지 않는다 — 재기동 시 하루치가 쏟아지면 안 된다', async () => {
   const refNow = Date.now();

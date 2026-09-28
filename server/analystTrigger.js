@@ -45,7 +45,10 @@
  *
  * LLM·네트워크·파일을 모르게 짰다. 입력(시세·세션·직전 상태) → 출력(돌릴까·왜·다음 상태).
  * 그래야 *"장마감에 도는가"* 를 **장 마감을 기다리지 않고** 검증할 수 있다.
+ * ⚠️ `./time` 의 `kstDay` 는 `Intl` 포맷팅만 하는 순수 함수라 이 규율을 안 어긴다.
  */
+
+const { kstDay } = require('./time');
 
 /** 기본 문턱 — `이 종목치고` 얼마나 이상해야 부를 것인가 */
 const DEFAULT_Z = Number(process.env.ANALYST_MOMENTUM_Z) || 2;
@@ -140,6 +143,19 @@ function trackUniverse(prev, held, targeted, now, watched = []) {
 }
 
 /**
+ * 세션 dedup 표시가 **오늘치인지** 잰다. 새 형식(`kstDay`, KST 날짜)만 보면 안 된다 —
+ * 배포 직전까지는 옛 형식(`toISOString().slice(0,10)`, UTC 날짜)으로 저장돼 있었다
+ * (2026-09-28). 옛 형식 값도 함께 인정해야, **배포 직후 그 값이 아직 남아 있는 순간**
+ * 오늘 이미 보낸 회차를 "아직 안 보냈다" 로 오판해 **중복 발화**하지 않는다.
+ * ⚠️ 다음 회차부터는 `kstDay` 로만 새로 저장되므로 옛 형식 값은 자연히 안 쓰이게 된다 —
+ *    영구 호환 코드가 아니라 **이번 전환 한 번만을 위한 안전장치**다.
+ */
+function sameDayMark(stored, atMs) {
+  if (stored == null) return false;
+  return stored === kstDay(atMs) || stored === new Date(atMs).toISOString().slice(0, 10);
+}
+
+/**
  * 돌릴 것인가.
  *
  * @param {object} input
@@ -190,9 +206,10 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
     st.lastCloseDay = { ...(st.lastCloseDay || {}) };
     const regEnd = Number(s?.regular?.end);
     if (cur === 'closed' && Number.isFinite(regEnd) && now >= regEnd) {
-      const closeDay = new Date(regEnd).toISOString().slice(0, 10);
-      if (st.lastCloseDay[key] !== closeDay) {
-        st.lastCloseDay[key] = closeDay;
+      // 🔴 **KST 날짜다 — UTC 가 아니다** (2026-09-28). `sameDayMark` 가 옛 UTC 형식 저장값도
+      //    함께 인정해 배포 직후 한 번은 중복 발화하지 않는다(파일 머리 주석 참조).
+      if (!sameDayMark(st.lastCloseDay[key], regEnd)) {
+        st.lastCloseDay[key] = kstDay(regEnd);
         reasons.push({ kind: 'close', key, label: s.label || key });
         st.sessions[key] = cur;
         continue; // 전이 검사와 중복 발화 방지
@@ -201,10 +218,9 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
     // 🔴 첫 실행은 기준선일 뿐 "바뀐 것" 이 아니다(alertService.ruleSessions 와 같은 규율)
     if (!was || was === cur) continue;
     if (cur === 'closed') {
-      // 전이 close — 위 캘린더 경로가 이미 오늘치를 보냈으면 중복 금지
-      const closeDay = Number.isFinite(regEnd) ? new Date(regEnd).toISOString().slice(0, 10) : null;
-      if (closeDay && st.lastCloseDay[key] === closeDay) continue;
-      if (closeDay) st.lastCloseDay[key] = closeDay;
+      // 전이 close — 위 캘린더 경로가 이미 오늘치를 보냈으면 중복 금지(KST 날짜, sameDayMark 참조)
+      if (Number.isFinite(regEnd) && sameDayMark(st.lastCloseDay[key], regEnd)) continue;
+      if (Number.isFinite(regEnd)) st.lastCloseDay[key] = kstDay(regEnd);
       reasons.push({ kind: 'close', key, label: s.label || key });
     }
     /**
@@ -238,11 +254,12 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
     const pre = s?.preSpan;
     const reg = s?.regular;
     if (!pre || !Number.isFinite(pre.start) || !reg || !Number.isFinite(reg.start)) continue;
-    const day = new Date(pre.start).toISOString().slice(0, 10);
-    if (st.lastPreopenDay[key] === day) continue;
+    // 🔴 KST 날짜다 — UTC 가 아니다(2026-09-28 라이브 실측: 이 값이 `{"kr":"2026-09-27"}` 로
+    //    찍혀 오늘 08:00 이벤트가 어제로 기록됐다). sameDayMark 가 옛 UTC 형식도 인정한다.
+    if (sameDayMark(st.lastPreopenDay[key], pre.start)) continue;
     if (now < pre.start) continue;
     if (now >= reg.start) continue; // 정규장이 이미 시작됐다 — 더는 "프리장" 이 아니다
-    st.lastPreopenDay[key] = day;
+    st.lastPreopenDay[key] = kstDay(pre.start);
     reasons.push({ kind: 'preopen', key, label: s.label || key });
   }
 
