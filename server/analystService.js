@@ -1571,6 +1571,21 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     }
     // 제안은 `orderService` 가 **승인 버튼과 함께** 따로 쏘므로 여기서는 건수만 적는다
     if (created.length) lines.push('', `🟡 매매 제안 ${created.length}건 — 승인 버튼이 곧 옵니다`);
+    /**
+     * 🔴 **검색 품질 저하를 사용자가 보는 곳에도 코드로 적는다** (2026-09-28, pm1 지시).
+     *    `web.degraded` 는 지금까지 **LLM 프롬프트에만**(1137행) 실렸다 — 모델이 그 귀띔을
+     *    자기 문장에 반영하지 않으면 사용자는 저품질 출처였다는 걸 영영 모른다. "프롬프트는
+     *    지시일 뿐이고 보장은 코드가 한다" 는 이 저장소 규율 그대로, **프롬프트 귀띔은
+     *    그대로 두고** 여기서 독립적으로 보장한다.
+     * ⚠️ `web` 이 `null`(검색 자체를 안 함)이거나 `degraded` 가 없으면(undefined) 한 글자도
+     *    안 낸다 — 평상시 본문을 더럽히면 사람이 안 읽는다.
+     * ⚠️ 어느 소스였는지는 **실제로 있으면만** 적는다(`mcpClient.js` 가 이미 결과별
+     *    `source` 를 담아 준다 — 지어내지 않는다).
+     */
+    if (web?.degraded) {
+      const altSources = [...new Set((web.results || []).map((r) => r.source).filter((s) => s && !/^brave/i.test(s)))];
+      lines.push('', `⚠️ 뉴스가 대체 검색 소스에서 왔습니다(품질 낮음${altSources.length ? ` — ${altSources.join('·')}` : ''})`);
+    }
     if (gaps.length) lines.push('', `못 본 것: ${gaps.join(' · ')}`);
     telegram
       .send(lines.join('\n'), { reason: 'analysis' })

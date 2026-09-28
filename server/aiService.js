@@ -695,6 +695,13 @@ async function withTimeout(promise, timeoutMs) {
 
 function isRetryableAiError(error) {
   if (!error) return false;
+  /**
+   * 🔴 **`kind` 를 메시지 정규식보다 먼저 본다** (2026-09-28, pm1 위임 — worker2 실사고
+   *    분석 후속). 잘림(`output_truncated`)은 같은 프롬프트가 같은 길이로 또 잘리므로
+   *    재시도가 낭비다. ⚠️ 기존 메시지 정규식 판정은 지우지 않는다 — `kind` 가 없으면
+   *    종전 그대로(다른 오류 종류가 거기 걸려 있다).
+   */
+  if (error.kind === 'output_truncated') return false;
   if (error.retryable || error.code === 'AI_TIMEOUT') return true;
 
   const status = Number(error.status || error.statusCode || error.cause?.status || 0);
@@ -708,23 +715,46 @@ function isRetryableAiError(error) {
   );
 }
 
+/**
+ * 🔴 **원인의 `kind` 를 잃지 않는다** (2026-09-28, pm1 위임) — 이 함수는 원인을 감싸
+ *    **새 `Error`** 로 갈아치우는데, 그러면서 `kind`(예: `'output_truncated'`)가
+ *    사라지고 있었다("자기가 만든 값을 자기가 지운다"). 호출자가 이미 보는 모양
+ *    (`Error` 인스턴스 + `.message`)은 그대로 두고, `kind` 가 있으면 **그대로 옮겨 붙인다.**
+ */
 function buildAiUserFacingError(error, { maxAttempts, effectiveTimeoutMs } = {}) {
+  const withKind = (err) => {
+    if (error?.kind) err.kind = error.kind;
+    return err;
+  };
+
+  /**
+   * 🔴 **잘림은 "다시 시도" 가 거짓말이다** — 같은 프롬프트는 같은 길이로 또 잘린다
+   *    (aiService.js:829 주석 참조). 구체적인 다음 행동(줄이라)이 없으면 안 적는다 —
+   *    "관리자에게 문의" 류는 사용자가 곧 관리자라 의미가 없다.
+   */
+  if (error?.kind === 'output_truncated') {
+    return withKind(new Error(
+      '분석 결과가 출력 상한에 잘려 불완전합니다 — 같은 요청은 다시 해도 같은 길이에서 또 잘립니다. '
+      + '프롬프트나 확인할 종목 수를 줄여야 합니다.'
+    ));
+  }
+
   if (error?.code === 'AI_TIMEOUT') {
     const seconds = Math.round((effectiveTimeoutMs || GEMINI_TIMEOUT_MS) / 1000);
-    return new Error(
+    return withKind(new Error(
       `AI 응답이 ${seconds}초 안에 완료되지 않아 중단했습니다. 잠시 후 다시 시도해 주세요.`
-    );
+    ));
   }
 
   if (isRetryableAiError(error)) {
-    return new Error(
+    return withKind(new Error(
       maxAttempts > 1
         ? 'AI 응답 생성이 일시적으로 불안정했습니다. 자동 재시도 후에도 완료되지 않아 중단했습니다. 잠시 후 다시 시도해 주세요.'
         : 'AI 응답 생성이 일시적으로 불안정합니다. 잠시 후 다시 시도해 주세요.'
-    );
+    ));
   }
 
-  return new Error('AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+  return withKind(new Error('AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.'));
 }
 
 async function generateContent({
@@ -2054,4 +2084,6 @@ module.exports = {
   buildManagerReport,
   runScheduledIndicatorAnalysis,
   runScheduledCustomAnalysis,
+  isRetryableAiError,
+  buildAiUserFacingError,
 };
