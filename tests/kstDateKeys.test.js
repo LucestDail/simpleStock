@@ -153,3 +153,116 @@ test('🔴 ③ 수수료: KST 08:00(=UTC 로는 전날)에도 today 기본값이
     unfreeze();
   }
 });
+
+// ── ④ alertService.collectMomentumRows — liveDay 폴백(우리 시계 추측) 제거 ──
+
+/**
+ * 2026-09-28 pm1 지적: `liveDay` 가 `live?.at` 이 없을 때 **우리 시계(UTC)로 날짜를
+ * 추측**해 마지막 봉이 진행 중인지 가렸다. `bars[].t` 는 거래소가 준 날짜(US 종목이면
+ * 미국 거래일)라 우리 시간대 추측은 KST 로 바꿔도 여전히 틀릴 수 있다 — 그래서 "더 나은
+ * 추측"이 아니라 **추측 자체를 없앤다**: `live.at` 이 없으면 `logWarn` 을 남기고, "hist 는
+ * 확정 봉만" 이라는 불변식을 지키려고 **마지막 봉을 보수적으로 버린다**(안 버리면 아직
+ * 움직이는 값이 확정 종가로 굳어 등락률이 거짓이 될 수 있다 — 그게 더 나쁘다는 판단).
+ * ⚠️ **보유 종목은 `live` 를 구조적으로 항상 못 받는다**(`held?.dailyRate != null` 분기에서
+ * `live` 가 무조건 `null`) — 드문 예외가 아니라 **보유 종목 전부가 매 틱 이 경로를 탄다**.
+ */
+function captureLogWarn() {
+  const logger = require('../server/logger');
+  const calls = [];
+  logger.logWarn = (event, ctx) => { calls.push({ event, ctx }); };
+  return calls;
+}
+
+test('🔴 ④ live.at 있음 · 마지막 봉이 진행 중(날짜 일치) — 종전처럼 버린다(회귀 없음)', async () => {
+  freshRequire(['alertService', 'tossClient', 'logger']);
+  const warnCalls = captureLogWarn();
+  const { collectMomentumRows } = require('../server/alertService');
+  const toss = require('../server/tossClient');
+  toss.getCandles = async () => ({
+    rows: [{ t: '2026-09-25', c: 100 }, { t: '2026-09-26', c: 101 }, { t: '2026-09-28', c: 102 }],
+  });
+  toss.getPrices = async () => new Map([['TEST4A', { price: 103, at: '2026-09-28T09:05:00.000Z' }]]);
+
+  const rows = await collectMomentumRows({}, { TEST4A: { role: 'watch' } }, [], kstMs('2026-09-28T18:00:00'));
+
+  assert.equal(rows[0].history.length, 1, '진행 중 봉을 못 걸렀다(회귀) — 확정 봉 2개의 변화 1개여야 한다');
+  assert.equal(warnCalls.length, 0, 'live.at 이 있는데도 경고를 남겼다');
+});
+
+test('④ live.at 있음 · 마지막 봉이 이미 확정(날짜 불일치) — 버리지 않는다(회귀 없음)', async () => {
+  freshRequire(['alertService', 'tossClient', 'logger']);
+  const warnCalls = captureLogWarn();
+  const { collectMomentumRows } = require('../server/alertService');
+  const toss = require('../server/tossClient');
+  toss.getCandles = async () => ({
+    rows: [{ t: '2026-09-25', c: 100 }, { t: '2026-09-26', c: 101 }, { t: '2026-09-27', c: 102 }],
+  });
+  toss.getPrices = async () => new Map([['TEST4B', { price: 103, at: '2026-09-28T09:05:00.000Z' }]]);
+
+  const rows = await collectMomentumRows({}, { TEST4B: { role: 'watch' } }, [], kstMs('2026-09-28T18:00:00'));
+
+  assert.equal(rows[0].history.length, 2, '이미 확정된 봉을 불필요하게 버렸다(회귀) — 확정 봉 3개의 변화 2개여야 한다');
+  assert.equal(warnCalls.length, 0);
+});
+
+test('🔴 ④ live.at 없음 — 우리 시계로 추측하지 않고 warn 을 남기고 마지막 봉을 보수적으로 버린다', async () => {
+  freshRequire(['alertService', 'tossClient', 'logger']);
+  const warnCalls = captureLogWarn();
+  const { collectMomentumRows } = require('../server/alertService');
+  const toss = require('../server/tossClient');
+  toss.getCandles = async () => ({
+    rows: [{ t: '2026-09-25', c: 100 }, { t: '2026-09-26', c: 101 }, { t: '2026-09-27', c: 102 }],
+  });
+  toss.getPrices = async () => new Map(); // 이 심볼은 응답에 없다 — live 는 undefined
+
+  const rows = await collectMomentumRows({}, { TEST4C: { role: 'watch' } }, [], kstMs('2026-09-28T18:00:00'));
+
+  assert.equal(rows[0].history.length, 1, '판정 불가인데도 마지막 봉을 확정 봉으로 단정했다');
+  assert.equal(warnCalls.length, 1, 'live.at 이 없는데 경고가 안 남았다');
+  assert.equal(warnCalls[0].event, 'analyst.trigger_live_at_missing');
+  assert.equal(warnCalls[0].ctx.symbol, 'TEST4C');
+});
+
+/**
+ * 🔴 2026-09-28 pm1 반영: 보유 종목은 **매 틱(5분) 마다** 이 경로를 타므로(위 주석 참조,
+ * 보유 2종이면 하루 576건) `live.at` 없음 warn 을 보유에도 내면 **오탐이 정말 이상한
+ * 경우(감시 심볼인데 시세가 안 온 것)를 묻어 버린다.** ⇒ `if (!held) logWarn(...)` 로
+ * 좁혔다 — **경고는 감시 종목에만, 트림은 보유·감시 둘 다.**
+ *
+ * ⚠️ 이 단언을 **각자 따로** 재면(보유 warn=0 하나, 감시 warn=1 하나) "둘 다 warn 이거나
+ * 둘 다 안 나도" 각 단언이 우연히 통과할 수 있는 자였다(예: 트림 로직 자체가 통째로 죽어도
+ * 보유 쪽 "warn=0" 은 여전히 참). ⇒ **보유·감시를 같은 호출에 함께 넣어** 경고 건수를
+ * "정확히 1건, 그것도 감시 심볼에" 로 못박는다 — 두 축이 실제로 갈리는지가 핵심이다.
+ */
+test('🔴 ④ live.at 없음이 보유/감시를 가른다 — 트림은 둘 다, warn 은 감시에만(같은 호출에서 구분)', async () => {
+  freshRequire(['alertService', 'tossClient', 'logger']);
+  const warnCalls = captureLogWarn();
+  const { collectMomentumRows } = require('../server/alertService');
+  const toss = require('../server/tossClient');
+  toss.getCandles = async () => ({
+    rows: [{ t: '2026-09-25', c: 100 }, { t: '2026-09-26', c: 101 }, { t: '2026-09-27', c: 102 }],
+  });
+  let gotPricesFor = null;
+  // 보유(TEST4D)는 `held?.dailyRate != null` 분기에서 live 를 아예 안 받고, 감시(TEST4E)는
+  // getPrices 응답에 없다 — 둘 다 "live.at 없음" 이라는 같은 조건인데 결과가 갈려야 한다.
+  toss.getPrices = async (symbols) => { gotPricesFor = symbols; return new Map(); };
+
+  const items = [{ symbol: 'TEST4D', dailyRate: 1.23 }];
+  const universe = { TEST4D: { role: 'held' }, TEST4E: { role: 'watch' } };
+  const rows = await collectMomentumRows({}, universe, items, kstMs('2026-09-28T18:00:00'));
+
+  assert.deepEqual(gotPricesFor, ['TEST4E'], '보유 종목까지 시세 조회 대상에 들어갔다(불필요한 호출)');
+
+  const heldRow = rows.find((r) => r.symbol === 'TEST4D');
+  const watchRow = rows.find((r) => r.symbol === 'TEST4E');
+  // ① 트림은 보유·감시 **둘 다** 일어난다 — 확정 봉 3개에서 1개를 버려 변화 1개
+  assert.equal(heldRow.history.length, 1, '보유 종목의 마지막 봉이 트림되지 않았다');
+  assert.equal(watchRow.history.length, 1, '감시 종목의 마지막 봉이 트림되지 않았다');
+  // ② 보유 등락률은 dailyRate 를 그대로 쓴다(회귀)
+  assert.equal(heldRow.dailyChangePct, 1.23, '보유 등락률은 dailyRate 를 그대로 써야 한다(회귀)');
+  // ③ 🔴 경고는 정확히 1건 — 감시 심볼에만. 보유에도 났거나(오탐 재발) 둘 다 안 났으면
+  //    (트림 확인 자체가 빠졌다면) 여기서 걸린다
+  assert.equal(warnCalls.length, 1, `경고 건수가 1이 아니다(보유/감시 구분 실패): ${JSON.stringify(warnCalls)}`);
+  assert.equal(warnCalls[0].ctx.symbol, 'TEST4E', '엉뚱한 심볼에 경고가 났다');
+  assert.equal(warnCalls[0].ctx.role, 'watch', '경고에 감시가 아닌 역할이 찍혔다');
+});

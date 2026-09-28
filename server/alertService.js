@@ -165,10 +165,31 @@ async function collectMomentumRows(st, universe, items, now) {
 
     const held = bySymbol.get(sym);
     const live = held?.dailyRate != null ? null : liveMap.get(sym);
-    // 진행 중 봉 판정: 시세 타임스탬프(없으면 지금)의 **현지 날짜**와 마지막 봉 날짜가 같으면 진행 봉
-    const liveDay = String(live?.at || new Date(now).toISOString()).slice(0, 10);
+    // 진행 중 봉 판정: 시세 타임스탬프의 날짜와 마지막 봉 날짜가 같으면 진행 봉(확정 봉만 남긴다)
     let bars = cached.bars;
-    if (bars.length && bars[bars.length - 1].t === liveDay) bars = bars.slice(0, -1); // 확정 봉만
+    if (live?.at) {
+      const liveDay = String(live.at).slice(0, 10);
+      if (bars.length && bars[bars.length - 1].t === liveDay) bars = bars.slice(0, -1); // 확정 봉만
+    } else if (bars.length) {
+      /**
+       * 🔴 **시세 타임스탬프가 없다 — 우리 시계로 날짜를 추측하지 않는다** (2026-09-28).
+       *    비교 상대(`bars[].t`)는 **거래소가 준 날짜**다(US 종목이면 미국 거래일). 여기서
+       *    UTC 든 KST 든 우리 시간대로 추측하면 오히려 날짜가 어긋난다 — 바로 이 파일에서
+       *    막 고친 KST/UTC 캐시 키 사고와 같은 함정이라, "더 나은 추측"으로 바꾸지 않는다.
+       *    ⚠️ **보유 종목은 `live` 를 아예 안 받으므로**(바로 위 `held?.dailyRate` 분기) 이
+       *    경로를 **항상** 탄다 — 드문 예외가 아니다. 실제 빈도는 이 warn 으로 잰다.
+       *    ⇒ **모르면 마지막 봉을 확정 봉으로 단정하지 않는다** — "hist 는 확정 봉만 담는다"
+       *    는 불변식을 지키려고 보수적으로 버린다(하루 덜 정확해지는 대가는 감수한다. 안
+       *    버리면 아직 움직이는 값이 "전일 종가" 로 굳어 등락률이 거짓이 될 수 있다 — 그게 더 나쁘다).
+       *
+       * ⚠️ **보유 종목에는 warn 을 남기지 않는다** — 위 분기가 `live` 를 **일부러** 안 주므로
+       *    보유 전 종목이 매 틱(5분) 이 경로를 탄다. 그대로 두면 하루 수백 건이 쌓여 **정작
+       *    이상한 경우(감시 심볼을 달라고 했는데 안 온 것)를 묻어 버린다.** 오탐하는 경고는
+       *    있으나 마나가 아니라 해롭다 — 사람이 로그를 안 보게 만든다. 트림은 양쪽 다 한다.
+       */
+      if (!held) logWarn('analyst.trigger_live_at_missing', { symbol: sym, role: meta.role });
+      bars = bars.slice(0, -1);
+    }
     const closes = bars.map((b) => b.c);
     const hist = [];
     for (let i = 1; i < closes.length; i += 1) hist.push(((closes[i] - closes[i - 1]) / closes[i - 1]) * 100);
