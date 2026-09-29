@@ -2053,7 +2053,11 @@ async function runScheduledIndicatorAnalysis({
     systemPrompt: [
       '당신은 개인 투자자를 돕는 시장·지표 리서처다.',
       'Google 검색으로 최근 시황·뉴스·지표 해석을 확인하고, 확인한 사실만 간결히 정리한다.',
-      '한국어로 12문장 이내, 불필요한 인사말 없이 핵심 위주로 작성한다.',
+      // 🔴 종전 '12문장 이내' — **provenance 없는 숫자 상한**이라 걷었다(2026-09-29 prompt-audit F4).
+      //    ⚠️ 자수 규칙이 있는 다른 프롬프트(analystService·stockRating)는 **그대로 둔다** —
+      //      거기엔 "총량 지시는 flash 가 무시했다(잘림 3/3) · 필드별 자수는 잘림 0" 이라는
+      //      대상 모델 실측이 붙어 있다. 근거 있는 상한과 없는 상한을 같이 지우면 안 된다.
+      '한국어로, 인사말 없이 핵심만 적는다. 확인한 사실 하나당 한 문장이면 충분하다.',
     ].join('\n'),
     userPrompt,
     useGoogleSearch: true,

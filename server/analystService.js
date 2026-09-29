@@ -246,7 +246,37 @@ function asPosition(o) {
     if (!stance && STANCES.has(up)) stance = up;
   }
   symbol = pickString(o, ['symbol', 'ticker', 'code', 'stock']);
-  if (!stance) return null;
+  /**
+   * 🔴 **버려지는 경로는 조용하면 안 된다** (2026-09-29, pm2 지적).
+   *
+   * 종전에는 `if (!stance) return null` 로 **말없이** 버렸다. 그래서 09-28 12:17 의
+   * `positions 0` 을 두고 **하루를 추론에 썼다** — `positions_short got:0` 은 *실패했다*는
+   * 것만 알려주고 **모델이 실제로 뭐라 답했는지**는 안 알려줬다. 원문이 있었으면 한 줄로 끝났다.
+   *
+   * ⚠️ **종목처럼 생긴 것만** 짖는다(`symbol` 이 있는데 stance 를 못 읽은 경우). `asPosition`
+   *    은 브리핑 파싱 중 온갖 객체에 불리므로, 조건을 안 좁히면 warn 이 소음이 되어
+   *    **읽히지 않는 로그**가 된다(그건 침묵과 같다).
+   * ★ 관대한 파서로 흡수하지 않는 이유: **흡수하면 계약 위반이 관측 불가가 된다.**
+   *   정본은 스키마 enum 하나이고, 이탈은 조용히 통과시키는 대신 **보이게** 만든다.
+   */
+  if (!stance) {
+    /**
+     * ⚠️ **`symbol` 만으로 좁히면 절반이 안 보인다** (pm2 지적) — 종목명이 아예 안 온 이탈이
+     *    `got:0` 의 그럴듯한 모양 중 하나인데, 그게 통째로 침묵하면 이 warn 의 목적이 반만 선다.
+     *    ⇒ **stance 자리에 뭔가 오긴 했는데 enum 밖인 경우**도 짖는다(그게 곧 계약 위반이다).
+     *    여전히 아무 관련 키도 없는 객체는 조용하다 — 그건 이탈이 아니라 **그냥 다른 객체**다.
+     */
+    const rawStance = ['stance', 'rating', 'judgment', 'action', '판단'].find((k) => typeof o[k] === 'string');
+    if (symbol || rawStance) {
+      logWarn('analyst.stance_unrecognized', {
+        symbol: symbol || null,
+        rawStanceKey: rawStance || null,
+        received: JSON.stringify(o).slice(0, 240),
+        expected: [...STANCES].join('|'),
+      });
+    }
+    return null;
+  }
   const num = (names) => {
     for (const n of names) { const v = Number(o?.[n]); if (Number.isFinite(v) && v > 0) return v; }
     return null;
@@ -872,8 +902,21 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       + '정규장 시작 전이라 **지금은 체결이 안 되는 시간대**임을 전제로, 개장 직후 대응안을 제시하라.',
     open: '**개장 브리핑**이다. 직전 세션(밤사이 해외장 포함)에서 넘어온 흐름과 **시가 갭**을 먼저 짚고, '
       + '오늘 이 종목들에서 **무엇을 지켜볼 것인지**를 말하라. 지금 당장의 매매보다 **관전 포인트**가 중심이다.',
+    /**
+     * 🔴 **stance 예시를 한국어로 주지 않는다** (2026-09-29, prompt-audit F1).
+     *    종전 문구는 `같으면 "유지" 라고 분명히 말하라` 였다 — 프롬프트가 주는 **유일한 stance
+     *    예시가 enum 밖 한국어**였고, 모델이 그대로 따르면 `STANCES`(:212)에 걸려 `asPosition`
+     *    이 그 항목을 **통째로 버린다**(= positions 0). 정본은 스키마 enum 하나다.
+     *    ⚠️ 이것이 09-28 12:17 `positions 0` 의 원인이라는 **단정은 하지 않았다** —
+     *      09-29 08:04 `positions_short` 는 `"유지"` 가 없는 preopen 회차에서 났다.
+     *      최초 0건은 다른 경로로도 난다. 여기서 고친 것은 **계약 불일치 하나**다.
+     * ⚠️ "새 얘기를 만들지 마라" 는 **서술에만** 걸어야 한다 — 범위를 안 적으면
+     *    구조화 필드(positions)까지 비우는 쪽으로 읽힌다(F2).
+     */
     mid: '**장중 브리핑**이다. 개장 이후 흐름이 **개장 때 본 그림과 같은지 달라졌는지**를 먼저 말하라. '
-      + '달라졌으면 무엇이 바뀌었는지 짚고, 같으면 "유지" 라고 분명히 말하라. **바뀐 게 없으면 없다고 하라** — 억지로 새 얘기를 만들지 마라.',
+      + '달라졌으면 무엇이 바뀌었는지 짚고, 그대로면 그대로라고 분명히 말하라(그 종목 stance 는 HOLD). '
+      + '**바뀐 게 없으면 서술을 억지로 늘리지 마라** — 단 이것은 marketView·momentumRead 에만 해당하고, '
+      + '`positions` 는 변화가 없어도 **보유 종목마다 항상 채운다**(변화 없음도 판단이다).',
     close: '**마감 브리핑**이다. 오늘 결과를 정리하고, **다음 세션까지 무엇을 들고 갈지**를 말하라. '
       + '장이 닫혀 있으므로 **지금 당장 집행할 수 없다** — 다음 개장에 볼 것으로 적어라.',
   };

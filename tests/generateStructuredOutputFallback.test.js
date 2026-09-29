@@ -272,8 +272,16 @@ function mutateSiteToPropertyStyle(src, targetLine) {
 test('🔴 자기검증: trade_analyst 호출부(analystService.js) 를 속성 스타일로 되돌리면 이 자가 잡는다', () => {
   const file = path.join(SERVER_DIR, 'analystService.js');
   const src = fs.readFileSync(file, 'utf8');
-  const before = findCallSites(src).find((s) => classifySite(s).kind === 'positional' && s.line >= 1235 && s.line <= 1250);
-  assert.ok(before, 'trade_analyst 호출부(1235~1250행 부근)를 못 찾았다 — 소스가 바뀌었다');
+  /**
+   * 🔴 **행 번호로 찾지 않는다** (2026-09-29 수정). 종전에는 `s.line >= 1235 && s.line <= 1250`
+   *    이었는데, 같은 파일에 **주석 몇 줄을 더하자 행이 밀려 자가 깨졌다** — 제품은 멀쩡한데
+   *    자가 빨간불을 냈다. 바로 아래 stockRating 자기검증은 행 번호를 안 쓰고 있었다
+   *    (**형제 중 하나만 취약했던** 전형). 이제 호출부 본문의 `logLabel` 로 찾는다.
+   */
+  const before = findCallSites(src).find(
+    (s) => classifySite(s).kind === 'positional' && src.slice(s.nameStart, s.closeParenIdx).includes('trade_analyst'),
+  );
+  assert.ok(before, "trade_analyst logLabel 을 가진 위치 인자 호출부를 못 찾았다 — 소스가 바뀌었다");
 
   const broken = mutateSiteToPropertyStyle(src, before.line);
   const results = scanSource('server/analystService.js', broken);
