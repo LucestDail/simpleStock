@@ -644,3 +644,41 @@ test('🔴 회귀: 폐장 뒤에도 preopen 은 실물로 남는다 — market �
   );
   assert.equal(r.failed.includes('brief_watch'), false);
 });
+
+// ── 🔴 US 프리장 — 감시가 트리거보다 앞서 나갔다 (2026-09-30 실사고) ──
+//
+// 17:20 KST 에 "미국장 프리장 개장 브리핑이 예정 시각에 돌지 않았습니다" 가 사용자
+// 폰으로 갔다. `analystTrigger.js` 는 프리장 브리핑을 **KR 만** 낸다(2026-09-27 사용자
+// 지시 — 비용 때문에 US 프리는 일부러 안 켰다). 그런데 `briefOccasions` 는 시장을 안
+// 가리고 preSpan 만 있으면 회차를 만들어서, **트리거가 안 하는 일을 감시가 기대**했다.
+
+test('🔴 발동(수정 전 재현): US 에도 preSpan 이 있으면 US 프리장 회차를 안 만든다(트리거는 KR만 낸다)', async () => {
+  const refNow = Date.now();
+  const preStart = refNow - 25 * 60_000; // 유예 지남
+  const preEnd = refNow + 5 * 60_000;
+  const regStart = refNow + 6 * 60 * 60_000; // 정규장은 한참 뒤(US 개장은 밤이다)
+  const regEnd = refNow + 12 * 60 * 60_000;
+
+  const a = freshAlerts(QUIET_OFF, () => {
+    quietOtherRules();
+    // stubCalendar 는 US 에 preMarket 을 못 실어 준다(운영 캘린더는 US 에도 preMarket 을 준다) —
+    // resolveSessionLive 를 직접 대역해 US 에도 실물처럼 preSpan 을 싣는다.
+    const marketCalendar = require('../server/marketCalendar');
+    marketCalendar.resolveSessionLive = async (now, market) => {
+      const regular = { start: regStart, end: regEnd };
+      const preSpan = { start: preStart, end: preEnd };
+      if (market === 'KR') return { state: 'closed', source: 'calendar', regular: null, preSpan: null };
+      return { state: 'pre', source: 'calendar', regular, preSpan }; // US — 실제로 preSpan 이 있다
+    };
+  });
+  seedSteadyState();
+
+  const r = await a.tick({ force: true, send: true });
+
+  const texts = missingTexts();
+  assert.ok(
+    !texts.some((t) => /미국장/.test(t) && /프리장/.test(t)),
+    `트리거가 안 내는 US 프리장 회차를 감시가 기대해 경고했다(2026-09-30 실사고 재현): ${JSON.stringify(sent.map((x) => x.body.text))}`
+  );
+  assert.equal(r.failed.includes('brief_watch'), false);
+});

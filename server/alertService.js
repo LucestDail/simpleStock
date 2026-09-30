@@ -577,7 +577,18 @@ function briefOccasions(sessions) {
   const out = [];
   for (const s of sessions || []) {
     const pre = s?.preSpan;
-    if (pre && Number.isFinite(pre.start)) {
+    /**
+     * 🔴 **US 프리장은 애초에 안 돈다 — 감시가 없는 사건을 기대했다** (2026-09-30 실측
+     * — 17:20 KST에 "미국장 프리장 개장 브리핑이 예정 시각에 돌지 않았습니다" 오탐이
+     * 사용자 폰으로 갔다). `analystTrigger.js`(280행)는 프리장 브리핑을 **KR 만** 낸다
+     * — 2026-09-27 사용자 지시로 "US 프리(17:00) 까지 켜면 LLM 회차가 하루 1번 더 는다"
+     * 는 이유로 일부러 뺐다. 그런데 이 감시(`briefOccasions`)는 `preSpan` 이 있으면
+     * 시장을 안 가리고 회차를 만든다 — **트리거가 안 하는 일을 감시가 기대한 것**이다.
+     * ⇒ 감시도 트리거와 같은 축(KR 만)으로 좁힌다. US 프리장을 켜려면 **둘 다** 고친다
+     *    (analystTrigger.js 의 `key !== 'kr'` 도 함께 지운다 — 한쪽만 고치면 이 사고가
+     *    반대 방향으로 재발한다: 이번엔 트리거가 살아도 감시가 못 본다).
+     */
+    if (pre && Number.isFinite(pre.start) && s?.key === 'kr') {
       out.push({ market: s.key, label: s.label, kind: 'preopen', at: pre.start });
     }
     const reg = s?.regular;
