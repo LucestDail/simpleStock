@@ -89,9 +89,16 @@ test('⚠️ 오탐 없음: 같은 날 두 번 부르면 두 번째는 안 뜬�
   assert.ok(first.reasons.some((r) => r.kind === 'preopen'), '첫 호출은 떠야 한다');
   const second = run(30, first.state);
   assert.ok(!second.reasons.some((r) => r.kind === 'preopen'), '같은 날 두 번째는 막혀야 한다(중복 발화 금지)');
-  assert.ok(
-    (second.skipped || []).some((s) => s.kind === 'preopen' && s.why === 'already_sent'),
-    '막았으면 **이유를 남겨야** 한다 — 이번 결함을 손계산으로 찾은 이유가 그게 없어서였다',
+  /**
+   * 🔴 **정상 차단은 `skipped` 에 싣지 않는다**(2026-09-30, pm2 반박 반영).
+   *    처음엔 `why:'already_sent'` 를 요구했는데, 그러면 **정상 발화한 날마다 warn 1건**이
+   *    쌓여 `warn 0` 기준선이 무너진다. 그리고 *"stored 가 오늘이 아닐 때만 싣자"* 는
+   *    **죽은 가드**다 — 이 분기 진입 조건이 곧 `stored === 오늘` 이라 절대 참이 안 된다.
+   *    재발(폴백 부활)은 **소스 층**에서 일어나고 그 탐지기는 이 파일의 골든이 맡는다.
+   */
+  assert.equal(
+    (second.skipped || []).filter((s) => s.kind === 'preopen').length, 0,
+    '정상 차단(같은 날 두 번째)은 싣지 않아야 한다 — 실으면 매일 warn 이 쌓여 소음이 된다',
   );
 });
 

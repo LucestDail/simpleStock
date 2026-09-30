@@ -296,10 +296,25 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
       continue;
     }
     // 🔴 KST 날짜다 — UTC 가 아니다(2026-09-28 라이브 실측). ⚠️09-30: UTC 폴백 제거됨(sameDayMark 주석)
-    if (sameDayMark(st.lastPreopenDay[key], pre.start)) {
-      skipped.push({ kind: 'preopen', key, why: 'already_sent', stored: st.lastPreopenDay[key], expected: kstDay(pre.start) });
-      continue;
-    }
+    /**
+     * ⚠️ **여기는 일부러 싣지 않는다** (2026-09-30, pm2 반박으로 되돌린 자리).
+     *
+     * 처음엔 `why:'already_sent'` 를 실었는데 **그건 정상 동작이다** — 프리장이 정상 발화하면
+     * `stored` 가 오늘로 찍히고, 그 뒤 모든 틱이 이 분기로 온다 ⇒ **매일 warn 1건**이 쌓여
+     * `warn 0` 기준선이 무너진다. 내가 바로 아래 *"소음이 되면 침묵과 같아진다"* 라고
+     * 적어 놓고 소음을 만들었다.
+     *
+     * 🔴 그리고 *"`stored` 가 오늘이 아닐 때만 싣자"* 는 **죽은 가드**였다(pm2가 잡았다):
+     *    폴백을 지운 뒤 `sameDayMark` ≡ `stored === kstDay(atMs)` 이므로 **이 분기 안에서는
+     *    정의상 `stored === 오늘`** 이다 — 그 조건은 **절대 참이 될 수 없다.**
+     *    로그가 0 인 것을 *"이상 없음"* 으로 읽게 만드는, **없는 안전망을 있다고 적는** 실패다.
+     *
+     * ★ 재발(누가 UTC 폴백을 되살리는 것)은 **런타임이 아니라 소스에서** 일어나고,
+     *   그 층의 탐지기는 이미 있다 — `tests/preopenDayBoundary.test.js`(변이 검증까지 했다).
+     *   **"구조적으로 불가능하게 만들었다" 와 "런타임에 재발을 탐지한다" 는 동시에 못 가진다.**
+     * ⚠️ 다음 사람이 *"탈락 사유를 안 남기네"* 하며 친절하게 되넣지 않도록 이 주석을 남긴다.
+     */
+    if (sameDayMark(st.lastPreopenDay[key], pre.start)) continue;
     if (now < pre.start) continue; // 아직 창 전 — 정상이라 싣지 않는다
     if (now >= reg.start) { // 정규장이 이미 시작됐다 — 더는 "프리장" 이 아니다(재기동이 늦었다)
       skipped.push({ kind: 'preopen', key, why: 'regular_started' });
