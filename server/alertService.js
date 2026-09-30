@@ -675,7 +675,41 @@ async function ruleBriefWatch(st, now, out, sup) {
     });
   }
 
-  for (const o of briefOccasions(sessions)) {
+  /**
+   * 🔴 **마감(close) 회차는 유예(20분)가 지나기 전에 이미 사라진다** (2026-09-30 라이브
+   *    실측 — `briefWatch` 에 `kr:close`·`us:close` 마크가 **단 한 번도 없었다**, 여러 날치
+   *    보존 기간 안에서 preopen·open·mid 는 전부 정상 기록되는데 close 만 0건).
+   *
+   *    원인: `marketCalendar.sessionFromCalendar` 는 장이 닫히는 **그 순간** `regular` 를
+   *    `null` 로 접는다("확인된 휴장" 과 구분하려는 설계 — `⚠️ 휴장이면 regular:null` 주석
+   *    참조). `briefOccasions` 는 `regular` 가 있을 때만 close 항목을 낸다. 그런데 이 판정은
+   *    **유예가 지난 뒤**(`nowMs >= o.at + GRACE`, 마감 20분 뒤)에야 일어난다 — 그 시점이면
+   *    장은 이미 닫혀 `regular` 가 사라진 뒤라 애초에 판정할 항목 자체가 없다. open·mid 는
+   *    유예 시각이 아직 장중이라(09:20·12:35 < 15:30) 이 함정을 피해 간다 — **close 만 걸린다.**
+   *    (`tests/alertsBriefWatch.test.js`의 "preSpan 이 없으면…" 테스트 주석이 이 함정을 이미
+   *    한 번 밟고 시나리오를 장중 창으로 우회했었다 — 우회했을 뿐 고치지는 않았다.)
+   *
+   * ⇒ **장이 열려 있어 `regular` 를 볼 수 있을 때 오늘의 회차를 스냅샷**해 두고, 닫힌 뒤에는
+   *    그 스냅샷으로 판정한다. 날짜가 바뀌면 버린다(내일 회차와 안 섞이게).
+   *
+   * ⚠️ **시장 단위가 아니라 `market:kind` 단위로 캐시한다** — `preopen` 은 `preSpan` 에서
+   *    나오는데 `preSpan` 은 `regular` 와 달리 폐장 뒤에도 안 사라진다(`sessionFromCalendar`
+   *    의 'closed' 분기도 `preSpan` 은 그대로 싣는다). 그래서 마감 뒤에도 kr 은
+   *    `liveOccasions` 에 **preopen 하나만 계속 잡힌다** — 시장 단위로 "이 시장이 live 에
+   *    있으면 캐시를 안 쓴다" 로 짜면 그 preopen 하나 때문에 **정작 필요한 close 캐시가
+   *    영원히 안 쓰인다.** 종류별로 갈라야 preopen 은 매 틱 실물로 갱신되고 open·mid·close
+   *    는 장중에 마지막으로 본 값이 폐장 뒤에도 남는다.
+   */
+  const today = kstDay(nowMs);
+  if (!st.briefOccasionsCache || st.briefOccasionsCache.date !== today) {
+    st.briefOccasionsCache = { date: today, byKey: {} };
+  }
+  const liveOccasions = briefOccasions(sessions);
+  const merged = new Map(Object.entries(st.briefOccasionsCache.byKey || {}));
+  for (const o of liveOccasions) merged.set(`${o.market}:${o.kind}`, o); // 실물이 있으면 항상 그것으로 갱신
+  st.briefOccasionsCache.byKey = Object.fromEntries(merged);
+
+  for (const o of merged.values()) {
     if (nowMs < o.at + BRIEF_GRACE_MS) continue; // 아직 유예 시간 안 — 판정을 미룬다
     const mark = `${o.market}:${o.kind}:${o.at}`;
     if (st.briefWatch[mark]) continue; // 이 회차는 이미 판정을 끝냈다(정상이든 경고든) — 같은 회차 재알림 금지

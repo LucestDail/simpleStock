@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { kstDay } = require('../server/time');
 
 /**
  * 🩺 정기 브리핑 누락 감시 — `alertService.ruleBriefWatch` (2026-09-27, worker3)
@@ -504,4 +505,142 @@ test('🔴 발동: 같은 시장·같은 날 사유가 바뀐다(unconfigured �
     `②(진짜 fallback)에서 폰 경고가 안 나갔다 — ①의 unconfigured 마크에 먹혔을 수 있다: ${JSON.stringify(sent.map((x) => x.body.text))}`
   );
   assert.match(texts[0], /KRX/);
+});
+
+// ── 🔴 마감(close) 회차 — 유예가 지나면 판정 재료(regular)가 이미 사라진다 (2026-09-30) ──
+//
+// 장이 닫히는 순간 `marketCalendar.sessionFromCalendar` 가 `regular` 를 `null` 로 접는다
+// ("확인된 휴장" 과 구분하려는 설계). close 회차의 유예(20분)는 마감 **뒤**에야 끝나므로,
+// 판정 시점엔 이미 `briefOccasions` 가 close 항목을 다시 못 만든다 — open·mid 는 유예가
+// 장중에 끝나 이 함정을 피해 간다(09:20·12:35 < 15:30). 라이브 실측(2026-09-30): `briefWatch`
+// 에 `kr:close`·`us:close` 마크가 보존 기간 내내 단 한 번도 없었다.
+//
+// ⇒ `ruleBriefWatch` 가 장중(regular 가 살아 있을 때) 오늘의 회차를 `market:kind` 단위로
+//    캐시해 두고, 폐장 뒤에는 그 캐시로 판정하도록 고쳤다. 아래는 그 회귀 고정 테스트 셋이다.
+
+/** 오늘 날짜로 `briefOccasionsCache` 를 직접 심는다 — "장중에 이미 캐시됐다" 를 전제로 두는 테스트용.
+ *  `occasions` 는 `[{market,label,kind,at}, …]` — 내부에서 `market:kind` 키로 접어 넣는다. */
+function seedWithOccasionsCache(occasions) {
+  const byKey = {};
+  for (const o of occasions) byKey[`${o.market}:${o.kind}`] = o;
+  fs.writeFileSync(process.env.ALERTS_STATE_FILE, JSON.stringify({
+    briefWatchSeeded: true,
+    briefOccasionsCache: { date: kstDay(new Date()), byKey },
+  }));
+}
+
+test('🔴 발동: 마감 유예 지난 뒤(장 이미 닫힘) 캐시된 회차로도 경고가 나간다', async () => {
+  const refNow = Date.now();
+  const closeAt = refNow - 25 * 60_000; // 마감 25분 전 = 유예(20분) 지남
+  // regular.end 가 이미 과거라 marketCalendar 가 실제로 상태를 'closed'로 접고 regular 를
+  // null 로 되돌린다 — 운영 코드와 같은 경로(대역 없이 실제 sessionFromCalendar 를 태운다)
+  const start = refNow - 6 * 60 * 60_000;
+  const end = closeAt;
+
+  const a = freshAlerts(QUIET_OFF, () => {
+    stubCalendar({ start, end }, null); // US 는 휴장 처리 — KR 마감 하나만 남긴다
+    quietOtherRules();
+  });
+  seedWithOccasionsCache([{ market: 'kr', label: 'KRX', kind: 'close', at: closeAt }]);
+
+  const r = await a.tick({ force: true, send: true });
+
+  const texts = missingTexts();
+  assert.equal(texts.length, 1, `마감 경고가 1건이 아니다: ${JSON.stringify(sent.map((x) => x.body.text))}`);
+  assert.match(texts[0], /KRX/);
+  assert.match(texts[0], /마감/);
+  assert.equal(r.failed.includes('brief_watch'), false);
+});
+
+test('오탐: 마감 유예 지난 뒤 실제로 분석 기록이 있으면(캐시된 회차) 경고하지 않는다', async () => {
+  const refNow = Date.now();
+  const closeAt = refNow - 25 * 60_000;
+  const start = refNow - 6 * 60 * 60_000;
+  const end = closeAt;
+
+  const a = freshAlerts(QUIET_OFF, () => {
+    stubCalendar({ start, end }, null);
+    quietOtherRules();
+  });
+  seedWithOccasionsCache([{ market: 'kr', label: 'KRX', kind: 'close', at: closeAt }]);
+
+  const analystService = require('../server/analystService');
+  analystService.saveLast({ at: new Date(closeAt + 5 * 60_000).toISOString(), positions: [], created: [] });
+
+  const r = await a.tick({ force: true, send: true });
+
+  assert.equal(missingTexts().length, 0, '마감 분석 기록이 있는데도 경고했다');
+  assert.ok(r.suppressedWhy.some((s) => /마감 브리핑 확인됨/.test(s)), '확인됐다는 사실을 어디에도 안 남겼다');
+});
+
+test('전제 확인: 장중(마감 전)에 close 회차를 시장별로 캐시에 스냅샷해 둔다', async () => {
+  const refNow = Date.now();
+  const start = refNow - 25 * 60_000;
+  const end = refNow + 60 * 60_000; // 마감은 아직 한참 남음 — regular 가 살아 있는 장중 창
+
+  const a = freshAlerts(QUIET_OFF, () => {
+    stubCalendar({ start, end }, null);
+    quietOtherRules();
+  });
+  seedSteadyState();
+
+  await a.tick({ force: true, send: true });
+
+  const persisted = JSON.parse(fs.readFileSync(process.env.ALERTS_STATE_FILE, 'utf8'));
+  const closeEntry = persisted.briefOccasionsCache?.byKey?.['kr:close'];
+  assert.ok(closeEntry, `장중 틱인데 close 회차가 캐시에 안 남았다: ${JSON.stringify(persisted.briefOccasionsCache)}`);
+  assert.equal(closeEntry.at, end, '캐시된 마감 시각이 캘린더의 regular.end 와 다르다');
+});
+
+test('경계: 캐시가 어제 날짜면 오늘 판정에 안 쓴다(내일 회차와 안 섞인다)', async () => {
+  const refNow = Date.now();
+  const closeAt = refNow - 25 * 60_000;
+  const start = refNow - 6 * 60 * 60_000;
+  const end = closeAt;
+
+  const a = freshAlerts(QUIET_OFF, () => {
+    stubCalendar({ start, end }, null);
+    quietOtherRules();
+  });
+  // 캐시 날짜를 명백한 과거로 박아 둔다 — 오늘(kstDay(now))과 절대 안 겹치는 값
+  fs.writeFileSync(process.env.ALERTS_STATE_FILE, JSON.stringify({
+    briefWatchSeeded: true,
+    briefOccasionsCache: { date: '2000-01-01', byKey: { 'kr:close': { market: 'kr', label: 'KRX', kind: 'close', at: closeAt } } },
+  }));
+
+  const r = await a.tick({ force: true, send: true });
+
+  assert.equal(missingTexts().length, 0, '어제 날짜 캐시(다른 날 회차)로 오늘 경고를 냈다');
+  assert.equal(r.failed.includes('brief_watch'), false);
+});
+
+test('🔴 회귀: 폐장 뒤에도 preopen 은 실물로 남는다 — market 단위 캐시였다면 이게 close 캐시를 가렸을 것', async () => {
+  /**
+   * `preSpan` 은 `regular` 와 달리 장이 닫혀도 안 사라진다(marketCalendar 설계 — 위 큰 주석
+   * 참고). 그래서 폐장 뒤에도 kr 은 `briefOccasions` 라이브 목록에 **preopen 하나만은** 계속
+   * 잡힌다. 캐시를 "이 시장이 지금 live 에 하나라도 있으면 캐시를 안 쓴다" 로 짰다면, 바로 이
+   * preopen 때문에 정작 필요한 close 캐시가 영원히 안 쓰인다 — `market:kind` 단위 캐시가
+   * 맞는 이유를 이 시나리오로 고정한다.
+   */
+  const refNow = Date.now();
+  const closeAt = refNow - 25 * 60_000; // 마감 25분 전 — 유예 지남
+  const start = refNow - 6 * 60 * 60_000;
+  const end = closeAt;
+  const preStart = start - 60 * 60_000; // 오늘 프리장(정규장보다 한참 전) — 폐장 뒤에도 살아남는다
+  const preEnd = start - 5 * 60_000;
+
+  const a = freshAlerts(QUIET_OFF, () => {
+    stubCalendar({ start, end }, null, { start: preStart, end: preEnd }); // krPre 제공
+    quietOtherRules();
+  });
+  seedWithOccasionsCache([{ market: 'kr', label: 'KRX', kind: 'close', at: closeAt }]);
+
+  const r = await a.tick({ force: true, send: true });
+
+  const texts = missingTexts();
+  assert.ok(
+    texts.some((t) => /KRX/.test(t) && /마감/.test(t)),
+    `KRX 마감 경고가 빠졌다 — 폐장 뒤에도 살아남는 preopen 이 market 단위 캐시를 가렸을 수 있다: ${JSON.stringify(sent.map((x) => x.body.text))}`
+  );
+  assert.equal(r.failed.includes('brief_watch'), false);
 });
