@@ -7,6 +7,7 @@ const mcp = require('./mcpClient');
 const rating = require('./stockRating');
 const activity = require('./activityLog');
 const telegram = require('./telegramService');
+const tossWriting = require('./tossWriting');
 const crypto = require('node:crypto');
 const { logInfo, logWarn } = require('./logger');
 
@@ -1598,12 +1599,22 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     sentWindow.set(digest, now);
     // 창을 벗어난 것은 버린다 — 안 그러면 무한히 자란다
     for (const [k, t] of sentWindow) if (now - t > SEND_WINDOW_MS) sentWindow.delete(k);
-    const lines = ['🧭 매매 분석'];
-    if (report.marketView) lines.push('', report.marketView);
-    if (report.momentumRead) lines.push('', `[모멘텀] ${report.momentumRead}`);
+    /**
+     * 🔴 **사용자 발화 직전 토스 라이팅 정제** (2026-09-30 사용자 지시) — "모든 내부 분석
+     *    시스템이 최종적으로 답변 나가기 전에 토스라이팅으로 정제되어 나갈 수 있게".
+     *    ⚠️ **LLM 이 쓴 서술(marketView·momentumRead·종목별 rationale)만** 정제한다 —
+     *    아래 이어지는 안내 문구(보유 판단 누락·제안 건수·검색 저하·못 본 것)는 **코드가
+     *    보장하는 사실**이라 정제 대상에 안 넣는다. 통째로 넣으면 스타일 다듬는 모델이
+     *    "잡초"로 보고 쳐낼 위험이 있고, 그건 이 저장소가 09-28 에 이미 겪은
+     *    "코드가 보장한 사실을 프롬프트 단계에서 잃는다" 사고와 같은 자리다.
+     */
+    const proseLines = ['🧭 매매 분석'];
+    if (report.marketView) proseLines.push('', report.marketView);
+    if (report.momentumRead) proseLines.push('', `[모멘텀] ${report.momentumRead}`);
     for (const ps of report.positions || []) {
-      lines.push('', `· ${ps.symbol} ${ps.stance}/${ps.confidence} — ${ps.rationale}`);
+      proseLines.push('', `· ${ps.symbol} ${ps.stance}/${ps.confidence} — ${ps.rationale}`);
     }
+    const lines = [];
     /**
      * 🔴 **보유가 있는데 재시도(위 1262~1295행) 후에도 판단이 통째로 비면 조용히 넘어가지
      *    않는다** (2026-09-28 실사고 — 08:47·12:17 두 회차가 시황만 오고 종목 판단이
@@ -1634,8 +1645,11 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
       lines.push('', `⚠️ 뉴스가 대체 검색 소스에서 왔습니다(품질 낮음${altSources.length ? ` — ${altSources.join('·')}` : ''})`);
     }
     if (gaps.length) lines.push('', `못 본 것: ${gaps.join(' · ')}`);
-    telegram
-      .send(lines.join('\n'), { reason: 'analysis' })
+    // 정제는 서술 부분에만, 코드가 보장하는 안내 문구(lines)는 그대로 뒤에 붙인다.
+    // analyze() 자체를 안 막는다 — 종전처럼 fire-and-forget 사슬에 한 단계만 끼운다.
+    tossWriting
+      .refine(proseLines.join('\n'), { logLabel: 'toss_writing_brief' })
+      .then((refinedProse) => telegram.send([refinedProse, ...lines].join('\n'), { reason: 'analysis' }))
       .then((r) => logInfo('analyst.telegram', { sent: Boolean(r.sent), why: r.why || null }))
       .catch((e) => logWarn('analyst.telegram_failed', { message: e.message }));
   }
