@@ -92,7 +92,24 @@ test('🔴 ② 마감 dedup: KST 날짜로 찍힌다(정규장 마감이 KST 로
   assert.notEqual(r.state.lastCloseDay.us, closeAtUtc, 'dedup 키가 여전히 UTC 날짜다(KST 와 우연히 같으면 이 단언이 무의미 — 이 테스트는 KST≠UTC 인 시각을 골랐다)');
 });
 
-test('🔴 ② 전환 안전성: 프리장이 옛 UTC 형식(예: "2026-09-27")으로 이미 기록돼 있으면 오늘 창에서도 중복 발화하지 않는다', () => {
+/**
+ * 🔴 **2026-09-30: 이 계약을 뒤집었다 — 전환은 끝났고, 그 폴백이 프리장을 격일로 죽였다.**
+ *
+ * 종전 계약: *"옛 UTC 형식 저장값도 '오늘' 로 인정해 중복 발화를 막는다."*
+ * **09-28 전환 순간에는 옳았다** — 그날 하루 옛 값이 남아 있었다.
+ * 전환 후 저장은 전부 KST 라, **KST 00:00~08:59 대역**에서는
+ * **어제 저장한 KST 날짜 == 오늘 회차의 UTC 날짜**가 되어 폴백이 **항상 매칭**한다:
+ * ```
+ * 09-29 08:03 발화 → 저장 "2026-09-29"
+ * 09-30 08:00      → UTC 가 "2026-09-29" → 매칭 → **조용히 건너뜀** 🔴 라이브 실측
+ * ```
+ * ★ **임시 안전장치에 만료가 없었고, 그것을 고정한 이 테스트가 만료를 막고 있었다.**
+ *   원본 주석은 *"영구 호환 코드가 아니라 이번 전환 한 번만"* 이라고 **명시**했는데
+ *   테스트는 그 조건을 안 담아 **영구 계약처럼** 굳었다.
+ * ⚠️ 제거 근거 셋: ①원본 주석이 "한 번만" 명시 ②라이브 상태 파일 실측 — 옛 형식 잔재 **없음**
+ *   ③폴백이 실제 결함을 냈다(3일 관측). ⚠️위험 방향도 안전 — 한 번 더 도는 것이고 HITL 이다.
+ */
+test('🔴 ② 전환 종료: 옛 UTC 형식 저장값은 더 이상 "오늘" 로 인정하지 않는다(KST 하나로만 판정)', () => {
   freshRequire(['analystTrigger']);
   const { decide } = require('../server/analystTrigger');
   // 실측 그대로: 오늘(KST 09-28) 08:30 프리장 창, regular 09:00 시작 — 아직 정규장 전
@@ -100,12 +117,16 @@ test('🔴 ② 전환 안전성: 프리장이 옛 UTC 형식(예: "2026-09-27")�
   const regStart = kstMs('2026-09-28T09:00:00');
   const now = kstMs('2026-09-28T08:30:00');
   const sessions = [{ key: 'kr', label: 'KRX', state: 'pre', preSpan: { start: preStart, end: regStart }, regular: { start: regStart, end: kstMs('2026-09-28T15:30:00') } }];
-  // 라이브에서 실제로 관측된 옛(UTC) 형식 저장값 — 오늘 이 이벤트를 이미 보낸 뒤 남은 흔적이다
+  // 옛(UTC) 형식 저장값. 09-28 전환 순간엔 '오늘 보낸 흔적' 이었지만, 전환이 끝난 지금은
+  // **어제 것과 구분되지 않는 모호한 값**이라 인정하지 않는다(KST 날짜 하나로만 판정).
   const legacyStoredValue = new Date(preStart).toISOString().slice(0, 10); // '2026-09-27'
 
   const r = decide({ now, sessions, symbols: [], state: { lastPreopenDay: { kr: legacyStoredValue } } });
 
-  assert.equal(r.reasons.some((x) => x.kind === 'preopen'), false, '옛 형식 저장값을 못 알아봐 같은 회차를 또 발화했다(중복 알림)');
+  assert.equal(
+    r.reasons.some((x) => x.kind === 'preopen'), true,
+    '🔴 옛 UTC 형식 값을 아직 "오늘" 로 인정한다 — 그 폴백이 KST 00:00~08:59 대역 회차를 격일로 죽인다',
+  );
 });
 
 test('② 전환 안전성 대조군: 완전히 새 상태(저장값 없음)면 오늘 프리장이 정상 발화한다', () => {

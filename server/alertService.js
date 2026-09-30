@@ -915,6 +915,26 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
       const d = trigger.decide({ now, sessions: await sessionsFor(st.universe, now), symbols: rows, state: st.analyst || {} });
       st.analyst = d.state;
       /**
+       * 🔴 **정기 브리핑이 왜 안 떴는지 남긴다** (2026-09-30).
+       *
+       * 09-30 08:00 프리장이 안 떴는데 **로그에 아무 흔적이 없어** 원인을 손계산으로 찾았다
+       * (`sameDayMark` 의 UTC 폴백이 어제 저장값과 매칭해 조용히 건너뛰고 있었다).
+       * `decide()` 는 순수라 로거를 안 쓰므로 **탈락 사유를 `skipped` 로 넘겨받아 여기서** 찍는다.
+       *
+       * ⚠️ **하루 1회만** — 틱이 5분이라 그냥 찍으면 프리장 창 한 시간에 12번 울린다.
+       *    소음이 되면 아무도 안 읽고, **그건 침묵과 같다.**
+       * ⚠️ 마커는 `kind:key → 날짜` 라 **키 개수가 고정**된다(회차종류×시장). 날짜를 키에 넣으면
+       *    briefWatch 처럼 무한히 자라 정리 코드가 또 필요해진다.
+       */
+      st.briefSkipLog = { ...(st.briefSkipLog || {}) };
+      for (const sk of d.skipped || []) {
+        const markKey = `${sk.kind}:${sk.key}`;
+        const day = kstDay(now);
+        if (st.briefSkipLog[markKey] === day) continue;
+        st.briefSkipLog[markKey] = day;
+        logWarn('analyst.brief_skipped', sk);
+      }
+      /**
        * 🔴 **건너뛴 정기 브리핑을 이월한다** (2026-09-22, pm2 지적).
        *
        * 분석은 ~70초 걸리고 틱은 5분이라 겹치면 건너뛰는데, 종전엔 **그 회차를 잃었다.**

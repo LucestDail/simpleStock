@@ -143,16 +143,38 @@ function trackUniverse(prev, held, targeted, now, watched = []) {
 }
 
 /**
- * 세션 dedup 표시가 **오늘치인지** 잰다. 새 형식(`kstDay`, KST 날짜)만 보면 안 된다 —
- * 배포 직전까지는 옛 형식(`toISOString().slice(0,10)`, UTC 날짜)으로 저장돼 있었다
- * (2026-09-28). 옛 형식 값도 함께 인정해야, **배포 직후 그 값이 아직 남아 있는 순간**
- * 오늘 이미 보낸 회차를 "아직 안 보냈다" 로 오판해 **중복 발화**하지 않는다.
- * ⚠️ 다음 회차부터는 `kstDay` 로만 새로 저장되므로 옛 형식 값은 자연히 안 쓰이게 된다 —
- *    영구 호환 코드가 아니라 **이번 전환 한 번만을 위한 안전장치**다.
+ * 세션 dedup 표시가 **오늘치인지** 잰다. 판정은 **KST 날짜 하나로만** 한다.
+ *
+ * 🔴 **2026-09-30: UTC 폴백을 걷어냈다 — 그 폴백이 프리장을 격일로 죽이고 있었다.**
+ *
+ * 09-28 에 UTC→KST 전환을 하며 *"배포 직후 옛 값이 남아 있는 순간의 중복 발화"* 를 막으려
+ * `|| stored === new Date(atMs).toISOString().slice(0,10)` 를 **한 번만 쓸 안전장치**로 뒀다
+ * (주석에도 *"영구 호환 코드가 아니다"* 라고 적혀 있었다). 그런데 **KST 00:00~08:59 는 UTC 로
+ * 전날**이라, 그 대역 회차에서는 **어제 저장한 KST 날짜 == 오늘 회차의 UTC 날짜**가 되어
+ * 폴백이 **항상 매칭**한다 ⇒ *"오늘 이미 보냈다"* 로 오판하고 **조용히 건너뛴다.**
+ * ```
+ * 09-28 08:00  수정 전 저장 → "2026-09-27"(UTC)
+ * 09-29 08:03  stored ≠ UTC"09-28" ≠ KST"09-29" → 발화 ✅  저장 → "2026-09-29"
+ * 09-30 08:00  UTC"2026-09-29" == stored        → **건너뜀** 🔴  (라이브 실측과 일치)
+ * ```
+ * ⇒ **어제 뜨면 오늘 안 뜬다.** 실측 3일이 전부 이 메커니즘으로 설명된다.
+ *
+ * ★ **고친 사람이 남긴 안전장치가 새 결함이 됐다** — 전환용 임시 코드에 **만료가 없었다.**
+ * ⚠️ 제거 전제는 실측으로 확인했다: 라이브 상태 파일의 `lastPreopenDay` 는 KST 형식 하나뿐이고
+ *    **옛 UTC 형식 잔재가 없다**(`lastCloseDay` 는 비어 있다). 코드 추론이 아니라 파일을 열어 봤다.
+ * ⚠️ 제거의 위험 방향도 안전하다 — 매칭이 깨져도 **한 번 더 도는 것**이고, 제안은 HITL 이라
+ *    실주문으로 가지 않는다.
+ * ⚠️ **알려진 유계 위험 — 백업 복원**(2026-09-30, pm2 지적): 일일 백업에서 09-28 **이전** 상태
+ *    파일을 되돌리면 옛 UTC 형식 값이 **돌아온다**. 그때는 폴백이 없으므로 그날 회차가
+ *    **한 번 더 발화**할 수 있다(중복 알림 1회 · HITL 이라 실주문 아님).
+ *    ⇒ 막지 않는다. **"모르는 위험" 을 "아는 위험" 으로 바꿔 두는 것**이 목적이다 —
+ *      복원한 사람이 중복 알림을 보고 당황하지 않도록.
+ * ★ 같은 파일의 `mid` 는 **날짜 문자열이 아니라 `String(reg.start)` epoch 마크**를 써서
+ *    이 함정을 처음부터 피했다(*"날짜 문자열보다 안전하다"* 는 그 주석이 답을 적어 두고 있었다).
  */
 function sameDayMark(stored, atMs) {
   if (stored == null) return false;
-  return stored === kstDay(atMs) || stored === new Date(atMs).toISOString().slice(0, 10);
+  return stored === kstDay(atMs);
 }
 
 /**
@@ -164,7 +186,7 @@ function sameDayMark(stored, atMs) {
  * @param {Array}  input.symbols  `[{symbol, dailyChangePct, history}]` 감시 대상의 시세
  * @param {object} input.state    직전 상태(영속화된 것)
  * @param {number} [input.z]      모멘텀 문턱(σ)
- * @returns {{run:boolean, reasons:Array, state:object}}
+ * @returns {{run:boolean, reasons:Array, skipped:Array, state:object}}
  */
 function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAULT_Z, cooldownMs = COOLDOWN_MS } = {}) {
   /**
@@ -189,6 +211,11 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
   st.sessions = { ...(st.sessions || {}) };
   st.momentum = { ...(st.momentum || {}) };
   const reasons = [];
+  /**
+   * 🔴 **건너뛴 이유를 담는다** (2026-09-30) — 이 함수는 순수라 로거를 안 쓴다.
+   *    호출자가 **하루 1회만** 로그한다. 09-30 프리장 미발화를 로그로 못 찾은 것이 계기다.
+   */
+  const skipped = [];
 
   // ① 장마감 — **상태 전이**일 때만. 닫혀 있는 내내 부르면 안 된다
   for (const s of sessions) {
@@ -253,12 +280,31 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
     if (key !== 'kr') continue; // ⚠️ KR 만 — 위 주석 참조
     const pre = s?.preSpan;
     const reg = s?.regular;
-    if (!pre || !Number.isFinite(pre.start) || !reg || !Number.isFinite(reg.start)) continue;
-    // 🔴 KST 날짜다 — UTC 가 아니다(2026-09-28 라이브 실측: 이 값이 `{"kr":"2026-09-27"}` 로
-    //    찍혀 오늘 08:00 이벤트가 어제로 기록됐다). sameDayMark 가 옛 UTC 형식도 인정한다.
-    if (sameDayMark(st.lastPreopenDay[key], pre.start)) continue;
-    if (now < pre.start) continue;
-    if (now >= reg.start) continue; // 정규장이 이미 시작됐다 — 더는 "프리장" 이 아니다
+    /**
+     * 🔴 **탈락 사유를 밖으로 내보낸다** (2026-09-30).
+     *
+     * 09-30 08:00 프리장이 안 떴는데 **로그에 아무 흔적이 없어** 원인을 손계산으로 찾아야 했다
+     * (`sameDayMark` 의 UTC 폴백이 범인이었다). 이 블록의 `continue` 는 전부 **조용했다.**
+     * ⚠️ 이 파일은 **순수 함수**라 로거를 들이지 않는다 — `skipped` 에 실어 보내고
+     *    **호출자(`alertService.tick`)가 하루 1회만** 로그한다(매 tick 짖으면 소음이고,
+     *    소음이 되면 침묵과 같아진다).
+     * ⚠️ `now < pre.start`(아직 창 전)는 **정상**이라 싣지 않는다 — 실으면 매일 새벽 내내
+     *    "건너뜀" 이 쌓여 진짜 신호가 묻힌다.
+     */
+    if (!pre || !Number.isFinite(pre.start) || !reg || !Number.isFinite(reg.start)) {
+      skipped.push({ kind: 'preopen', key, why: 'no_span', hasPre: Boolean(pre), hasReg: Boolean(reg) });
+      continue;
+    }
+    // 🔴 KST 날짜다 — UTC 가 아니다(2026-09-28 라이브 실측). ⚠️09-30: UTC 폴백 제거됨(sameDayMark 주석)
+    if (sameDayMark(st.lastPreopenDay[key], pre.start)) {
+      skipped.push({ kind: 'preopen', key, why: 'already_sent', stored: st.lastPreopenDay[key], expected: kstDay(pre.start) });
+      continue;
+    }
+    if (now < pre.start) continue; // 아직 창 전 — 정상이라 싣지 않는다
+    if (now >= reg.start) { // 정규장이 이미 시작됐다 — 더는 "프리장" 이 아니다(재기동이 늦었다)
+      skipped.push({ kind: 'preopen', key, why: 'regular_started' });
+      continue;
+    }
     st.lastPreopenDay[key] = kstDay(pre.start);
     reasons.push({ kind: 'preopen', key, label: s.label || key });
   }
@@ -330,7 +376,7 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
   const hasClose = all.some((r) => r.kind === 'close');
   const since = now - (st.lastRunAt || 0);
 
-  if (!all.length) return { run: false, reasons: [], state: { ...st, pending: [] } };
+  if (!all.length) return { run: false, reasons: [], skipped, state: { ...st, pending: [] } };
   /**
    * ⚠️ **`st.lastRunAt` 이 0 이면 falsy 다** — `&& st.lastRunAt` 으로 쓰면 그 회차만 쿨다운이 풀린다.
    *    테스트가 `now: 0` 으로 재다 잡았다. 실제 타임스탬프에서는 **영영 안 드러났을** 자리고,
@@ -338,9 +384,9 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
    */
   if (!hasClose && st.lastRunAt != null && since < cooldownMs) {
     // 아직 이르다 — 쌓아 두고 다음에 함께
-    return { run: false, reasons: [], deferred: all.length, state: { ...st, pending: all } };
+    return { run: false, reasons: [], skipped, deferred: all.length, state: { ...st, pending: all } };
   }
-  return { run: true, reasons: all, state: { ...st, pending: [], lastRunAt: now } };
+  return { run: true, reasons: all, skipped, state: { ...st, pending: [], lastRunAt: now } };
 }
 
 /** 사람이 읽는 한 줄 — 활동 기록·로그에 그대로 쓴다 */
