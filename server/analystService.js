@@ -1451,6 +1451,73 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     for (const r of webHits) {
       lines.push('', `### ${r.name || r.symbol}`, r.text.slice(0, 2500));
     }
+    /**
+     * 🔴 **헤드라인만 보던 것을 본문까지 읽는다** (2026-10-01 — simpleStock ↔ my-computer 연계).
+     *
+     * 종전 브리핑은 검색 **목록**(제목·날짜·URL·220자 요약)만 받았다. 그래서 *"왜 움직였나"*
+     * 를 물으면 제목을 바꿔 말하는 수준이었다. 본문을 읽는 `readArticle` 은 **이미
+     * 구현돼 있고 실측까지 돼 있었는데**(한국 경제지 12도메인 1.7k~12k자) **채팅 전용**
+     * 이라 브리핑 경로에 배선이 0 이었다 — 이 저장소가 반복해 밟은 *"만들어 놓고 안 쓴"* 자리.
+     *
+     * ⚠️ **전부 읽으면 안 된다** — 회차당 URL 이 8~15개다. 실측 비용으로 재니
+     *    본문 8건이면 프롬프트가 **3~4배**(+16k~24k 토큰)가 되고 최악 +120초다.
+     *    출력 길이가 곧 시간인 이 저장소에서 그건 브리핑을 죽인다(09-23 전례).
+     * ⇒ **주제당 1건 · 전체 최대 3건 · 본문 1,500자 · 전체 시간 예산 20초**로 묶는다.
+     *    예산을 넘으면 **거기서 멈추고 몇 건을 못 읽었는지 적는다**(조용히 줄이지 않는다).
+     * ⚠️ 실패는 `dataGaps` 가 아니라 이 절에 **그 종목 자리에** 적는다 — "본문을 못 읽었다"
+     *    는 그 종목에 대한 사실이지 시스템 전체의 결손이 아니다.
+     */
+    /**
+     * ⚠️ `Number(x) || 기본값` 을 쓰면 **0 을 끌 수 없다** — `0 || 3` 은 3 이다.
+     *    처음에 그렇게 썼고 "끄면 안 부른다" 테스트가 바로 잡았다(내 자가 내 코드를 잡은 자리).
+     *    이 저장소에서 `|| 기본값` 관용구는 **0 이 의미 있는 값일 때만** 함정이 된다.
+     */
+    const envNum = (k, dflt) => { const v = Number(process.env[k]); return Number.isFinite(v) ? v : dflt; };
+    const ARTICLE_MAX = Math.max(0, envNum('ANALYST_ARTICLE_MAX', 3));
+    const ARTICLE_CHARS = Math.max(500, envNum('ANALYST_ARTICLE_CHARS', 1500));
+    const ARTICLE_BUDGET_MS = Math.max(5000, envNum('ANALYST_ARTICLE_BUDGET_MS', 20_000));
+    if (ARTICLE_MAX > 0) {
+      const deadline = Date.now() + ARTICLE_BUDGET_MS;
+      const bodies = [];
+      let readAttempts = 0;
+      let skippedForBudget = 0;
+      for (const r of webHits) {
+        if (bodies.length >= ARTICLE_MAX) { skippedForBudget += 1; continue; }
+        if (Date.now() >= deadline) { skippedForBudget += 1; continue; }
+        const url = (/https?:\/\/\S+/.exec(String(r.text || '')) || [null])[0];
+        if (!url) continue;
+        readAttempts += 1;
+        try {
+          const art = await mcp.readArticle(url);
+          if (art.ok && art.text) {
+            bodies.push({ name: r.name || r.symbol, url, text: String(art.text).slice(0, ARTICLE_CHARS) });
+          } else {
+            bodies.push({ name: r.name || r.symbol, url, error: art.error || '본문 확보 실패' });
+          }
+        } catch (e) {
+          // 🔴 본문 읽기 실패가 브리핑을 멈추면 안 된다 — 헤드라인만으로도 회차는 성립한다
+          logWarn('analyst.article_read_failed', { symbol: r.symbol, message: e?.message });
+          bodies.push({ name: r.name || r.symbol, url, error: e?.message || '예외' });
+        }
+      }
+      if (bodies.length) {
+        lines.push('', '## 기사 본문 (위 목록 중 상위 기사 — 숫자·발언을 직접 인용하라)');
+        for (const b of bodies) {
+          lines.push('', `### ${b.name} — ${b.url}`);
+          lines.push(b.error ? `(본문을 못 읽었다: ${b.error} — 제목·요약만으로 판단하라)` : b.text);
+        }
+        if (skippedForBudget) {
+          lines.push('', `⚠️ 나머지 ${skippedForBudget}건은 시간·개수 예산으로 **본문을 안 읽었다** — 그 종목은 제목 수준의 근거만 있다.`);
+        }
+      }
+      logInfo('analyst.articles_read', {
+        attempted: readAttempts,
+        ok: bodies.filter((b) => !b.error).length,
+        failed: bodies.filter((b) => b.error).length,
+        skipped: skippedForBudget,
+        budgetMs: ARTICLE_BUDGET_MS,
+      });
+    }
   }
 
   /**
