@@ -196,22 +196,12 @@ test('계좌 조회는 턴당 한 번이다 (판단기가 get_portfolio 를 또 
 
 // ── ② 보유 방침이 채팅에도 간다 ─────────────────────────────────
 
-test('🔴 보유 방침이 채팅 프롬프트에 실린다 (16:44 에 배포했는데 채팅 배선이 0건이었다)', async () => {
-  const analyst = require('../server/analystService');
-  const chat = fresh();
-  await run(chat, '내 주식 어떻게 할까?');
-  const p = promptText();
-  const lines = analyst.holdingPolicyLines();
-  assert.ok(lines.length, '방침 정본이 비었다 — 이 자가 아무것도 안 본 것이다');
-  /**
-   * ⚠️ **심볼로 단언하면 공허하다** — RAM 은 바로 위 `## 계좌` 절에도 있어서, 방침이
-   *    통째로 빠져도 통과한다. 방침 **문장 자체**가 들어갔는지를 본다.
-   */
-  for (const line of lines) {
-    assert.ok(p.includes(line), `방침 문구가 채팅 프롬프트에 없다: ${line.slice(0, 40)}…`);
-  }
-  assert.match(p, /보유 방침/, '방침 절 제목이 없다 — 모델이 그 줄들을 방침으로 안 읽는다');
-});
+/**
+ * ⚠️ **보유 방침 테스트는 제거됐다** (2026-10-02 사용자 지시: *"holding-policy 이거 없애.
+ *    제한 걸지말고 냉철하게 공격적 포트폴리오 관점에서 구성해야해."*).
+ *    10-01 에 만들어 10-02 에 뺐다 — **판단은 사람이 한다**는 결정이다.
+ * 🔴 지운 이유를 남긴다. 안 적으면 다음 세션이 *"제안 게이트가 없네"* 하고 또 만든다.
+ */
 
 // ── ③ 판단기가 맥락을 본다 (종목 환각 축) ───────────────────────
 
@@ -281,34 +271,6 @@ test('🔴 이 자는 "프롬프트에 무엇이 있나" 를 본다 — 붙잡�
  *    `propose_conditional_order` 라는 **같은 문이 둘 더** 있었다.
  *    이 구멍은 위 "오탐 축" 테스트가 빨간불을 내면서 드러났다 — 가드를 만들다 다른 구멍을 찾았다.
  */
-test('🔴 채팅에서도 방침을 어기는 매도 제안은 막힌다 (12:19 에 폰으로 간 그 제안)', async () => {
-  const chat = fresh({
-    decide: { tools: [{ name: 'propose_order', argsJson: '{"symbol":"RAM","side":"SELL","quantity":400,"price":13.98,"reason":"손절"}' }] },
-  });
-  await run(chat, 'RAM 전량 손절해줘');
-  assert.equal(captured.proposed.length, 0, '방침을 어긴 제안이 그대로 등록됐다');
-  assert.ok(captured.warns.some((w) => w.ev === 'chat.policy_blocked'), '막혔는데 로그에 안 남았다');
-  assert.match(promptText(), /보유 방침|방침을 그대로 알리고/, '왜 막혔는지가 모델에게 안 돌아갔다 — 또 시도한다');
-});
-
-test('조건부는 **발동가**로 판정한다 (방침이 허용한 16.0 트리거는 통과해야 한다)', async () => {
-  const chat = fresh({
-    decide: { tools: [{ name: 'propose_conditional_order', argsJson: '{"symbol":"RAM","side":"SELL","quantity":400,"triggerPrice":16.5,"orderPrice":16.5,"expiresAt":"2026-12-31","reason":"목표가"}' }] },
-  });
-  await run(chat, 'RAM 16.5 되면 팔아줘');
-  assert.ok(!captured.warns.some((w) => w.ev === 'chat.policy_blocked'),
-    '현재가(13.98)로 판정해서 사용자가 정한 바로 그 조건을 막았다 — 오탐하면 가드가 제품을 해친다');
-});
-
-test('오탐 축: 방침 없는 종목 매도는 안 막는다 (QLD)', async () => {
-  const chat = fresh({
-    decide: { tools: [{ name: 'propose_order', argsJson: '{"symbol":"QLD","side":"SELL","quantity":1,"price":96.5,"reason":"축소"}' }] },
-  });
-  await run(chat, 'QLD 1주 팔아줘');
-  assert.ok(!captured.warns.some((w) => w.ev === 'chat.policy_blocked'), '방침에 없는 종목을 막았다');
-  assert.equal(captured.proposed.length, 1, '정상 제안이 등록되지 않았다');
-});
-
 test('🔴 정식명·레버리지가 계좌 절에 실린다 (도구 0회 턴에서는 이것이 유일한 출처다)', async () => {
   const chat = fresh();
   await run(chat, '내 자산 어때?');

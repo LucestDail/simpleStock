@@ -128,7 +128,14 @@ test('🔴 propose() 를 부르는 곳은 계좌 검증도 부른다', () => {
   assert.deepEqual(problems, [], `\n🔴 이 경로로는 살 수 없는 제안이 나간다:\n${problems.join('\n')}`);
 });
 
-test('🔴 현금 버퍼 15%(사용자 확정 09-24) — 바닥을 깨는 매수는 거부, 사다리는 면제', async () => {
+/**
+ * ⚠️ **기본값은 0 이 됐다** (2026-10-02 사용자 지시 — "매수 현금바닥 구조 없애").
+ *    그래도 **기계는 계속 잰다** — 지운 게 아니라 끈 것이고, `CASH_FLOOR_PCT=15` 한 줄이면
+ *    되살아난다. 기계를 안 재면 되살렸을 때 동작하는지 아무도 모른다.
+ */
+test('현금 버퍼 기계 — 켜면(15%) 바닥을 깨는 매수는 거부, 사다리는 면제', async () => {
+  const savedFloor = process.env.CASH_FLOOR_PCT;
+  process.env.CASH_FLOOR_PCT = '15';
   // 현금 1000 · 보유(USD) 1000 → 평가 2000 · 버퍼 300. 700 초과 매수는 거부돼야 한다
   for (const k of Object.keys(require.cache)) {
     if (/orderService|tossClient|tossPortfolio/.test(k)) delete require.cache[k];
@@ -147,6 +154,29 @@ test('🔴 현금 버퍼 15%(사용자 확정 09-24) — 바닥을 깨는 매수
   // 🔴 사다리 면제 — 공포에 실탄 소진이 취지(백테스트: floor 는 LLM 매수에만)
   const ladder = await o.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 9, price: 100, exemptCashFloor: true });
   assert.equal(ladder.ok, true, ladder.error);
+  if (savedFloor === undefined) delete process.env.CASH_FLOOR_PCT; else process.env.CASH_FLOOR_PCT = savedFloor;
+});
+
+/**
+ * 🔴 **기본값이 0 이라는 것 자체를 못박는다** (2026-10-02). 라이브 5회차 중 3회가
+ *    `no_buying_capacity · capacity:blocked` 였고 그 사이 **매도 제안만** 나갔다 —
+ *    현금이 없는데 파는 쪽만 열려 있던 상태다. 사용자가 그 구조를 없애라고 했다.
+ */
+test('🔴 기본값은 0 — 버퍼가 매수를 막지 않는다 (사용자 결정 2026-10-02)', async () => {
+  const savedFloor = process.env.CASH_FLOOR_PCT;
+  delete process.env.CASH_FLOOR_PCT;
+  for (const k of Object.keys(require.cache)) {
+    if (/orderService|tossClient|tossPortfolio/.test(k)) delete require.cache[k];
+  }
+  const tp2 = require.resolve('../server/tossClient');
+  require.cache[tp2] = { id: tp2, filename: tp2, loaded: true, exports: { ...require(tp2), getBuyingPower: CASH('1000'), getPriceLimits: async () => ({}) } };
+  const pp2 = require.resolve('../server/tossPortfolio');
+  require.cache[pp2] = { id: pp2, filename: pp2, loaded: true, exports: { getHoldings: async () => ({ summary: {}, items: [{ symbol: 'QQQ', currency: 'USD', marketValue: 1000 }] }) } };
+  const o2 = require('../server/orderService');
+  assert.equal(Number(o2.CASH_FLOOR_PCT), 0, '기본 버퍼가 0 이 아니다');
+  const all = await o2.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 10, price: 100 });
+  assert.equal(all.ok, true, `현금 전액 매수가 막혔다: ${all.error}`);
+  if (savedFloor === undefined) delete process.env.CASH_FLOOR_PCT; else process.env.CASH_FLOOR_PCT = savedFloor;
 });
 
 test('🔴 가격-현재가 괴리 게이트(±2.5%) — 체결 불가능한 지정가는 조건주문으로 안내', async () => {

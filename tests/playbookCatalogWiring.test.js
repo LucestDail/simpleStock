@@ -39,6 +39,11 @@ const NON_TICKER = {
   // fear_ladder modelPortfolio 키 `1배 광범위(QQQ/SPY, KR 이면 069500)` — 시장 코드다.
   // ⚠️ 실제 KR 종목은 6자리 숫자(069500)라 2~5자 영대문자 추출에 안 걸린다.
   KR: '시장 코드(한국) — 종목이 아니다',
+  // ── 2026-10-02 매크로 국면 시나리오에서 새로 나온 것들 ──
+  // `"레버리지 ETF 비중을 먼저 줄인다"` 처럼 상품 종류를 가리키는 보통명사.
+  ETF: '상품 종류를 가리키는 보통명사 — 특정 종목이 아니다',
+  // `"물가연동채(TIPS)는 인플레 헤지지만…"` — 일반 명칭이고 실제 상품 심볼은 TIP 이다.
+  TIPS: '물가연동채의 일반 명칭 — 실제 상품 심볼은 TIP',
 };
 
 /** 산문에서 티커 후보(2~5자 영대문자)를 뽑는다 */
@@ -243,6 +248,25 @@ const SINGLE_GOLDEN = {
   shock_day: [],
   fear_ladder: ['QQQ', 'SPY'],
   war_geopolitics: ['ITA', 'XLE', 'GLD'],
+  /**
+   * ── 2026-10-02 매크로 국면 12종 (사용자 지시: "발생할 시장 국면성을 전부다 열거") ──
+   * 아래 값도 **실측해 받아 적은 것**이다. 설계 의도와 대조해 확인했다:
+   *   금리 쇼크 → SHY 가 **맨 앞**(듀레이션 축소) · 금리 하락 전환 → VNQ·XLU·TLT(되사는 자산)
+   *   신용 경색 → SHY·XLP·XLV·GLD(방어) · 스태그플레이션 → XLE·GLD(실물)
+   * ⚠️ 이 순서가 바뀌면 **국면별 우선순위가 바뀐 것**이다 — 우연이 아니라 설계 변경이어야 한다.
+   */
+  rate_shock_whole_curve: ['SHY', 'QQQ', 'SOXX', 'XLE', 'XLF'],
+  rate_shock_long_end: ['SHY', 'XLF', 'GLD', 'QQQ', 'XLE'],
+  rate_falling_pivot: ['VNQ', 'XLU', 'TLT', 'SCHD', 'QQQ'],
+  narrow_leadership: ['QQQ', 'SOXX', 'SHY', 'SPY'],
+  credit_stress: ['SHY', 'XLP', 'XLV', 'GLD'],
+  dollar_surge: ['QQQ', 'SHY', 'XLP', 'UUP'],
+  stagflation: ['XLE', 'GLD', 'SHY', 'XLP'],
+  goldilocks: ['QQQ', 'SOXX', 'SPY', 'VNQ', 'SCHD'],
+  capitulation: ['SPY', 'QQQ', 'SHY'],
+  melt_up: ['QQQ', 'SOXX', 'SPY'],
+  earnings_season: ['SHY'],
+  policy_pivot: ['SHY'],
 };
 
 test('🔴 회귀 잠금 — 단일 시나리오 6종의 후보가 순차 구현과 순서까지 동일하다', () => {
@@ -406,4 +430,25 @@ test('🔴 없는 카테고리 키는 그것만 버리고 warn 한다 (조용히
     warned.some((w) => w.includes('regime.playbook_unknown_category') && w.includes('tech_borad')),
     `오타가 조용히 버려졌다. 받은 로그: ${warned.join(' | ') || '(없음)'}`
   );
+});
+
+
+/**
+ * 🔴 **면제 목록이 진짜 상품을 가리지 않는지 검사한다** (2026-10-02).
+ *    `NOT_TICKERS` 에 실제 카탈로그 심볼을 적어 두면, 그 종목이 도구상자 밖인데도
+ *    **조용히 통과**한다 — 면제가 곧 구멍이 되는 그 모양이다.
+ * ⚠️ 목록 **전체 불변식**으로 건다(한 항목 고정이 아니다) — 나중에 누가 더해도 강제된다.
+ */
+/**
+ * ⚠️ **중복 목록을 만들었다가 되돌렸다** (2026-10-02). 이 파일엔 이미 `NON_TICKER` 가
+ *    있었는데 두 번째 면제 목록을 만들었고, 그 필터가 **기존 가드의 검사를 무력화**해
+ *    멀쩡하던 면제(VIX·KR)가 "장식" 으로 찍혔다. ★정본이 둘이면 갈라진다.
+ */
+test('🔴 면제 목록이 실제 카탈로그 심볼을 가리지 않는다', () => {
+  const all = new Set();
+  for (const c of Object.values(catalog.categories)) for (const e of c.etfs || []) all.add(e.symbol);
+  const leaking = Object.keys(NON_TICKER).filter((k) => all.has(k));
+  assert.deepEqual(leaking, [], `🔴 면제가 실제 상품을 가린다: ${leaking.join(',')}`);
+  assert.ok(Object.keys(NON_TICKER).length >= 5, '면제 목록이 비었다 — 이 검사가 아무것도 안 본다');
+  for (const [k, why] of Object.entries(NON_TICKER)) assert.ok(why && why.length > 5, `${k} 면제에 이유가 없다`);
 });

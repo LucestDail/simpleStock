@@ -49,7 +49,17 @@ const AUDIT_FILE = process.env.ORDERS_AUDIT_FILE || path.join(DATA_DIR, 'orders-
 /** 🔴 기본 꺼짐. **없어도 꺼짐**이다 — 미설정이 켜짐이 되면 안 된다 */
 const ORDERS_ENABLED = String(process.env.ORDERS_ENABLED || '').trim().toLowerCase() === 'true';
 /** 🔴 현금 버퍼 %(2026-09-24 사용자 확정 15) — VIX 사다리 실탄 보전. 0 이면 끔 */
-const CASH_FLOOR_PCT = Math.max(0, Number(process.env.CASH_FLOOR_PCT ?? 15));
+/**
+ * 🔴 **현금 버퍼 기본값 0** (2026-10-02 사용자 지시: *"매수 현금바닥 구조 없애.
+ *    제한 걸지말고 냉철하게 공격적 포트폴리오 관점에서 구성해야해."*).
+ *
+ * 종전 15% 는 "VIX 사다리 실탄 보전" 용이었는데, 실제로는 **매수 제안을 구조적으로
+ * 0으로 만들고 있었다** — 10-01~02 라이브 5회차 중 3회가 `no_buying_capacity ·
+ * capacity:blocked` 였고, 그 사이 **매도 제안만** 나갔다(현금이 없는데 파는 쪽만 열려 있었다).
+ * ⚠️ 0 이면 아래 `CASH_FLOOR_PCT > 0` 가드가 통째로 꺼진다 — 코드는 그대로 두고 값만 0이다.
+ *    되살리려면 `CASH_FLOOR_PCT=15` 환경변수 하나면 된다(지우지 않는 이유).
+ */
+const CASH_FLOOR_PCT = Math.max(0, Number(process.env.CASH_FLOOR_PCT ?? 0));
 /** 🔴 즉시 제안 지정가의 현재가 괴리 상한 % — 넘으면 조건주문으로 안내(2026-09-24) */
 const PRICE_DRIFT_PCT = Math.max(0.5, Number(process.env.PRICE_DRIFT_PCT ?? 2.5));
 

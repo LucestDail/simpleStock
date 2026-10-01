@@ -137,7 +137,35 @@ const REPORT_SCHEMA = {
 };
 
 const SYSTEM_PROMPT = [
-  '당신은 매수·매도 판단을 내리는 선임 주식 애널리스트입니다.',
+  '당신은 **퀀트 모멘텀 분석가**입니다. 이야기가 아니라 **가격·추세·상대강도·변동성**으로 판단합니다.',
+  '',
+  /**
+   * 🔴 **공격적 기조 · 퀀트 모멘텀 재구성** (2026-10-02 사용자 지시:
+   *    *"지금 퀀트 모먼트 분석가로서 제대로 매도 매수 제안도 안나오고 … 제한 걸지말고
+   *    냉철하게 공격적 포트폴리오 관점에서 구성해야해."*)
+   * 같은 날 현금 버퍼(15%)와 보유 방침 게이트를 **코드에서 제거**했다 — 프롬프트가
+   *    없는 한도를 말하면 모델이 스스로 제안을 깎는다(문서가 코드보다 오래 사는 그 병).
+   */
+  '## 운용 기조 — 공격적 (2026-10-02 사용자 결정)',
+  '- 🔴 현금 버퍼(15%)와 보유 방침 게이트는 **제거됐습니다.** 인위적 한도로 제안을 깎지 마십시오.',
+  '- 확신의 근거는 **숫자**입니다 — 추세·상대강도·손익비가 서면 **제안을 내십시오.** 뉴스가 없어도 됩니다.',
+  '  "관망" 은 판단이 아니라 판단 회피입니다. 다만 숫자가 안 서면 빈 배열이 정답입니다.',
+  '- 공격적이란 위험을 **모르고** 가는 게 아니라 위험을 **정량화하고** 가는 것입니다 —',
+  '  그래서 `stop` 이 더 중요해집니다. 손절선 없는 공격은 공격이 아니라 도박입니다.',
+  '- 레버리지는 추세가 선 구간에서 허용됩니다. 횡보·고변동 구간에서는 일일 리밸런싱 감쇠가 복리로 깎습니다.',
+  '',
+  '## 모멘텀 판단의 축 (이 순서로 보십시오)',
+  '1. **추세** — 종가 vs 20일선 vs 60일선. 정배열(종가>20>60)·역배열·엇갈림',
+  '2. **상대강도** — 같은 기간 지수 대비 초과인가 열위인가. 오르는 것 중에 고르고 내리는 것 중에 피합니다',
+  '3. **변동성** — volPct·atrPct. 기대수익이 같으면 변동성이 낮은 쪽이 낫습니다(같은 리스크로 더 담을 수 있습니다)',
+  '4. **위치** — 120일 고점 대비 어디인가, 20일 스윙 고저 안 어디인가',
+  '5. **국면 정합** — "## 시장 국면" 의 매크로 축(금리·신용·달러·시장폭)과 이 종목이 **같은 방향인가**',
+  '',
+  '🔴 **종목의 등락을 국면으로 먼저 설명하십시오.** "52주 신저가" 는 증상이지 원인이 아닙니다.',
+  '   금리 상승기에 리츠·유틸·고배당이 함께 내리는 것은 **그 종목의 문제가 아닙니다** —',
+  '   그걸 "약세라 매도" 로 읽으면 국면이 바뀔 때 **가장 싼 자리에서 팔게 됩니다**(2026-10-02 실사고).',
+  '🔴 **사용자가 적립·보유를 정한 종목에 매도 제안을 내려면 근거가 "가격이 내렸다" 보다 강해야 합니다** —',
+  '   배당 삭감·신용등급 하락·사업 훼손처럼 **종목 자체의 변화**여야 합니다. 국면 역풍은 그 근거가 아닙니다.',
   '',
   /**
    * 🔴 길이는 **필드별 자수로** 묶는다 (2026-09-23 2차) — "전체 2,000토큰" 총량 지시는
@@ -172,7 +200,8 @@ const SYSTEM_PROMPT = [
   '   언급하지 않습니다 — 어디서도 받지 않은 값은 존재하지 않는 값입니다.',
   '',
   '## proposals (매매 제안)',
-  '- **확신이 있을 때만** 냅니다. 없으면 빈 배열이 정답입니다.',
+  '- 추세·상대강도·손익비가 서면 **냅니다.** 숫자가 안 서면 빈 배열이 정답입니다.',
+  '  ⚠️ 한도 때문에 못 낸다고 적지 마십시오 — 현금 버퍼 규칙은 제거됐습니다(2026-10-02).',
   '- symbol·side·quantity·price 를 **전부 숫자로** 채웁니다. 하나라도 비면 그 제안은 버려집니다.',
   '- quantity 는 **보유 수량과 현금 여력을 넘지 않게** 합니다. 매도는 보유 수량 이내입니다.',
   '- price 는 지정가입니다. 🔴 **현재가 ±2.5% 안**이어야 합니다(코드가 거부합니다 — 09-23 실물:',
@@ -799,7 +828,11 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     //    다음 사람이 이 줄을 고치는 순간 조용히 뚫린다. `buildQuery` 가 두 칸만 읽는다.
     // ⚠️ 시장 주제를 **앞에** 둔다 — `maxSubjects` 로 잘릴 때 종목보다 시황이 먼저 살아남게
     web = await mcp.searchMarketNews([...marketSubjects, ...items]);
-    if (!web.ok) logWarn('analyst.web_unavailable', { kind: web.kind, error: web.error });
+    /**
+     * ⚠️ **`null` 도 받는다** (2026-10-02). 종전엔 `web.ok` 라 검색 모듈이 null 을 내면
+     *    **브리핑이 통째로 죽는다.** 검색은 곁가지인데 본체를 끌고 내려가면 안 된다.
+     */
+    if (!web?.ok) logWarn('analyst.web_unavailable', { kind: web?.kind || 'null', error: web?.error || '검색 결과 객체가 없다' });
   }
 
   /**
@@ -1034,26 +1067,12 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   if (identity) lines.push('', identity);
 
   /**
-   * 🔴 사용자 보유 방침 (2026-09-24 결정 — §17.5) — 모델이 사용자 의사에 반하는 제안을
-   *    반복하면 신뢰가 깎인다. ⚠️ 날짜 조건부는 **코드가** 만료시킨다(지난 방침이 낡은 채
-   *    프롬프트에 남으면 "문서가 거짓이 되는" 그 병이다).
+   * ⚠️ **사용자 보유 방침 절은 제거됐다** (2026-10-02 사용자 지시: *"holding-policy 이거 없애.
+   *    제한 걸지말고 냉철하게 공격적 포트폴리오 관점에서 구성해야해."*).
+   *    종전에는 `config/holding-policy.json` 이 프롬프트 문구와 코드 게이트를 함께 먹였다.
+   * 🔴 **되돌린 이유를 적어 둔다** — 안 적으면 다음 세션이 *"방침 게이트를 넣으면 되겠네"*
+   *    를 또 한다. 그 장치는 10-01 에 만들어 10-02 에 사용자가 뺐다. 판단은 사람이 한다.
    */
-  {
-    /**
-     * 🔴 **문구를 설정에서 만든다** (2026-10-01) — 종전엔 여기 문자열이 **정본**이었고
-     *    그것을 지키게 하는 장치가 **프롬프트뿐**이었다. 2026-10-01 12:19 에 모델이
-     *    `RAM SELL 50주 @14.1` 을 제안했다 — 허용 조건(16.0 이상 또는 급락) 어디에도
-     *    안 맞고, 사용자는 12:43 에 거절했다.
-     * ⇒ `config/holding-policy.json` 하나를 **프롬프트와 코드 게이트가 함께** 읽는다.
-     *   값을 고치면 둘이 같이 바뀐다 — 두 벌로 갈라질 수 없다.
-     */
-    const policy = holdingPolicyLines();
-    if (Date.now() < Date.parse('2026-09-28T00:00:00+09:00')) {
-      policy.push('9/28(월) 삼성전자 특별배당락 — 사용자가 그 전까지 관망 방침. 큰 포지션 변경 제안은 자제.');
-    }
-    lines.push('', '## 사용자 방침 (결정권자의 지시 — 판단보다 우선)', ...policy.map((x) => `- ${x}`));
-  }
-
   lines.push('', '## 보유 종목');
   for (const h of items) {
     const t = tech[h.symbol];
@@ -1729,15 +1748,6 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
      *    프롬프트에 적어 뒀는데도 12:19 에 `RAM SELL @14.1` 이 나갔고 사용자가 거절했다.
      *    ⚠️ 막는 쪽이 **방침과 같은 설정**을 읽으므로 둘이 갈라질 수 없다.
      */
-    {
-      const held = (items || []).find((h) => String(h.symbol).toUpperCase() === String(p.symbol).toUpperCase());
-      const gate = holdingPolicyGate(p, held);
-      if (!gate.ok) {
-        rejected.push({ symbol: p.symbol, side: p.side, error: gate.why });
-        logWarn('analyst.holding_policy_blocked', { symbol: p.symbol, side: p.side, why: gate.why });
-        continue;
-      }
-    }
     const chk = await orderService.checkAccountLimits({
       symbol: p.symbol, side: p.side, quantity: p.quantity, price: p.price,
     });
@@ -2046,6 +2056,42 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     }
     const lines = [];
     /**
+     * 🔴 **종목별 근거 보고서를 폰으로 보낸다** (2026-10-02 사용자 지시:
+     *    *"매도 매수 제안 근거 보고서도 없고 뭐하는거야? 토큰비용이 너무 아까운데?"*).
+     *
+     * 모델은 종목마다 `entry/stop/target/evidence/risk/scenarioUp/scenarioDown` 을 **이미
+     * 만들고 있었다.** 시스템은 거기에 `trade`(R:R·수수료 반영·리스크 비중)까지 계산해
+     * 붙였다. 그런데 폰으로 가는 건 `marketView`+`momentumRead` **두 문장뿐**이었고
+     * 나머지는 전부 버려졌다 — *"수집해 놓고 안 쓰는"* 의 가장 비싼 형태다.
+     * (실측 2026-10-02 05:48 회차: O 한 종목에만 진입 54.3·손절 52.5·목표 57.52·R:R 1.79·
+     *  근거 2건·리스크·양방향 시나리오가 생성됐고 **단 한 줄도 전달되지 않았다.**)
+     *
+     * ⚠️ `lines` 에 넣는다 — 토스 라이팅 정제 대상이 아니다. 정제 모델이 숫자를 "잡초" 로
+     *    쳐내면 **근거가 사라진 근거 보고서**가 된다(09-28 에 겪은 그 자리).
+     * ⚠️ 길어지면 `telegramService` 가 4096자 경계에서 나눠 보낸다(10-02 추가).
+     */
+    if ((report.positions || []).length) {
+      lines.push('', '━━━ 종목별 근거 ━━━');
+      for (const ps of report.positions) {
+        const t = ps.trade || {};
+        const n = (v, d = 2) => (Number.isFinite(Number(v)) ? Number(v).toFixed(d) : null);
+        lines.push('', `▸ ${ps.symbol} — ${ps.stance}/${ps.confidence}`);
+        const lv = [
+          n(ps.entry) && `진입 ${n(ps.entry)}`,
+          n(ps.stop) && `손절 ${n(ps.stop)}`,
+          n(ps.target) && `목표 ${n(ps.target)}`,
+          n(t.rr) && `R:R ${n(t.rr)}${n(t.rrAfterFee) ? `(수수료후 ${n(t.rrAfterFee)})` : ''}`,
+          n(t.riskPct) && `리스크 ${n(t.riskPct, 1)}%`,
+        ].filter(Boolean);
+        if (lv.length) lines.push(`  ${lv.join(' · ')}`);
+        const ev = (ps.evidence || []).filter(Boolean);
+        if (ev.length) lines.push(`  근거: ${ev.join(' · ')}`);
+        if (ps.risk) lines.push(`  리스크: ${ps.risk}`);
+        if (ps.scenarioUp) lines.push(`  ↑ ${ps.scenarioUp}`);
+        if (ps.scenarioDown) lines.push(`  ↓ ${ps.scenarioDown}`);
+      }
+    }
+    /**
      * 🔴 **보유가 있는데 재시도(위 1262~1295행) 후에도 판단이 통째로 비면 조용히 넘어가지
      *    않는다** (2026-09-28 실사고 — 08:47·12:17 두 회차가 시황만 오고 종목 판단이
      *    아예 없이 "정상 발송" 됐다). 사용자는 이걸 "브리핑이 왔다" 로 받아서 실패로 안
@@ -2140,82 +2186,8 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
  *    프롬프트에 규칙이 있는데도 모델이 횡보에서 PSQ 매수를 냈다.
  *    실전(analyze)과 백테스트(decideOnContext)가 **같은 함수**를 태운다 — 게이트가 두 벌이면 갈라진다.
  */
-/**
- * 사용자 보유 방침 — **설정 한 벌**(`config/holding-policy.json`)에서 읽는다.
- * ⚠️ 못 읽으면 **빈 방침**으로 둔다(기본값을 지어내면 사용자가 안 정한 규칙이 생긴다).
- *    대신 조용하지 않다 — 못 읽은 것과 방침이 없는 것은 다르다.
- */
-let _policyCache = null;
-function readHoldingPolicy() {
-  if (_policyCache) return _policyCache;
-  try {
-    const raw = require('node:fs').readFileSync(
-      require('node:path').join(__dirname, '..', 'config', 'holding-policy.json'), 'utf8');
-    _policyCache = JSON.parse(raw);
-  } catch (e) {
-    logWarn('analyst.holding_policy_unreadable', { message: e.message });
-    _policyCache = { holdings: {}, general: [] };
-  }
-  return _policyCache;
-}
 
-/** 프롬프트에 실을 방침 문장 — **게이트와 같은 값**에서 만든다 */
-function holdingPolicyLines() {
-  const pol = readHoldingPolicy();
-  const out = [];
-  for (const [sym, h] of Object.entries(pol.holdings || {})) {
-    if (String(h.stance).toLowerCase() !== 'hold') continue;
-    const w = h.sellAllowedWhen || {};
-    const conds = [];
-    if (Number.isFinite(Number(w.priceAtOrAbove))) conds.push(`현재가 ${w.priceAtOrAbove} 이상`);
-    if (Number.isFinite(Number(w.dayChangePctAtOrBelow))) conds.push(`당일 ${w.dayChangePctAtOrBelow}% 이하 급락`);
-    out.push(`${sym}: ${h.why || '사용자가 보유 유지를 정했다'}.`);
-    out.push(`  🔴 ${sym} SELL 제안은 ${conds.length ? conds.join(' 또는 ') : '별도 조건'} 일 때만 허용된다.`
-      + ' 그 밖에는 **코드가 거부한다** — 내지 마라.');
-  }
-  out.push(...(pol.general || []));
-  return out;
-}
 
-/**
- * 🔴 **방침을 코드가 지킨다** — 프롬프트는 지시일 뿐이다(이 저장소가 반복해 적은 규율).
- *
- * @param p       제안 `{symbol, side, price, quantity}`
- * @param holding 그 종목의 지금 상태 `{lastPrice, dailyRate}` (없으면 **판정하지 않는다**)
- */
-function holdingPolicyGate(p, holding) {
-  const sym = String(p?.symbol || '').toUpperCase();
-  const rule = readHoldingPolicy().holdings?.[sym];
-  if (!rule || String(rule.stance).toLowerCase() !== 'hold') return { ok: true };
-  if (String(p?.side).toUpperCase() !== 'SELL') return { ok: true };
-
-  const w = rule.sellAllowedWhen || {};
-  const price = Number(holding?.lastPrice);
-  const day = Number(holding?.dailyRate);
-  /**
-   * ⚠️ **모르면 막지 않는다.** 시세를 못 읽었는데 "조건 미달" 로 거부하면, 데이터 장애가
-   *    사용자의 정당한 매도까지 막는다. 대신 **그 사실을 남긴다** — 조용한 통과는 아니다.
-   */
-  if (!Number.isFinite(price) && !Number.isFinite(day)) {
-    logWarn('analyst.holding_policy_unjudged', { symbol: sym, why: '현재가·등락률을 못 읽어 방침을 판정하지 않았다' });
-    return { ok: true };
-  }
-  const okByPrice = Number.isFinite(Number(w.priceAtOrAbove)) && Number.isFinite(price)
-    && price >= Number(w.priceAtOrAbove);
-  const okByDrop = Number.isFinite(Number(w.dayChangePctAtOrBelow)) && Number.isFinite(day)
-    && day <= Number(w.dayChangePctAtOrBelow);
-  if (okByPrice || okByDrop) return { ok: true };
-
-  const parts = [];
-  if (Number.isFinite(price)) parts.push(`현재가 ${price}`);
-  if (Number.isFinite(day)) parts.push(`당일 ${day}%`);
-  return {
-    ok: false,
-    why: `${sym} 은 사용자가 **보유 유지**를 정한 종목이다 (${parts.join(' · ')})`
-      + ` — 매도는 ${Number.isFinite(Number(w.priceAtOrAbove)) ? `${w.priceAtOrAbove} 이상` : ''}`
-      + `${Number.isFinite(Number(w.dayChangePctAtOrBelow)) ? ` 또는 ${w.dayChangePctAtOrBelow}% 이하 급락` : ''} 일 때만 허용된다.`,
-  };
-}
 
 function inverseGate(p, regimeState) {
   const inv = require('./regimeService').readCatalog().categories?.inverse_hedge?.etfs || [];
@@ -2253,18 +2225,15 @@ async function decideOnContext({ contextText, regimeState = null, holdings = [] 
   const rejected = [];
   for (const p of report.proposals || []) {
     const gate = inverseGate(p, regimeState);
-    // ⚠️ **형제 중 하나만 빠지는 것**이 이 저장소의 전형적 실패다 — 여기도 같은 방침 게이트를 건다
-    const pol = holdingPolicyGate(p, (holdings || []).find(
-      (h) => String(h.symbol).toUpperCase() === String(p.symbol).toUpperCase()));
-    if (gate.ok && pol.ok) accepted.push(p);
-    else rejected.push({ ...p, error: gate.ok ? pol.why : gate.why });
+    if (gate.ok) accepted.push(p);
+    else rejected.push({ ...p, error: gate.why });
   }
   return { report, proposals: accepted, rejected };
 }
 
 module.exports = {
   analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport,
-  computeTrade, decideOnContext, inverseGate, holdingPolicyGate, holdingPolicyLines, REPORT_SCHEMA, SYSTEM_PROMPT,
+  computeTrade, decideOnContext, inverseGate, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
   assessBuyingCapacity, capacityDetail, capacityBand, describeNoProposal, watchMovesSection,
 };

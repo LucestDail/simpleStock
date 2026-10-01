@@ -425,43 +425,6 @@ const PROPOSAL_CLAIMED = new RegExp([
   '승인(해|을)\\s*(주세요|해\\s*주세요|하시면|부탁)',
 ].join('|'));
 
-/**
- * 🔴 **보유 방침을 채팅의 제안 경로에서도 막는다** (2026-10-01).
- *
- * 방침 게이트는 16:44 에 분석 경로(`analyze`·`decideOnContext`)에만 붙었다. 채팅에도
- * `propose_order`·`propose_conditional_order` 라는 **같은 문이 둘 더** 있었다 —
- * *"문이 셋인데 둘만 막으면 안 막는 것"*(이 파일이 계좌 한도에 대해 이미 적어 둔 말).
- *
- * ⚠️ **조건부 주문은 발동가로 판정한다.** 현재가로 보면 *"RAM 을 16.0 에 팔아줘"*
- *    (= 방침이 **허용한 바로 그 조건**)가 현재가 13.98 때문에 막힌다. 발동가가
- *    곧 체결 조건이므로 그것이 맞는 자다.
- * ⚠️ 당일 등락률은 **지금 값**을 쓴다 — 발동 시점의 등락률은 알 수 없다. 느슨한 쪽이라
- *    기록해 둔다(막는 가드가 오탐하면 사용자가 정당한 매도를 못 한다).
- */
-function policyBlock(args, ctx, atPrice) {
-  const sym = String(args?.symbol || '').toUpperCase();
-  const held = (ctx?.account?.items || []).find((h) => String(h.symbol || '').toUpperCase() === sym);
-  let gate;
-  try {
-    gate = require('./analystService').holdingPolicyGate(
-      { symbol: args?.symbol, side: String(args?.side || '').toUpperCase(), price: atPrice },
-      held ? { ...held, lastPrice: Number.isFinite(Number(atPrice)) ? Number(atPrice) : held.lastPrice } : held
-    );
-  } catch (e) {
-    // ⚠️ 방침을 못 읽은 것은 **통과가 아니다** — 다만 제안을 막지도 않는다(모르는 것이다)
-    logWarn('chat.policy_gate_failed', { message: e.message });
-    return null;
-  }
-  if (!gate || gate.ok !== false) return null;
-  logWarn('chat.policy_blocked', { symbol: sym, side: String(args?.side || '').toUpperCase(), atPrice });
-  return {
-    ok: false,
-    error: '사용자가 정한 보유 방침',
-    blockedBy: 'holding-policy',
-    note: `${gate.why} 제안을 만들지 않았다. 사용자에게 **방침을 그대로 알리고**,`
-      + ' 방침을 바꿀 생각인지 물어라. 추측해서 다시 시도하지 마라.',
-  };
-}
 
 function decidePrompt() {
   return [
@@ -978,9 +941,6 @@ async function runTool(name, args = {}, ctx = {}) {
             : '계좌 한도를 넘어 제안을 만들지 않았다. 수량을 줄이거나 사용자에게 알려라.',
         };
       }
-      // 🔴 계좌 다음은 **사용자 방침** — 둘 다 통과해야 제안이 된다
-      const blocked = policyBlock(args, ctx, args.price);
-      if (blocked) return blocked;
       // 🔴 빈칸이 있으면 `orderService` 가 거부한다 — 승인 화면이 주문 화면이 되면 안 된다
       const r = orderService.propose(
         {
@@ -1019,9 +979,6 @@ async function runTool(name, args = {}, ctx = {}) {
             : '계좌 한도를 넘어 예약 제안을 만들지 않았다. 수량을 줄이거나 사용자에게 알려라.',
         };
       }
-      // 🔴 조건부도 같은 문이다 — **발동가**로 방침을 판정한다(위 policyBlock 주석 참조)
-      const blockedCond = policyBlock(args, ctx, args.orderPrice ?? args.triggerPrice);
-      if (blockedCond) return blockedCond;
       const r = orderService.propose(
         {
           symbol: args.symbol,
@@ -1289,19 +1246,7 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
   }
 
   const preface = [accountTruthSection(accountSnap, accountErr)];
-  /**
-   * 🔴 **보유 방침도 채팅에 싣는다** (2026-10-01). 16:44 에 방침 게이트를 배포했는데
-   *    **채팅 경로 배선이 0건**이라, 그 뒤 세 턴이 전부 *"RAM 400주 전량 매도"* 를 권했다.
-   *    게이트는 제안 **등록**을 막지만 채팅은 **말로** 권한다 — 모델이 방침을 모르면
-   *    사용자는 "분명 보유하라고 정했는데 또 팔라네" 를 본다.
-   * ★ 정본은 `config/holding-policy.json` **한 벌**이고 분석 경로와 같은 함수를 쓴다.
-   */
-  try {
-    const policy = require('./analystService').holdingPolicyLines();
-    if (policy && policy.length) preface.push(`## 사용자가 정한 보유 방침 (어기지 마라)\n${policy.join('\n')}`);
-  } catch (e) {
-    logWarn('chat.policy_load_failed', { turnId, message: e.message });
-  }
+
   /**
    * 🔴 **사용자 템플릿을 채팅에도 싣는다** (2026-09-22). 분석 경로에는 있었는데
    *    채팅 경로에는 **빠져 있었다** — 사용자: *"내부의 내가 준 템플릿들을 종합하여서

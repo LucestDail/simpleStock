@@ -49,9 +49,52 @@ function status() {
 }
 
 /** 텔레그램 MarkdownV2 는 까다롭다 — 평문으로 보내고 escape 를 안 쓴다 */
+/**
+ * 🔴 **텔레그램은 4096자를 넘기면 통째로 거부한다** (2026-10-02).
+ *    종전엔 분할이 **아예 없어서**, 본문이 길어지는 순간 `message is too long` 으로
+ *    **브리핑 전체가 발송 실패**한다 — 그리고 사용자 화면에서는 *"브리핑이 안 왔다"*
+ *    로만 보인다(실패와 미발화가 같은 모양이다).
+ * ⚠️ 줄 경계로 쪼갠다 — 문장 중간에서 끊으면 숫자가 반으로 갈린다.
+ * ⚠️ 한 줄이 상한보다 길면 그 줄만 강제로 자른다(무한 루프 방지).
+ */
+const TG_LIMIT = Math.max(500, Number(process.env.TELEGRAM_MAX_CHARS) || 3900);
+function splitForTelegram(body, limit = TG_LIMIT) {
+  if (body.length <= limit) return [body];
+  const out = [];
+  let buf = '';
+  for (let line of body.split('\n')) {
+    while (line.length > limit) {
+      if (buf) { out.push(buf); buf = ''; }
+      out.push(line.slice(0, limit));
+      line = line.slice(limit);
+    }
+    if (buf && buf.length + 1 + line.length > limit) { out.push(buf); buf = line; }
+    else buf = buf ? `${buf}\n${line}` : line;
+  }
+  if (buf) out.push(buf);
+  return out;
+}
+
 async function send(text, { reason = 'manual', replyMarkup = null } = {}) {
   const body = String(text || '').trim();
   if (!body) return { ok: false, error: '빈 메시지' };
+
+  /**
+   * 🔴 길면 **나눠 보낸다** — 안 그러면 한 글자 초과로 브리핑 전체가 사라진다.
+   *    ⚠️ 버튼(replyMarkup)은 **마지막 조각에만** 붙인다. 앞 조각에 붙이면 같은 승인
+   *       버튼이 여러 번 떠서 사용자가 몇 번 눌러야 하는지 알 수 없게 된다.
+   */
+  const parts = splitForTelegram(body);
+  if (parts.length > 1) {
+    logInfo('telegram.split', { reason, chars: body.length, parts: parts.length });
+    let last = { ok: true, sent: false };
+    for (let i = 0; i < parts.length; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      last = await send(parts[i], { reason, replyMarkup: i === parts.length - 1 ? replyMarkup : null });
+      if (!last.ok) return last;
+    }
+    return last;
+  }
 
   if (!isConfigured() || !SEND_ENABLED) {
     // 🔴 조용히 성공으로 만들지 않는다. **안 보냈다는 사실**을 그대로 돌려준다
@@ -162,7 +205,7 @@ function _resetForTest() {
   notifiedToday.clear();
 }
 
-module.exports = {
+module.exports = { splitForTelegram,
   isConfigured,
   status,
   send,

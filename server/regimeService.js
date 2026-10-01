@@ -81,6 +81,81 @@ function vixBandOf(v) {
   return 0;
 }
 
+/**
+ * 🔴 **매크로 축 — 금리·신용·달러·시장폭** (2026-10-02 사용자 지시:
+ *    *"금리 인상/횡보/하락 등등 … 발생할 시장 국면성을 전부다 열거"*)
+ *
+ * 종전 국면은 `trend × shock × vix` **세 축뿐**이었다. 금리 축이 **아예 없었다** —
+ * 그래서 2026-10-02 실측 국면(美 10년물 5.34%, 24년만의 최고 · 글로벌 국채 투매)을
+ * 시스템이 **볼 수 없었고**, 리얼티 인컴 하락을 *"52주 신저가"* 라는 **증상**으로만 읽어
+ * 매도를 제안했다. 실제 원인은 **리츠가 금리에 눌린 것**이고 VNQ·XLU·SCHD 가 같이 내렸다.
+ *
+ * ★ **새 데이터 소스를 안 쓴다.** 채권·달러 ETF 가격이 곧 그 축이다 —
+ *   금리 상승 = TLT/IEF 하락. 같은 `judgeMarket` 산수를 그대로 태운다(판정은 산수다).
+ *   실측 2026-10-02: 16종 전부 브로커에서 받힌다(TLT·IEF·SHY·UUP·HYG·LQD·TIP…).
+ *
+ * ⚠️ **모르면 null 이다.** 데이터가 없는 축을 "중립" 으로 채우면 결손이 안심 신호가 된다
+ *    (VIX 밴드가 이미 배운 것).
+ */
+function judgeMacro({ tlt = null, ief = null, shy = null, uup = null, hyg = null, lqd = null, tip = null, spy = null, qqq = null } = {}) {
+  const tr = (x) => (x ? judgeMarket(x).trend : null);
+  const t = { tlt: tr(tlt), ief: tr(ief), shy: tr(shy), uup: tr(uup), hyg: tr(hyg), lqd: tr(lqd), tip: tr(tip), spy: tr(spy), qqq: tr(qqq) };
+
+  /**
+   * 금리 방향 — 채권값과 **반대**다. 장기(TLT)·중기(IEF)를 함께 본다.
+   * ⚠️ 한쪽만 있으면 그것으로 판정하되, 둘 다 없으면 null(모름).
+   */
+  const bondTrends = [t.tlt, t.ief].filter(Boolean);
+  let rates = null;
+  if (bondTrends.length) {
+    if (bondTrends.every((x) => x === 'down')) rates = 'rising';
+    else if (bondTrends.every((x) => x === 'up')) rates = 'falling';
+    else rates = 'flat';
+  }
+  /**
+   * 금리 상승의 **모양**: 단기물(SHY)까지 내리면 정책금리 기대가 움직인 것이고,
+   * 장기물만 내리면 기간 프리미엄·재정 우려다 — 처방이 다르다.
+   */
+  const rateShape = rates !== 'rising' ? null : (t.shy === 'down' ? 'whole-curve' : 'long-end');
+
+  /** 신용: 하이일드(HYG)·투자등급(LQD) 동반 약세 = 스프레드 확대 */
+  const credit = (t.hyg && t.lqd) ? ((t.hyg === 'down' && t.lqd === 'down') ? 'stress' : (t.hyg === 'up' ? 'easy' : 'mixed')) : null;
+
+  /** 달러: 강세는 신흥국·원자재·수입물가에 압박 */
+  const dollar = t.uup ? (t.uup === 'up' ? 'strong' : t.uup === 'down' ? 'weak' : 'flat') : null;
+
+  /**
+   * 시장 폭 — **좁은 시장**은 지수만 보면 안 보인다.
+   * QQQ 는 오르는데 SPY 가 못 따라가면 소수 종목이 끌고 가는 것이고, 그 장은 잘 부러진다.
+   */
+  const breadth = (t.qqq && t.spy) ? ((t.qqq === 'up' && t.spy !== 'up') ? 'narrow' : (t.qqq === 'up' && t.spy === 'up') ? 'broad' : (t.spy === 'down' ? 'weak' : 'mixed')) : null;
+
+  /** 실질금리: TIP 하락 = 실질금리 상승 → 금·장기성장주에 역풍 */
+  const realRate = t.tip ? (t.tip === 'down' ? 'rising' : t.tip === 'up' ? 'falling' : 'flat') : null;
+
+  return { rates, rateShape, credit, dollar, breadth, realRate, proxies: t };
+}
+
+const MACRO_KO = {
+  rates: { rising: '금리 상승', falling: '금리 하락', flat: '금리 횡보' },
+  rateShape: { 'whole-curve': '전 구간(정책금리 기대 이동)', 'long-end': '장기물 중심(기간 프리미엄·재정)' },
+  credit: { stress: '신용 경색', easy: '신용 완화', mixed: '혼조' },
+  dollar: { strong: '달러 강세', weak: '달러 약세', flat: '달러 횡보' },
+  breadth: { narrow: '좁은 시장(소수 주도)', broad: '넓은 상승', weak: '약세', mixed: '혼조' },
+  realRate: { rising: '실질금리 상승', falling: '실질금리 하락', flat: '실질금리 횡보' },
+};
+
+/**
+ * 매크로 프록시 — **브로커에서 실제로 받히는 것만** 넣는다(2026-10-02 실측 16/16 성공).
+ * ⚠️ 심볼을 더할 때는 **먼저 받아 보고** 넣는다. 안 받히는 심볼은 조용히 축을 null 로 만든다.
+ */
+const MACRO_PROXIES = [
+  ['tlt', 'TLT'], ['ief', 'IEF'], ['shy', 'SHY'], ['uup', 'UUP'],
+  ['hyg', 'HYG'], ['lqd', 'LQD'], ['tip', 'TIP'], ['spy', 'SPY'], ['qqq', 'QQQ'],
+];
+const MACRO_TTL_MS = Math.max(60_000, Number(process.env.REGIME_MACRO_TTL_MS) || 30 * 60_000);
+let macroCache = null;
+
 const VIX_BAND_LABEL = ['평온(<20)', '공포 진입(20+) — 분할 매수 1단계', '공포 확대(25+) — 2단계', '고공포(30+) — 3단계', '극단 공포(35+) — 최대 단계'];
 const TREND_KO = { up: '상승추세', side: '횡보', down: '하락추세' };
 
@@ -95,11 +170,13 @@ const TREND_KO = { up: '상승추세', side: '횡보', down: '하락추세' };
  * ⚠️ `vix` 는 **여전히 숫자(또는 null)**다 — 기존 `compute({vix:26})` 호출부·테스트가
  *    그대로 통과해야 한다(하위호환). stale·나이는 별도 파라미터로 받는다.
  */
-function compute({ kr = null, us = null, vix = null, vixStale = false, vixAgeMin = null, manual = [] } = {}) {
+function compute({ kr = null, us = null, vix = null, vixStale = false, vixAgeMin = null, manual = [], macro = null } = {}) {
   return {
     at: new Date().toISOString(),
     kr: kr ? judgeMarket(kr) : null,
     us: us ? judgeMarket(us) : null,
+    // 🔴 매크로 축 (2026-10-02) — 없으면 **null 이지 중립이 아니다**
+    macro: macro ? judgeMacro(macro) : null,
     vix: vix != null
       ? { value: Number(vix), band: vixBandOf(vix), stale: Boolean(vixStale), ageMin: vixAgeMin ?? null }
       : { value: null, band: null, stale: false, ageMin: null },
@@ -122,6 +199,10 @@ function vixStaleNote(vix) {
  * 시나리오 매칭 — playbook 의 match 절과 상태를 대조한다.
  * 🔴 여러 개가 맞으면 **전부** 발동한다(예: 하락추세 + VIX 25 는 bear_trend 와 fear_ladder 둘 다).
  */
+/** 시나리오가 쓸 수 있는 매크로 매칭 키 — judgeMacro 의 반환 축과 **한 벌**이어야 한다 */
+const PLAYBOOK_MAX = Math.max(1, Number(process.env.PLAYBOOK_MAX) || 4);
+const MACRO_MATCH_KEYS = ['rates', 'rateShape', 'credit', 'dollar', 'breadth', 'realRate'];
+
 function matchScenarios(state, playbook) {
   const out = [];
   const anyShock = Boolean(state?.kr?.shock || state?.us?.shock);
@@ -143,9 +224,40 @@ function matchScenarios(state, playbook) {
     if (m.shock === true && !anyShock) continue;
     if (m.shock === false && anyShock) continue;
     if (m.shock === true) via = ['us', 'kr'].filter((k) => state?.[k]?.shock).map((k) => k.toUpperCase()).join('·') || via;
-    if (m.vixBandMin != null && !(band != null && band >= m.vixBandMin)) continue;
+    if (m.vixBandMin != null && !(band != null && band <= 99 && band >= m.vixBandMin)) continue;
     if (m.vixBandMax != null && !(band != null && band <= m.vixBandMax)) continue;
-    out.push({ ...sc, via: via || (m.vixBandMin != null ? 'VIX' : via) });
+    /**
+     * 🔴 **매크로 축 매칭** (2026-10-02). `rates`·`rateShape`·`credit`·`dollar`·`breadth`·
+     *    `realRate` 중 시나리오가 **명시한 것만** 본다(생략 = 무엇이든).
+     * ⚠️ **모르는 축은 발동시키지 않는다** — `state.macro` 가 없거나 그 축이 null 이면
+     *    `continue`. 모름을 "맞다" 로 읽으면 데이터 결손이 매뉴얼을 발동시킨다
+     *    (VIX 밴드가 이미 배운 것: 결손을 "평온" 으로 읽으면 안 된다).
+     */
+    let macroHit = false;
+    for (const key of MACRO_MATCH_KEYS) {
+      if (m[key] == null) continue;
+      const got = state?.macro?.[key];
+      const want = Array.isArray(m[key]) ? m[key] : [m[key]];
+      if (got == null || !want.includes(got)) { macroHit = null; break; }
+      macroHit = true;
+    }
+    if (macroHit === null) continue;
+    out.push({ ...sc, via: via || (macroHit ? '매크로' : (m.vixBandMin != null ? 'VIX' : via)) });
+  }
+  /**
+   * 🔴 **우선순위 정렬 + 상한** (2026-10-02). 축이 늘자 한 순간에 6개가 맞았고, 그중
+   *    `bull_calm`("공격 축 확대 허용")과 `stagflation`("레버리지를 쓰지 않는다")이
+   *    **정반대 지시를 동시에** 모델에게 보냈다. 위험을 줄이는 쪽이 이긴다.
+   * ⚠️ 잘린 것은 **조용히 사라지지 않는다** — 안 그러면 "왜 그 매뉴얼이 안 먹었나" 를
+   *    영영 못 찾는다(이 저장소가 반복해 배운 자리).
+   */
+  out.sort((x, y) => (y.priority ?? 50) - (x.priority ?? 50));
+  if (out.length > PLAYBOOK_MAX) {
+    logInfo('regime.playbook_truncated', {
+      matched: out.length, kept: PLAYBOOK_MAX,
+      dropped: out.slice(PLAYBOOK_MAX).map((x) => x.id),
+    });
+    return out.slice(0, PLAYBOOK_MAX);
   }
   return out;
 }
@@ -209,6 +321,38 @@ async function refresh() {
     const closes = (c.rows || []).map((r) => r.c).filter(Number.isFinite);
     inputs.us = { closes, last: null };
   } catch (e) { logWarn('regime.us_failed', { message: e.message, kind: e.kind }); }
+  /**
+   * 🔴 **매크로 프록시** (2026-10-02). 새 데이터 소스 없이 **채권·달러 ETF 가격**으로
+   *    금리·신용·달러·시장폭을 판정한다(위 judgeMacro 참조).
+   * ⚠️ **캐시 30분** — 이 값들은 분 단위로 안 변하는데 refresh 는 5분마다 돈다.
+   *    캐시가 없으면 호출이 12배가 되고 브로커 쿼터를 그쪽이 다 먹는다.
+   * ⚠️ 한 종목이 실패해도 **나머지로 판정한다** — 전부 실패하면 null(모름)이다.
+   *    매크로는 곁가지이므로 본체(추세·VIX)를 끌고 내려가면 안 된다.
+   */
+  try {
+    if (macroCache && Date.now() - macroCache.at < MACRO_TTL_MS) {
+      inputs.macro = macroCache.data;
+    } else {
+      const got = {};
+      let okCount = 0;
+      await Promise.all(MACRO_PROXIES.map(async ([key, sym]) => {
+        try {
+          const c = await toss.getCandles(sym, { interval: '1d', count: 70 });
+          const closes = (c.rows || []).map((r) => r.c).filter(Number.isFinite);
+          if (closes.length >= 60) { got[key] = { closes, last: null }; okCount += 1; }
+        } catch { /* 한 종목 실패는 치명적이지 않다 */ }
+      }));
+      if (okCount) {
+        macroCache = { at: Date.now(), data: got };
+        inputs.macro = got;
+        logInfo('regime.macro_refreshed', { ok: okCount, asked: MACRO_PROXIES.length });
+      } else {
+        // ⚠️ 전부 실패했으면 **조용하지 않다** — 축이 통째로 먼 것이다
+        logWarn('regime.macro_unavailable', { asked: MACRO_PROXIES.length });
+      }
+    }
+  } catch (e) { logWarn('regime.macro_failed', { message: e.message }); }
+
   try {
     const v = await market.getVix();
     inputs.vix = v?.price ?? null;
@@ -320,6 +464,25 @@ function promptSection(state = current, scenarios = null) {
     lines.push(`- ${mkt.toUpperCase()}: ${m.trend ? TREND_KO[m.trend] : '판정 불가(데이터 부족)'}${m.dayPct != null ? ` · 당일 ${m.dayPct}%` : ''}${m.shock ? ' · 🔴급락' : ''}`);
   }
   lines.push(`- VIX: ${state.vix?.value ?? '확인 못 함'}${state.vix?.band != null ? ` — ${VIX_BAND_LABEL[state.vix.band]}` : ' (확인 못 함이면 낮다고 가정 금지)'}`);
+  /**
+   * 🔴 **매크로 축을 모델에게 보여 준다** (2026-10-02). 판정만 하고 안 실으면
+   *    *"수집해 놓고 안 쓰는"* 이 된다 — 이 저장소가 열 번 넘게 밟은 자리다.
+   * ⚠️ 축이 null 이면 **그 줄을 안 쓴다**(모름을 중립으로 적으면 모델이 안심한다).
+   */
+  const mc = state.macro;
+  if (mc) {
+    const parts = [];
+    if (mc.rates) parts.push(`${MACRO_KO.rates[mc.rates]}${mc.rateShape ? `(${MACRO_KO.rateShape[mc.rateShape]})` : ''}`);
+    if (mc.realRate) parts.push(MACRO_KO.realRate[mc.realRate]);
+    if (mc.credit) parts.push(MACRO_KO.credit[mc.credit] === '혼조' ? '신용 혼조' : MACRO_KO.credit[mc.credit]);
+    if (mc.dollar) parts.push(MACRO_KO.dollar[mc.dollar]);
+    if (mc.breadth) parts.push(`시장폭 ${MACRO_KO.breadth[mc.breadth]}`);
+    if (parts.length) {
+      lines.push(`- 매크로: ${parts.join(' · ')}`);
+      lines.push('  🔴 **종목의 등락을 설명할 때 국면을 먼저 보라** — "52주 신저가" 는 증상이지 원인이 아니다.'
+        + ' 금리 상승기에 리츠·유틸·고배당이 함께 내리는 것은 **그 종목의 문제가 아니다**(2026-10-02 실사고).');
+    }
+  }
 
   const active = scenarios || matchScenarios(state, readPlaybook());
   if (active.length) {
@@ -328,7 +491,7 @@ function promptSection(state = current, scenarios = null) {
     const wantCats = new Set();
     for (const sc of active) {
       // via = 발동 근원 — 디커플링에서 "이 매뉴얼은 어느 시장 얘기인가" 를 모델이 안다
-      lines.push(`### ${sc.name}${sc.via ? ` — 발동: ${sc.via}` : ''}${sc.via && sc.via !== 'VIX' && sc.via.length <= 5 ? ' (이 시장에만 적용)' : ''}`);
+      lines.push(`### ${sc.name}${sc.via ? ` — 발동: ${sc.via}` : ''}${['US', 'KR', 'US·KR', 'KR·US'].includes(sc.via) ? ' (이 시장에만 적용)' : ''}`);
       /**
        * 국면별 모델 포트폴리오 기준선 (2026-09-24) — 제안은 이 기준선과의 괴리를 줄이는 방향.
        * ⚠️ 울타리가 아니라 나침반(사용자 결정: 비율 상한 강제 없음).
@@ -508,7 +671,7 @@ function setManual(tags) {
 
 function getState() { return current || loadState(); }
 
-module.exports = {
+module.exports = { MACRO_MATCH_KEYS, judgeMacro, MACRO_KO,
   compute, judgeMarket, vixBandOf, matchScenarios, diffTransitions, promptSection,
   refresh, getState, setManual, readPlaybook, readCatalog, candidateSection, ladderProposals,
   scenarioCategories, roundRobinCandidates, CANDIDATE_MAX,

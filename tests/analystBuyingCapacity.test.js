@@ -1,5 +1,12 @@
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
+
+/**
+ * ⚠️ **기본 버퍼는 0 이 됐다** (2026-10-02 사용자 지시). 이 파일은 **버퍼 기계 자체**를
+ *    재는 자라서 15% 를 명시해 켠다 — 끈 상태로 두면 이 파일 전체가 공허하게 통과한다.
+ *    (기본값이 0 이라는 사실은 `orderAccountCheck.test.js` 가 따로 못박는다.)
+ */
+process.env.CASH_FLOOR_PCT = '15';
 const os = require('node:os');
 const path = require('node:path');
 
