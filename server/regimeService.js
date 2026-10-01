@@ -254,6 +254,56 @@ function readCatalog() {
   }
 }
 
+// ── 시나리오 → 도구상자 카테고리 (판정 한 벌) ────────────────
+
+/**
+ * 🔴 발동 시나리오가 끌어올 카탈로그 카테고리 키를 정한다 — **판정은 이 한 함수** (2026-10-01).
+ *
+ * ## 왜 고쳤나
+ * 종전에는 `promptSection` 과 `candidateSection` 이 **각자** 이렇게 추측했다:
+ * `for (key of catalog.categories) if (step.includes(key)) want.add(key)`
+ * — 즉 스텝 문자열 안에 `tech_broad` 같은 **키가 문자 그대로 박혀 있어야만** 잡혔다.
+ * 스텝을 심볼이나 한글로 쓰면 **조용히 0개**가 되는데, 도구상자가 비면 프롬프트가
+ * "이 목록 밖 티커는 계좌 검증이 거부한다" 를 붙이므로 **매수 제안이 통째로 0** 이 된다.
+ *
+ * 실측(수정 전): `side_grind` 0개(스텝이 `QLD→QQQ` 라 키가 없다) ·
+ * `fear_ladder` **kr_broad 하나뿐**(스텝이 `QQQ·SPY 계열` 이라 `tech_broad`·`sp_broad` 가 없다)
+ * ⇒ VIX 사다리가 발동하는 **바로 그 순간, 사라고 한 종목이 화이트리스트 밖**이었다.
+ *
+ * ## 왜 한 함수인가
+ * 같은 로직이 두 곳에 **복제**돼 있던 것이 이 결함의 뿌리다 — 복제된 자는 갈라진다.
+ * 프롬프트(도구상자)와 후보 산출이 서로 다른 집합을 보면, 모델에게 보여준 목록과
+ * 실제 후보가 어긋나도 아무도 모른다.
+ *
+ * ⚠️ `categories` 가 **없는** 시나리오(사용자가 손으로 추가할 수 있다)는 옛 추측으로
+ *    떨어지되 **반드시 warn 을 남긴다** — 조용히 0개가 되면 지금 결함이 그대로 재발한다.
+ * ⚠️ 카탈로그에 없는 키는 **그 키만 버리고 warn** — 조용히 버리면 오타가 영원히 안 보인다.
+ *
+ * @returns {string[]} 카탈로그에 실재하는 카테고리 키 (선언 순서 유지)
+ */
+function scenarioCategories(sc, catalog) {
+  const known = catalog?.categories || {};
+  if (Array.isArray(sc?.categories)) {
+    const out = [];
+    for (const raw of sc.categories) {
+      const key = String(raw);
+      if (!Object.prototype.hasOwnProperty.call(known, key)) {
+        logWarn('regime.playbook_unknown_category', { scenario: sc.id ?? null, category: key });
+        continue;
+      }
+      if (!out.includes(key)) out.push(key);
+    }
+    return out;
+  }
+  // ── 폴백: 옛 부분문자열 추측 (조용히 0개가 되는 그 경로다 — 그래서 시끄럽게 한다)
+  logWarn('regime.playbook_categories_missing', { scenario: sc?.id ?? null });
+  const out = [];
+  for (const st of sc?.steps || []) {
+    for (const key of Object.keys(known)) if (st.includes(key) && !out.includes(key)) out.push(key);
+  }
+  return out;
+}
+
 // ── 분석 프롬프트 절 ─────────────────────────────────────────
 
 /**
@@ -287,10 +337,9 @@ function promptSection(state = current, scenarios = null) {
         lines.push(`  기준 배분: ${mp.map(([k, v]) => `${k} ${v}`).join(' · ')}`);
         if (sc.modelPortfolio._설명) lines.push(`  (${sc.modelPortfolio._설명})`);
       }
-      for (const st of sc.steps) {
-        lines.push(`- ${st}`);
-        for (const key of Object.keys(catalog.categories || {})) if (st.includes(key)) wantCats.add(key);
-      }
+      for (const st of sc.steps) lines.push(`- ${st}`);
+      // 🔴 판정은 scenarioCategories 한 곳 — candidateSection 과 같은 함수를 탄다(두 벌이면 갈라진다)
+      for (const key of scenarioCategories(sc, catalog)) wantCats.add(key);
     }
     if (wantCats.size) {
       lines.push('', '## 도구상자 (티커는 이 안에서만 — 지어내지 마라)');
@@ -315,31 +364,78 @@ function promptSection(state = current, scenarios = null) {
  *    summarizeCandles 를 **그대로 받아 쓴다** — 자를 새로 만들지 않는다.
  * ⚠️ 실패한 후보는 건너뛴다(빈 값 지어내기 금지) · 후보 수 상한 4(길이 = 시간).
  */
+const CANDIDATE_MAX = 6;
+
+/**
+ * 🔴 **시나리오 라운드로빈** — 발동한 매뉴얼마다 최소 한 칸을 보장한다 (2026-10-01).
+ *
+ * 종전에는 시나리오를 **순서대로** 돌며 채웠다. 그래서 앞 시나리오가 상한 6을 혼자
+ * 먹으면 **뒤 시나리오는 한 칸도 못 받았다.** 실측: `side_grind`(카테고리 6개)가 혼자
+ * 상한을 채워 함께 발동한 `fear_ladder` 의 **SPY 가 통째로 밀렸다** — 공포 사다리가
+ * 사라고 지목한 바로 그 종목이다.
+ *
+ * ★ 이것은 09-24 에 고친 병이 **한 층 위에서 재발한 것**이다. 그때는 *카테고리* 하나가
+ *   두 칸을 먹어 인버스가 잘렸고(처방: 카테고리당 1개), 지금은 *시나리오* 하나가 여섯
+ *   칸을 먹어 뒤 시나리오가 통째로 잘렸다. **같은 처방을 그 층에 적용한다.**
+ * ★ 상한을 올리는 것은 이 비대칭을 **없애지 않고 뒤로 미룰 뿐**이다(시나리오가 셋이면
+ *   다시 같은 일이 난다) — 그래서 상한 6은 그대로 둔다.
+ *
+ * ⚠️ **발동 시나리오가 하나뿐이면 결과가 종전과 글자 그대로 같다**(한 줄에서 1개씩 빼는
+ *    것 = 순차). 단일 발동이 압도적으로 흔하므로 거기서 회귀를 내면 안 된다 —
+ *    `playbookCatalogWiring.test.js` 가 6종 전부를 **순서까지** 못박는다.
+ * ⚠️ **카테고리당 1개·같은 심볼 1회는 전역 규칙**이다(시나리오별이 아니다) — 두 시나리오가
+ *    `gold` 를 공유해도 GLD 는 한 번만 나온다. 라운드로빈이 그 규칙을 깨면 안 된다.
+ */
+function roundRobinCandidates(scenarios, catalog, held) {
+  // 시나리오별 '카테고리 줄' — 각 칸은 그 카테고리에서 쓸 수 있는 ETF 후보들(선언 순서)
+  const queues = scenarios.map((sc) => scenarioCategories(sc, catalog).map((key) => ({
+    key,
+    // 1배(정방향·인버스 -1 포함 — 인버스 헤지는 사용자 결정 09-24) · 미보유 · KR 은 원화 현금이 있어야 의미
+    etfs: catalog.categories[key].etfs.filter(
+      (e) => Math.abs(e.leverage) === 1 && !held.has(e.symbol) && e.market !== 'KR'
+    ),
+  })));
+  const cursor = queues.map(() => 0);
+  const usedCats = new Set();
+  const usedSyms = new Set();
+  const wanted = [];
+  let progressed = true;
+  // 한 바퀴에 시나리오마다 1개씩 — 아무도 못 집으면 멈춘다(큐 고갈 = 무한루프 방지)
+  while (wanted.length < CANDIDATE_MAX && progressed) {
+    progressed = false;
+    for (let i = 0; i < queues.length && wanted.length < CANDIDATE_MAX; i += 1) {
+      while (cursor[i] < queues[i].length) {
+        const slot = queues[i][cursor[i]];
+        cursor[i] += 1;
+        if (usedCats.has(slot.key)) continue; // 🔴 카테고리당 1개 — 전역
+        const e = slot.etfs.find((x) => !usedSyms.has(x.symbol)); // 🔴 같은 심볼 1회 — 전역
+        if (!e) continue;
+        usedCats.add(slot.key);
+        usedSyms.add(e.symbol);
+        /**
+         * ⚠️ `scenarioIdx` = **그 칸을 실제로 집어 간 시나리오**. 공정성을 검사하려면
+         *    "내 카테고리가 채워졌나" 가 아니라 "내가 집었나" 를 봐야 한다 — 카테고리를
+         *    공유하면(예: side_grind·fear_ladder 가 둘 다 tech_broad) 남이 채운 것을 보고
+         *    **자기가 받은 줄 착각**한다. 실제로 첫 판 테스트가 그 착각으로 변이를 놓쳤다.
+         */
+        wanted.push({ symbol: e.symbol, name: e.name, category: catalog.categories[slot.key].name, categoryKey: slot.key, scenarioIdx: i });
+        progressed = true;
+        break;
+      }
+    }
+  }
+  return wanted;
+}
+
 async function candidateSection(scenarios, { heldSymbols = [], summarize, getCandles } = {}) {
   if (!scenarios?.length || typeof summarize !== 'function' || typeof getCandles !== 'function') return '';
   const catalog = readCatalog();
   const held = new Set(heldSymbols.map((s) => String(s).toUpperCase()));
-  const wanted = [];
-  for (const sc of scenarios) {
-    for (const st of sc.steps || []) {
-      for (const key of Object.keys(catalog.categories || {})) {
-        if (!st.includes(key)) continue;
-        for (const e of catalog.categories[key].etfs) {
-          // 1배(정방향·인버스 -1 포함 — 인버스 헤지는 사용자 결정 09-24) · 미보유 · KR 은 원화 현금이 있어야 의미
-          if (Math.abs(e.leverage) !== 1 || held.has(e.symbol) || e.market === 'KR') continue;
-          /**
-           * 🔴 카테고리당 1개 (2026-09-24 시뮬 실측) — 생필품이 XLP·VDC 로 두 자리를 먹어
-           *    상한에 인버스(PSQ)가 **항상 잘렸다.** 같은 카테고리 둘은 정보가 거의 같다 —
-           *    다양성이 상한 안에서 우선이다.
-           */
-          if (wanted.some((w) => w.categoryKey === key)) break;
-          if (!wanted.some((w) => w.symbol === e.symbol)) wanted.push({ symbol: e.symbol, name: e.name, category: catalog.categories[key].name, categoryKey: key });
-        }
-      }
-    }
-  }
+  // 🔴 판정은 scenarioCategories 한 곳 — promptSection(도구상자)과 반드시 같은 집합이어야 한다.
+  //    어긋나면 "모델에게 보여준 목록" 과 "후보로 시세를 뜬 목록" 이 갈라지는데 아무도 모른다.
+  const wanted = roundRobinCandidates(scenarios, catalog, held);
   const lines = [];
-  for (const w of wanted.slice(0, 6)) {
+  for (const w of wanted) {
     try {
       const c = await getCandles(w.symbol, { interval: '1d', count: 120 });
       const t = summarize(c.rows || []);
@@ -414,5 +510,6 @@ function getState() { return current || loadState(); }
 module.exports = {
   compute, judgeMarket, vixBandOf, matchScenarios, diffTransitions, promptSection,
   refresh, getState, setManual, readPlaybook, readCatalog, candidateSection, ladderProposals,
+  scenarioCategories, roundRobinCandidates, CANDIDATE_MAX,
   vixStaleNote, VIX_BAND_LABEL, TREND_KO,
 };
