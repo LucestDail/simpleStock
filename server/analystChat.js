@@ -414,7 +414,15 @@ function accountTruthSection(snap, err) {
  * ★ 2026-08-04 *"메일 발송했습니다"* 와 같은 가족이다 — **말과 행동이 갈리는 것**은
  *   기능이 없는 것보다 나쁘다. 없으면 포기하지만, 있다고 하면 믿고 기다린다.
  */
-const PROPOSAL_CLAIMED = /(제안|주문)\s*(을|를)?\s*(등록|접수)(했|합니다|하겠|해)/;
+const PROPOSAL_CLAIMED = new RegExp([
+  '(제안|주문)\\s*(을|를)?\\s*(등록|접수)(했|합니다|하겠|해)',
+  // 🔴 "등록" 을 안 쓰고 **결과만** 말하는 쪽이 실제로 더 흔했다 (2026-10-01 E2E 실물:
+  //    "상단 HITL에서 승인해 주세요" — 등록은 0건인데 가드가 못 봤다).
+  //    ★ 내가 판단기의 열거 비대칭을 지적해 놓고 **내 가드가 똑같이** 열거하고 있었다.
+  '상단[^.\\n]{0,10}(HITL|목록)',
+  'HITL[^.\\n]{0,10}(에서|에)?\\s*승인',
+  '승인(해|을)\\s*(주세요|해\\s*주세요|하시면|부탁)',
+].join('|'));
 
 /**
  * 🔴 **보유 방침을 채팅의 제안 경로에서도 막는다** (2026-10-01).
@@ -1162,6 +1170,29 @@ function isStubAnswer(answer) {
   return /잠시만|조회\s*중|확인\s*중|알아보는 중/.test(t);
 }
 
+/**
+ * 🔴 **과거 "내 답변" 의 수치를 가린다** (2026-10-01 — E2E 로 두 번 확인한 뒤).
+ *
+ * 계좌 정본을 매 턴 실어도 모델이 **과거 대화의 가격을 그대로 썼다**(실측: 답변이
+ * `$96.54`·`$13.98`·`$54.50` 을 인용 — 실제 현재가는 96.83·14.00·54.49).
+ * 같은 턴 안에 올바른 숫자가 **두 번**(계좌 절 + 도구 결과) 있었는데도 그랬다.
+ * ⇒ 프롬프트로 한 번 더 타이르는 것은 09-30 에 이미 실패했다. **숫자를 없앤다.**
+ *
+ * ⚠️ **사용자 발화는 절대 안 건드린다.** 사용자가 *"나 아직 90주 남았어"* 라고 한 것은
+ *    **사실의 진술**이고, 가리면 모델이 사용자의 정정을 못 읽는다. 가리는 것은
+ *    *"그때 데이터로 내가 한 말"* 뿐이다 — 그건 지금 낡았다.
+ * ⚠️ 뜻은 남긴다 — 방향("전량 매도")·논리("레버리지 감쇠")는 그대로이고 **수치만** 간다.
+ */
+const STALE = '⟨옛값⟩';
+function maskStaleNumbers(text) {
+  return String(text || '')
+    .replace(/\$\s?\d[\d,]*(?:\.\d+)?/g, STALE)          // $96.54
+    .replace(/\d[\d,]*(?:\.\d+)?\s*(원|달러)/g, STALE)     // 19,537,164원
+    .replace(/\d[\d,]*\s*주(?![가-힣])/g, `${STALE}주`)      // 400주 (주가·주식 은 제외)
+    .replace(/[+-]?\d+(?:\.\d+)?\s*%/g, STALE)            // -26.7%
+    .replace(/\b\d{1,6}\.\d{1,2}\b/g, STALE);            // 92.38 (맨 소수 = 이 바닥에선 가격)
+}
+
 function partsOf(chunk) {
   return chunk?.candidates?.[0]?.content?.parts || [];
 }
@@ -1218,7 +1249,12 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
 
   const contents = [];
   for (const h of recent) {
-    contents.push({ role: h.role === 'user' ? 'user' : 'model', parts: [{ text: String(h.text || '') }] });
+    const isUser = h.role === 'user';
+    contents.push({
+      role: isUser ? 'user' : 'model',
+      // 🔴 **내 과거 답변의 수치만** 가린다 (maskStaleNumbers 주석 참조)
+      parts: [{ text: isUser ? String(h.text || '') : maskStaleNumbers(h.text) }],
+    });
   }
   /**
    * 🔴 **계좌 정본을 먼저 읽는다** — 판단기가 도구를 고르든 말든 상관없이 (2026-10-01).
@@ -1257,7 +1293,13 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
   if (recalled.length) {
     preface.push(
       '## 과거 대화에서 찾은 것 (recall)\n' +
-        recalled.map((r) => `- [${r.at}] ${r.role === 'user' ? '사용자' : '나'}: ${r.text}`).join('\n')
+        /**
+         * 🔴 **여기도 과거 "내 답변" 이 들어온다** — `contents` 만 가리고 이 절을 빠뜨려
+         *    가격이 그대로 샜다(배선 테스트가 잡았다). *형제 중 하나만 빠진* 전형이고,
+         *    바로 그 패턴을 지적하는 커밋에서 내가 똑같이 저질렀다.
+         */
+        recalled.map((r) => `- [${r.at}] ${r.role === 'user' ? '사용자' : '나'}: `
+          + (r.role === 'user' ? r.text : maskStaleNumbers(r.text))).join('\n')
     );
   }
   contents.push({
@@ -1616,6 +1658,7 @@ module.exports = {
   // 테스트용 — 맥락 조립의 두 축을 밖에서 직접 잰다(로그를 세려 하면 공허해진다)
   accountTruthSection,
   isStubAnswer,
+  maskStaleNumbers,
   PROPOSAL_CLAIMED,
   currentSession,
   tokenize,

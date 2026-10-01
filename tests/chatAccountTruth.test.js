@@ -318,3 +318,91 @@ test('🔴 정식명·레버리지가 계좌 절에 실린다 (도구 0회 턴�
   assert.match(p, /2배 레버리지/, '레버리지 배수가 없다 — "레버리지 줄일까" 를 판단할 수 없다');
   assert.ok(!/QLD QLD|RAM RAM/.test(p), '티커가 두 번 적혔다');
 });
+
+// ── ⑦ 과거 "내 답변" 의 수치를 가린다 ───────────────────────────
+
+/**
+ * 🔴 계좌 정본을 실어도 모델이 **과거 대화의 가격을 그대로 썼다** (E2E 실측:
+ *    답변이 `$96.54`·`$13.98`·`$54.50` 인용 — 실제는 96.83·14.00·54.49).
+ *    같은 턴 안에 올바른 숫자가 **두 번**(계좌 절 + 도구 결과) 있었는데도 그랬다.
+ *    ⇒ 더 타이르지 않고 **숫자를 없앤다.**
+ */
+test('🔴 과거 모델 답변의 가격·수량·퍼센트가 가려진다', () => {
+  const m = require('../server/analystChat').maskStaleNumbers;
+  assert.ok(!m('오늘: $96.54에 1주 매도').includes('96.54'), '달러 가격이 남았다');
+  assert.ok(!m('RAM 400주 전량, -26.7% 손실').includes('400'), '수량이 남았다');
+  assert.ok(!m('20일선(92.38) 위').includes('92.38'), '맨 소수 가격이 남았다 — 이 바닥에선 거의 가격이다');
+});
+
+test('🔴 사용자 발화는 **절대** 안 가린다 (정정을 못 읽게 된다)', async () => {
+  const chat = fresh();
+  await run(chat, '내 주식 뭐있어?');
+  const chat2 = fresh({ answer: 'QLD는 $96.54 입니다.' });
+  await run(chat2, '뭔소리야 나 아직 90주 남았어');
+  const p = promptText();
+  assert.ok(p.includes('90주'), '사용자가 말한 "90주" 가 가려졌다 — 사용자의 정정이 모델에게 안 간다');
+});
+
+/**
+ * ⚠️ **자가 한 번 틀렸다** — 처음엔 과거 답변에 `$96.54` 를 썼는데 그건 **픽스처의 QLD
+ *    현재가와 같은 숫자**라, 계좌 정본에 정상적으로 실린 값을 "가림 실패" 로 읽었다.
+ *    ★ *"대상이 0건인가" 가 아니라 "재려던 그것이 대상에 들었나"* — 가린 과거 값은
+ *      **현재 값과 겹치지 않는 수**여야 한다. 실제 오염 값(773.5)을 쓴다.
+ */
+test('🔴 과거 모델 답변은 가려진 채로 프롬프트에 들어간다 (배선 축)', async () => {
+  const chat = fresh({ answer: 'QLD 보유 2,652주, 평단 542, 현재 773.5 입니다.' });
+  await run(chat, 'qld 어때?');
+  const chat2 = fresh();
+  await run(chat2, '그럼 어떻게 할까?');
+  const p = promptText();
+  assert.ok(!p.includes('773.5'), '과거 답변의 가격이 그대로 실렸다 — 가림이 배선되지 않았다');
+  assert.ok(!p.includes('2,652'), '과거 답변의 수량이 그대로 실렸다');
+  assert.ok(p.includes('⟨옛값⟩'), '가림 표식이 없다 — 과거 답변이 아예 안 실렸거나 가림이 안 돌았다');
+  assert.ok(p.includes('96.54'), '현재 계좌의 가격까지 사라졌다 — 가림이 과했다(오탐 축)');
+});
+
+test('오탐 축: "2배 레버리지"·"주가" 는 안 건드린다', () => {
+  const m = require('../server/analystChat').maskStaleNumbers;
+  assert.equal(m('QLD는 2배 레버리지라 주가 변동이 크다'), 'QLD는 2배 레버리지라 주가 변동이 크다');
+});
+
+test('🔴 "등록" 이라고 안 쓰고 결과만 말해도 잡는다 (내 가드가 열거하고 있었다)', () => {
+  const re = require('../server/analystChat').PROPOSAL_CLAIMED;
+  assert.equal(re.test('상단 HITL에서 승인해 주세요.'), true, 'E2E 실물을 놓쳤다');
+  assert.equal(re.test('승인해 주세요'), true);
+  assert.equal(re.test('QLD는 20일선 위입니다'), false, '오탐');
+  assert.equal(re.test('이 종목은 승인된 ETF입니다'), false, '오탐 — "승인된" 은 주장이 아니다');
+});
+
+/**
+ * 🔴 **recall 은 `contents` 와 다른 문**이다 — 세션 밖 과거는 이쪽으로만 들어온다.
+ *    첫 구현에서 `contents` 만 가리고 이 절을 빠뜨렸고, **변이 검증이 "안 잡힘" 을 내서야**
+ *    알았다(테스트는 초록이었다). ★*형제 중 하나만 빠진* 전형을, 그 패턴을 고치는
+ *    커밋에서 내가 똑같이 저질렀다.
+ * ⚠️ 세션 안에 두면 `contents` 가 대신 가려 줘서 **이 문을 재지 못한다** — 6시간 밖에 둔다.
+ */
+test('🔴 recall 로 올라온 과거 답변도 가려진다 (세션 밖 경로)', async () => {
+  const fs2 = require('node:fs');
+  const old = new Date(Date.now() - 9 * 3600_000).toISOString();
+  /**
+   * ⚠️ **코퍼스를 채운다** — 2줄만 넣으면 모든 낱말의 df=N 이라 **idf=0** 이고 recall 이
+   *    아무것도 못 고른다. 전에도 밟은 함정이다(*"고립 테스트가 idf=0 에 가려 재려던 것을
+   *    안 재고 있었다"*). 채우는 줄에는 **리얼티인컴이 없어야** df 가 낮게 유지된다.
+   */
+  const filler = Array.from({ length: 14 }, (_, i) => JSON.stringify({
+    at: new Date(Date.now() - (30 + i) * 3600_000).toISOString(),
+    turnId: `f${i}`, role: i % 2 ? 'assistant' : 'user',
+    text: `${i % 2 ? '네 알겠습니다' : '질문입니다'} 잡담 주제 ${'가나다라마바사아자차카타파하'[i]} 내용`,
+  }));
+  fs2.writeFileSync(process.env.ANALYST_CHAT_FILE, [
+    ...filler,
+    JSON.stringify({ at: old, turnId: 'old1', role: 'user', text: '리얼티인컴 매수 매력 판단해줘' }),
+    JSON.stringify({ at: old, turnId: 'old1', role: 'assistant', text: '리얼티인컴 현재 773.5, 2,652주 보유 기준입니다.' }),
+  ].join('\n') + '\n');
+  const chat = fresh();
+  await run(chat, '리얼티인컴 지금 어때?');
+  const p = promptText();
+  assert.match(p, /recall/, 'recall 절이 안 실렸다 — 이 테스트가 그 문을 못 재고 있다(공허한 통과)');
+  assert.ok(p.includes('773') === false, 'recall 로 올라온 과거 가격이 그대로 실렸다');
+  assert.ok(p.includes('2,652') === false, 'recall 로 올라온 과거 수량이 그대로 실렸다');
+});
