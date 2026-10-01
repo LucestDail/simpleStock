@@ -72,3 +72,54 @@ test('임계값이 하루보다 짧게 설정되지 않았다', () => {
   // 장이 쉬는 주말을 넘겨야 하므로 너무 짧으면 월요일 아침에 멀쩡한 금요일 종가를 버린다
   assert.ok(QUOTE_STALE_MS >= 2 * DAY, `임계값이 ${QUOTE_STALE_MS / DAY}일 — 주말을 못 넘긴다`);
 });
+
+// ── 로그 소음 — 라이브에서 내가 만든 회귀 ─────────────────────────
+
+const { shouldReportStaleChange } = require('../server/watchlistService');
+const fs = require('node:fs');
+
+/**
+ * 🔴 **첫 시도는 공허하게 통과했다.** `logWarn` 을 monkey-patch 해서 "몇 번 짖었나" 를
+ *    세려 했는데, 그 모듈은 `const { logWarn } = require('./logger')` 로 **구조분해
+ *    바인딩**이라 밖에서 바꿔도 안 먹는다 ⇒ 매번 찍는 변이에도 **9/9 통과**했다.
+ *    ⇒ 로그를 세지 말고 **판정을 직접** 잰다.
+ */
+
+test('같은 집합을 다시 물으면 거짓 — 15분에 16건이 쌓이던 그 소음', () => {
+  const 집합 = ['QLD@2026-05-08', 'JEPI@2026-05-08'];
+  assert.equal(shouldReportStaleChange(집합), true, '처음엔 말해야 한다');
+  assert.equal(shouldReportStaleChange(집합), false);
+  assert.equal(shouldReportStaleChange(집합), false);
+});
+
+test('집합이 바뀌면 다시 참 — 조용해지는 것과 안 보는 것은 다르다', () => {
+  shouldReportStaleChange(['A@1', 'B@2']);
+  assert.equal(shouldReportStaleChange(['A@1']), true, '줄어든 것도 사건이다');
+  assert.equal(shouldReportStaleChange(['A@1', 'C@3']), true, '늘어난 것도 사건이다');
+  assert.equal(shouldReportStaleChange([]), true, '전부 사라진 것도 사건이다');
+  assert.equal(shouldReportStaleChange([]), false, '빈 상태가 이어지면 조용하다');
+});
+
+test('순서만 다른 같은 집합은 같은 것으로 본다', () => {
+  shouldReportStaleChange(['X@1', 'Y@2']);
+  assert.equal(shouldReportStaleChange(['Y@2', 'X@1']), false, '순서 때문에 또 짖으면 안 된다');
+});
+
+test('입력 배열을 건드리지 않는다 (호출부가 그 배열을 로그에 싣는다)', () => {
+  const 원본 = ['Z@9', 'A@1'];
+  shouldReportStaleChange(원본);
+  assert.deepEqual(원본, ['Z@9', 'A@1'], '정렬이 호출부의 배열을 뒤집으면 로그 순서가 바뀐다');
+});
+
+test('배선이 살아 있다 — buildQuoteIndex 가 이 판정을 실제로 쓴다', () => {
+  /**
+   * 🔴 순수 함수만 테스트하면 "로직은 맞는데 안 불린다" 를 못 잡는다.
+   *    판정부를 함수로 뺐으니 **호출이 사라져도 위 테스트는 전부 초록**이다.
+   */
+  const src = fs.readFileSync(require.resolve('../server/watchlistService'), 'utf8');
+  const body = src.slice(src.indexOf('function buildQuoteIndex'), src.indexOf('function joinQuote'));
+  assert.ok(body.includes('shouldReportStaleChange('),
+    'buildQuoteIndex 가 판정을 안 쓴다 — 매 호출 찍히던 상태로 돌아갔다');
+  assert.ok(body.includes("logWarn('watchlist.stale_quote_dropped'"),
+    '판정은 하는데 로그가 사라졌다 — 그러면 조용히 버리는 것이다');
+});

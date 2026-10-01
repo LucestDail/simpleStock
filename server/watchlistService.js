@@ -44,6 +44,13 @@ function inferMarket({ symbol, market, currency }) {
  *   ⚠️ 날짜가 없는 쪽을 **선호하지도 않는다** — 날짜 있는 것이 신선하면 그대로 쓴다.
  *      버리는 기준은 오직 "임계값보다 오래됐다" 하나다.
  */
+/**
+ * 직전에 버린 집합의 지문 — **바뀔 때만** 로그를 남기려고 들고 있다(아래 buildQuoteIndex 참조).
+ * ⚠️ 프로세스 수명 동안만 산다. 재기동하면 한 번 더 찍히는데 그건 맞다 —
+ *    새 프로세스는 자기가 무엇을 버리는지 한 번은 말해야 한다.
+ */
+let lastStaleSignature = null;
+
 const QUOTE_STALE_MS = Math.max(0, Number(process.env.WATCHLIST_QUOTE_STALE_MS) || 7 * 24 * 60 * 60_000);
 
 /** 본인이 적어 둔 시각 기준으로 너무 낡았는가. 시각이 없거나 못 읽으면 **판정하지 않는다**(false). */
@@ -51,6 +58,25 @@ function isSelfDeclaredStale(quote, now = Date.now()) {
   const at = Date.parse(quote?.updatedAt || '');
   if (!Number.isFinite(at)) return false;      // 모르는 것은 낡았다고 단정하지 않는다
   return now - at > QUOTE_STALE_MS;
+}
+
+/**
+ * 버린 집합이 **직전과 달라졌는가** — 달라졌을 때만 참.
+ *
+ * 🔴 **판정을 함수로 뺀 이유는 테스트 때문만이 아니다.** 처음엔 이 비교를
+ *    `buildQuoteIndex` 안에 인라인으로 두고 "로그가 한 번만 나오는지" 를 테스트하려
+ *    했는데, 이 모듈은 `const { logWarn } = require('./logger')` 로 **구조분해 바인딩**
+ *    이라 밖에서 가로챌 수 없다 ⇒ **그 테스트가 변이에도 통과했다**(공허한 통과).
+ *    반환값은 멀쩡하니 결과만 보면 소음을 영영 못 본다.
+ *    ⇒ 로그를 세려 하지 말고 **판정을 직접 재는** 쪽으로 옮겼다.
+ * ⚠️ 부수효과(지문 갱신)가 있으므로 **한 번 물으면 답이 바뀐다.** 호출부는 한 곳뿐이고,
+ *    아래 자가 그 배선이 사라지지 않는지 소스로 지킨다.
+ */
+function shouldReportStaleChange(dropped) {
+  const signature = [...dropped].sort().join('|');
+  if (signature === lastStaleSignature) return false;
+  lastStaleSignature = signature;
+  return true;
 }
 
 // 최신 시세를 티커에 조인. quotes 키는 "MARKET:SYMBOL" 이지만 ETF↔KR 편차가 있어
@@ -71,8 +97,31 @@ function buildQuoteIndex(now = Date.now()) {
     }
     if (!bySymbol.has(sym)) bySymbol.set(sym, quote);
   }
-  if (dropped.length) {
-    logWarn('watchlist.stale_quote_dropped', { count: dropped.length, staleDays: Math.round(QUOTE_STALE_MS / 86_400_000), keys: dropped.slice(0, 10) });
+  /**
+   * 🔴 **버린 집합이 바뀔 때만 짖는다** (2026-10-01 라이브 실측 후 수정).
+   *
+   * 처음엔 호출마다 찍었는데 `buildQuoteIndex` 는 **관심종목을 읽을 때마다** 불린다 ⇒
+   * 배포 15분에 **같은 줄이 16건** 쌓였다. 버려지는 키는 공급자 교체 잔재라 거의
+   * 안 변하는데, 그 불변인 사실을 매번 반복하면 **옆의 진짜 경고를 묻는다.**
+   * ⚠️ 이 저장소가 `analyst.trigger_live_at_missing` 에서 이미 겪은 그 실수다 —
+   *    *"오탐하는 경고는 있으나 마나가 아니라 해롭다. 사람이 로그를 안 보게 만든다."*
+   *
+   * ⇒ **집합이 바뀐 순간**(새 키가 늘거나 줄거나)에만 남긴다. 그러면 로그 한 줄이
+   *   *"상태가 이렇다"* 가 아니라 **"무언가 달라졌다"** 를 뜻하게 된다.
+   * ⚠️ 조용해지는 것과 **안 보는 것**을 구분하려고, 바뀔 때는 **전체 집합**을 싣는다
+   *   (증분만 싣으면 나중에 로그 한 줄만 보고는 현재 상태를 복원할 수 없다).
+   */
+  if (shouldReportStaleChange(dropped)) {
+    if (dropped.length) {
+      logWarn('watchlist.stale_quote_dropped', {
+        count: dropped.length,
+        staleDays: Math.round(QUOTE_STALE_MS / 86_400_000),
+        keys: dropped.slice(0, 10),
+      });
+    } else {
+      // 🔴 **사라진 것도 사건이다** — 안 적으면 "고쳐졌다" 와 "검사가 멈췄다" 가 같아 보인다
+      logInfo('watchlist.stale_quote_cleared', {});
+    }
   }
   return bySymbol;
 }
@@ -341,5 +390,7 @@ module.exports = {
   inferMarket,
   // 테스트용 — 낡은 시세 판정을 밖에서 직접 재게 한다(가드가 가드를 못 보면 안 된다)
   isSelfDeclaredStale,
+  shouldReportStaleChange,
   QUOTE_STALE_MS,
+  _resetStaleLogForTest: () => { lastStaleSignature = null; },
 };
