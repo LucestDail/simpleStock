@@ -287,6 +287,13 @@ const SYSTEM_PROMPT = [
   '- "반대 시나리오"·"확인 못 한 것" 같은 절은 **판단이 갈릴 만할 때만** 한두 줄로 — 매 답마다',
   '  정해진 틀을 채우지 않는다.',
   '',
+  '## 🔴 지금 질문이 과거 대화를 이깁니다 (2026-10-01 실사고)',
+  '- 사용자가 **새 조건**을 걸면("공격적으로", "보수적으로", "현금 늘려") 그게 기준입니다.',
+  '  몇 시간 전 대화에서 정한 방향과 어긋나면 **지금 질문을 따릅니다.**',
+  '- 🔴 과거 답변의 "제안 요약" 을 **그대로 다시 쓰지 않습니다.** 그건 그때 질문에 대한 답입니다.',
+  '  (실측: "공격적으로 투자한다면 자산비율 조정?" 에 3시간 전 "전량 청산" 요약을 그대로 재탕했다.)',
+  '- 숫자는 `## 계좌` 절만 근거입니다. 과거 대화에 적힌 수량·가격은 **낡은 값**입니다.',
+  '',
   '## 🔴 주문은 내지 않습니다',
   '매수/매도가 필요하다고 판단되면 **제안으로 등록**됩니다(상단 HITL 목록).',
   '그건 주문이 아닙니다 — **사람이 승인해야** 진행되고, 당신은 승인도 실행도 할 수 없습니다.',
@@ -334,6 +341,109 @@ const DECIDE_SCHEMA = {
   required: ['tools'],
 };
 
+/**
+ * 🔴 **계좌 정본을 매 턴 프롬프트에 싣는다** (2026-10-01 라이브 실사고)
+ *
+ * 분석 경로(`analystService.analyze`)는 `## 계좌` 를 **매 회차** 싣는데 채팅만 안 실었다
+ * — *형제 중 하나만 빠진* 전형. 그 결과 채팅은 **도구를 안 부른 턴에서 과거 대화의
+ * 숫자를 그대로 인용**했다(17:41 "지금 2주 남은 걸" ← 실제 90주 · 20:57 3시간 12분 묵은 표).
+ *
+ * ★ **금지가 아니라 대체다.** 09-30 에 *"과거 숫자를 재사용하지 마라"* 는 프롬프트 가드를
+ *   넣었고 네 턴 전부 라이브였는데 **모델이 네 번 다 무시했다.** 모델에게 쓸 숫자가
+ *   과거 대화밖에 없으면 그걸 쓴다 — 막을 게 아니라 **맞는 숫자를 줘야** 한다.
+ *
+ * ⚠️ 실패해도 절을 **지우지 않는다**. 절이 사라지면 모델은 "계좌 얘기가 없네" 가 아니라
+ *    "과거 대화에 있네" 로 간다 — 조용한 실패가 가장 나쁜 모양이다.
+ */
+function accountTruthSection(snap, err) {
+  const head = '## 계좌 (지금 조회한 값 — 보유·현금 숫자는 이 절만 근거다)';
+  if (err) {
+    return [
+      head,
+      `🔴 조회 실패: ${err}`,
+      '→ 보유 수량·평단·현재가·비중·현금을 **답에 쓰지 마라.** 과거 대화에 적힌 숫자도 낡았다.',
+      '   "지금 계좌를 확인하지 못했다" 고 밝히고, 숫자가 필요 없는 선에서만 답하라.',
+    ].join('\n');
+  }
+  const num = (v, d = 2) => (Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '—');
+  const items = Array.isArray(snap?.items) ? snap.items : [];
+  const s = snap?.summary || {};
+  const lines = [head];
+  if (!items.length) {
+    lines.push('보유 종목 **없음**(0종목) — 매도할 것이 없다.');
+  } else {
+    for (const it of items) {
+      lines.push(
+        `- ${it.symbol} ${it.name || ''} — **${num(it.quantity, 0)}주** · 평단 ${num(it.avgPrice)}`
+        + ` · 현재 ${num(it.lastPrice)} (손익 ${num(it.profitRate)}% · 당일 ${num(it.dailyRate)}%)`
+      );
+    }
+  }
+  lines.push(`가용 현금 — USD ${num(s?.cash?.usd?.amount)} · KRW ${num(s?.cash?.krw?.amount, 0)}`);
+  /**
+   * 🔴 두 수익률이 다르면 **둘 다** 준다 — 분석 경로와 같은 규율(2026-10-01).
+   *    안 주면 모델이 스스로 다시 계산하고, 사용자는 화면과 답이 다른 것을 본다.
+   */
+  if (Number.isFinite(Number(s?.profitRateDerived)) && Number.isFinite(Number(s?.profitRate))
+      && Math.abs(Number(s.profitRateDerived) - Number(s.profitRate)) > 0.5) {
+    lines.push(`⚠️ 평가손익률이 두 값으로 온다 — 증권사 보고 ${num(s.profitRate)}% ·`
+      + ` **금액에서 계산하면 ${num(s.profitRateDerived)}%**. 금액과 일관된 쪽은 계산값이다.`);
+  } else if (Number.isFinite(Number(s?.profitRate))) {
+    lines.push(`평가손익률 ${num(s.profitRate)}% · 당일 ${num(s?.dailyRate)}%`);
+  }
+  lines.push('🔴 과거 대화에 다른 수량·가격·비중이 적혀 있으면 **그것은 낡은 값이다 — 이 절이 맞다.**');
+  return lines.join('\n');
+}
+
+/**
+ * 답이 *"제안을 등록했다"* 고 주장하는가.
+ *
+ * 🔴 2026-10-01 20:57 턴이 **"RAM 400주 전량 매도 제안을 등록합니다"** 라고 써서 보냈는데
+ *    실제 등록은 **0건**이었다(그날 등록된 제안 2건은 12:19 분이고 둘 다 사용자가 거절).
+ *    사용자는 승인 버튼을 찾으러 가고, 없으면 **시스템이 고장 난 것으로 읽는다.**
+ * ★ 2026-08-04 *"메일 발송했습니다"* 와 같은 가족이다 — **말과 행동이 갈리는 것**은
+ *   기능이 없는 것보다 나쁘다. 없으면 포기하지만, 있다고 하면 믿고 기다린다.
+ */
+const PROPOSAL_CLAIMED = /(제안|주문)\s*(을|를)?\s*(등록|접수)(했|합니다|하겠|해)/;
+
+/**
+ * 🔴 **보유 방침을 채팅의 제안 경로에서도 막는다** (2026-10-01).
+ *
+ * 방침 게이트는 16:44 에 분석 경로(`analyze`·`decideOnContext`)에만 붙었다. 채팅에도
+ * `propose_order`·`propose_conditional_order` 라는 **같은 문이 둘 더** 있었다 —
+ * *"문이 셋인데 둘만 막으면 안 막는 것"*(이 파일이 계좌 한도에 대해 이미 적어 둔 말).
+ *
+ * ⚠️ **조건부 주문은 발동가로 판정한다.** 현재가로 보면 *"RAM 을 16.0 에 팔아줘"*
+ *    (= 방침이 **허용한 바로 그 조건**)가 현재가 13.98 때문에 막힌다. 발동가가
+ *    곧 체결 조건이므로 그것이 맞는 자다.
+ * ⚠️ 당일 등락률은 **지금 값**을 쓴다 — 발동 시점의 등락률은 알 수 없다. 느슨한 쪽이라
+ *    기록해 둔다(막는 가드가 오탐하면 사용자가 정당한 매도를 못 한다).
+ */
+function policyBlock(args, ctx, atPrice) {
+  const sym = String(args?.symbol || '').toUpperCase();
+  const held = (ctx?.account?.items || []).find((h) => String(h.symbol || '').toUpperCase() === sym);
+  let gate;
+  try {
+    gate = require('./analystService').holdingPolicyGate(
+      { symbol: args?.symbol, side: String(args?.side || '').toUpperCase(), price: atPrice },
+      held ? { ...held, lastPrice: Number.isFinite(Number(atPrice)) ? Number(atPrice) : held.lastPrice } : held
+    );
+  } catch (e) {
+    // ⚠️ 방침을 못 읽은 것은 **통과가 아니다** — 다만 제안을 막지도 않는다(모르는 것이다)
+    logWarn('chat.policy_gate_failed', { message: e.message });
+    return null;
+  }
+  if (!gate || gate.ok !== false) return null;
+  logWarn('chat.policy_blocked', { symbol: sym, side: String(args?.side || '').toUpperCase(), atPrice });
+  return {
+    ok: false,
+    error: '사용자가 정한 보유 방침',
+    blockedBy: 'holding-policy',
+    note: `${gate.why} 제안을 만들지 않았다. 사용자에게 **방침을 그대로 알리고**,`
+      + ' 방침을 바꿀 생각인지 물어라. 추측해서 다시 시도하지 마라.',
+  };
+}
+
 function decidePrompt() {
   return [
     '당신은 **도구 사용 여부만** 정하는 판단기입니다. 사람에게 하는 답은 쓰지 않습니다.',
@@ -368,7 +478,21 @@ function decidePrompt() {
     '    · 한 종목의 단기 체결 강도가 필요할 때 → get_trades',
     '    · 검색 헤드라인만으로 부족하면 → read_article(URL) 로 **본문**을 읽고 판단하라',
     '    · 기업의 질·밸류·점수 → rate_stock (10항목 100점 · 유형별 기준)',
-    '- 🔴 잡담·인사·감사이거나 **이미 `[도구 결과]` 로 받은 것**이면 `tools` 를 **빈 배열**로 둡니다.',
+    /**
+     * 🔴 **기본값을 뒤집는다** (2026-10-01). 위 목록은 **열거**라서, 사용자가 열거 안 된
+     *    표현 하나만 쓰면 도구가 0이 된다. 라이브 실측 — *"내 자산 비중 어때?"* 는 걸리는데
+     *    **"공격적으로 투자한다면 내 자산비율 조정 어떻게?"** 는 안 걸렸다(A 판 **0/5회**).
+     *    이 저장소가 셸 가드·MCP 이름·HTML 태그에서 이미 세 번 진 그 비대칭이다.
+     * 📊 A/B 실측(진짜 프롬프트 3회씩): 그 질의 **0/5 → 6/7**, 잡담·메타 **오탐 0/3 유지**.
+     * ⚠️ 나머지 질의는 회차마다 갈려 **개선을 주장하지 않는다** — 이득은 저 한 축이다.
+     *    데이터 정합성 자체는 `## 계좌` 정본이 지키고, 이건 최신 시세·뉴스를 더 받는 쪽이다.
+     */
+    '- 🔴 **기본값은 부르는 쪽입니다.** 위 목록은 예시이지 전부가 아닙니다 — 사용자의 말이',
+    '  **자기 돈·보유·종목·시장**에 관한 것이면 열거에 없어도 필요한 도구를 고르세요.',
+    '  자산 배분·비중·비율·리밸런싱·"공격적으로/보수적으로"·"줄일까/늘릴까" 는 **전부',
+    '  get_portfolio 가 필요합니다** — 무엇을 얼마나 들고 있는지 모르면 답할 수 없습니다.',
+    '- 🔴 잡담·인사·감사이거나 **시스템 사용법을 묻는 메타 질문**이거나',
+    '  **이미 `[도구 결과]` 로 받은 것**이면 `tools` 를 **빈 배열**로 둡니다.',
   ].join('\n');
 }
 
@@ -731,7 +855,12 @@ function recall(query, { limit = RECALL_LIMIT, history = null, excludeTurnId = n
 async function runTool(name, args = {}, ctx = {}) {
   switch (name) {
     case 'get_portfolio': {
-      const p = await tossPortfolio.getHoldings({ fx: ctx.fx || null });
+      /**
+       * ⚠️ 같은 턴에 프리페이스가 이미 읽어 뒀으면 **그것을 쓴다** (2026-10-01).
+       *    몇 초 차이로 두 번 부르면 외부 호출만 두 배이고, 두 값이 미세하게 달라지면
+       *    모델이 **같은 턴 안에서 다른 숫자 둘**을 보게 된다(그게 더 나쁘다).
+       */
+      const p = ctx.account || await tossPortfolio.getHoldings({ fx: ctx.fx || null });
       return {
         summary: p.summary,
         items: (p.items || []).map((h) => ({
@@ -830,6 +959,9 @@ async function runTool(name, args = {}, ctx = {}) {
             : '계좌 한도를 넘어 제안을 만들지 않았다. 수량을 줄이거나 사용자에게 알려라.',
         };
       }
+      // 🔴 계좌 다음은 **사용자 방침** — 둘 다 통과해야 제안이 된다
+      const blocked = policyBlock(args, ctx, args.price);
+      if (blocked) return blocked;
       // 🔴 빈칸이 있으면 `orderService` 가 거부한다 — 승인 화면이 주문 화면이 되면 안 된다
       const r = orderService.propose(
         {
@@ -868,6 +1000,9 @@ async function runTool(name, args = {}, ctx = {}) {
             : '계좌 한도를 넘어 예약 제안을 만들지 않았다. 수량을 줄이거나 사용자에게 알려라.',
         };
       }
+      // 🔴 조건부도 같은 문이다 — **발동가**로 방침을 판정한다(위 policyBlock 주석 참조)
+      const blockedCond = policyBlock(args, ctx, args.orderPrice ?? args.triggerPrice);
+      if (blockedCond) return blockedCond;
       const r = orderService.propose(
         {
           symbol: args.symbol,
@@ -1054,7 +1189,33 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
   for (const h of recent) {
     contents.push({ role: h.role === 'user' ? 'user' : 'model', parts: [{ text: String(h.text || '') }] });
   }
-  const preface = [];
+  /**
+   * 🔴 **계좌 정본을 먼저 읽는다** — 판단기가 도구를 고르든 말든 상관없이 (2026-10-01).
+   *    같은 턴에 `get_portfolio` 도구가 불려도 **이 스냅샷을 재사용**한다(외부 호출 1회).
+   */
+  let accountSnap = null;
+  let accountErr = null;
+  try {
+    accountSnap = await tossPortfolio.getHoldings({ fx: fx || null });
+  } catch (e) {
+    accountErr = e.message || String(e);
+    logWarn('chat.account_failed', { turnId, message: accountErr });
+  }
+
+  const preface = [accountTruthSection(accountSnap, accountErr)];
+  /**
+   * 🔴 **보유 방침도 채팅에 싣는다** (2026-10-01). 16:44 에 방침 게이트를 배포했는데
+   *    **채팅 경로 배선이 0건**이라, 그 뒤 세 턴이 전부 *"RAM 400주 전량 매도"* 를 권했다.
+   *    게이트는 제안 **등록**을 막지만 채팅은 **말로** 권한다 — 모델이 방침을 모르면
+   *    사용자는 "분명 보유하라고 정했는데 또 팔라네" 를 본다.
+   * ★ 정본은 `config/holding-policy.json` **한 벌**이고 분석 경로와 같은 함수를 쓴다.
+   */
+  try {
+    const policy = require('./analystService').holdingPolicyLines();
+    if (policy && policy.length) preface.push(`## 사용자가 정한 보유 방침 (어기지 마라)\n${policy.join('\n')}`);
+  } catch (e) {
+    logWarn('chat.policy_load_failed', { turnId, message: e.message });
+  }
   /**
    * 🔴 **사용자 템플릿을 채팅에도 싣는다** (2026-09-22). 분석 경로에는 있었는데
    *    채팅 경로에는 **빠져 있었다** — 사용자: *"내부의 내가 준 템플릿들을 종합하여서
@@ -1101,8 +1262,22 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
   let toolCalls = 0;
   let decideFailed = null;
 
-  /** 판단기에게 보여 줄 대화 사본 — 도구 결과가 쌓이면 여기에도 붙는다 */
-  const seen = [`## 사용자 발화\n${text}`];
+  /**
+   * 판단기에게 보여 줄 대화 사본 — 도구 결과가 쌓이면 여기에도 붙는다.
+   *
+   * 🔴 **직전 사용자 발화를 함께 준다** (2026-10-01). 종전엔 현재 발화 **한 줄**만 줬다.
+   *    사용자는 종목 이름을 한 번 말하고 그다음부터 생략한다 —
+   *    *"매일매일 1주씩 사고 50달러 하방 돌파시 추가로 더 사는건?"* 에 판단기가
+   *    **`web_search("TQQQ")`** 를 골랐다(그 대화는 리얼티인컴 얘기였다). 라이브 실측.
+   *
+   * ⚠️ **사용자 발화만** 넣는다 — 모델의 과거 답변이나 `[도구 결과]` 를 넣으면
+   *    판단기가 *"이미 받았다"* 며 도구를 안 부른다. **고치려던 결함을 그대로 다시 만든다.**
+   */
+  const priorUserTurns = recent
+    .filter((h) => h.role === 'user')
+    .slice(-2)
+    .map((h) => `## 직전 사용자 발화\n${String(h.text || '').slice(0, 200)}`);
+  const seen = [...priorUserTurns, `## 사용자 발화\n${text}`];
   /**
    * ⚠️ **같은 호출을 두 번 하지 않는다.** 결과를 이미 줬는데도 판단기가 또 부르는 일이
    *    실측 5회 중 1회 있었다(같은 `get_portfolio`). 프롬프트로 막으려 하지 말고
@@ -1182,7 +1357,7 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
       emit('tool_call', { id: callId, name: call.name, args: call.args });
       let result;
       try {
-        result = await runTool(call.name, call.args, { fx, turnId });
+        result = await runTool(call.name, call.args, { fx, turnId, account: accountSnap });
         emit('tool_result', { id: callId, name: call.name, ok: true, preview: preview(result) });
         // ⚠️ 도구가 스스로 {ok:false} 를 돌려주는 경우(runTool 안에서 잡은 실패)도 실패로 센다
         toolLog.push({ name: call.name, ok: result?.ok !== false, ...(result?.ok === false ? { error: String(result.error || '').slice(0, 200) } : {}) });
@@ -1307,6 +1482,21 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
     answer = '';
   }
 
+  /**
+   * 🔴 **말과 행동이 갈리면 사용자에게 말한다** (2026-10-01 실사고 — 위 PROPOSAL_CLAIMED 참조).
+   *    조용히 두면 사용자는 상단 목록에서 승인 버튼을 찾다가 **시스템이 고장 났다고 읽는다.**
+   * ⚠️ 답을 고쳐 쓰지는 않는다 — 스트리밍은 되돌릴 수 없고, 판단 자체는 쓸모가 있다.
+   *    **없는 것을 있다고 한 사실만** 덧붙인다.
+   */
+  if (PROPOSAL_CLAIMED.test(answer)
+      && !toolLog.some((t) => /^propose/.test(t.name || '') && t.ok !== false)) {
+    logWarn('chat.proposal_claim_unbacked', { turnId, tools: toolLog.map((t) => t.name) });
+    emit('notice', {
+      text: '⚠️ 답에는 제안을 등록했다고 적혀 있지만 **실제로는 등록되지 않았습니다** —'
+        + ' 상단 목록에 안 뜹니다. 필요하면 "제안 등록해줘" 라고 다시 말해 주세요.',
+    });
+  }
+
   appendHistory({ at: new Date().toISOString(), turnId, role: 'assistant', text: answer, toolCalls, rounds, tools: toolLog });
   logInfo('chat.turn', {
     turnId, rounds, toolCalls, chars: answer.length, recalled: recalled.length,
@@ -1393,6 +1583,8 @@ module.exports = {
   HISTORY_FILE,
   MAX_ROUNDS,
   // 테스트용 — 맥락 조립의 두 축을 밖에서 직접 잰다(로그를 세려 하면 공허해진다)
+  accountTruthSection,
+  PROPOSAL_CLAIMED,
   currentSession,
   tokenize,
   SESSION_GAP_MS,
