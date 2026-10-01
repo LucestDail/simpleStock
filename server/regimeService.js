@@ -200,11 +200,17 @@ function vixStaleNote(vix) {
  * 🔴 여러 개가 맞으면 **전부** 발동한다(예: 하락추세 + VIX 25 는 bear_trend 와 fear_ladder 둘 다).
  */
 /** 시나리오가 쓸 수 있는 매크로 매칭 키 — judgeMacro 의 반환 축과 **한 벌**이어야 한다 */
-const PLAYBOOK_MAX = Math.max(1, Number(process.env.PLAYBOOK_MAX) || 4);
+/**
+ * 🔴 4 → **6** (2026-10-02). 국면이 18 → 32종이 되자 한 순간에 **14개**가 맞았고
+ *    상한 4 에서 `rate_shock_whole_curve`(금리 축) 같은 핵심이 잘렸다.
+ * ⚠️ 무한정 늘리지 않는다 — 전부 실으면 길이가 판단을 밀어낸다. 6 = 매크로 2~3 +
+ *    포트폴리오 1 + 추세 1~2 정도가 들어가는 수다.
+ */
+const PLAYBOOK_MAX = Math.max(1, Number(process.env.PLAYBOOK_MAX) || 6);
 const MACRO_MATCH_KEYS = ['rates', 'rateShape', 'credit', 'dollar', 'breadth', 'realRate'];
 
 function matchScenarios(state, playbook) {
-  const out = [];
+  let out = [];
   const anyShock = Boolean(state?.kr?.shock || state?.us?.shock);
   const band = state?.vix?.band;
   for (const sc of playbook?.scenarios || []) {
@@ -233,6 +239,25 @@ function matchScenarios(state, playbook) {
      *    `continue`. 모름을 "맞다" 로 읽으면 데이터 결손이 매뉴얼을 발동시킨다
      *    (VIX 밴드가 이미 배운 것: 결손을 "평온" 으로 읽으면 안 된다).
      */
+    /**
+     * 🔴 **포트폴리오 자신도 국면이다** (2026-10-02). 시장이 멀쩡해도 **내 배분이 위험하면**
+     *    그건 다뤄야 할 상태다 — 실측: 레버리지 합계 **90.7%** 인데 어떤 매뉴얼도 그걸
+     *    보지 않았다(시장 축만 봤기 때문이다).
+     * ⚠️ 비중을 못 읽으면(`state.portfolio` 없음) 포트폴리오 조건 매뉴얼은 **발동하지 않는다**
+     *    — 모름을 "맞다" 로 읽지 않는 규율은 여기도 같다.
+     */
+    if (m.portfolio) {
+      const w = state?.portfolio;
+      if (!w) continue;
+      const bad = Object.entries(m.portfolio).some(([field, cond]) => {
+        const got = Number(w[field]);
+        if (!Number.isFinite(got)) return true;
+        if (cond.min != null && got < cond.min) return true;
+        if (cond.max != null && got > cond.max) return true;
+        return false;
+      });
+      if (bad) continue;
+    }
     let macroHit = false;
     for (const key of MACRO_MATCH_KEYS) {
       if (m[key] == null) continue;
@@ -242,7 +267,7 @@ function matchScenarios(state, playbook) {
       macroHit = true;
     }
     if (macroHit === null) continue;
-    out.push({ ...sc, via: via || (macroHit ? '매크로' : (m.vixBandMin != null ? 'VIX' : via)) });
+    out.push({ ...sc, via: via || (m.portfolio ? '내 포트폴리오' : macroHit ? '매크로' : (m.vixBandMin != null ? 'VIX' : via)) });
   }
   /**
    * 🔴 **우선순위 정렬 + 상한** (2026-10-02). 축이 늘자 한 순간에 6개가 맞았고, 그중
@@ -252,6 +277,20 @@ function matchScenarios(state, playbook) {
    *    영영 못 찾는다(이 저장소가 반복해 배운 자리).
    */
   out.sort((x, y) => (y.priority ?? 50) - (x.priority ?? 50));
+  /**
+   * 🔴 **특수가 일반을 밀어낸다** (2026-10-02). 같은 가족이 둘 다 뜨면 상한 칸을 두 번
+   *    먹어 **정작 중요한 다른 축이 잘린다** — 실측: `credit_stress` 와
+   *    `credit_stress_low_vix` 가 같이 떠서 `rate_shock_whole_curve` 가 밀렸다.
+   * ⚠️ 밀어내는 쪽이 **실제로 떴을 때만** 적용한다(선언만으로 지우지 않는다).
+   */
+  const superseded = new Set(out.flatMap((sc) => sc.supersedes || []));
+  if (superseded.size) {
+    const kept = out.filter((sc) => !superseded.has(sc.id));
+    if (kept.length !== out.length) {
+      logInfo('regime.playbook_superseded', { dropped: out.filter((sc) => superseded.has(sc.id)).map((sc) => sc.id) });
+      out = kept;
+    }
+  }
   if (out.length > PLAYBOOK_MAX) {
     logInfo('regime.playbook_truncated', {
       matched: out.length, kept: PLAYBOOK_MAX,

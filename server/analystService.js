@@ -1336,10 +1336,24 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   try {
     const regime = require('./regimeService');
     const { state, scenarios } = await regime.refresh();
-    const sec = regime.promptSection(state, scenarios);
+    /**
+     * 🔴 **내 비중도 국면 판정에 넣는다** (2026-10-02). `refresh()` 는 **시장만** 본다 —
+     *    그래서 레버리지 합계 **90.7%** 같은 상태가 어떤 매뉴얼도 못 건드렸다.
+     *    비중을 실어 다시 매칭하면 `leverage_concentration`·`cash_drag` 가 발동한다.
+     * ⚠️ 비중을 못 읽으면 **원래 결과를 그대로 쓴다**(포트폴리오 매뉴얼은 안 뜬다).
+     *    모름을 "맞다" 로 읽지 않는 규율은 여기도 같다.
+     */
+    let active = scenarios;
+    const weights = portfolioWeights(items, summary, regime.readCatalog());
+    if (weights) {
+      try {
+        active = regime.matchScenarios({ ...state, portfolio: weights }, regime.readPlaybook());
+      } catch (e) { logWarn('analyst.portfolio_regime_failed', { message: e.message }); }
+    }
+    const sec = regime.promptSection(state, active);
     if (sec) lines.push('', sec);
     // 🔴 매수 후보 실데이터 — 이름만 주면 모델이 정직하게 침묵한다(시뮬 E: 현금 있어도 제안 0)
-    const cand = await regime.candidateSection(scenarios, {
+    const cand = await regime.candidateSection(active, {
       heldSymbols: items.map((i) => i.symbol),
       summarize: summarizeCandles,
       getCandles: (sym, o) => toss.getCandles(sym, o),

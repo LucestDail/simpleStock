@@ -44,6 +44,11 @@ const NON_TICKER = {
   ETF: '상품 종류를 가리키는 보통명사 — 특정 종목이 아니다',
   // `"물가연동채(TIPS)는 인플레 헤지지만…"` — 일반 명칭이고 실제 상품 심볼은 TIP 이다.
   TIPS: '물가연동채의 일반 명칭 — 실제 상품 심볼은 TIP',
+  // `"KR 과 US 추세가 갈리면…"` — 시장 코드다(KR 은 위에 이미 있다).
+  US: '시장 코드(미국) — 종목이 아니다',
+  // `"메모리(DRAM·HBM)와 로직을 구분한다"` — 반도체 제품군 이름.
+  DRAM: '반도체 제품군 이름 — 종목이 아니다',
+  HBM: '반도체 제품군 이름 — 종목이 아니다',
 };
 
 /** 산문에서 티커 후보(2~5자 영대문자)를 뽑는다 */
@@ -236,38 +241,44 @@ const picks = (ids) => regime.roundRobinCandidates(ids.map(byId), catalog, new S
  * 아래 값은 순차 구현에서 **실측해 받아 적은 것**이다 — 순서까지 못박는다.
  */
 const SINGLE_GOLDEN = {
-  bull_calm: ['QQQ', 'SOXX', 'SPY', 'SCHD'],
-  side_grind: ['QQQ', 'SOXX', 'XLP', 'XLV', 'GLD', 'SCHD'],
   /**
-   * ⚠️ 2026-10-01 **순서만** 바뀌었다 — `inverse_hedge` 를 playbook 선언 맨 앞으로 옮겼기 때문이다.
-   * (라운드로빈에서 bear_trend 가 상한 6 중 3~4칸만 받아 선언 끝의 PSQ 가 **하락장 조합마다**
-   *  잘리고 있었다 — 헤지가 가장 필요한 순간에만 없어지는 모양이라 09-24 결함의 재발이다.)
-   * 🔴 **집합은 그대로다**(5종 동일) — 단독 발동은 상한 미만이라 아무도 안 잘린다. 집합이 바뀌면 회귀다.
+   * 🔴 **실측해 받아 적은 값**이다(2026-10-02 3차 — 카탈로그 42→273종 확장 반영).
+   *    순서가 바뀌면 국면별 우선순위가 바뀐 것 — 우연이 아니라 설계 변경이어야 한다.
    */
-  bear_trend: ['PSQ', 'XLP', 'XLV', 'TLT', 'GLD'],
+  bull_calm: ['QQQ','SOXX','SPY','SCHD'],
+  side_grind: ['QQQ','SOXX','XLP','XLV','GLD','SCHD'],
+  bear_trend: ['PSQ','XLP','XLV','TLT','GLD'],
   shock_day: [],
-  fear_ladder: ['QQQ', 'SPY'],
-  war_geopolitics: ['ITA', 'XLE', 'GLD'],
-  /**
-   * ── 2026-10-02 매크로 국면 12종 (사용자 지시: "발생할 시장 국면성을 전부다 열거") ──
-   * 아래 값도 **실측해 받아 적은 것**이다. 설계 의도와 대조해 확인했다:
-   *   금리 쇼크 → SHY 가 **맨 앞**(듀레이션 축소) · 금리 하락 전환 → VNQ·XLU·TLT(되사는 자산)
-   *   신용 경색 → SHY·XLP·XLV·GLD(방어) · 스태그플레이션 → XLE·GLD(실물)
-   * ⚠️ 이 순서가 바뀌면 **국면별 우선순위가 바뀐 것**이다 — 우연이 아니라 설계 변경이어야 한다.
-   */
-  rate_shock_whole_curve: ['SHY', 'QQQ', 'SOXX', 'XLE', 'XLF'],
-  rate_shock_long_end: ['SHY', 'XLF', 'GLD', 'QQQ', 'XLE'],
-  rate_falling_pivot: ['VNQ', 'XLU', 'TLT', 'SCHD', 'QQQ'],
-  narrow_leadership: ['QQQ', 'SOXX', 'SHY', 'SPY'],
-  credit_stress: ['SHY', 'XLP', 'XLV', 'GLD'],
-  dollar_surge: ['QQQ', 'SHY', 'XLP', 'UUP'],
-  stagflation: ['XLE', 'GLD', 'SHY', 'XLP'],
-  goldilocks: ['QQQ', 'SOXX', 'SPY', 'VNQ', 'SCHD'],
-  capitulation: ['SPY', 'QQQ', 'SHY'],
-  melt_up: ['QQQ', 'SOXX', 'SPY'],
+  fear_ladder: ['QQQ','SPY'],
+  war_geopolitics: ['ITA','XLE','GLD'],
+  rate_shock_whole_curve: ['SHY','QQQ','SOXX','XLE','XLF'],
+  rate_shock_long_end: ['SHY','XLF','GLD','QQQ','XLE'],
+  rate_falling_pivot: ['VNQ','XLU','TLT','SCHD','QQQ'],
+  narrow_leadership: ['QQQ','SOXX','SHY','SPY'],
+  credit_stress: ['SHY','XLP','XLV','GLD'],
+  dollar_surge: ['QQQ','SHY','XLP','UUP'],
+  stagflation: ['XLE','GLD','SHY','XLP'],
+  goldilocks: ['QQQ','SOXX','SPY','VNQ','SCHD'],
+  capitulation: ['SPY','QQQ','SHY'],
+  melt_up: ['QQQ','SOXX','SPY'],
   earnings_season: ['SHY'],
   policy_pivot: ['SHY'],
+  leverage_concentration: ['QQQ','SPY','SHY','VONG','BRK.B'],
+  cash_drag: ['SPY','QQQ','SCHD','SHY'],
+  credit_stress_low_vix: ['SHY','XLP','XLV','BRK.B'],
+  vix_spike_credit_ok: ['SPY','QQQ','SOXX'],
+  risk_parity_unwind: ['SHY','GLD','XLE','XLP'],
+  dollar_weak_reflation: ['EMXC','XLB','XLE','XLF'],
+  power_demand: ['CEG','SOXX','QQQ','IONQ'],
+  semis_leadership: ['SOXX','QQQ','VONG'],
+  kr_decoupling: [],
+  commodity_squeeze: ['XLE','XLB','GLD','DBA'],
+  crypto_risk_signal: ['IBIT','SHY'],
+  quantum_theme_risk: ['SHY','BRK.B'],
+  trend_resumption: ['QQQ','SPY','VONG','SOXX'],
+  dead_cat_bounce: ['SHY','XLP','PSQ'],
 };
+
 
 test('🔴 회귀 잠금 — 단일 시나리오 6종의 후보가 순차 구현과 순서까지 동일하다', () => {
   // 대상 계정: 모든 시나리오가 골든에 들어 있어야 한다(새 시나리오가 조용히 빠지지 않게)

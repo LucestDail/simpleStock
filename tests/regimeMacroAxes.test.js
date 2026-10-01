@@ -79,9 +79,42 @@ const stateWith = (macro, extra = {}) => ({ kr: null, us: { trend: 'up', shock: 
 
 test('🔴 실측 국면에서 금리·신용·시장폭 매뉴얼이 발동한다', () => {
   const ids = regime.matchScenarios(stateWith(regime.judgeMacro(LIVE)), PB()).map((s) => s.id);
-  for (const want of ['credit_stress', 'rate_shock_whole_curve', 'narrow_leadership']) {
-    assert.ok(ids.includes(want), `${want} 가 발동하지 않았다 — 국면을 못 본다`);
-  }
+  assert.ok(ids.includes('rate_shock_whole_curve'), '🔴 금리 축이 안 떴다 — 2026-10-02 사고의 핵심이다');
+  assert.ok(ids.includes('narrow_leadership'), '좁은 시장을 못 봤다');
+  assert.ok(ids.some((x) => /^credit_stress/.test(x)), '신용 축이 안 떴다');
+});
+
+/**
+ * 🔴 **특수가 일반을 밀어낸다** — 같은 가족이 둘 다 뜨면 상한 칸을 두 번 먹어
+ *    **정작 중요한 다른 축이 잘린다**(실측: credit_stress 둘이 떠서 rate_shock_whole_curve 가 밀렸다).
+ */
+test('🔴 특수 시나리오가 일반 부모를 밀어낸다 (칸을 두 번 먹지 않는다)', () => {
+  const ids = regime.matchScenarios(stateWith(regime.judgeMacro(LIVE)), PB()).map((s) => s.id);
+  assert.ok(ids.includes('credit_stress_low_vix'), '특수형(신용 경색 + 저VIX)이 안 떴다');
+  assert.ok(!ids.includes('credit_stress'), '🔴 일반형이 같이 떠서 칸을 두 번 먹었다');
+});
+
+/**
+ * 🔴 **포트폴리오 자신도 국면이다** (2026-10-02). 시장이 멀쩡해도 내 배분이 위험하면
+ *    다뤄야 할 상태다 — 실측 레버리지 합계 **90.7%** 인데 어떤 매뉴얼도 안 보고 있었다.
+ */
+test('🔴 레버리지 쏠림이 "내 포트폴리오" 국면으로 발동한다', () => {
+  const got = regime.matchScenarios(stateWith(regime.judgeMacro(LIVE), { portfolio: { leveragePct: 90.7, cashPct: 8.6 } }), PB());
+  const lev = got.find((s) => s.id === 'leverage_concentration');
+  assert.ok(lev, '🔴 레버리지 90.7% 인데 아무 매뉴얼도 안 떴다');
+  assert.equal(lev.via, '내 포트폴리오', '발동 근원이 시장으로 적혔다');
+});
+
+test('🔴 비중을 못 읽으면 포트폴리오 매뉴얼은 발동하지 않는다 (모름 ≠ 맞음)', () => {
+  const ids = regime.matchScenarios(stateWith(regime.judgeMacro(LIVE)), PB()).map((s) => s.id);
+  assert.ok(!ids.includes('leverage_concentration'), '비중 데이터가 없는데 발동했다');
+  assert.ok(!ids.includes('cash_drag'));
+});
+
+test('오탐 축: 레버리지가 낮으면 쏠림 매뉴얼은 안 뜬다', () => {
+  const ids = regime.matchScenarios(stateWith(regime.judgeMacro(LIVE), { portfolio: { leveragePct: 12, cashPct: 20 } }), PB()).map((s) => s.id);
+  assert.ok(!ids.includes('leverage_concentration'));
+  assert.ok(!ids.includes('cash_drag'), '현금 20%는 과다가 아니다');
 });
 
 test('🔴 위험을 줄이는 매뉴얼이 공격 매뉴얼을 이긴다 (정반대 지시가 같이 가면 안 된다)', () => {
@@ -89,8 +122,7 @@ test('🔴 위험을 줄이는 매뉴얼이 공격 매뉴얼을 이긴다 (정�
   const ids = got.map((s) => s.id);
   assert.ok(!ids.includes('bull_calm'),
     '🔴 "공격 축 확대 허용"(bull_calm)과 "레버리지를 쓰지 않는다"(stagflation)가 **동시에** 모델에게 갔다');
-  assert.ok(got.length <= 4, `상한을 넘었다(${got.length}) — 전부 실으면 길이가 판단을 밀어낸다`);
-  // 우선순위 내림차순
+  assert.ok(got.length <= 6, `상한을 넘었다(${got.length}) — 전부 실으면 길이가 판단을 밀어낸다`);
   const pri = got.map((s) => s.priority ?? 50);
   assert.deepEqual(pri, [...pri].sort((a, b) => b - a), '정렬이 안 됐다');
 });
