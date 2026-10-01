@@ -47,12 +47,50 @@ function num(v) {
  * ⇒ **경계에서 한 번만** 퍼센트로 바꾸고, 이후 코드는 전부 퍼센트로 다룬다.
  */
 /**
- * 금액과 매입액으로 수익률을 **직접 계산**한다. 증권사 값과 어긋나면 경고하고 **계산값을 쓴다**.
+ * 금액과 매입액으로 수익률을 **직접 계산**한다. 증권사 값과 어긋나면 경고하되 **덮어쓰지 않는다**
+ * (원본 `profitRate` 와 유도값 `profitRateDerived` 를 나란히 싣는다 — 그 필드의 의미를 우리가 모른다).
  *
  * ⚠️ 통화가 섞이면(원화+달러) 환율 없이는 합칠 수 없다 ⇒ 그때는 **계산하지 않고**
  *    증권사 값을 그대로 쓴다(모르는 것을 지어내지 않는다).
  * ⚠️ 매입액이 0이면 수익률이 정의되지 않는다 — 나누지 않는다.
  */
+/**
+ * 🔴 **같은 사실을 매번 외치지 않는다** (2026-10-01 저녁 — 내가 **같은 날 두 번째로** 밟았다).
+ *
+ * 처음엔 어긋날 때마다 `logWarn` 했다. `getHoldings` 는 화면 폴링·브리핑·채팅마다 불린다 ⇒
+ * 배포 3.3시간에 **284건**(시간당 86 → 117 로 증가). 값은 가격이 틱할 때마다 끝자리만
+ * 바뀔 뿐 **괴리 자체는 상수**(약 10%p)다.
+ *
+ * ⚠️ 몇 시간 전에 `watchlist.stale_quote_dropped` 에서 똑같은 것을 고치고, 그 교훈을
+ *    메모리에 적어 놓고, **같은 세션에서 또 만들었다.**
+ *    ★ *"규칙을 아는 것과 그 순간에 적용하는 것은 다른 능력"* 의 실례 ⇒ 규칙이 아니라 **코드**로 옮긴다.
+ *
+ * ⇒ **괴리 폭이 달라질 때**(1%p 단위)와 **한 시간에 한 번**만 남긴다. 그래야 한 줄이
+ *   *"지금 이렇다"* 가 아니라 **"달라졌다"** 또는 **"아직도 그렇다"** 를 뜻한다.
+ * ⚠️ 완전히 끄지 않는다 — 조용해지면 *"고쳐졌다"* 와 *"검사가 멈췄다"* 가 같아 보인다.
+ */
+const RATE_MISMATCH_COOLDOWN_MS = Math.max(0, Number(process.env.TOSS_RATE_MISMATCH_COOLDOWN_MS) || 60 * 60_000);
+const rateMismatchSeen = new Map();   // label → { bucket, at }
+
+function reportRateMismatch(label, reported, derived, now = Date.now()) {
+  const bucket = Math.round(derived - reported);   // 가격이 틱해도 같은 사실이면 같은 값
+  const prev = rateMismatchSeen.get(label);
+  const changed = !prev || prev.bucket !== bucket;
+  const stale = Boolean(prev) && now - prev.at >= RATE_MISMATCH_COOLDOWN_MS;
+  if (!changed && !stale) return false;
+  rateMismatchSeen.set(label, { bucket, at: now });
+  logWarn('toss.rate_mismatch', {
+    field: label, reported, derived, gapPct: bucket,
+    why: changed ? (prev ? 'gap_changed' : 'first_seen') : 'still_mismatched',
+    // ⚠️ 금액은 로그에 안 남긴다(이 파일의 기존 방침) — 비율만으로 진단된다
+    note: '증권사 수익률이 자기 금액과 맞지 않는다 — 원본은 profitRate, 유도값은 profitRateDerived 로 둘 다 싣는다',
+  });
+  return true;
+}
+
+/** 테스트용 — 프로세스 상태를 격리한다 */
+function _resetRateMismatchForTest() { rateMismatchSeen.clear(); }
+
 function deriveRatePct(amountObj, purchaseObj, reportedPct, label) {
   const aK = num(amountObj?.krw) || 0;
   const aU = num(amountObj?.usd) || 0;
@@ -65,12 +103,7 @@ function deriveRatePct(amountObj, purchaseObj, reportedPct, label) {
   if (!purchase) return reportedPct;                   // 0 으로 나누지 않는다
   const derived = Math.round((amount / purchase) * 100 * 100) / 100;
   if (reportedPct != null && Math.abs(derived - reportedPct) > 0.5) {
-    logWarn('toss.rate_mismatch', {
-      field: label, reported: reportedPct, derived,
-      // ⚠️ 금액은 로그에 안 남긴다(이 파일의 기존 방침) — 비율만으로 진단된다
-      // ⚠️ 문구가 동작과 어긋나면 안 된다 — 우리는 **덮어쓰지 않고 둘 다 싣는다**
-      note: '증권사 수익률이 자기 금액과 맞지 않는다 — 원본은 profitRate, 유도값은 profitRateDerived 로 둘 다 싣는다',
-    });
+    reportRateMismatch(label, reportedPct, derived);
   }
   return derived;
 }
@@ -243,4 +276,6 @@ function _resetForTest() {
   accountCache = null;
 }
 
-module.exports = { getAccount, getHoldings, pickMomentum, isEnabled, _resetForTest };
+module.exports = {
+  reportRateMismatch,
+  _resetRateMismatchForTest, getAccount, getHoldings, pickMomentum, isEnabled, _resetForTest };

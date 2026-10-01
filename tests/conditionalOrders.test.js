@@ -109,7 +109,14 @@ test('승인 없이는 조건부도 안 나간다 (같은 상태기계)', async 
 });
 
 test('감사에 조건이 남는다 — 나중에 "무슨 예약을 승인했나" 를 파일이 답해야 한다', async () => {
-  const auditFile = path.join(__dirname, '..', 'data', 'orders-audit.jsonl');
+  /**
+   * 🔴 **경로를 테스트가 따로 알지 않는다** (2026-10-01).
+   *    종전엔 `data/orders-audit.jsonl` 을 손으로 적어 **저장소의 진짜 감사 파일**을 읽었다 —
+   *    `node --test` 는 파일을 병렬로 돌리므로 **다른 테스트가 같은 파일에 쓰는 중**일 수 있고,
+   *    그러면 이 단언은 남의 줄을 보거나 못 본다.
+   * ⇒ 서비스가 내보내는 경로를 그대로 쓴다. 경로가 한 벌이면 갈라질 수 없다.
+   */
+  const auditFile = require('../server/orderService').AUDIT_FILE;
   const before = fs.existsSync(auditFile) ? fs.readFileSync(auditFile, 'utf8') : '';
   const o = fresh({ createConditionalOrder: async () => ({ conditionalOrderId: 'co-2' }) });
   const { proposal } = o.propose(COND, { source: 'test', notify: false });

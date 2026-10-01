@@ -70,7 +70,12 @@ test('🔴 재시도까지 실패하면 반드시 알린다 (조용한 쪽으로
 
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 let logged = [];
-const logWarn = (e, f) => logged.push({ e, f });
+/**
+ * ⚠️ `deriveRatePct` 는 private 이라 소스에서 떼어 와 돈다. 그 안에서 부르는
+ *    `reportRateMismatch` 를 **이 범위에 세워 둬야** 한다 — 안 그러면 ReferenceError 가
+ *    나고 *"계산이 틀렸다"* 로 읽힌다(실제로 한 번 그렇게 깨졌다).
+ */
+const reportRateMismatch = (label, reported, derived) => { logged.push({ e: 'toss.rate_mismatch', f: { label, reported, derived } }); return true; };
 eval(portSrc.match(/function ratePct[\s\S]*?\n}/)[0]);
 eval(portSrc.match(/function deriveRatePct[\s\S]*?\n}/)[0]);
 
@@ -146,4 +151,49 @@ test('🔴 summary 가 실제로 그 계산을 쓴다 (순수 함수만 재면 "
     '유도값을 만들어 놓고 프롬프트가 안 쓴다 — "수집해 놓고 안 쓰는" 그 자리다');
   assert.ok(/Math\.abs\(summary\.profitRateDerived\s*-\s*summary\.profitRate\)/.test(ana),
     '두 값을 비교하지 않으면 "다르다" 를 영영 못 알린다');
+});
+
+// ── ④ 내가 만든 경고가 로그를 삼켰다 (라이브 실측 후 추가) ───────────
+//
+// 🔴 `toss.rate_mismatch` 를 배포하고 3.3시간 만에 **284건**이 쌓였다
+//    (시간당 86 → 117 로 증가). `getHoldings` 는 화면 폴링·브리핑·채팅마다 불리는데
+//    괴리 자체는 상수(약 10%p)라, 가격이 틱할 때마다 **같은 사실을 다시 외쳤다.**
+// ⚠️ 몇 시간 전에 `watchlist.stale_quote_dropped` 에서 똑같은 것을 고치고,
+//    교훈을 적어 놓고, **같은 세션에서 또 만들었다.** 그래서 규칙이 아니라 **자**로 옮긴다.
+
+const toss = require('../server/tossPortfolio');
+const HOUR = 60 * 60_000;
+
+test('🔴 같은 괴리가 이어지면 매번 외치지 않는다 (3.3시간에 284건이던 것)', () => {
+  toss._resetRateMismatchForTest();
+  const t0 = 1_700_000_000_000;
+  let n = 0;
+  // 가격만 틱하고 괴리는 그대로인 상황 — 라이브에서 실제로 이랬다
+  for (let i = 0; i < 60; i += 1) {
+    if (toss.reportRateMismatch('profit', -8.70 - i * 0.001, 1.50 + i * 0.001, t0 + i * 1000)) n += 1;
+  }
+  assert.equal(n, 1, `60번 호출에 ${n}건 — 같은 사실을 반복해 찍으면 옆의 진짜 경고가 묻힌다`);
+});
+
+test('괴리가 **달라지면** 다시 말한다 (조용히 묻으면 변화를 놓친다)', () => {
+  toss._resetRateMismatchForTest();
+  const t0 = 1_700_000_000_000;
+  assert.equal(toss.reportRateMismatch('profit', -8.7, 1.5, t0), true, '처음은 말해야 한다');
+  assert.equal(toss.reportRateMismatch('profit', -8.7, 1.5, t0 + 1000), false);
+  assert.equal(toss.reportRateMismatch('profit', -2.0, 1.5, t0 + 2000), true, '괴리가 10%p→3%p 로 바뀌었는데 침묵했다');
+});
+
+test('한 시간에 한 번은 생존 신호를 낸다 (조용한 것과 검사가 멈춘 것은 다르다)', () => {
+  toss._resetRateMismatchForTest();
+  const t0 = 1_700_000_000_000;
+  toss.reportRateMismatch('profit', -8.7, 1.5, t0);
+  assert.equal(toss.reportRateMismatch('profit', -8.7, 1.5, t0 + HOUR - 1000), false, '아직 한 시간이 안 됐다');
+  assert.equal(toss.reportRateMismatch('profit', -8.7, 1.5, t0 + HOUR + 1000), true, '한 시간이 지나도 침묵하면 "고쳐졌다" 와 구분이 안 된다');
+});
+
+test('필드가 다르면 따로 센다 (하나가 다른 하나를 가리면 안 된다)', () => {
+  toss._resetRateMismatchForTest();
+  const t0 = 1_700_000_000_000;
+  assert.equal(toss.reportRateMismatch('profit', -8.7, 1.5, t0), true);
+  assert.equal(toss.reportRateMismatch('daily', -8.7, 1.5, t0), true, '다른 필드인데 앞 필드 때문에 삼켜졌다');
 });

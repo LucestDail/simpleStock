@@ -36,7 +36,15 @@ const { logInfo, logWarn, logError } = require('./logger');
  */
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
-const AUDIT_FILE = path.join(DATA_DIR, 'orders-audit.jsonl');
+/**
+ * ⚠️ **경로를 환경변수로 뺄 수 있게 한다** (2026-10-01) — 운영이 아니라 **테스트** 때문이다.
+ *    `node --test` 는 파일을 병렬 프로세스로 돌리는데, 이 경로가 하드코딩이라 테스트가
+ *    **저장소의 진짜 감사 파일**에 쓴다(실측: 전체 실행 후 `data/orders-audit.jsonl` 해시가 바뀐다).
+ *    형제 경로들은 이미 그렇게 하고 있었다(`ORDERS_FILE`·`ALERTS_STATE_FILE`·`ANALYST_CHAT_FILE`
+ *    ·`SETTINGS_FILE`·`ACTIVITY_FILE`) — **여기만 빠져 있었다.**
+ * 🔴 감사 파일은 **지우면 안 되는 것**이라 더더욱 테스트가 건드리면 안 된다.
+ */
+const AUDIT_FILE = process.env.ORDERS_AUDIT_FILE || path.join(DATA_DIR, 'orders-audit.jsonl');
 
 /** 🔴 기본 꺼짐. **없어도 꺼짐**이다 — 미설정이 켜짐이 되면 안 된다 */
 const ORDERS_ENABLED = String(process.env.ORDERS_ENABLED || '').trim().toLowerCase() === 'true';

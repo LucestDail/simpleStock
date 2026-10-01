@@ -1,5 +1,7 @@
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
+const os = require('node:os');
+const path = require('node:path');
 
 /**
  * 🔴 승인 버튼 발송 실패를 사용자가 안다 (2026-09-28, pm1 지시 — pm2 가 오늘 잡은
@@ -20,6 +22,20 @@ process.env.TELEGRAM_BOT_TOKEN = 'T';
 process.env.TELEGRAM_CHAT_ID = '999';
 process.env.TELEGRAM_SEND_ENABLED = 'true';
 process.env.ALERTS_ENABLED = 'true'; // onProposal 의 `if (!ENABLED)` 게이트를 통과해야 한다
+/**
+ * 🔴 **상태 파일을 격리한다** (2026-10-01 — 전체 실행에서만 간헐 실패하던 원인).
+ *
+ * `node --test` 는 파일을 **병렬 프로세스**로 돌린다. 이 파일만 `ALERTS_STATE_FILE` 을
+ * 안 깔아서 **저장소의 진짜 `data/alerts-state.json`** 을 읽고 썼고, 같은 순간 다른
+ * alerts 테스트가 그 파일을 갈아엎으면 JSON 파싱이 깨져 `logError` 가 난다 ⇒
+ * `assert.equal(errorCalls.length, 0)` 이 **1 !== 0** 으로 터진다.
+ *
+ * ⚠️ 증상이 "가끔 빨간불" 이라 **플래키로 넘기기 쉬웠다** — 단독 실행은 5/5 통과한다.
+ *    그런데 원인은 타이밍이 아니라 **격리 누락**이고, 형제 테스트 4개는 전부 하고 있었다
+ *    (**형제 중 하나만 빠진** 그 모양).
+ * ★ 플래키를 방치하면 **빨간불을 읽지 않는 습관**이 생긴다 — 그게 진짜 비용이다.
+ */
+process.env.ALERTS_STATE_FILE = path.join(os.tmpdir(), `ss-alerts-btn-${process.pid}.json`);
 
 let errorCalls = [];
 

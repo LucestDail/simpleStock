@@ -31,7 +31,8 @@ const path = require('node:path');
 const { logInfo, logWarn } = require('./logger');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
-const STATE_FILE = path.join(DATA_DIR, 'regime.json');
+// ⚠️ 테스트 격리를 위해 환경변수로 뺄 수 있게 한다(형제 경로들과 같은 이유 — orderService 주석 참조)
+const STATE_FILE = process.env.REGIME_STATE_FILE || path.join(DATA_DIR, 'regime.json');
 const PLAYBOOK_FILE = path.join(__dirname, '..', 'config', 'playbook.json');
 const CATALOG_FILE = path.join(__dirname, '..', 'config', 'etf-catalog.json');
 
