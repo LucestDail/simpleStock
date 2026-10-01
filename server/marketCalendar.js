@@ -96,9 +96,40 @@ function sessionFromCalendar(nowMs, days) {
   /**
    * 오늘 정규장이 **아직 시작 전**이면 `pre`. 휴장일(regular=null)은 해당 없음 —
    * **"안 여는 날" 을 "곧 연다" 로 말하지 않는다.**
+   *
+   * 🔴🔴 **`pre` 는 "프리장 창 안" 일 때만이다** (2026-10-01 라이브 실측 수정).
+   *
+   *    종전 조건은 `nowMs < today.regular.start` 하나였다. 그런데 미국장의 '오늘 정규장'
+   *    은 **KST 22:30 시작**이라, 05:00 에 장이 끝난 뒤 **17시간 내내** 이 조건이 참이다
+   *    ⇒ 미국장은 `open` 에서 곧장 `pre` 로 가고 **`closed` 를 한 번도 거치지 않는다.**
+   *
+   *    실측(2026-10-01 11:47 KST — 마감 6시간 후, 프리장 5시간 전):
+   *    ```
+   *    session:us = 'pre'      analyst.sessions = {"us":"pre","kr":"open"}
+   *    lastCloseDay = {}       ← 양 시장 모두 한 번도 안 채워졌다
+   *    ```
+   *    `analystTrigger` 의 마감 브리핑은 **`closed` 로의 전이**로 발동한다
+   *    ⇒ **미국장 마감 브리핑이 원리상 한 번도 뜰 수 없었다.** 설계된 정기 브리핑 7회차
+   *       중 하나이고, 사용자 보유가 **둘 다 미국 종목**인데 그 요약을 못 받고 있었다.
+   *       대신 05:00 에 `open→pre` 전이가 나서 **"🔔 미국장 장 전"** 이 갔다(마감인데).
+   *
+   *    ★ **같은 코드가 시장에 따라 다르게 동작했다.** 한국장은 정규장이 09:00 라
+   *      15:30 마감 뒤에는 `nowMs < start` 가 거짓 ⇒ `closed` 로 떨어져 정상이었다.
+   *      그래서 "KR 은 되는데 US 만 안 된다" 로 보였고 원인이 시장별 설정에 있는 줄 알기 쉽다.
+   *
+   * ⇒ `pre` 를 **프리장 창으로 묶는다.** 프리장 정보를 **못 받았으면 `pre` 라고 하지
+   *    않는다** — `pre` 는 *"곧 연다"* 는 주장인데 그 근거가 없으면 주장하지 않는 쪽이
+   *    이 파일의 기존 규율(`휴장일엔 null`)과 같다. 잃는 것은 그런 날의 "장 전" 알림
+   *    하나이고, 얻는 것은 **마감 전이**다.
+   * ⚠️ 프리장 **개장 브리핑**은 이 state 가 아니라 `preSpan` 을 직접 본다
+   *    (`alertService.briefOccasions` · `analystTrigger` 의 preopen 경로) ⇒ 영향 없다.
+   * ⚠️ `open` 전이도 영향 없다 — `closed → open` 이든 `pre → open` 이든 전이는 전이다.
    */
   if (today?.regular && nowMs < today.regular.start) {
-    return { state: 'pre', source: 'calendar', regular: today.regular, preSpan, date: today.date };
+    const preStart = Number(preSpan?.start);
+    if (Number.isFinite(preStart) && nowMs >= preStart) {
+      return { state: 'pre', source: 'calendar', regular: today.regular, preSpan, date: today.date };
+    }
   }
   /**
    * 어느 구간에도 안 들면 **닫혀 있다.** 다만 *"캘린더를 못 읽어서 모른다"* 와는 다르다 —
