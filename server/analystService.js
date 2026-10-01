@@ -1024,11 +1024,15 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    *    프롬프트에 남으면 "문서가 거짓이 되는" 그 병이다).
    */
   {
-    const policy = [
-      'RAM: 사용자가 **보유 유지**를 정했다(평단 19.08 회복 대기, 16.0 근접 시 매도 검토 — 목표선 알림 설정됨).',
-      '  급락·구조 악화가 아니면 RAM SELL 제안을 반복하지 마라. 16.0 접근 시에는 매도 검토 제안 허용.',
-      '이행 방침: 레버리지 축소는 **점진** — 기술적 반등 지점에서 분할 매도 제안(즉시 전량 아님).',
-    ];
+    /**
+     * 🔴 **문구를 설정에서 만든다** (2026-10-01) — 종전엔 여기 문자열이 **정본**이었고
+     *    그것을 지키게 하는 장치가 **프롬프트뿐**이었다. 2026-10-01 12:19 에 모델이
+     *    `RAM SELL 50주 @14.1` 을 제안했다 — 허용 조건(16.0 이상 또는 급락) 어디에도
+     *    안 맞고, 사용자는 12:43 에 거절했다.
+     * ⇒ `config/holding-policy.json` 하나를 **프롬프트와 코드 게이트가 함께** 읽는다.
+     *   값을 고치면 둘이 같이 바뀐다 — 두 벌로 갈라질 수 없다.
+     */
+    const policy = holdingPolicyLines();
     if (Date.now() < Date.parse('2026-09-28T00:00:00+09:00')) {
       policy.push('9/28(월) 삼성전자 특별배당락 — 사용자가 그 전까지 관망 방침. 큰 포지션 변경 제안은 자제.');
     }
@@ -1705,6 +1709,20 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
         continue;
       }
     }
+    /**
+     * 🔴 **사용자가 "보유 유지" 를 정한 종목의 매도를 코드가 막는다** (2026-10-01).
+     *    프롬프트에 적어 뒀는데도 12:19 에 `RAM SELL @14.1` 이 나갔고 사용자가 거절했다.
+     *    ⚠️ 막는 쪽이 **방침과 같은 설정**을 읽으므로 둘이 갈라질 수 없다.
+     */
+    {
+      const held = (items || []).find((h) => String(h.symbol).toUpperCase() === String(p.symbol).toUpperCase());
+      const gate = holdingPolicyGate(p, held);
+      if (!gate.ok) {
+        rejected.push({ symbol: p.symbol, side: p.side, error: gate.why });
+        logWarn('analyst.holding_policy_blocked', { symbol: p.symbol, side: p.side, why: gate.why });
+        continue;
+      }
+    }
     const chk = await orderService.checkAccountLimits({
       symbol: p.symbol, side: p.side, quantity: p.quantity, price: p.price,
     });
@@ -2107,6 +2125,83 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
  *    프롬프트에 규칙이 있는데도 모델이 횡보에서 PSQ 매수를 냈다.
  *    실전(analyze)과 백테스트(decideOnContext)가 **같은 함수**를 태운다 — 게이트가 두 벌이면 갈라진다.
  */
+/**
+ * 사용자 보유 방침 — **설정 한 벌**(`config/holding-policy.json`)에서 읽는다.
+ * ⚠️ 못 읽으면 **빈 방침**으로 둔다(기본값을 지어내면 사용자가 안 정한 규칙이 생긴다).
+ *    대신 조용하지 않다 — 못 읽은 것과 방침이 없는 것은 다르다.
+ */
+let _policyCache = null;
+function readHoldingPolicy() {
+  if (_policyCache) return _policyCache;
+  try {
+    const raw = require('node:fs').readFileSync(
+      require('node:path').join(__dirname, '..', 'config', 'holding-policy.json'), 'utf8');
+    _policyCache = JSON.parse(raw);
+  } catch (e) {
+    logWarn('analyst.holding_policy_unreadable', { message: e.message });
+    _policyCache = { holdings: {}, general: [] };
+  }
+  return _policyCache;
+}
+
+/** 프롬프트에 실을 방침 문장 — **게이트와 같은 값**에서 만든다 */
+function holdingPolicyLines() {
+  const pol = readHoldingPolicy();
+  const out = [];
+  for (const [sym, h] of Object.entries(pol.holdings || {})) {
+    if (String(h.stance).toLowerCase() !== 'hold') continue;
+    const w = h.sellAllowedWhen || {};
+    const conds = [];
+    if (Number.isFinite(Number(w.priceAtOrAbove))) conds.push(`현재가 ${w.priceAtOrAbove} 이상`);
+    if (Number.isFinite(Number(w.dayChangePctAtOrBelow))) conds.push(`당일 ${w.dayChangePctAtOrBelow}% 이하 급락`);
+    out.push(`${sym}: ${h.why || '사용자가 보유 유지를 정했다'}.`);
+    out.push(`  🔴 ${sym} SELL 제안은 ${conds.length ? conds.join(' 또는 ') : '별도 조건'} 일 때만 허용된다.`
+      + ' 그 밖에는 **코드가 거부한다** — 내지 마라.');
+  }
+  out.push(...(pol.general || []));
+  return out;
+}
+
+/**
+ * 🔴 **방침을 코드가 지킨다** — 프롬프트는 지시일 뿐이다(이 저장소가 반복해 적은 규율).
+ *
+ * @param p       제안 `{symbol, side, price, quantity}`
+ * @param holding 그 종목의 지금 상태 `{lastPrice, dailyRate}` (없으면 **판정하지 않는다**)
+ */
+function holdingPolicyGate(p, holding) {
+  const sym = String(p?.symbol || '').toUpperCase();
+  const rule = readHoldingPolicy().holdings?.[sym];
+  if (!rule || String(rule.stance).toLowerCase() !== 'hold') return { ok: true };
+  if (String(p?.side).toUpperCase() !== 'SELL') return { ok: true };
+
+  const w = rule.sellAllowedWhen || {};
+  const price = Number(holding?.lastPrice);
+  const day = Number(holding?.dailyRate);
+  /**
+   * ⚠️ **모르면 막지 않는다.** 시세를 못 읽었는데 "조건 미달" 로 거부하면, 데이터 장애가
+   *    사용자의 정당한 매도까지 막는다. 대신 **그 사실을 남긴다** — 조용한 통과는 아니다.
+   */
+  if (!Number.isFinite(price) && !Number.isFinite(day)) {
+    logWarn('analyst.holding_policy_unjudged', { symbol: sym, why: '현재가·등락률을 못 읽어 방침을 판정하지 않았다' });
+    return { ok: true };
+  }
+  const okByPrice = Number.isFinite(Number(w.priceAtOrAbove)) && Number.isFinite(price)
+    && price >= Number(w.priceAtOrAbove);
+  const okByDrop = Number.isFinite(Number(w.dayChangePctAtOrBelow)) && Number.isFinite(day)
+    && day <= Number(w.dayChangePctAtOrBelow);
+  if (okByPrice || okByDrop) return { ok: true };
+
+  const parts = [];
+  if (Number.isFinite(price)) parts.push(`현재가 ${price}`);
+  if (Number.isFinite(day)) parts.push(`당일 ${day}%`);
+  return {
+    ok: false,
+    why: `${sym} 은 사용자가 **보유 유지**를 정한 종목이다 (${parts.join(' · ')})`
+      + ` — 매도는 ${Number.isFinite(Number(w.priceAtOrAbove)) ? `${w.priceAtOrAbove} 이상` : ''}`
+      + `${Number.isFinite(Number(w.dayChangePctAtOrBelow)) ? ` 또는 ${w.dayChangePctAtOrBelow}% 이하 급락` : ''} 일 때만 허용된다.`,
+  };
+}
+
 function inverseGate(p, regimeState) {
   const inv = require('./regimeService').readCatalog().categories?.inverse_hedge?.etfs || [];
   const hit = inv.find((e) => e.symbol === String(p.symbol).toUpperCase());
@@ -2127,7 +2222,11 @@ function inverseGate(p, regimeState) {
  * 백테스트는 합성 세계. **판단 코드가 한 벌**이라 백테스트 결과가 실전을 대표한다.
  * ⚠️ 부작용 0: 제안을 등록하지 않는다(orderService 를 안 부른다) — 반환만.
  */
-async function decideOnContext({ contextText, regimeState = null }) {
+/**
+  * ⚠️ `holdings` 는 **선택**이다 — 안 주면 보유 방침을 **판정하지 않고 그 사실을 로그로 남긴다**
+  *    (모르면 막지 않는다. 다만 조용히 통과시키지도 않는다).
+  */
+async function decideOnContext({ contextText, regimeState = null, holdings = [] }) {
   const raw = await generateStructuredOutput({
     systemPrompt: SYSTEM_PROMPT,
     userPrompt: String(contextText || ''),
@@ -2139,15 +2238,18 @@ async function decideOnContext({ contextText, regimeState = null }) {
   const rejected = [];
   for (const p of report.proposals || []) {
     const gate = inverseGate(p, regimeState);
-    if (gate.ok) accepted.push(p);
-    else rejected.push({ ...p, error: gate.why });
+    // ⚠️ **형제 중 하나만 빠지는 것**이 이 저장소의 전형적 실패다 — 여기도 같은 방침 게이트를 건다
+    const pol = holdingPolicyGate(p, (holdings || []).find(
+      (h) => String(h.symbol).toUpperCase() === String(p.symbol).toUpperCase()));
+    if (gate.ok && pol.ok) accepted.push(p);
+    else rejected.push({ ...p, error: gate.ok ? pol.why : gate.why });
   }
   return { report, proposals: accepted, rejected };
 }
 
 module.exports = {
   analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport,
-  computeTrade, decideOnContext, inverseGate, REPORT_SCHEMA, SYSTEM_PROMPT,
+  computeTrade, decideOnContext, inverseGate, holdingPolicyGate, holdingPolicyLines, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
   assessBuyingCapacity, capacityDetail, capacityBand, describeNoProposal, watchMovesSection,
 };
