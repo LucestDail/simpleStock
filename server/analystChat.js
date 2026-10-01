@@ -53,6 +53,36 @@ const MAX_ROUNDS = Math.max(1, Number(process.env.ANALYST_MAX_TOOL_ROUNDS) || 6)
 const MAX_CALLS_PER_ROUND = 4;
 const RECALL_LIMIT = 6;
 
+/**
+ * 🔴🔴 **대화 세션 경계** (2026-10-01 — 라이브 실사고로 추가)
+ *
+ * 종전에는 `recent = history.slice(-8)` 로 **시간을 보지 않고** 최근 8턴을 실었다.
+ * 이 봇의 이력은 **몇 주에 걸친 한 줄**이라, 8일 전 다른 종목 얘기가 **지금 하고 있는
+ * 대화인 것처럼** 모델에게 전달됐다.
+ *
+ * 실사고(실측):
+ * ```
+ * 09-24 08:30  "아이온큐 프리장 상승 이유"        → 아이온큐 답변 ✅
+ * 09-26 21:03  "다음주 주말 시황 정리해줘"        → **아이온큐 프리장 상승** 🔴
+ * 09-30 07:49  "내 보유주식상황 분석해"           → QLD + **"아이온큐가 고베타 성장주라"** 🔴
+ * 10-01 15:37  "리얼티인컴 매수 매력 판단해줘"     → **아이온큐 프리장 급등 이유** 🔴
+ * ```
+ * ★ **한 번 오염되면 스스로 되먹임한다** — 빗나간 답변이 다음 턴의 "최근 대화" 가 되어
+ *   또 같은 주제를 끌어낸다. 09-24 의 아이온큐가 **8일을 살아남았다.**
+ * ★ 더 나쁜 것: 그 턴에 **웹검색은 정확히 돌았다**(`리얼티인컴 최근 하락 이유` 5건 ·
+ *   toolFailed 0). **도구는 맞았고 낡은 맥락이 그 결과를 덮었다.**
+ *
+ * ⇒ 마지막 턴에서 거꾸로 걸어 **간격이 이보다 벌어지면 거기서 끊는다.**
+ * ⚠️ 시각이 아니라 **간격**으로 끊는다 — "오늘 09:00 질문, 14:00 후속" 은 이어지는 대화이고
+ *    "어제 질문, 오늘 질문" 은 아니다. 자정 기준으로 자르면 전자가 끊긴다.
+ * ⚠️ 6시간은 **넉넉한 쪽**으로 골랐다. 짧게 잡아 정당한 후속 질문의 맥락을 잃는 것이
+ *    길게 잡아 가끔 한 턴 더 보는 것보다 나쁘다 — 관측된 오염은 전부 **1일 이상** 간격이었다.
+ */
+const SESSION_GAP_MS = Math.max(0, Number(process.env.ANALYST_CHAT_SESSION_GAP_MS) || 6 * 60 * 60_000);
+
+/** 이력의 도구 결과 줄 표식 — **대화가 아니라 그 턴에만 유효한 휘발성 데이터**다 */
+const TOOL_RESULT_PREFIX = '[도구 결과]';
+
 // ── 도구 선언 ────────────────────────────────────────────────
 
 const TOOL_DECLARATIONS = [
@@ -432,10 +462,25 @@ function shapeToolCalls(out) {
   const calls = [];
   const seenNames = new Set();
   for (const { node, name } of found) {
-    if (seenNames.has(name)) continue; // 같은 도구를 한 바퀴에 두 번 부르지 않는다
-    seenNames.add(name);
     const args = argsOf(node, name);
-    calls.push({ name, args: args && typeof args === 'object' ? args : {} });
+    const safeArgs = args && typeof args === 'object' ? args : {};
+    /**
+     * 🔴 **이름이 아니라 이름+인자로 중복을 가른다** (2026-10-01).
+     *
+     * 종전엔 `seenNames.has(name)` 이라 **같은 도구를 다른 종목에 부르는 것이 버려졌다.**
+     * 두 종목을 비교해 달라는 질문(`"QLD 랑 리얼티인컴 중 뭐가 나아"`)에서
+     * `get_candles(QLD)` + `get_candles(O)` 를 요청하면 **둘째가 조용히 사라지고**,
+     * 모델은 한쪽 데이터만 받은 채 둘을 비교한다 ⇒ 없는 쪽을 **지어낸다.**
+     * ⚠️ 로그도 없어서 **그런 일이 있었는지조차** 알 수 없었다.
+     *
+     * ★ 바로 아래 라운드 간 중복 차단(`calledKeys`)은 **처음부터 이름+인자**였다
+     *   (*"`get_candles` 를 종목 둘에 부르는 것은 정당하다"* 라고 주석까지 달려 있다).
+     *   **형제 중 하나만 느슨했다** — 같은 판정이 두 곳에 복제돼 갈라진 전형.
+     */
+    const key = `${name}(${JSON.stringify(safeArgs)})`;
+    if (seenNames.has(key)) continue;
+    seenNames.add(key);
+    calls.push({ name, args: safeArgs });
   }
   return { tools: calls };
 }
@@ -506,30 +551,173 @@ function clearHistory() {
 }
 
 /**
+ * 이 턴들이 **한 대화**인가 — 마지막 턴에서 거꾸로 걸으며 간격이 벌어지는 지점에서 끊는다.
+ *
+ * 🔴 `slice(-N)` 과의 차이가 이 함수의 존재 이유다. `slice` 는 **개수**만 보므로
+ *    8일 전 대화도 "최근 8턴" 에 들어온다(위 SESSION_GAP_MS 주석의 실사고).
+ * ⚠️ 시각을 못 읽는 줄은 **경계로 쓰지 않는다** — 모르는 것을 "오래됐다" 로도
+ *    "최근이다" 로도 단정하지 않고, 간격 계산에서만 건너뛴다.
+ */
+function currentSession(rows, { gapMs = SESSION_GAP_MS, max = 8 } = {}) {
+  /**
+   * 🔴 **도구 결과 줄을 대화로 싣지 않는다** (2026-10-01 실측으로 추가).
+   *
+   * 이력에는 `[도구 결과] get_candles({...}) {"last":773.5,...}` 같은 줄이 `assistant` 역할로
+   * 들어 있다. 그대로 `contents` 에 넣으면 모델은 **그 숫자를 자기가 방금 받은 데이터로** 읽는다.
+   *
+   * 실제로 그렇게 됐다:
+   * ```
+   * 09-23 02:20  [도구 결과] get_candles("QLD") → last 773.5   ← 그날 한 번 잘못 온 값
+   * 09-24 05:59  답변: "QLD 현재 773.5, 20일선 766.07 위"       ← 이력에서 그대로 베꼈다
+   * 09-30 07:48  답변: "QLD 2,652주 … 현재 773.5"               ← 일주일 뒤에도
+   * ```
+   * ⚠️ **`get_candles` 자체는 지금 정상이다**(실측 10-01: QQQ 745.4 vs QLD 97.13 — 다르게 나온다).
+   *    즉 **일회성 오류 하나가 이력에 박혀 일주일을 거짓말했다.** 도구 결과는 그 턴에만
+   *    유효한 **휘발성 데이터**이지 대화가 아니다 — 다음 턴에는 반드시 다시 받아야 한다.
+   */
+  const turns = (rows || []).filter((h) => (h.role === 'user' || h.role === 'assistant')
+    && !String(h.text || '').startsWith(TOOL_RESULT_PREFIX));
+  if (!turns.length) return [];
+  const out = [turns[turns.length - 1]];
+  for (let i = turns.length - 2; i >= 0 && out.length < max; i -= 1) {
+    const cur = Date.parse(turns[i].at);
+    const next = Date.parse(turns[i + 1].at);
+    if (Number.isFinite(cur) && Number.isFinite(next) && next - cur > gapMs) break;
+    out.unshift(turns[i]);
+  }
+  return out;
+}
+
+/**
+ * 한국어 조사를 떼어 **주제어를 드러낸다**.
+ *
+ * 🔴 왜 필요한가: 종전 토크나이저는 공백으로만 잘라 `리얼티인컴도` 를 통째로 들고
+ *    `includes('리얼티인컴도')` 를 했다 ⇒ 과거에 `리얼티인컴은`·`리얼티인컴` 이 있어도
+ *    **한 글자 차이로 전부 못 찾는다.** 정작 주제어가 매칭에서 빠지고, 남은 것은
+ *    `매수`·`많이` 같은 **아무 글에나 있는 낱말**뿐이라 그것으로 점수가 매겨졌다.
+ * ⚠️ 원형도 함께 남긴다 — 조사가 아니라 **낱말의 일부**일 수 있다(`정보`, `주가`).
+ *    둘 다 넣고 매칭은 관대하게, **점수는 아래 IDF 가 엄격하게** 가른다.
+ */
+const PARTICLES = ['으로서', '으로써', '에서는', '에게서', '이라고', '라고', '으로', '에서', '에게', '까지', '부터', '보다', '처럼', '마다', '조차', '라도', '이나', '든지', '은', '는', '이', '가', '을', '를', '도', '의', '에', '와', '과', '로', '만', '및'];
+
+function tokenize(text) {
+  const raw = String(text || '').toLowerCase().split(/[^0-9a-z가-힣]+/).filter((t) => t.length >= 2);
+  const out = new Set();
+  for (const t of raw) {
+    out.add(t);
+    if (!/[가-힣]/.test(t)) continue;
+    for (const p of PARTICLES) {
+      if (t.length - p.length >= 2 && t.endsWith(p)) { out.add(t.slice(0, -p.length)); break; }
+    }
+  }
+  return [...out];
+}
+
+/**
  * recall — 과거 대화에서 관련 대목을 찾는다.
  *
  * ⚠️ 임베딩을 쓰지 않는다. **낱말 겹침**으로 고른다 — 이력이 수천 건 규모가 아니고,
  *    임베딩을 넣으면 외부 호출이 하나 더 늘어 실패 지점이 늘어난다.
- *    ★ 나중에 이력이 커지면 그때 바꾼다. **지금 확인할 수 있는 것**을 만든다.
+ *
+ * 🔴🔴 **종전 판정은 "흔한 낱말 하나" 를 관련성으로 읽었다** (2026-10-01 실측 재현).
+ * ```
+ * 질의: "리얼티인컴도 많이 내려간거 같은데 매수 매력 판단해줘"
+ * 결과: score=1 아이온큐 답변 ×3  ← 전부 `매수` 또는 `많이` **한 낱말**로 1점
+ *       (주제어 `리얼티인컴도` 는 조사 때문에 **아무것도 못 맞혔다**)
+ * ```
+ * 그 6건이 프롬프트의 `## 과거 대화에서 찾은 것` 으로 들어가 **답을 아이온큐로 끌었다.**
+ *
+ * ⇒ 네 가지를 함께 고친다. **하나만 고치면 다른 경로로 같은 일이 난다**:
+ *   ① **IDF** — 이력 대부분에 나오는 낱말은 정보가 없다(`매수`·`시장`·`판단`). 가중을 깎는다
+ *   ② **최소 점수** — 흔한 낱말 하나로는 못 들어온다
+ *   ③ **자기 자신 제외** — `recall` **도구** 경로는 이력을 새로 읽어 이번 턴이 들어 있다.
+ *      (⚠️ preface 경로는 append **전에** 읽은 `history` 를 쓰므로 해당 없다 — 두 경로가
+ *       같은 함수를 **다른 입력**으로 불러 동작이 갈렸다. 한쪽만 보고 단정하면 틀린다)
+ *   ④ **도구 결과 줄 제외** — `[도구 결과] get_candles({...})` 는 대화가 아니라 **기계 출력**이다.
+ *      숫자·티커가 잔뜩이라 낱말 겹침에서 부당하게 이긴다
  */
-function recall(query, { limit = RECALL_LIMIT, history = null } = {}) {
-  const terms = String(query || '')
-    .toLowerCase()
-    .split(/[^0-9a-z가-힣]+/)
-    .filter((t) => t.length >= 2);
+/**
+ * 🔴 **이력의 이 비율을 넘게 나오는 낱말은 주제어가 아니다.**
+ *
+ * 처음엔 IDF 점수에 하한(1.5)만 뒀는데 **그걸로는 안 걸러졌다** — 실측에서 `매수` 가
+ * 40건 중 8건(20%)에 있어 idf 1.72 로 하한을 넘었고, 아이온큐 답변 4건이 **그 한 낱말로**
+ * 그대로 들어왔다. 점수를 올리면 이번엔 **작은 이력에서 아무것도 안 걸린다**(N 에 따라
+ * idf 범위가 통째로 움직인다).
+ * ⇒ 점수가 아니라 **비율**로 끊는다. "이력 다섯 건 중 하나 꼴로 나오는 낱말" 은
+ *   주제가 아니라 **이 사람의 말버릇**이다(매수·시장·판단·종목…).
+ * ⚠️ `Math.max(2, …)` — **단 한 건에만 나오는 낱말은 무슨 일이 있어도 살린다.**
+ *    이력이 짧을 때 비율만 쓰면 희귀어까지 잘려 recall 이 통째로 죽는다.
+ */
+const RECALL_MAX_DF_RATIO = Number(process.env.ANALYST_RECALL_MAX_DF_RATIO) || 0.35;
+/**
+ * 🔴 **0.2 로 잡았다가 0.35 로 넓혔다 — 규칙이 자기 패배적이었다.**
+ *    라이브 이력에서 `아이온큐` 의 df 가 **8/39(21%)** 였다. 그런데 그게 흔한 이유가
+ *    **바로 이 오염 때문**이다(빗나간 답변이 8일간 이력을 채웠다). 0.2 로 자르면
+ *    *"오염된 주제어를 말버릇으로 오인해 영영 못 찾는"* 상태가 된다 — 실측으로
+ *    `아이온큐 프리장 상승 이유` 질의가 **0건**을 냈다(판별력 상실).
+ * ⇒ 비율은 **진짜 말버릇만** 걷어내는 선으로 넓히고, 정밀도는 아래 희귀어·다중일치
+ *   규칙이 진다. ★한 규칙을 조이는 대신 **다른 축으로 가른다.**
+/** 낱말 하나만 겹쳤을 때, 이 건수 이하로만 나오는 낱말이어야 "주제가 같다" 고 본다 */
+const RECALL_RARE_DF = Number(process.env.ANALYST_RECALL_RARE_DF) || 2;
+/** 이 건수 미만이면 "흔한 낱말" 판정 자체를 하지 않는다(표본이 없다) */
+const RECALL_MIN_CORPUS = Number(process.env.ANALYST_RECALL_MIN_CORPUS) || 10;
+
+function recall(query, { limit = RECALL_LIMIT, history = null, excludeTurnId = null } = {}) {
+  const terms = tokenize(query);
   if (!terms.length) return [];
 
-  const rows = history || readHistory();
-  const scored = [];
-  for (const r of rows) {
-    if (r.role !== 'user' && r.role !== 'assistant') continue;
-    const text = String(r.text || '');
-    const hay = text.toLowerCase();
-    let score = 0;
-    for (const t of terms) if (hay.includes(t)) score += 1;
-    if (score) scored.push({ score, at: r.at, role: r.role, text: text.slice(0, 400) });
+  const rows = (history || readHistory()).filter((r) => {
+    if (r.role !== 'user' && r.role !== 'assistant') return false;
+    if (excludeTurnId && r.turnId === excludeTurnId) return false;        // ③
+    if (String(r.text || '').startsWith(TOOL_RESULT_PREFIX)) return false; // ④
+    return true;
+  });
+  if (!rows.length) return [];
+
+  // ① 문서빈도 — 이력의 몇 %에 나오는 낱말인가. 흔할수록 가중이 0 에 수렴한다.
+  const df = new Map();
+  const hays = rows.map((r) => String(r.text || '').toLowerCase());
+  for (const t of terms) {
+    let n = 0;
+    for (const hay of hays) if (hay.includes(t)) n += 1;
+    df.set(t, n);
   }
-  // 점수 높은 것 우선, 같으면 최근 것 우선
+  const N = rows.length;
+  // ② 말버릇 낱말을 **아예 뺀다**(위 RECALL_MAX_DF_RATIO 주석 참조)
+  /**
+   * 🔴 **이력이 적으면 "흔하다" 를 판정할 수 없다** (기존 테스트가 잡았다).
+   *    N=3 짜리 이력에서 2건에 나오는 낱말은 말버릇이 아니라 **그냥 그 사람의 주제**다.
+   *    비율만 쓰면 `삼성전자`(3건 중 2건)가 잘려 정작 관련 대화를 못 찾았다.
+   * ⚠️ 절대 건수 하한(3)도 함께 둔다 — 2건은 어떤 코퍼스에서도 말버릇의 증거가 못 된다.
+   */
+  const dfCap = N >= RECALL_MIN_CORPUS ? Math.max(3, N * RECALL_MAX_DF_RATIO) : Infinity;
+  const topical = terms.filter((t) => df.get(t) < dfCap);
+  if (!topical.length) return [];   // 주제어가 하나도 없으면 **아무것도 집어오지 않는다**
+
+  const scored = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    const hay = hays[i];
+    let score = 0;
+    const hits = [];
+    for (const t of topical) {
+      if (!hay.includes(t)) continue;
+      score += Math.log(N / Math.max(1, df.get(t)));   // 희귀할수록 크게
+      hits.push(t);
+    }
+    /**
+     * 🔴 **한 낱말만 겹쳤으면 그 낱말이 희귀할 때만 인정한다.**
+     *    비율 상한만으로는 못 막았다 — 실측에서 `매수` 가 33건 중 6건(18%)이라 20% 문턱을
+     *    **간신히 통과**했고, 아이온큐 답변 4건이 그 한 낱말로 그대로 들어왔다.
+     *    문턱을 더 조이면 이번엔 희귀어까지 잘린다 ⇒ **낱말 수**라는 다른 축을 함께 본다.
+     * ★ 두 축이 **서로 다른 실패를 막는다**: 비율은 말버릇을, 개수는 "우연히 한 낱말 겹침" 을.
+     *   하나만 두면 다른 쪽으로 샌다.
+     */
+    const onlyOneCommonHit = hits.length === 1 && df.get(hits[0]) > RECALL_RARE_DF;
+    if (score > 0 && !onlyOneCommonHit) {
+      const r = rows[i];
+      scored.push({ score: Number(score.toFixed(2)), at: r.at, turnId: r.turnId || null, role: r.role, hits, text: String(r.text || '').slice(0, 400) });
+    }
+  }
   scored.sort((a, b) => b.score - a.score || String(b.at).localeCompare(String(a.at)));
   return scored.slice(0, limit);
 }
@@ -732,7 +920,15 @@ async function runTool(name, args = {}, ctx = {}) {
       return { ok: true, chars: r.chars, text: r.text, note: '본문 전문이다 — 숫자·발언을 직접 인용해 근거로 쓰라.' };
     }
     case 'recall': {
-      const hits = recall(String(args.query || ''));
+      /**
+       * 🔴 **이 경로는 이번 발화를 자기 자신으로 되찾는다.** `chat()` 의 preface 경로는
+       *    append 전에 읽은 `history` 를 넘기지만, 도구 경로는 여기서 `readHistory()` 를
+       *    **새로** 읽으므로 방금 적힌 이번 턴이 들어 있다 ⇒ 질의와 100% 겹쳐 1위를 먹고
+       *    **recall 한 자리를 자기 자신으로 태운다.**
+       * ⚠️ 두 경로가 같은 함수를 쓰는데 **입력이 달라 동작이 갈렸다** — 한쪽만 보고
+       *    "자기 매칭은 없다" 고 단정할 뻔했다.
+       */
+      const hits = recall(String(args.query || ''), { excludeTurnId: ctx.turnId || null });
       return { hits, note: hits.length ? null : '관련된 과거 대화를 찾지 못했습니다.' };
     }
     default:
@@ -747,7 +943,43 @@ async function runTool(name, args = {}, ctx = {}) {
  * (오늘 이미 배웠다 — 작은 모델일수록 앞의 지시를 놓친다).
  * ⇒ 밖으로 나가기 직전에 코드가 거른다.
  */
+/**
+ * 🔴 **모델이 만드는 검색어의 두 가지 고질** (2026-10-01, 이력 전수 실측 8건 중 6건)
+ *
+ * ```
+ * "RAM ETF 반도체 장비 전망 2025"                          ← 연도가 틀렸다(지금은 2026)
+ * "반도체 매매 타이밍 HBM DRAM 가격 전망 D램 고정거래가격 2025"  ← 9낱말
+ * "2026년 반도체 전망 하반기 HBM D램 \"고정거래가\" 바로"       ← 따옴표 + 무의미 토큰
+ * ```
+ * ① **연도 토큰** — 우리는 이미 `recency='1d'`(Brave `freshness=pd`)로 기간을 자른다.
+ *    거기에 `2025`·`2026` 을 더하면 **기간이 좁아지는 게 아니라 매칭만 좁아진다**(AND 검색).
+ *    게다가 실제로 **틀린 연도**가 6건 중 3건이었다 — 모델의 시간 감각은 믿을 수 없다.
+ * ② **낱말 과다** — 09-22 사고의 교훈(*"AND 검색이라 낱말이 늘수록 0 에 수렴한다"*)이
+ *    브리핑 경로에만 반영됐고 **채팅 경로에는 한 줄도 없었다.**
+ *
+ * ⇒ ①은 **코드가 지운다**(프롬프트로 타이르지 않는다 — 이 저장소가 이미 실패한 길이다).
+ *   ②는 지우면 뜻이 바뀌므로 **경고만** 남긴다 — 사람이 보고 도구 설명을 고칠 수 있게.
+ * ⚠️ `2026년` 처럼 **조사·단위가 붙은 것은 건드리지 않는다**(문장의 일부다).
+ *    맨 토큰으로 선 네 자리 연도만 지운다.
+ */
+const YEAR_TOKEN = /(^|\s)(19|20)\d{2}(?=\s|$)/g;
+const QUERY_WORD_WARN = Number(process.env.ANALYST_QUERY_WORD_WARN) || 6;
+
 function sanitizeQuery(q) {
+  const before = String(q);
+  const out = sanitizeQueryInner(before.replace(YEAR_TOKEN, '$1'));
+  if (out !== sanitizeQueryInner(before)) {
+    logWarn('chat.query_year_stripped', { before: before.slice(0, 120), after: out.slice(0, 120) });
+  }
+  const words = out.split(/\s+/).filter(Boolean);
+  if (words.length > QUERY_WORD_WARN) {
+    // 🔴 지우지 않는다 — 어떤 낱말을 버릴지는 코드가 알 수 없다. **보이게만** 한다
+    logWarn('chat.query_too_many_words', { words: words.length, limit: QUERY_WORD_WARN, query: out.slice(0, 160) });
+  }
+  return out;
+}
+
+function sanitizeQueryInner(q) {
   return String(q)
     // 통화 기호가 붙은 금액, 3자리 구분 숫자, `12주`·`100株` 같은 수량 표현
     .replace(/[₩$€¥]\s?[\d,.]+/g, ' ')
@@ -793,11 +1025,30 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
    *   도구로도 부를 수 있지만, 모델이 부를 생각을 못 하면 맥락이 통째로 빠진다.
    *   ⚠️ 찾은 게 없으면 **아무것도 싣지 않는다**(빈 섹션은 모델을 헷갈리게 한다).
    */
-  const recalled = recall(text, { history });
+  const recalled = recall(text, { history, excludeTurnId: turnId });
   if (recalled.length) emit('recall', { count: recalled.length, items: recalled.slice(0, 3) });
 
-  // 최근 대화 몇 턴을 맥락으로(전부 싣지 않는다 — 토큰과 혼선)
-  const recent = history.filter((h) => h.role === 'user' || h.role === 'assistant').slice(-8);
+  /**
+   * 🔴 **"최근 8턴" 이 아니라 "지금 이어지고 있는 대화"** (2026-10-01 — 위 SESSION_GAP_MS 참조).
+   *    종전 `slice(-8)` 은 개수만 봐서 8일 전 다른 종목 대화를 현재 대화로 실었다.
+   */
+  const recent = currentSession(history);
+  /**
+   * ⚠️ **무엇을 실었는지 남긴다** — 답이 빗나갔을 때 *"맥락이 오염됐나"* 를 소급으로
+   *    가를 수 있어야 한다. 09-24~10-01 오염은 **로그에 아무 흔적이 없어** 사용자가
+   *    말해 줄 때까지 아무도 몰랐다. 본문은 안 싣는다(길이·개인정보).
+   */
+  const sessionSpanMin = recent.length > 1
+    ? Math.round((Date.parse(recent[recent.length - 1].at) - Date.parse(recent[0].at)) / 60_000)
+    : 0;
+  logInfo('chat.context', {
+    turnId,
+    historyTurns: history.filter((h) => h.role === 'user' || h.role === 'assistant').length,
+    sessionTurns: recent.length,
+    sessionSpanMin: Number.isFinite(sessionSpanMin) ? sessionSpanMin : null,
+    recalled: recalled.length,
+    recallTopScore: recalled[0]?.score ?? null,
+  });
 
   const contents = [];
   for (const h of recent) {
@@ -931,7 +1182,7 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
       emit('tool_call', { id: callId, name: call.name, args: call.args });
       let result;
       try {
-        result = await runTool(call.name, call.args, { fx });
+        result = await runTool(call.name, call.args, { fx, turnId });
         emit('tool_result', { id: callId, name: call.name, ok: true, preview: preview(result) });
         // ⚠️ 도구가 스스로 {ok:false} 를 돌려주는 경우(runTool 안에서 잡은 실패)도 실패로 센다
         toolLog.push({ name: call.name, ok: result?.ok !== false, ...(result?.ok === false ? { error: String(result.error || '').slice(0, 200) } : {}) });
@@ -1098,6 +1349,7 @@ module.exports = {
   recall,
   runTool,
   sanitizeQuery,
+  sanitizeQueryInner,
   readHistory,
   appendHistory,
   clearHistory,
@@ -1109,4 +1361,11 @@ module.exports = {
   DECIDE_SCHEMA,
   HISTORY_FILE,
   MAX_ROUNDS,
+  // 테스트용 — 맥락 조립의 두 축을 밖에서 직접 잰다(로그를 세려 하면 공허해진다)
+  currentSession,
+  tokenize,
+  SESSION_GAP_MS,
+  RECALL_MAX_DF_RATIO,
+  RECALL_RARE_DF,
+  RECALL_MIN_CORPUS,
 };

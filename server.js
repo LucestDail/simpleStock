@@ -505,6 +505,22 @@ app.get('/api/news', async (req, res) => {
   }
   const hit = r.results[0] || {};
   if (hit.error) return res.status(200).json({ ok: false, error: hit.error, kind: hit.kind, items: [] });
+  /**
+   * 🔴 **건너뛴 것을 "뉴스 없음" 으로 보여주지 않는다** (2026-10-01).
+   *
+   * 맨 티커(`QLD` → 퀸즐랜드 럭비) 질의는 오늘 `mcpClient` 가 **건너뛰고 `skipped` 를 단다.**
+   * 그런데 여기선 `hit.error` 도 `hit.text` 도 없으므로 `parseNews('')` → `items: []`
+   * ⇒ 화면이 **"이 종목은 뉴스가 없다"** 로 읽는다. 실제로는 **묻지도 않았다.**
+   * ⚠️ 브리핑 경로는 같은 결손을 `dataGaps` 에 적는다 — **같은 사건이 한쪽에서는 보이고
+   *    한쪽에서는 사라지던** 자리다(라이브 30일 맨 티커 경고 19회).
+   * ★ "검사 안 한 것" 과 "결과가 없는 것" 을 구분한다 — 이 저장소가 반복해 적은 그 규율.
+   */
+  if (hit.skipped) {
+    return res.status(200).json({
+      ok: false, skipped: hit.skipped, kind: 'skipped', items: [],
+      error: '종목명이 없어 검색하지 않았습니다 (티커만으로는 엉뚱한 결과가 옵니다).',
+    });
+  }
   return res.json({ ok: true, tool: r.tool, query: hit.query, items: parseNews(hit.text || '') });
 });
 

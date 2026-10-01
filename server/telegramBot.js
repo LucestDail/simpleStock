@@ -284,6 +284,42 @@ async function handleCallback(cb) {
  */
 let chatBusy = false;
 
+/**
+ * 🔴 **응답이 멈추면 봇이 통째로 죽는다** (2026-10-01).
+ *
+ * `chatBusy` 는 `finally` 에서 풀리지만, 최종 스트림에 **타임아웃이 없어서**
+ * 상대가 응답을 끝내지 않으면 `await` 가 영영 안 돌아온다 ⇒ `finally` 도 안 돌고
+ * `chatBusy` 가 **영구 true** 가 된다. 그 뒤로는 무엇을 물어도 *"앞 질문을 아직
+ * 처리 중입니다"* 만 돌아온다 — **재기동 전까지 봇이 벽돌이 된다.**
+ * ⚠️ 실패(throw)는 이미 잘 처리하고 있었다. 위험한 것은 **실패가 아니라 무응답**이다.
+ * ⚠️ 상한은 넉넉하게 — 실측 정상 턴이 55초였다(도구 4개). 짧게 잡으면 멀쩡한 답을 끊는다.
+ */
+const CHAT_TIMEOUT_MS = Math.max(60_000, Number(process.env.TELEGRAM_CHAT_TIMEOUT_MS) || 5 * 60_000);
+
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * 🔴 **텔레그램은 마크다운을 안 켜고 보낸다** — `parse_mode` 가 없다(MarkdownV2 는 이스케이프가
+ *    까다로워 일부러 평문으로 보낸다, `telegramService.js:51`). 그런데 시스템 프롬프트와
+ *    사용자 템플릿은 `**굵게**`·`## 제목` 을 **쓰라고 지시한다** ⇒ 사용자 화면에는
+ *    별표와 우물정자가 **그대로 글자로** 보인다.
+ * ⇒ 보내기 직전에 **표식만 걷어낸다.** 내용은 한 글자도 안 지운다.
+ * ⚠️ 마크다운을 켜는 쪽은 고르지 않았다 — 모델이 쓰는 `_`·`[`·`(` 가 섞이면 텔레그램이
+ *    **400 으로 거절**해서 답이 통째로 안 간다. 미관보다 도착이 중요하다.
+ */
+function toPlainText(s) {
+  return String(s || '')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')        // ## 제목 → 제목
+    .replace(/\*\*(.+?)\*\*/gs, '$1')          // **굵게** → 굵게
+    .replace(/(^|[\s(])\*(?!\s)([^*\n]+?)\*(?=[\s).,!?]|$)/g, '$1$2')  // *기울임* → 기울임
+    .replace(/^\s{0,3}[-*]\s+/gm, '· ');       // - 항목 → · 항목
+}
+
+
 async function handleUserMessage(msg) {
   const fromChat = String(msg?.chat?.id || '');
   const text = String(msg?.text || '').trim();
@@ -291,7 +327,25 @@ async function handleUserMessage(msg) {
     logWarn('tgbot.rejected_foreign_chat', { fromChat: fromChat.slice(0, 6) + '…', kind: 'message' });
     return;
   }
-  if (!text || text.startsWith('/')) return; // 명령어는 아직 없다 — 조용히 무시하지 않고 아래에서 안내
+  /**
+   * 🔴 **조용히 버리지 않는다** (2026-10-01). 종전 주석은 *"조용히 무시하지 않고 아래에서
+   *    안내"* 라고 적혀 있었는데 **그 "아래" 가 없었다** — 그냥 `return` 이었다.
+   *    주석이 약속한 동작이 코드에 없는 자리(이 워크스페이스가 반복해 밟은 모양).
+   *
+   *    사용자가 겪는 것: 사진·음성·스티커를 보내거나 `/start` 를 눌러도 **아무 반응이
+   *    없다.** "봇이 죽었나" 와 "그건 못 받는다" 가 구분되지 않는다.
+   * ⚠️ 로그도 안 남아 **얼마나 자주 일어나는지조차** 알 수 없었다.
+   */
+  if (!text) {
+    logInfo('tgbot.non_text_ignored', { kinds: Object.keys(msg || {}).filter((k) => k !== 'chat' && k !== 'from' && k !== 'date' && k !== 'message_id').slice(0, 5) });
+    await api('sendMessage', { chat_id: CHAT_ID, text: '글로 물어봐 주세요 — 사진·음성·파일은 아직 못 읽습니다.' }).catch(() => {});
+    return;
+  }
+  if (text.startsWith('/')) {
+    logInfo('tgbot.command_ignored', { cmd: text.split(/\s+/)[0].slice(0, 32) });
+    await api('sendMessage', { chat_id: CHAT_ID, text: '명령어는 없습니다 — 그냥 평소 말투로 물어보시면 됩니다.' }).catch(() => {});
+    return;
+  }
   if (chatBusy) {
     await api('sendMessage', { chat_id: CHAT_ID, text: '⏳ 앞 질문을 아직 처리 중입니다 — 끝나면 이어서 물어봐 주세요.' });
     return;
@@ -305,11 +359,24 @@ async function handleUserMessage(msg) {
     const rate = Number(mkt?.fx?.USDKRW?.rate) || 0;
     let answer = '';
     const toolsUsed = [];
+    /**
+     * 🔴 **자기고발 신호를 사용자에게 전달한다** (2026-10-01).
+     *
+     * 종전 `emit` 은 `text_delta`·`tool_call` **둘만** 처리하고 나머지를 버렸다. 그래서
+     * `analystChat` 이 공들여 만든 경고가 **텔레그램에서 전부 0** 이 됐다:
+     *   · 도구 바퀴 상한(6)에 걸려 멈춤          → 폰에는 매끈한 답만
+     *   · 도구 판단기가 죽어 도구 없이 답함        → 폰에는 매끈한 답만
+     *   · 도구 호출이 실패함                     → 폰에는 매끈한 답만
+     * ★ 서버 로그에는 있는데 **결정을 내리는 사람에게는 없었다.** 매매 판단을 받는
+     *   화면에서 "이 답은 데이터 없이 썼다" 를 숨기는 것이 이 결함의 값이다.
+     * ⚠️ 본문에 섞지 않고 **꼬리에 모아** 붙인다 — 답 중간에 끼면 읽는 흐름이 끊긴다.
+     */
+    const notices = [];
     const keepTyping = setInterval(() => {
       api('sendChatAction', { chat_id: CHAT_ID, action: 'typing' }).catch(() => {});
     }, 5000);
     try {
-      await analystChat.chat({
+      await withTimeout(analystChat.chat({
         message: text,
         userInstruction: require('./settingsService').getDashboardSettings().briefingPrompt,
         contextNote: '텔레그램에서 온 질문이다. 답은 채팅 메시지로 전달되므로 간결하게 쓰되, 근거 숫자는 유지하라. '
@@ -318,13 +385,20 @@ async function handleUserMessage(msg) {
         emit: (event, data) => {
           if (event === 'text_delta') answer += data?.text || '';
           else if (event === 'tool_call') toolsUsed.push(data?.name);
+          else if (event === 'notice') notices.push(String(data?.text || '').slice(0, 200));
+          else if (event === 'tool_result' && data?.ok === false) {
+            notices.push(`${data?.name || '도구'} 실패: ${String(data?.error || '').slice(0, 120)}`);
+          }
         },
-      });
+      }), CHAT_TIMEOUT_MS, '모델 응답이 제한 시간을 넘겼습니다');
     } finally {
       clearInterval(keepTyping);
     }
     if (!answer.trim()) answer = '(모델이 빈 답을 냈습니다 — 다시 물어봐 주세요)';
     if (toolsUsed.length) answer += `\n\n🔧 확인한 것: ${[...new Set(toolsUsed)].join(' · ')}`;
+    // 🔴 경고는 **답 뒤에** 붙인다 — 답을 가리지 않으면서 숨기지도 않는다
+    if (notices.length) answer += `\n\n⚠️ ${[...new Set(notices)].join('\n⚠️ ')}`;
+    answer = toPlainText(answer);
     // 텔레그램 한 메시지 상한 4096 — 자르지 말고 나눠 보낸다(잘리면 근거 숫자가 사라진다)
     for (let i = 0; i < answer.length; i += 3800) {
       await api('sendMessage', { chat_id: CHAT_ID, text: answer.slice(i, i + 3800) });
