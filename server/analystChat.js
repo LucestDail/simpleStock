@@ -1141,6 +1141,27 @@ function sanitizeQueryInner(q) {
 
 // ── 스트리밍 대화 ────────────────────────────────────────────
 
+/**
+ * 🔴 **답이 "하겠습니다" 로 끝나는 미완인가** — 2026-10-01 E2E 에서 두 번째로 뚫렸다.
+ *
+ * 실물: `"아직 계좌 전체를 조회 중입니다. 잠시만요. (QLD 정리, RAM 손절, O 매수 — 세 가지를
+ * 함께 검토하겠습니다)"` (66자). **도구 결과를 이미 받은 턴**인데 대기 선언으로 끝났다.
+ *
+ * 종전 패턴 `(하겠습니다|…)\s*\.?\s*$` 은 **닫는 괄호에서 진다** — 끝이 `검토하겠습니다)`
+ * 라 안 걸렸다. 09-30 에 *"확인해 보겠"* → *"보겠습니다"* 로 한 번 넓힌 바로 그 자리이고,
+ * 같은 가족을 **문장부호 축**에서 또 밟았다.
+ * ⇒ 꼬리 문장부호를 허용하고, *"조회 중 / 확인 중 / 잠시만"* 류 **대기 선언**도 본다.
+ *
+ * ⚠️ 길이 상한(200자)을 **모든 축에 건다.** 긴 답이 본문 중간에 "조회 중" 을 언급하는 것은
+ *    미완이 아니다 — 오탐하면 멀쩡한 답을 버리고 다시 쓰게 만든다(비용·지연 두 배).
+ */
+function isStubAnswer(answer) {
+  const t = String(answer || '').trim();
+  if (t.length >= 200) return false;
+  if (/(하겠습니다|보겠습니다|드리겠습니다)[\s.)\]"'’”」』]*$/.test(t)) return true;
+  return /잠시만|조회\s*중|확인\s*중|알아보는 중/.test(t);
+}
+
 function partsOf(chunk) {
   return chunk?.candidates?.[0]?.content?.parts || [];
 }
@@ -1451,7 +1472,7 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
      *    보겠습니다"·"살펴보겠습니다" 를 전부 한 패턴으로 잡는다(부분집합이라 별도
      *    "해보겠습니다" 항목은 뺀다).
      */
-    const stub = fake || (answer.trim().length < 200 && /(하겠습니다|보겠습니다|드리겠습니다)\s*\.?\s*$/.test(answer.trim()));
+    const stub = fake || isStubAnswer(answer);
     if (!stub) break;
     if (pass === 2) {
       /**
@@ -1594,6 +1615,7 @@ module.exports = {
   MAX_ROUNDS,
   // 테스트용 — 맥락 조립의 두 축을 밖에서 직접 잰다(로그를 세려 하면 공허해진다)
   accountTruthSection,
+  isStubAnswer,
   PROPOSAL_CLAIMED,
   currentSession,
   tokenize,

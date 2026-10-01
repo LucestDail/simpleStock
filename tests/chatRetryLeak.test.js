@@ -197,3 +197,36 @@ test('필드가 다르면 따로 센다 (하나가 다른 하나를 가리면 �
   assert.equal(toss.reportRateMismatch('profit', -8.7, 1.5, t0), true);
   assert.equal(toss.reportRateMismatch('daily', -8.7, 1.5, t0), true, '다른 필드인데 앞 필드 때문에 삼켜졌다');
 });
+
+/**
+ * ── 미완 판정기 — 2026-10-01 E2E 에서 **문장부호 축으로 뚫렸다** ────────────────
+ *
+ * 라이브 실물(66자): `"아직 계좌 전체를 조회 중입니다. 잠시만요. (QLD 정리, RAM 손절,
+ * O 매수 — 세 가지를 함께 검토하겠습니다)"` — 도구 결과를 **이미 받은** 턴인데 대기
+ * 선언으로 끝났고, 끝이 `검토하겠습니다**)**` 라 `하겠습니다\s*\.?\s*$` 가 안 걸렸다.
+ * `retriedFinal:false` 로 그대로 나갔다.
+ *
+ * ★ 09-30 에 *"확인해 보겠"* → *"보겠습니다"* 로 넓힌 **바로 그 자리**다. 같은 가족을
+ *   다른 축(꼬리 문장부호)에서 또 밟았다 ⇒ 순수 함수로 빼서 양방향을 못박는다.
+ */
+const chatMod = require('../server/analystChat');
+
+test('🔴 닫는 괄호로 끝나는 미완을 잡는다 (라이브 실물)', () => {
+  assert.equal(chatMod.isStubAnswer('… 세 가지를 함께 검토하겠습니다)'), true);
+  assert.equal(chatMod.isStubAnswer('확인해 보겠습니다."'), true);
+});
+
+test('🔴 "조회 중 / 잠시만" 류 대기 선언도 미완이다', () => {
+  assert.equal(chatMod.isStubAnswer('아직 계좌 전체를 조회 중입니다. 잠시만요.'), true);
+  assert.equal(chatMod.isStubAnswer('데이터를 확인 중입니다.'), true);
+});
+
+test('회귀 축: 09-30 에 넓힌 "보겠습니다" 가 여전히 잡힌다', () => {
+  assert.equal(chatMod.isStubAnswer('포트폴리오를 확인해 보겠습니다.'), true);
+});
+
+test('🔴 오탐 축: 정상적인 짧은 답을 미완으로 읽지 않는다', () => {
+  assert.equal(chatMod.isStubAnswer('QLD 보유 유지가 낫습니다. 20일선 위이고 +34.9% 구간입니다.'), false);
+  // ⚠️ 길이 상한을 **모든 축에** 건다 — 긴 답이 본문에서 "조회 중" 을 언급하는 것은 미완이 아니다
+  assert.equal(chatMod.isStubAnswer('가'.repeat(210) + ' 조회 중인 지표도 있습니다.'), false);
+});
