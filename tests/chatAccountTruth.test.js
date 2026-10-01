@@ -412,16 +412,28 @@ test('🔴 recall 로 올라온 과거 답변도 가려진다 (세션 밖 경로
  *    `"⟨옛값⟩주 남은 물량"`·`"배당률 ⟨옛값⟩"` 이 그대로 나갔다. 프롬프트에 "쓰지 마라" 를
  *    적었지만 **그것만 믿지 않는다** — 1차는 재시도, 마지막은 코드가 지운다.
  */
-test('🔴 답에 가림 표식이 남으면 한 번 다시 쓰게 한다', async () => {
-  let pass = 0;
+/**
+ * ⚠️ **재시도로 고치려다 되돌렸다** (2026-10-01). 표식이 새면 답을 다시 쓰게 했더니
+ *    **품질이 무너졌다**(E2E 3회: 64자 사죄 스텁 · `⟨옛값⟩` 벽 · 오타). 표식은 가린
+ *    과거 답에 흔해 재시도가 자주 걸리고, **재시도된 답이 원본보다 나쁘다.**
+ *    ⇒ 누출은 **치환으로만** 끝낸다. 이 테스트가 그 결정을 못박는다.
+ */
+test('🔴 표식 누출로 답을 다시 쓰게 하지 않는다 (되돌린 결정)', async () => {
   const chat = fresh({ answer: '⟨옛값⟩주 남은 물량을 정리하세요.' });
-  // 두 번째 패스에서는 깨끗한 답을 주도록 스트림을 바꿔치기할 수 없으므로,
-  // 재시도가 **일어났다는 사실**(경고)과 최종 정리를 함께 본다
   const ev = await run(chat, '어떻게 할까?');
-  pass = ev.filter((e) => e.e === 'answer_restart').length;
-  assert.equal(pass, 1, '표식이 샜는데 재시도가 안 걸렸다');
-  assert.ok(captured.warns.some((w) => w.ev === 'chat.stale_marker_leaked'),
-    '두 번째도 샜는데 코드가 지웠다는 기록이 없다');
+  assert.equal(ev.filter((e) => e.e === 'answer_restart').length, 0,
+    '표식 누출로 재시도가 걸렸다 — 그 길은 품질을 떨어뜨려 되돌린 결정이다');
+  assert.ok(captured.warns.some((w) => w.ev === 'chat.stale_marker_leaked'), '누출이 기록되지 않았다');
+});
+
+test('🔴 과거 답변은 **요지만** 남기고 잘린다 (표를 가리면 ⟨옛값⟩ 벽이 되고 모델이 따라 쓴다)', () => {
+  const m = require('../server/analystChat').maskStaleNumbers;
+  const table = '# 조정안\n\n| 종목 | 보유 |\n| QLD | 90주 |\n| RAM | 400주 |';
+  const out = m(table);
+  assert.ok(!out.includes('|'), '표가 그대로 남았다 — 가리면 ⟨옛값⟩ 벽이 된다');
+  assert.ok(out.includes('조정안'), '요지까지 사라졌다 — 맥락이 통째로 날아간다');
+  assert.match(out, /이전 답변 요지만/, '잘렸다는 사실을 안 알렸다');
+  assert.ok((out.match(/⟨옛값⟩/g) || []).length <= 2, `표식이 ${(out.match(/⟨옛값⟩/g) || []).length}개 — 벽이 그대로다`);
 });
 
 test('🔴 끝까지 남은 표식은 사용자 눈에 보이지 않게 치환된다', async () => {
