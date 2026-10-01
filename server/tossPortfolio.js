@@ -68,7 +68,8 @@ function deriveRatePct(amountObj, purchaseObj, reportedPct, label) {
     logWarn('toss.rate_mismatch', {
       field: label, reported: reportedPct, derived,
       // ⚠️ 금액은 로그에 안 남긴다(이 파일의 기존 방침) — 비율만으로 진단된다
-      note: '증권사가 준 수익률이 자기 금액과 맞지 않는다 — 계산값을 쓴다',
+      // ⚠️ 문구가 동작과 어긋나면 안 된다 — 우리는 **덮어쓰지 않고 둘 다 싣는다**
+      note: '증권사 수익률이 자기 금액과 맞지 않는다 — 원본은 profitRate, 유도값은 profitRateDerived 로 둘 다 싣는다',
     });
   }
   return derived;
