@@ -41,6 +41,84 @@
      "name": "Technology Select SPDR",
      "leverage": 1,
      "desc": "S&P 기술 섹터 현물. QQQ 보다 대형 기술주 집중"
+    },
+    {
+     "symbol": "QQQM",
+     "name": "QQQM",
+     "leverage": 1,
+     "desc": "QQQ 저보수판 — 장기 보유용"
+    },
+    {
+     "symbol": "NVDA",
+     "name": "NVDA",
+     "leverage": 1,
+     "desc": "AI 가속기 — 반도체 사이클의 중심"
+    },
+    {
+     "symbol": "MSFT",
+     "name": "MSFT",
+     "leverage": 1,
+     "desc": "클라우드·AI 복합"
+    },
+    {
+     "symbol": "GOOGL",
+     "name": "GOOGL",
+     "leverage": 1,
+     "desc": "검색·클라우드"
+    },
+    {
+     "symbol": "META",
+     "name": "META",
+     "leverage": 1,
+     "desc": "광고·AI 설비투자"
+    },
+    {
+     "symbol": "AAPL",
+     "name": "AAPL",
+     "leverage": 1,
+     "desc": "하드웨어·서비스"
+    },
+    {
+     "symbol": "AVGO",
+     "name": "AVGO",
+     "leverage": 1,
+     "desc": "맞춤형 AI 칩·네트워킹"
+    },
+    {
+     "symbol": "ORCL",
+     "name": "ORCL",
+     "leverage": 1,
+     "desc": "AI 데이터센터 수주"
+    },
+    {
+     "symbol": "NOW",
+     "name": "NOW",
+     "leverage": 1,
+     "desc": "엔터프라이즈 SaaS"
+    },
+    {
+     "symbol": "ANET",
+     "name": "ANET",
+     "leverage": 1,
+     "desc": "AI 네트워킹"
+    },
+    {
+     "symbol": "VRT",
+     "name": "VRT",
+     "leverage": 1,
+     "desc": "데이터센터 전력·냉각"
+    },
+    {
+     "symbol": "PLTR",
+     "name": "PLTR",
+     "leverage": 1,
+     "desc": "데이터 분석"
+    },
+    {
+     "symbol": "CRWD",
+     "name": "CRWD",
+     "leverage": 1,
+     "desc": "보안"
     }
    ]
   },
@@ -65,6 +143,60 @@
      "name": "ProShares UltraPro S&P500",
      "leverage": 3,
      "desc": "S&P500 일일 3배. 단기 전용 — TQQQ 보다 변동성은 낮지만 같은 감쇠 구조"
+    },
+    {
+     "symbol": "VOO",
+     "name": "VOO",
+     "leverage": 1,
+     "desc": "S&P500 저보수"
+    },
+    {
+     "symbol": "IVV",
+     "name": "IVV",
+     "leverage": 1,
+     "desc": "S&P500"
+    },
+    {
+     "symbol": "VTI",
+     "name": "VTI",
+     "leverage": 1,
+     "desc": "미국 전체시장"
+    },
+    {
+     "symbol": "IWB",
+     "name": "IWB",
+     "leverage": 1,
+     "desc": "러셀1000"
+    },
+    {
+     "symbol": "DIA",
+     "name": "DIA",
+     "leverage": 1,
+     "desc": "다우30"
+    },
+    {
+     "symbol": "IWM",
+     "name": "IWM",
+     "leverage": 1,
+     "desc": "러셀2000 — 소형주·금리 민감"
+    },
+    {
+     "symbol": "VT",
+     "name": "VT",
+     "leverage": 1,
+     "desc": "전세계"
+    },
+    {
+     "symbol": "SPXL",
+     "name": "SPXL",
+     "leverage": 3,
+     "desc": "S&P 3배 롱 — 단기"
+    },
+    {
+     "symbol": "TNA",
+     "name": "TNA",
+     "leverage": 3,
+     "desc": "러셀2000 3배 롱 — 단기"
     }
    ]
   },
@@ -95,6 +227,84 @@
      "name": "Roundhill 2X DRAM",
      "leverage": 2,
      "desc": "DRAM(메모리) 일일 2배. 초협소 테마 — 상장 2026-06, 이력 짧음"
+    },
+    {
+     "symbol": "NVDA",
+     "name": "NVDA",
+     "leverage": 1,
+     "desc": "AI 가속기"
+    },
+    {
+     "symbol": "AMD",
+     "name": "AMD",
+     "leverage": 1,
+     "desc": "CPU·GPU"
+    },
+    {
+     "symbol": "AVGO",
+     "name": "AVGO",
+     "leverage": 1,
+     "desc": "맞춤형 AI 칩"
+    },
+    {
+     "symbol": "TSM",
+     "name": "TSM",
+     "leverage": 1,
+     "desc": "파운드리"
+    },
+    {
+     "symbol": "ASML",
+     "name": "ASML",
+     "leverage": 1,
+     "desc": "EUV 독점"
+    },
+    {
+     "symbol": "ARM",
+     "name": "ARM",
+     "leverage": 1,
+     "desc": "IP 라이선스"
+    },
+    {
+     "symbol": "MRVL",
+     "name": "MRVL",
+     "leverage": 1,
+     "desc": "데이터센터 커스텀"
+    },
+    {
+     "symbol": "LRCX",
+     "name": "LRCX",
+     "leverage": 1,
+     "desc": "식각 장비"
+    },
+    {
+     "symbol": "AMAT",
+     "name": "AMAT",
+     "leverage": 1,
+     "desc": "증착 장비"
+    },
+    {
+     "symbol": "KLAC",
+     "name": "KLAC",
+     "leverage": 1,
+     "desc": "검사 장비"
+    },
+    {
+     "symbol": "MU",
+     "name": "MU",
+     "leverage": 1,
+     "desc": "메모리(DRAM·HBM)"
+    },
+    {
+     "symbol": "SNDK",
+     "name": "SNDK",
+     "leverage": 1,
+     "desc": "낸드"
+    },
+    {
+     "symbol": "ALAB",
+     "name": "ALAB",
+     "leverage": 1,
+     "desc": "AI 인터커넥트"
     }
    ]
   },
@@ -113,6 +323,42 @@
      "name": "Vanguard Consumer Staples",
      "leverage": 1,
      "desc": "XLP 와 유사 — 더 넓은 편입, 수수료 낮음"
+    },
+    {
+     "symbol": "PG",
+     "name": "PG",
+     "leverage": 1,
+     "desc": "생활용품"
+    },
+    {
+     "symbol": "KO",
+     "name": "KO",
+     "leverage": 1,
+     "desc": "음료"
+    },
+    {
+     "symbol": "PEP",
+     "name": "PEP",
+     "leverage": 1,
+     "desc": "음료·스낵"
+    },
+    {
+     "symbol": "COST",
+     "name": "COST",
+     "leverage": 1,
+     "desc": "회원제 유통 — 경기 방어"
+    },
+    {
+     "symbol": "WMT",
+     "name": "WMT",
+     "leverage": 1,
+     "desc": "대형 유통"
+    },
+    {
+     "symbol": "MCD",
+     "name": "MCD",
+     "leverage": 1,
+     "desc": "외식"
     }
    ]
   },
@@ -138,6 +384,48 @@
      "leverage": 1,
      "market": "KR",
      "desc": "한국 방산(한화에어로·KAI 등). 원화 계좌 필요"
+    },
+    {
+     "symbol": "LMT",
+     "name": "LMT",
+     "leverage": 1,
+     "desc": "방산 대형"
+    },
+    {
+     "symbol": "RTX",
+     "name": "RTX",
+     "leverage": 1,
+     "desc": "엔진·미사일"
+    },
+    {
+     "symbol": "NOC",
+     "name": "NOC",
+     "leverage": 1,
+     "desc": "폭격기·우주"
+    },
+    {
+     "symbol": "KTOS",
+     "name": "KTOS",
+     "leverage": 1,
+     "desc": "무인기"
+    },
+    {
+     "symbol": "AVAV",
+     "name": "AVAV",
+     "leverage": 1,
+     "desc": "소형 드론"
+    },
+    {
+     "symbol": "BWXT",
+     "name": "BWXT",
+     "leverage": 1,
+     "desc": "해군 원자로"
+    },
+    {
+     "symbol": "DFEN",
+     "name": "DFEN",
+     "leverage": 3,
+     "desc": "방산 3배 롱 — 단기"
     }
    ]
   },
@@ -156,6 +444,54 @@
      "name": "SPDR S&P Bank",
      "leverage": 1,
      "desc": "은행 집중 — XLF 보다 금리 민감도 큼"
+    },
+    {
+     "symbol": "KRE",
+     "name": "KRE",
+     "leverage": 1,
+     "desc": "지역은행 — 금리·신용에 가장 민감"
+    },
+    {
+     "symbol": "JPM",
+     "name": "JPM",
+     "leverage": 1,
+     "desc": "대형은행"
+    },
+    {
+     "symbol": "AXP",
+     "name": "AXP",
+     "leverage": 1,
+     "desc": "카드·신용"
+    },
+    {
+     "symbol": "MA",
+     "name": "MA",
+     "leverage": 1,
+     "desc": "결제망"
+    },
+    {
+     "symbol": "V",
+     "name": "V",
+     "leverage": 1,
+     "desc": "결제망"
+    },
+    {
+     "symbol": "HOOD",
+     "name": "HOOD",
+     "leverage": 1,
+     "desc": "리테일 브로커"
+    },
+    {
+     "symbol": "NU",
+     "name": "NU",
+     "leverage": 1,
+     "desc": "중남미 디지털뱅크"
+    },
+    {
+     "symbol": "DPST",
+     "name": "DPST",
+     "leverage": 3,
+     "desc": "지역은행 3배 롱 — 단기"
     }
    ]
   },
@@ -168,6 +504,60 @@
      "name": "Energy Select SPDR",
      "leverage": 1,
      "desc": "미 에너지 섹터 현물 — 유가·인플레 헤지 성격"
+    },
+    {
+     "symbol": "XOM",
+     "name": "XOM",
+     "leverage": 1,
+     "desc": "통합 에너지"
+    },
+    {
+     "symbol": "CVX",
+     "name": "CVX",
+     "leverage": 1,
+     "desc": "통합 에너지"
+    },
+    {
+     "symbol": "USO",
+     "name": "USO",
+     "leverage": 1,
+     "desc": "WTI 선물"
+    },
+    {
+     "symbol": "UCO",
+     "name": "UCO",
+     "leverage": 2,
+     "desc": "원유 2배 롱 — 단기"
+    },
+    {
+     "symbol": "UNG",
+     "name": "UNG",
+     "leverage": 1,
+     "desc": "천연가스"
+    },
+    {
+     "symbol": "PDBC",
+     "name": "PDBC",
+     "leverage": 1,
+     "desc": "원자재 광범위(K-1 없음)"
+    },
+    {
+     "symbol": "DBC",
+     "name": "DBC",
+     "leverage": 1,
+     "desc": "원자재 광범위"
+    },
+    {
+     "symbol": "GSG",
+     "name": "GSG",
+     "leverage": 1,
+     "desc": "원자재 지수"
+    },
+    {
+     "symbol": "COMT",
+     "name": "COMT",
+     "leverage": 1,
+     "desc": "원자재 + 에너지주"
     }
    ]
   },
@@ -180,6 +570,78 @@
      "name": "Health Care Select SPDR",
      "leverage": 1,
      "desc": "미 헬스케어 현물. 경기 무관 수요 — 방어 코어"
+    },
+    {
+     "symbol": "UNH",
+     "name": "UNH",
+     "leverage": 1,
+     "desc": "보험·관리의료"
+    },
+    {
+     "symbol": "LLY",
+     "name": "LLY",
+     "leverage": 1,
+     "desc": "비만·당뇨"
+    },
+    {
+     "symbol": "NVO",
+     "name": "NVO",
+     "leverage": 1,
+     "desc": "비만·당뇨"
+    },
+    {
+     "symbol": "ABBV",
+     "name": "ABBV",
+     "leverage": 1,
+     "desc": "면역·신약"
+    },
+    {
+     "symbol": "MRK",
+     "name": "MRK",
+     "leverage": 1,
+     "desc": "종양"
+    },
+    {
+     "symbol": "PFE",
+     "name": "PFE",
+     "leverage": 1,
+     "desc": "백신·신약"
+    },
+    {
+     "symbol": "AMGN",
+     "name": "AMGN",
+     "leverage": 1,
+     "desc": "바이오"
+    },
+    {
+     "symbol": "REGN",
+     "name": "REGN",
+     "leverage": 1,
+     "desc": "바이오"
+    },
+    {
+     "symbol": "VRTX",
+     "name": "VRTX",
+     "leverage": 1,
+     "desc": "희귀질환"
+    },
+    {
+     "symbol": "ISRG",
+     "name": "ISRG",
+     "leverage": 1,
+     "desc": "수술 로봇"
+    },
+    {
+     "symbol": "XBI",
+     "name": "XBI",
+     "leverage": 1,
+     "desc": "바이오 소형 — 금리에 민감"
+    },
+    {
+     "symbol": "IBB",
+     "name": "IBB",
+     "leverage": 1,
+     "desc": "바이오 대형"
     }
    ]
   },
@@ -198,6 +660,42 @@
      "name": "iShares 1-3yr Treasury",
      "leverage": 1,
      "desc": "단기국채 — 사실상 현금 대용. 변동 최소"
+    },
+    {
+     "symbol": "IEF",
+     "name": "IEF",
+     "leverage": 1,
+     "desc": "7~10년 국채 — 중기 듀레이션"
+    },
+    {
+     "symbol": "SHV",
+     "name": "SHV",
+     "leverage": 1,
+     "desc": "초단기 국채"
+    },
+    {
+     "symbol": "BIL",
+     "name": "BIL",
+     "leverage": 1,
+     "desc": "1~3개월 T-Bill"
+    },
+    {
+     "symbol": "TFLO",
+     "name": "TFLO",
+     "leverage": 1,
+     "desc": "변동금리 국채 — 금리 상승에 유리"
+    },
+    {
+     "symbol": "TMF",
+     "name": "TMF",
+     "leverage": 3,
+     "desc": "장기채 3배 롱 — 금리 하락 베팅, 단기"
+    },
+    {
+     "symbol": "TYD",
+     "name": "TYD",
+     "leverage": 3,
+     "desc": "중기채 3배 롱 — 단기"
     }
    ]
   },
@@ -217,6 +715,48 @@
      "leverage": 1,
      "market": "KR",
      "desc": "금 선물 추종(원화). 환헤지 아님"
+    },
+    {
+     "symbol": "IAU",
+     "name": "IAU",
+     "leverage": 1,
+     "desc": "금 현물 저보수"
+    },
+    {
+     "symbol": "GLDM",
+     "name": "GLDM",
+     "leverage": 1,
+     "desc": "금 현물 미니"
+    },
+    {
+     "symbol": "SLV",
+     "name": "SLV",
+     "leverage": 1,
+     "desc": "은 — 산업 수요가 섞여 금보다 변동 큼"
+    },
+    {
+     "symbol": "PPLT",
+     "name": "PPLT",
+     "leverage": 1,
+     "desc": "백금"
+    },
+    {
+     "symbol": "PALL",
+     "name": "PALL",
+     "leverage": 1,
+     "desc": "팔라듐"
+    },
+    {
+     "symbol": "NUGT",
+     "name": "NUGT",
+     "leverage": 2,
+     "desc": "금광주 2배 롱 — 단기"
+    },
+    {
+     "symbol": "GDXU",
+     "name": "GDXU",
+     "leverage": 3,
+     "desc": "금광주 3배 롱 — 단기"
     }
    ]
   },
@@ -235,6 +775,84 @@
      "name": "JPMorgan Equity Premium Income",
      "leverage": 1,
      "desc": "커버드콜 인컴 — 횡보 최적, 급등장에선 상승 제한"
+    },
+    {
+     "symbol": "VIG",
+     "name": "VIG",
+     "leverage": 1,
+     "desc": "배당성장"
+    },
+    {
+     "symbol": "VYM",
+     "name": "VYM",
+     "leverage": 1,
+     "desc": "고배당"
+    },
+    {
+     "symbol": "DGRO",
+     "name": "DGRO",
+     "leverage": 1,
+     "desc": "배당성장"
+    },
+    {
+     "symbol": "JEPQ",
+     "name": "JEPQ",
+     "leverage": 1,
+     "desc": "커버드콜 — 나스닥"
+    },
+    {
+     "symbol": "DIVO",
+     "name": "DIVO",
+     "leverage": 1,
+     "desc": "커버드콜 + 배당성장"
+    },
+    {
+     "symbol": "NOBL",
+     "name": "NOBL",
+     "leverage": 1,
+     "desc": "배당귀족"
+    },
+    {
+     "symbol": "SPHD",
+     "name": "SPHD",
+     "leverage": 1,
+     "desc": "고배당 저변동"
+    },
+    {
+     "symbol": "QYLD",
+     "name": "QYLD",
+     "leverage": 1,
+     "desc": "나스닥 커버드콜 — 상승 제한"
+    },
+    {
+     "symbol": "XYLD",
+     "name": "XYLD",
+     "leverage": 1,
+     "desc": "S&P 커버드콜"
+    },
+    {
+     "symbol": "SPYI",
+     "name": "SPYI",
+     "leverage": 1,
+     "desc": "S&P 커버드콜"
+    },
+    {
+     "symbol": "QDTE",
+     "name": "QDTE",
+     "leverage": 1,
+     "desc": "나스닥 일배당"
+    },
+    {
+     "symbol": "XDTE",
+     "name": "XDTE",
+     "leverage": 1,
+     "desc": "S&P 일배당"
+    },
+    {
+     "symbol": "PFF",
+     "name": "PFF",
+     "leverage": 1,
+     "desc": "우선주 — 금리 민감"
     }
    ]
   },
@@ -262,6 +880,97 @@
      "leverage": 1,
      "market": "KR",
      "desc": "코스닥150 현물 — 중소형 성장주 축"
+    },
+    {
+     "symbol": "005930",
+     "name": "005930",
+     "leverage": 1,
+     "desc": "삼성전자",
+     "market": "KR"
+    },
+    {
+     "symbol": "000660",
+     "name": "000660",
+     "leverage": 1,
+     "desc": "SK하이닉스 — HBM",
+     "market": "KR"
+    },
+    {
+     "symbol": "035420",
+     "name": "035420",
+     "leverage": 1,
+     "desc": "NAVER",
+     "market": "KR"
+    },
+    {
+     "symbol": "035720",
+     "name": "035720",
+     "leverage": 1,
+     "desc": "카카오",
+     "market": "KR"
+    },
+    {
+     "symbol": "373220",
+     "name": "373220",
+     "leverage": 1,
+     "desc": "LG에너지솔루션",
+     "market": "KR"
+    },
+    {
+     "symbol": "207940",
+     "name": "207940",
+     "leverage": 1,
+     "desc": "삼성바이오로직스",
+     "market": "KR"
+    },
+    {
+     "symbol": "005380",
+     "name": "005380",
+     "leverage": 1,
+     "desc": "현대차",
+     "market": "KR"
+    },
+    {
+     "symbol": "000270",
+     "name": "000270",
+     "leverage": 1,
+     "desc": "기아",
+     "market": "KR"
+    },
+    {
+     "symbol": "051910",
+     "name": "051910",
+     "leverage": 1,
+     "desc": "LG화학",
+     "market": "KR"
+    },
+    {
+     "symbol": "006400",
+     "name": "006400",
+     "leverage": 1,
+     "desc": "삼성SDI",
+     "market": "KR"
+    },
+    {
+     "symbol": "105560",
+     "name": "105560",
+     "leverage": 1,
+     "desc": "KB금융",
+     "market": "KR"
+    },
+    {
+     "symbol": "055550",
+     "name": "055550",
+     "leverage": 1,
+     "desc": "신한지주",
+     "market": "KR"
+    },
+    {
+     "symbol": "086790",
+     "name": "086790",
+     "leverage": 1,
+     "desc": "하나금융",
+     "market": "KR"
     }
    ]
   },
@@ -311,6 +1020,42 @@
      "leverage": -1,
      "market": "KR",
      "desc": "KOSPI200 -1배(원화). 국내 하락추세 확정 시"
+    },
+    {
+     "symbol": "DOG",
+     "name": "DOG",
+     "leverage": 1,
+     "desc": "다우 인버스 1배"
+    },
+    {
+     "symbol": "SPXS",
+     "name": "SPXS",
+     "leverage": 3,
+     "desc": "S&P 인버스 3배 — 단기"
+    },
+    {
+     "symbol": "SRTY",
+     "name": "SRTY",
+     "leverage": 3,
+     "desc": "러셀2000 인버스 3배"
+    },
+    {
+     "symbol": "VIXY",
+     "name": "VIXY",
+     "leverage": 1,
+     "desc": "VIX 단기선물 — 롤 비용 큼"
+    },
+    {
+     "symbol": "UVXY",
+     "name": "UVXY",
+     "leverage": 2,
+     "desc": "VIX 1.5배 — 매우 빠른 소멸"
+    },
+    {
+     "symbol": "VXX",
+     "name": "VXX",
+     "leverage": 1,
+     "desc": "VIX 단기선물"
     }
    ]
   },
@@ -323,6 +1068,36 @@
      "name": "iShares 1-3yr Treasury",
      "leverage": 1,
      "desc": "1~3년 국채. 금리 민감도 최소 — 공포 사다리 실탄을 여기 둔다"
+    },
+    {
+     "symbol": "SHV",
+     "name": "SHV",
+     "leverage": 1,
+     "desc": "초단기 국채"
+    },
+    {
+     "symbol": "BIL",
+     "name": "BIL",
+     "leverage": 1,
+     "desc": "1~3개월 T-Bill"
+    },
+    {
+     "symbol": "SGOV",
+     "name": "SGOV",
+     "leverage": 1,
+     "desc": "0~3개월 국채"
+    },
+    {
+     "symbol": "TFLO",
+     "name": "TFLO",
+     "leverage": 1,
+     "desc": "변동금리 국채 — 금리 상승기에 쿠폰이 따라 오른다"
+    },
+    {
+     "symbol": "BOXX",
+     "name": "BOXX",
+     "leverage": 1,
+     "desc": "박스스프레드 — 현금 대용"
     }
    ]
   },
@@ -365,6 +1140,36 @@
      "name": "Utilities Select SPDR",
      "leverage": 1,
      "desc": "유틸리티 섹터. 금리 하락 + 경기 둔화 조합에서만 진짜 방어가 된다"
+    },
+    {
+     "symbol": "NEE",
+     "name": "NEE",
+     "leverage": 1,
+     "desc": "신재생 유틸리티"
+    },
+    {
+     "symbol": "DUK",
+     "name": "DUK",
+     "leverage": 1,
+     "desc": "전통 유틸리티"
+    },
+    {
+     "symbol": "EXC",
+     "name": "EXC",
+     "leverage": 1,
+     "desc": "송배전"
+    },
+    {
+     "symbol": "CEG",
+     "name": "CEG",
+     "leverage": 1,
+     "desc": "원전 발전 — AI 데이터센터 전력 수요"
+    },
+    {
+     "symbol": "VST",
+     "name": "VST",
+     "leverage": 1,
+     "desc": "발전 — 전력 수요 수혜"
     }
    ]
   },
@@ -377,6 +1182,666 @@
      "name": "Invesco DB US Dollar Bullish",
      "leverage": 1,
      "desc": "달러인덱스 롱. 금리차 확대 구간의 헤지"
+    }
+   ]
+  },
+  "emerging": {
+   "name": "신흥국",
+   "role": "경기 반등·달러 약세 수혜. ⚠️ 달러 강세·금리 상승기에는 가장 먼저 눌린다",
+   "etfs": [
+    {
+     "symbol": "EMXC",
+     "name": "EMXC",
+     "leverage": 1,
+     "desc": "신흥국(중국 제외)"
+    },
+    {
+     "symbol": "INDA",
+     "name": "INDA",
+     "leverage": 1,
+     "desc": "인도"
+    },
+    {
+     "symbol": "EWT",
+     "name": "EWT",
+     "leverage": 1,
+     "desc": "대만 — 반도체 비중 큼"
+    },
+    {
+     "symbol": "EWY",
+     "name": "EWY",
+     "leverage": 1,
+     "desc": "한국"
+    },
+    {
+     "symbol": "EWJ",
+     "name": "EWJ",
+     "leverage": 1,
+     "desc": "일본"
+    },
+    {
+     "symbol": "FXI",
+     "name": "FXI",
+     "leverage": 1,
+     "desc": "중국 대형주"
+    },
+    {
+     "symbol": "VNM",
+     "name": "VNM",
+     "leverage": 1,
+     "desc": "베트남"
+    },
+    {
+     "symbol": "EWW",
+     "name": "EWW",
+     "leverage": 1,
+     "desc": "멕시코 — 니어쇼어링"
+    },
+    {
+     "symbol": "EWG",
+     "name": "EWG",
+     "leverage": 1,
+     "desc": "독일"
+    },
+    {
+     "symbol": "EIDO",
+     "name": "EIDO",
+     "leverage": 1,
+     "desc": "인도네시아"
+    },
+    {
+     "symbol": "THD",
+     "name": "THD",
+     "leverage": 1,
+     "desc": "태국"
+    },
+    {
+     "symbol": "ARGT",
+     "name": "ARGT",
+     "leverage": 1,
+     "desc": "아르헨티나"
+    },
+    {
+     "symbol": "GREK",
+     "name": "GREK",
+     "leverage": 1,
+     "desc": "그리스"
+    },
+    {
+     "symbol": "VXUS",
+     "name": "VXUS",
+     "leverage": 1,
+     "desc": "미국 제외 전세계"
+    }
+   ]
+  },
+  "materials_industrials": {
+   "name": "소재·산업재 (인프라·리쇼어링)",
+   "role": "재정지출·인프라·물가 상승 국면. 실물 수요에 연동",
+   "etfs": [
+    {
+     "symbol": "XLB",
+     "name": "XLB",
+     "leverage": 1,
+     "desc": "소재 섹터"
+    },
+    {
+     "symbol": "XLI",
+     "name": "XLI",
+     "leverage": 1,
+     "desc": "산업재 섹터"
+    },
+    {
+     "symbol": "PAVE",
+     "name": "PAVE",
+     "leverage": 1,
+     "desc": "미국 인프라"
+    },
+    {
+     "symbol": "XME",
+     "name": "XME",
+     "leverage": 1,
+     "desc": "금속·광산"
+    },
+    {
+     "symbol": "COPX",
+     "name": "COPX",
+     "leverage": 1,
+     "desc": "구리 광산 — 전력망·전기차 수요"
+    },
+    {
+     "symbol": "FCX",
+     "name": "FCX",
+     "leverage": 1,
+     "desc": "구리 개별"
+    },
+    {
+     "symbol": "WOOD",
+     "name": "WOOD",
+     "leverage": 1,
+     "desc": "목재"
+    },
+    {
+     "symbol": "LIT",
+     "name": "LIT",
+     "leverage": 1,
+     "desc": "리튬·배터리"
+    },
+    {
+     "symbol": "URA",
+     "name": "URA",
+     "leverage": 1,
+     "desc": "우라늄"
+    }
+   ]
+  },
+  "nuclear_power": {
+   "name": "원자력·전력 (AI 전력 수요)",
+   "role": "🔴 AI 데이터센터 전력 수요가 만든 새 축. 유틸리티인데 성장주처럼 움직인다",
+   "etfs": [
+    {
+     "symbol": "CEG",
+     "name": "CEG",
+     "leverage": 1,
+     "desc": "원전 발전 — 데이터센터 PPA"
+    },
+    {
+     "symbol": "VST",
+     "name": "VST",
+     "leverage": 1,
+     "desc": "발전"
+    },
+    {
+     "symbol": "TLN",
+     "name": "TLN",
+     "leverage": 1,
+     "desc": "발전"
+    },
+    {
+     "symbol": "NNE",
+     "name": "NNE",
+     "leverage": 1,
+     "desc": "소형모듈원자로(SMR)"
+    },
+    {
+     "symbol": "OKLO",
+     "name": "OKLO",
+     "leverage": 1,
+     "desc": "SMR"
+    },
+    {
+     "symbol": "SMR",
+     "name": "SMR",
+     "leverage": 1,
+     "desc": "SMR"
+    },
+    {
+     "symbol": "LEU",
+     "name": "LEU",
+     "leverage": 1,
+     "desc": "농축우라늄"
+    },
+    {
+     "symbol": "CCJ",
+     "name": "CCJ",
+     "leverage": 1,
+     "desc": "우라늄 채굴"
+    },
+    {
+     "symbol": "NLR",
+     "name": "NLR",
+     "leverage": 1,
+     "desc": "원자력 ETF"
+    },
+    {
+     "symbol": "BWXT",
+     "name": "BWXT",
+     "leverage": 1,
+     "desc": "해군·소형 원자로"
+    },
+    {
+     "symbol": "GEV",
+     "name": "GEV",
+     "leverage": 1,
+     "desc": "전력설비"
+    },
+    {
+     "symbol": "ENS",
+     "name": "ENS",
+     "leverage": 1,
+     "desc": "전력저장"
+    }
+   ]
+  },
+  "clean_energy": {
+   "name": "신재생",
+   "role": "금리에 매우 민감(프로젝트 금융). 금리 하락 전환에서 탄력이 크다",
+   "etfs": [
+    {
+     "symbol": "ICLN",
+     "name": "ICLN",
+     "leverage": 1,
+     "desc": "글로벌 청정에너지"
+    },
+    {
+     "symbol": "TAN",
+     "name": "TAN",
+     "leverage": 1,
+     "desc": "태양광"
+    },
+    {
+     "symbol": "FSLR",
+     "name": "FSLR",
+     "leverage": 1,
+     "desc": "태양광 모듈"
+    },
+    {
+     "symbol": "ENPH",
+     "name": "ENPH",
+     "leverage": 1,
+     "desc": "태양광 인버터"
+    }
+   ]
+  },
+  "crypto_proxy": {
+   "name": "크립토 대리자산",
+   "role": "유동성·위험선호의 선행 지표. ⚠️ 변동성이 주식의 2~3배 — 비중을 작게",
+   "etfs": [
+    {
+     "symbol": "IBIT",
+     "name": "IBIT",
+     "leverage": 1,
+     "desc": "비트코인 현물 ETF"
+    },
+    {
+     "symbol": "FBTC",
+     "name": "FBTC",
+     "leverage": 1,
+     "desc": "비트코인 현물 ETF"
+    },
+    {
+     "symbol": "ETHA",
+     "name": "ETHA",
+     "leverage": 1,
+     "desc": "이더리움 현물 ETF"
+    },
+    {
+     "symbol": "COIN",
+     "name": "COIN",
+     "leverage": 1,
+     "desc": "거래소"
+    },
+    {
+     "symbol": "MSTR",
+     "name": "MSTR",
+     "leverage": 2,
+     "desc": "비트코인 보유 기업 — 레버리지 성격"
+    },
+    {
+     "symbol": "RIOT",
+     "name": "RIOT",
+     "leverage": 1,
+     "desc": "채굴"
+    },
+    {
+     "symbol": "MARA",
+     "name": "MARA",
+     "leverage": 1,
+     "desc": "채굴"
+    },
+    {
+     "symbol": "CLSK",
+     "name": "CLSK",
+     "leverage": 1,
+     "desc": "채굴"
+    },
+    {
+     "symbol": "WULF",
+     "name": "WULF",
+     "leverage": 1,
+     "desc": "채굴 + AI 데이터센터"
+    },
+    {
+     "symbol": "HUT",
+     "name": "HUT",
+     "leverage": 1,
+     "desc": "채굴"
+    },
+    {
+     "symbol": "BITU",
+     "name": "BITU",
+     "leverage": 2,
+     "desc": "비트코인 2배 롱 — 단기"
+    }
+   ]
+  },
+  "quantum_ai": {
+   "name": "양자·AI 소프트웨어",
+   "role": "초장기 듀레이션 테마 — 금리에 가장 민감한 쪽. 실적이 아니라 기대로 움직인다",
+   "etfs": [
+    {
+     "symbol": "IONQ",
+     "name": "IONQ",
+     "leverage": 1,
+     "desc": "트랩이온 양자"
+    },
+    {
+     "symbol": "RGTI",
+     "name": "RGTI",
+     "leverage": 1,
+     "desc": "초전도 양자"
+    },
+    {
+     "symbol": "QBTS",
+     "name": "QBTS",
+     "leverage": 1,
+     "desc": "어닐링 양자"
+    },
+    {
+     "symbol": "QUBT",
+     "name": "QUBT",
+     "leverage": 1,
+     "desc": "양자 광학"
+    },
+    {
+     "symbol": "PLTR",
+     "name": "PLTR",
+     "leverage": 1,
+     "desc": "데이터 분석"
+    },
+    {
+     "symbol": "AI",
+     "name": "AI",
+     "leverage": 1,
+     "desc": "엔터프라이즈 AI"
+    },
+    {
+     "symbol": "BBAI",
+     "name": "BBAI",
+     "leverage": 1,
+     "desc": "국방 AI"
+    },
+    {
+     "symbol": "SOUN",
+     "name": "SOUN",
+     "leverage": 1,
+     "desc": "음성 AI"
+    }
+   ]
+  },
+  "space_drone": {
+   "name": "우주·드론",
+   "role": "방산·통신과 겹치는 성장 테마. 변동성이 크고 실적 가시성이 낮다",
+   "etfs": [
+    {
+     "symbol": "RKLB",
+     "name": "RKLB",
+     "leverage": 1,
+     "desc": "소형 발사체"
+    },
+    {
+     "symbol": "LUNR",
+     "name": "LUNR",
+     "leverage": 1,
+     "desc": "달 착륙선"
+    },
+    {
+     "symbol": "ASTS",
+     "name": "ASTS",
+     "leverage": 1,
+     "desc": "위성 직결 통신"
+    },
+    {
+     "symbol": "ACHR",
+     "name": "ACHR",
+     "leverage": 1,
+     "desc": "eVTOL"
+    },
+    {
+     "symbol": "JOBY",
+     "name": "JOBY",
+     "leverage": 1,
+     "desc": "eVTOL"
+    },
+    {
+     "symbol": "RDW",
+     "name": "RDW",
+     "leverage": 1,
+     "desc": "우주 인프라"
+    },
+    {
+     "symbol": "PL",
+     "name": "PL",
+     "leverage": 1,
+     "desc": "위성 영상"
+    },
+    {
+     "symbol": "GSAT",
+     "name": "GSAT",
+     "leverage": 1,
+     "desc": "위성 통신"
+    },
+    {
+     "symbol": "ARKX",
+     "name": "ARKX",
+     "leverage": 1,
+     "desc": "우주 ETF"
+    },
+    {
+     "symbol": "UFO",
+     "name": "UFO",
+     "leverage": 1,
+     "desc": "우주 ETF"
+    }
+   ]
+  },
+  "megacap_quality": {
+   "name": "대형 퀄리티 (방어적 성장)",
+   "role": "현금흐름이 두껍고 변동성이 낮다. 금리 상승기에 성장주보다 덜 맞는다",
+   "etfs": [
+    {
+     "symbol": "BRK.B",
+     "name": "BRK.B",
+     "leverage": 1,
+     "desc": "버크셔"
+    },
+    {
+     "symbol": "JNJ",
+     "name": "JNJ",
+     "leverage": 1,
+     "desc": "헬스케어 복합"
+    },
+    {
+     "symbol": "HD",
+     "name": "HD",
+     "leverage": 1,
+     "desc": "주택 관련 유통"
+    },
+    {
+     "symbol": "CAT",
+     "name": "CAT",
+     "leverage": 1,
+     "desc": "건설기계"
+    },
+    {
+     "symbol": "MMM",
+     "name": "MMM",
+     "leverage": 1,
+     "desc": "산업 복합"
+    },
+    {
+     "symbol": "DIS",
+     "name": "DIS",
+     "leverage": 1,
+     "desc": "미디어"
+    },
+    {
+     "symbol": "USMV",
+     "name": "USMV",
+     "leverage": 1,
+     "desc": "최소변동성 ETF"
+    },
+    {
+     "symbol": "XLG",
+     "name": "XLG",
+     "leverage": 1,
+     "desc": "메가캡 50"
+    }
+   ]
+  },
+  "growth_tilt": {
+   "name": "성장 팩터",
+   "role": "장기 듀레이션 — 금리 하락에 강하고 상승에 약하다. 모멘텀 국면의 주력",
+   "etfs": [
+    {
+     "symbol": "VONG",
+     "name": "VONG",
+     "leverage": 1,
+     "desc": "러셀1000 성장"
+    },
+    {
+     "symbol": "IWF",
+     "name": "IWF",
+     "leverage": 1,
+     "desc": "러셀1000 성장"
+    },
+    {
+     "symbol": "SCHG",
+     "name": "SCHG",
+     "leverage": 1,
+     "desc": "대형 성장"
+    },
+    {
+     "symbol": "MGK",
+     "name": "MGK",
+     "leverage": 1,
+     "desc": "메가캡 성장"
+    }
+   ]
+  },
+  "leveraged_bull": {
+   "name": "레버리지 롱 (단기 전용)",
+   "role": "🔴 추세가 **선** 구간에서만. 횡보·고변동에서 일일 리밸런싱 감쇠가 복리로 깎는다",
+   "etfs": [
+    {
+     "symbol": "TQQQ",
+     "name": "TQQQ",
+     "leverage": 3,
+     "desc": "나스닥 3배"
+    },
+    {
+     "symbol": "UPRO",
+     "name": "UPRO",
+     "leverage": 3,
+     "desc": "S&P 3배"
+    },
+    {
+     "symbol": "SOXL",
+     "name": "SOXL",
+     "leverage": 3,
+     "desc": "반도체 3배"
+    },
+    {
+     "symbol": "TECL",
+     "name": "TECL",
+     "leverage": 3,
+     "desc": "기술 3배"
+    },
+    {
+     "symbol": "BULZ",
+     "name": "BULZ",
+     "leverage": 3,
+     "desc": "빅테크 3배"
+    },
+    {
+     "symbol": "NVDL",
+     "name": "NVDL",
+     "leverage": 2,
+     "desc": "엔비디아 2배"
+    },
+    {
+     "symbol": "TSLL",
+     "name": "TSLL",
+     "leverage": 2,
+     "desc": "테슬라 2배"
+    },
+    {
+     "symbol": "LABU",
+     "name": "LABU",
+     "leverage": 3,
+     "desc": "바이오 3배"
+    },
+    {
+     "symbol": "CURE",
+     "name": "CURE",
+     "leverage": 3,
+     "desc": "헬스케어 3배"
+    },
+    {
+     "symbol": "WEBL",
+     "name": "WEBL",
+     "leverage": 3,
+     "desc": "인터넷 3배"
+    },
+    {
+     "symbol": "FNGU",
+     "name": "FNGU",
+     "leverage": 3,
+     "desc": "FANG 3배"
+    },
+    {
+     "symbol": "ROM",
+     "name": "ROM",
+     "leverage": 2,
+     "desc": "기술 2배"
+    },
+    {
+     "symbol": "USD",
+     "name": "USD",
+     "leverage": 2,
+     "desc": "반도체 2배"
+    },
+    {
+     "symbol": "KORU",
+     "name": "KORU",
+     "leverage": 3,
+     "desc": "한국 3배"
+    },
+    {
+     "symbol": "RETL",
+     "name": "RETL",
+     "leverage": 3,
+     "desc": "소매 3배"
+    },
+    {
+     "symbol": "NAIL",
+     "name": "NAIL",
+     "leverage": 3,
+     "desc": "주택 3배"
+    }
+   ]
+  },
+  "agri": {
+   "name": "농산물",
+   "role": "기후·지정학에 연동. 다른 자산과 상관이 낮아 분산 효과가 있다",
+   "etfs": [
+    {
+     "symbol": "DBA",
+     "name": "DBA",
+     "leverage": 1,
+     "desc": "농산물 광범위"
+    },
+    {
+     "symbol": "CORN",
+     "name": "CORN",
+     "leverage": 1,
+     "desc": "옥수수"
+    },
+    {
+     "symbol": "WEAT",
+     "name": "WEAT",
+     "leverage": 1,
+     "desc": "밀"
     }
    ]
   }

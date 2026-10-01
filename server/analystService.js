@@ -199,6 +199,10 @@ const SYSTEM_PROMPT = [
   '6. 웹검색에서 온 사실은 **"(검색)"** 을 붙여 구분합니다. 검색 결과에도 없는 지표(달러인덱스 등)는',
   '   언급하지 않습니다 — 어디서도 받지 않은 값은 존재하지 않는 값입니다.',
   '',
+  '🔴 **보유 종목은 하나도 빠뜨리지 말고 전부 판단하십시오.**',
+  '   빠진 종목은 "판단 보류" 가 아니라 **방치**입니다 — 사용자는 그 종목을 들고 있습니다.',
+  '   데이터가 모자라면 stance=HOLD · confidence=LOW 로 **그렇게 적고**, dataGaps 에 무엇이 없는지 쓰십시오.',
+  '',
   '## proposals (매매 제안)',
   '- 추세·상대강도·손익비가 서면 **냅니다.** 숫자가 안 서면 빈 배열이 정답입니다.',
   '  ⚠️ 한도 때문에 못 낸다고 적지 마십시오 — 현금 버퍼 규칙은 제거됐습니다(2026-10-02).',
@@ -787,6 +791,59 @@ function describeNoProposal(reason, capacity, { proposed = 0, rejected = [] } = 
  *   **검증할 수 없는 경로는 결국 검증 안 된 채로 배포된다.**
  *   ⚠️ `lastSentDigest` 도 **건드리지 않는다** — 점검이 다음 진짜 발송을 삼키면 안 된다.
  */
+/**
+ * 🔴 **현재 비중을 계산해서 준다** (2026-10-02 사용자 지적:
+ *    *"각 시황 판정에 따른 포트폴리오 리밸런싱, 강화가 처리되고 있는지?"*)
+ *
+ * 답은 **아니오**였다. 국면마다 `modelPortfolio`(기준 배분)를 프롬프트에 **문자열로**
+ * 싣고 있었지만, **현재 비중을 계산하는 코드가 0줄**이었다 — 모델에게
+ * *"공격 축 40~60%"* 라고 말하면서 **지금이 몇 %인지는 안 알려줬다.**
+ * 괴리를 모르면 리밸런싱 제안은 원리상 나올 수 없다. "나침반이지 울타리가 아니다" 라고
+ * 적어 뒀지만 **나침반 노릇도 못 하고 있었다.**
+ *
+ * ⚠️ 현금을 분모에 넣는다 — 주식만으로 비중을 내면 현금 100% 일 때 비중이 정의되지 않고,
+ *    "현금 비중" 이라는 축 자체가 사라진다.
+ * ⚠️ 카테고리 매핑은 **카탈로그 한 벌**에서 온다(두 벌이면 갈라진다).
+ */
+function portfolioWeights(items = [], summary = null, catalog = null) {
+  const symCat = new Map();
+  for (const [key, c] of Object.entries(catalog?.categories || {})) {
+    for (const e of c.etfs || []) if (!symCat.has(e.symbol)) symCat.set(e.symbol, key);
+  }
+  const rows = (items || []).map((h) => ({
+    symbol: String(h.symbol || '').toUpperCase(),
+    value: Number(h.marketValue) || (Number(h.quantity) * Number(h.lastPrice)) || 0,
+    category: symCat.get(String(h.symbol || '').toUpperCase()) || null,
+    leverage: Number(h.leverageFactor) || 1,
+  })).filter((r) => r.value > 0);
+
+  const cashUsd = Number(summary?.cash?.usd?.amount) || 0;
+  const fx = Number(summary?.fx?.rate) || 0;
+  const cashKrwRaw = Number(summary?.cash?.krw?.amount) || 0;
+  // ⚠️ 통화가 섞이면 비중이 거짓말한다 — 환율이 없으면 원화 현금을 **빼지 않고 모른다고 적는다**
+  const cashUsdEq = cashUsd + (fx > 0 ? cashKrwRaw / fx : 0);
+  const stock = rows.reduce((a, r) => a + r.value, 0);
+  const total = stock + cashUsdEq;
+  if (!(total > 0)) return null;
+
+  const pct = (v) => Math.round((v / total) * 1000) / 10;
+  const byCategory = new Map();
+  for (const r of rows) {
+    const k = r.category || '미분류';
+    byCategory.set(k, (byCategory.get(k) || 0) + r.value);
+  }
+  const levValue = rows.filter((r) => r.leverage > 1).reduce((a, r) => a + r.value, 0);
+  return {
+    total,
+    cashPct: pct(cashUsdEq),
+    krwCashUnconverted: fx > 0 ? 0 : cashKrwRaw,
+    leveragePct: pct(levValue),
+    holdings: rows.map((r) => ({ symbol: r.symbol, pct: pct(r.value), category: r.category, leverage: r.leverage }))
+      .sort((a, b) => b.pct - a.pct),
+    categories: [...byCategory.entries()].map(([k, v]) => ({ key: k, pct: pct(v) })).sort((a, b) => b.pct - a.pct),
+  };
+}
+
 async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = null, dryRun = false, trigger = null } = {}) {
   const items = dash?.portfolio?.items || [];
   const summary = dash?.portfolio?.summary || null;
@@ -1073,6 +1130,59 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    * 🔴 **되돌린 이유를 적어 둔다** — 안 적으면 다음 세션이 *"방침 게이트를 넣으면 되겠네"*
    *    를 또 한다. 그 장치는 10-01 에 만들어 10-02 에 사용자가 뺐다. 판단은 사람이 한다.
    */
+  /**
+   * 🔴 **사용자가 채팅에서 한 말을 브리핑이 읽는다** (2026-10-02 사용자 지적:
+   *    *"텔래그램 얘기하면 브리핑 애널리스트가 그걸 듣고 … 처리하는지?"*)
+   *
+   * 답은 **아니오**였다 — 브리핑(`analystService`)과 채팅(`analystChat`)은 **완전히 분리**돼
+   * 있었고, 브리핑이 채팅 이력을 읽는 코드가 **0줄**이었다. 그래서 사용자가 17:30 에
+   * *"나 리얼티인컴도 이제 1주씩 살건데"* 라고 말했는데, 01:47·05:03 브리핑이 그걸 모른 채
+   * **O 매도 제안을 두 번** 냈다(둘 다 거절). 두 에이전트가 같은 계좌를 보면서 **서로
+   * 다른 전제**로 움직인 것이다.
+   *
+   * ⚠️ **사용자 발화만** 싣는다 — 모델의 과거 답변은 그 시점 데이터라 낡았고(10-02 에
+   *    이미 겪었다), `[도구 결과]` 는 휘발성이다. 사용자가 **자기 입으로 한 말**만이
+   *    시간이 지나도 유효한 의사다.
+   * ⚠️ 창을 둔다 — 두 달 전 "사겠다" 를 오늘의 방침으로 읽으면 안 된다.
+   */
+  try {
+    const chat = require('./analystChat');
+    const windowMs = Math.max(0, Number(process.env.ANALYST_USER_VOICE_DAYS || 7)) * 24 * 3600_000;
+    const cutoff = Date.now() - windowMs;
+    const said = (chat.readHistory({ limit: 200 }) || [])
+      .filter((h) => h.role === 'user' && Date.parse(h.at) >= cutoff)
+      .slice(-10)
+      .map((h) => `- [${String(h.at).slice(5, 16).replace('T', ' ')}] ${String(h.text || '').slice(0, 200)}`);
+    if (said.length) {
+      lines.push('', '## 사용자가 최근에 직접 한 말 (의사·방침 — 판단보다 우선한다)');
+      lines.push(...said);
+      lines.push('🔴 여기에 **적립·보유 의사**가 있으면 그 종목의 매도 제안은 근거가 "가격이 내렸다"'
+        + ' 보다 강해야 한다(배당 삭감·신용등급 하락·사업 훼손 같은 **종목 자체의 변화**).');
+      lines.push('🔴 여기서 사용자가 **방향을 바꿨으면**(예: "레버리지는 이제 안 하는 게 맞겠다")'
+        + ' 그 뒤의 판단은 바뀐 방향을 따른다.');
+    }
+  } catch (e) {
+    // ⚠️ 채팅 이력을 못 읽어도 브리핑은 돈다 — 다만 조용하지 않다
+    logWarn('analyst.user_voice_unavailable', { message: e.message });
+  }
+
+  /**
+   * 🔴 **현재 비중 vs 국면 기준선** — 괴리를 모르면 리밸런싱은 원리상 불가능하다.
+   */
+  {
+    const w = portfolioWeights(items, summary, require('./regimeService').readCatalog());
+    if (w) {
+      lines.push('', '## 현재 비중 (현금 포함 · 코드 계산 — 이 숫자를 그대로 써라)');
+      lines.push(`- 종목: ${w.holdings.map((h) => `${h.symbol} ${h.pct}%${h.leverage > 1 ? `(${h.leverage}배)` : ''}`).join(' · ')}`);
+      lines.push(`- 카테고리: ${w.categories.map((c) => `${c.key} ${c.pct}%`).join(' · ')}`);
+      lines.push(`- 현금 ${w.cashPct}% · 레버리지 합계 ${w.leveragePct}%`);
+      if (w.krwCashUnconverted > 0) lines.push(`  ⚠️ 환율을 못 읽어 원화 현금 ${w.krwCashUnconverted} 은 분모에서 빠졌다 — 현금 비중은 실제보다 낮다`);
+      lines.push('🔴 위 "## 발동된 매뉴얼" 의 **기준 배분과 이 숫자의 차이**가 리밸런싱 제안의 근거다.');
+      lines.push('   기준선에서 크게 벗어난 축을 먼저 줄이고/늘려라. ⚠️ 기준선은 울타리가 아니라 나침반이다 —');
+      lines.push('   추세·상대강도가 더 강하게 말하면 그쪽을 따르되, **왜 기준선을 벗어나는지 rationale 에 적어라.**');
+    }
+  }
+
   lines.push('', '## 보유 종목');
   for (const h of items) {
     const t = tech[h.symbol];
@@ -1748,16 +1858,42 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
      *    프롬프트에 적어 뒀는데도 12:19 에 `RAM SELL @14.1` 이 나갔고 사용자가 거절했다.
      *    ⚠️ 막는 쪽이 **방침과 같은 설정**을 읽으므로 둘이 갈라질 수 없다.
      */
+    /** 깎인 값이 있으면 여기 담긴다 — `p` 는 상수라 덮어쓰지 않는다 */
+    let clamped = null;
     const chk = await orderService.checkAccountLimits({
       symbol: p.symbol, side: p.side, quantity: p.quantity, price: p.price,
     });
+    /**
+     * 🔴 **현금을 넘으면 거부하지 말고 깎는다** (2026-10-02 실사고).
+     *    08:00 회차에서 `SHY BUY · 필요 1,622 USD > 가능 1,375` 가 **통째로 거부**됐다.
+     *    모델 판단(단기국채로 피난)은 **맞았는데** 수량 하나 때문에 제안이 0건이 됐고,
+     *    사용자 화면에는 *"매매 제안 0건"* 만 남았다.
+     * ★ `checkAccountLimits` 는 **가능 수량(maxQuantity)을 이미 계산해서 돌려주고 있었다** —
+     *   그걸 읽는 코드가 0곳이었다. *"수집해 놓고 안 쓰는"* 의 또 하나.
+     * ⚠️ 깎는 것은 **수량 부족(insufficient)** 일 때만이다 — 다른 거부(종목 제한·가격 밴드)는
+     *    판단 자체가 틀린 것이라 깎아서 통과시키면 안 된다.
+     * ⚠️ 깎았다는 사실을 **제안 사유에 적는다** — 사용자가 승인 화면에서 원래 의도를 알아야 한다.
+     */
     if (!chk.ok) {
-      rejected.push({ symbol: p.symbol, side: p.side, error: chk.error, kind: chk.kind });
-      logWarn('analyst.proposal_blocked', { symbol: p.symbol, side: p.side, kind: chk.kind, error: chk.error });
-      continue;
+      const canClamp = chk.kind === 'insufficient' && Number(chk.maxQuantity) >= 1
+        && Number(chk.maxQuantity) < Number(p.quantity);
+      if (!canClamp) {
+        rejected.push({ symbol: p.symbol, side: p.side, error: chk.error, kind: chk.kind });
+        logWarn('analyst.proposal_blocked', { symbol: p.symbol, side: p.side, kind: chk.kind, error: chk.error });
+        continue;
+      }
+      logInfo('analyst.proposal_clamped', {
+        symbol: p.symbol, side: p.side, asked: p.quantity, to: chk.maxQuantity, why: chk.kind,
+      });
+      clamped = { quantity: Number(chk.maxQuantity),
+        reason: `${p.reason || ''} (현금 한도로 ${p.quantity}→${chk.maxQuantity}주 축소)`.trim() };
     }
     const r = orderService.propose(
-      { symbol: p.symbol, side: p.side, type: 'LIMIT', quantity: p.quantity, price: p.price, reason: p.reason },
+      {
+        symbol: p.symbol, side: p.side, type: 'LIMIT', price: p.price,
+        quantity: clamped ? clamped.quantity : p.quantity,
+        reason: clamped ? clamped.reason : p.reason,
+      },
       { source: 'analyst' }
     );
     if (r.ok) created.push(r.proposal);
@@ -2099,9 +2235,23 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
      * ⚠️ **보유가 0 이면 아무 말도 안 한다** — 그건 정상이다(보유가 없으면 판단도 없다).
      *    오탐하면 매 회차 울린다.
      */
-    if (heldSymbols.length && !report.positions.length) {
-      lines.push('', `⚠️ 보유 ${heldSymbols.length}종(${heldSymbols.join('·')}) 판단을 받지 못했습니다`);
-      logWarn('analyst.positions_missing_in_brief', { symbols: heldSymbols });
+    /**
+     * 🔴 **부분 누락을 잡는다** (2026-10-02 실사고). 종전 가드는 `!report.positions.length`
+     *    — **통째로 비었을 때만** 봤다. 08:00 회차는 보유 3종 중 **2종만** 판단했고
+     *    리얼티 인컴(O)이 조용히 빠졌는데 **아무 경고도 안 났다.**
+     *    사용자: *"브리핑 내용도 지금 전혀 내 자산 현황을 고려하지 않는데?"*
+     * ★ 0건은 잡으면서 부분 누락은 못 잡는 모양 — 이 저장소가 반복해 밟은 자리다.
+     *    **집합의 차**로 본다(건수 비교가 아니라).
+     */
+    const judged = new Set((report.positions || []).map((p) => String(p.symbol || '').toUpperCase()));
+    const missed = heldSymbols.filter((sym) => !judged.has(String(sym).toUpperCase()));
+    if (missed.length) {
+      lines.push('', `⚠️ 보유 ${missed.length}종(${missed.join('·')}) 판단이 빠졌습니다`
+        + `${judged.size ? ` — 나머지 ${judged.size}종만 판단했습니다` : ''}`);
+      // ⚠️ `symbols` 는 **기존 계약**이다(빠진 종목) — 이름을 바꾸면 소비자가 조용히 깨진다
+      logWarn('analyst.positions_missing_in_brief', {
+        symbols: missed, judged: [...judged], held: heldSymbols, partial: judged.size > 0,
+      });
     }
     // 제안은 `orderService` 가 **승인 버튼과 함께** 따로 쏘므로 여기서는 건수만 적는다
     if (created.length) lines.push('', `🟡 매매 제안 ${created.length}건 — 승인 버튼이 곧 옵니다`);
@@ -2231,7 +2381,7 @@ async function decideOnContext({ contextText, regimeState = null, holdings = [] 
   return { report, proposals: accepted, rejected };
 }
 
-module.exports = {
+module.exports = { portfolioWeights,
   analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport,
   computeTrade, decideOnContext, inverseGate, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)

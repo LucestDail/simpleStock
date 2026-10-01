@@ -137,7 +137,7 @@ test('🔴 보유 2종 + positions 빈 결과(재시도 후에도) → 폰 본�
   await new Promise((r) => setTimeout(r, 30));
 
   assert.equal(sent.length, 1, '분석 결과가 안 나갔다');
-  assert.match(sent[0].text, /⚠️ 보유 2종\(QLD·RAM\) 판단을 받지 못했습니다/);
+  assert.match(sent[0].text, /⚠️ 보유 2종\(QLD·RAM\) 판단이 빠졌습니다/);
   const missingWarns = warnCalls.filter((w) => w.event === 'analyst.positions_missing_in_brief');
   assert.equal(missingWarns.length, 1, 'logWarn 이 안 남았다');
   assert.deepEqual(missingWarns[0].ctx.symbols, ['QLD', 'RAM']);
@@ -153,6 +153,50 @@ test('오탐 0(중요): 보유 0종 + positions 빈 결과 → 경고 없음', a
   await new Promise((r) => setTimeout(r, 30));
 
   assert.equal(sent.length, 1, '분석 결과가 안 나갔다');
-  assert.ok(!/판단을 받지 못했습니다/.test(sent[0].text), '보유가 없는데 경고가 났다(오탐)');
+  assert.ok(!/판단이 빠졌습니다/.test(sent[0].text), '보유가 없는데 경고가 났다(오탐)');
   assert.equal(warnCalls.filter((w) => w.event === 'analyst.positions_missing_in_brief').length, 0);
+});
+
+
+/**
+ * 🔴 **부분 누락** — 2026-10-02 실사고. 보유 3종 중 **2종만** 판단하고 리얼티 인컴(O)이
+ *    조용히 빠졌는데 **아무 경고도 안 났다.** 종전 가드가 `!positions.length`,
+ *    즉 **통째로 비었을 때만** 봤기 때문이다.
+ *    사용자: *"브리핑 내용도 지금 전혀 내 자산 현황을 고려하지 않는데?"*
+ * ★ 0건은 잡으면서 부분 누락은 못 잡는 모양 — **집합의 차**로 봐야 한다.
+ */
+test('🔴 보유 3종 중 2종만 판단하면 빠진 종목을 이름으로 알린다 (부분 누락)', async () => {
+  const held3 = [{ symbol: 'QLD', market: 'US' }, { symbol: 'RAM', market: 'US' }, { symbol: 'O', market: 'US' }];
+  reportToReturn = {
+    marketView: '시황', momentumRead: '', dataGaps: [], proposals: [],
+    positions: [{ symbol: 'QLD', stance: 'HOLD' }, { symbol: 'RAM', stance: 'HOLD' }],
+  };
+  const analyst = fresh();
+  await analyst.analyze(
+    { portfolio: { items: held3, summary: null }, momentum: [], warnings: {}, rankings: {} },
+    { useWebSearch: false }
+  );
+  await new Promise((r) => setTimeout(r, 30));
+  assert.match(sent[0].text, /보유 1종\(O\) 판단이 빠졌습니다/, `빠진 종목을 안 알렸다: ${sent[0].text.slice(0, 220)}`);
+  assert.match(sent[0].text, /나머지 2종만 판단/, '몇 종을 판단했는지가 없다');
+  const w = warnCalls.filter((x) => x.event === 'analyst.positions_missing_in_brief');
+  assert.equal(w.length, 1, '부분 누락이 로그에 안 남았다');
+  assert.deepEqual(w[0].ctx.symbols, ['O']);
+  assert.equal(w[0].ctx.partial, true, '부분 누락인데 전체 누락으로 기록됐다');
+});
+
+test('오탐 축: 보유를 전부 판단했으면 아무 말도 안 한다 (대소문자가 흔들려도)', async () => {
+  const held2 = [{ symbol: 'QLD', market: 'US' }, { symbol: 'RAM', market: 'US' }];
+  reportToReturn = {
+    marketView: '시황', momentumRead: '', dataGaps: [], proposals: [],
+    positions: [{ symbol: 'QLD', stance: 'HOLD' }, { symbol: 'ram', stance: 'HOLD' }],
+  };
+  const analyst = fresh();
+  await analyst.analyze(
+    { portfolio: { items: held2, summary: null }, momentum: [], warnings: {}, rankings: {} },
+    { useWebSearch: false }
+  );
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(!/판단이 빠졌습니다/.test(sent[0].text), '전부 판단했는데 경고가 났다');
+  assert.equal(warnCalls.filter((x) => x.event === 'analyst.positions_missing_in_brief').length, 0);
 });
