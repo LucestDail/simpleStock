@@ -24,16 +24,55 @@ function inferMarket({ symbol, market, currency }) {
   return 'US';
 }
 
+/**
+ * 같은 종목의 시세가 **스스로 낡았다고 말하면** 쓰지 않는다 — 2026-10-01
+ *
+ * 🔴 라이브 실측(2026-10-01 11:4x): 시세 저장소에 같은 종목이 **두 키**로 들어 있었다.
+ * ```
+ * key=QLD      src=yahoo-finance  price=91.72  pct=+4.63   at=2026-05-08T20:00:00Z  ← 5개월 전
+ * key=US:QLD   src=toss           price=96.74  pct=+1.596  at=없음                   ← 현재
+ * ```
+ * 종전 `buildQuoteIndex` 는 **먼저 온 것이 이긴다**(`if (!bySymbol.has(sym))`). 삽입 순서상
+ * 접두사 없는 옛 키가 먼저라 **5개월 묵은 값이 이겼다.** 사용자 관심종목 화면의 QLD 가
+ * 91.72(+4.63%)로 보였다 — **보유 종목인데** 실제가와 5달러·3%p 가 어긋난 채로.
+ * (공급자를 yahoo → toss 로 바꿨을 때 옛 키가 안 지워져 남은 것으로 보인다.)
+ *
+ * ⇒ 처방: **스스로 낡았다고 밝힌 시세만** 버린다.
+ *   ⚠️ "updatedAt 이 없으면 신선하다" 고 **가정하지 않는다** — 그건 추측이고, 추측으로
+ *      고르면 다음에 반대 방향으로 틀린다. 우리가 아는 것은 *"이 값은 N일 전 것이라고
+ *      본인이 적어 뒀다"* 뿐이고, **그 양성 증거에만** 반응한다.
+ *   ⚠️ 날짜가 없는 쪽을 **선호하지도 않는다** — 날짜 있는 것이 신선하면 그대로 쓴다.
+ *      버리는 기준은 오직 "임계값보다 오래됐다" 하나다.
+ */
+const QUOTE_STALE_MS = Math.max(0, Number(process.env.WATCHLIST_QUOTE_STALE_MS) || 7 * 24 * 60 * 60_000);
+
+/** 본인이 적어 둔 시각 기준으로 너무 낡았는가. 시각이 없거나 못 읽으면 **판정하지 않는다**(false). */
+function isSelfDeclaredStale(quote, now = Date.now()) {
+  const at = Date.parse(quote?.updatedAt || '');
+  if (!Number.isFinite(at)) return false;      // 모르는 것은 낡았다고 단정하지 않는다
+  return now - at > QUOTE_STALE_MS;
+}
+
 // 최신 시세를 티커에 조인. quotes 키는 "MARKET:SYMBOL" 이지만 ETF↔KR 편차가 있어
 // 심볼 기준(관용 매칭)으로도 찾는다.
-function buildQuoteIndex() {
+function buildQuoteIndex(now = Date.now()) {
   const market = getMarketSnapshot();
   const quotes = market && market.quotes ? market.quotes : {};
   const bySymbol = new Map();
+  const dropped = [];
   for (const [key, quote] of Object.entries(quotes)) {
     if (!quote) continue;
     const sym = normalizeSymbol(quote.symbol || key.split(':').pop());
-    if (sym && !bySymbol.has(sym)) bySymbol.set(sym, quote);
+    if (!sym) continue;
+    if (isSelfDeclaredStale(quote, now)) {
+      // 🔴 조용히 버리지 않는다 — 낡은 키가 쌓이는 것 자체가 신호다(공급자 교체 잔재).
+      dropped.push(`${key}@${quote.updatedAt}`);
+      continue;
+    }
+    if (!bySymbol.has(sym)) bySymbol.set(sym, quote);
+  }
+  if (dropped.length) {
+    logWarn('watchlist.stale_quote_dropped', { count: dropped.length, staleDays: Math.round(QUOTE_STALE_MS / 86_400_000), keys: dropped.slice(0, 10) });
   }
   return bySymbol;
 }
@@ -300,4 +339,7 @@ module.exports = {
   setWatch,
   getWatchedSymbols,
   inferMarket,
+  // 테스트용 — 낡은 시세 판정을 밖에서 직접 재게 한다(가드가 가드를 못 보면 안 된다)
+  isSelfDeclaredStale,
+  QUOTE_STALE_MS,
 };
