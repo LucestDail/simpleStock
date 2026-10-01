@@ -973,7 +973,22 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   lines.push('## 계좌');
   if (summary) {
     lines.push(
-      `평가 ${fmt(summary.value?.krw, 0)}원(환산) · 평가손익률 ${fmt(summary.profitRate)}% · 당일 ${fmt(summary.dailyRate)}%`
+      /**
+       * 🔴 **두 수익률이 다르면 둘 다 보여준다** (2026-10-01).
+       *    증권사가 준 `profitRate` 가 자기 금액과 일관되게 어긋난다(실측 약 8%p, 오늘은
+       *    **부호까지** 반대: 금액 +$220 인데 rate −8.7%). 의미를 모르니 덮어쓰지 않고
+       *    **금액에서 유도한 값**을 함께 준다 — 안 주면 모델이 **스스로 다시 계산**하고
+       *    (10-01 에 실제로 그랬다) 사용자는 화면과 답이 다른 것을 보게 된다.
+       * ⚠️ 어느 쪽이 "맞다" 고 단정하지 않는다 — **다르다는 사실**을 모델에게 넘긴다.
+       */
+      summary.profitRateDerived != null && summary.profitRate != null
+        && Math.abs(summary.profitRateDerived - summary.profitRate) > 0.5
+        ? `평가 ${fmt(summary.value?.krw, 0)}원(환산) · 당일 ${fmt(summary.dailyRate)}%`
+          + `\n⚠️ 평가손익률이 두 값으로 온다 — 증권사 보고 ${fmt(summary.profitRate)}% ·`
+          + ` **보유 금액에서 계산하면 ${fmt(summary.profitRateDerived)}%**`
+          + `(평가 ${fmt(summary.value?.usd)} − 매입 ${fmt(summary.purchase?.usd)}).`
+          + ' 금액과 일관된 쪽은 계산값이다 — 그쪽을 쓰고, 다르다는 사실도 한 번 짚어라.'
+        : `평가 ${fmt(summary.value?.krw, 0)}원(환산) · 평가손익률 ${fmt(summary.profitRate)}% · 당일 ${fmt(summary.dailyRate)}%`
     );
     /**
      * 🔴 **현금을 준다** (2026-09-22). 종전엔 프롬프트가 *"현금 여력을 넘지 않게"* 라고

@@ -384,6 +384,24 @@ async function handleUserMessage(msg) {
         fx: rate ? { rate } : null,
         emit: (event, data) => {
           if (event === 'text_delta') answer += data?.text || '';
+          /**
+           * 🔴 **재시도가 시작되면 지금까지 쌓은 것을 버린다** (2026-10-01 실사고).
+           *
+           * `analystChat` 은 재시도 때 자기 `answer` 를 비우는데 **여기는 안 비웠다** ⇒
+           * pass1 + pass2 가 **둘 다** 발송됐다. 사용자가 받은 것:
+           * ```
+           * (도구 호출)
+           * [도구 결과] get_portfolio({"summary":{...계좌 전체 JSON...}})   ← pass1
+           * 내 포트폴리오 — 3종목 …                                        ← pass2
+           * ```
+           * 하필 pass1 이 **도구 결과 원문**(잔고·보유 전량)이라 그냥 미관 문제가 아니었다.
+           * ⚠️ 스트리밍이면 못 되돌리지만 **텔레그램은 다 모았다가 한 번에 보낸다** —
+           *    보내기 전이라 **여기서는 되돌릴 수 있다.**
+           */
+          else if (event === 'answer_restart') {
+            logWarn('tgbot.answer_discarded', { chars: answer.length, reason: data?.reason || null });
+            answer = '';
+          }
           else if (event === 'tool_call') toolsUsed.push(data?.name);
           else if (event === 'notice') notices.push(String(data?.text || '').slice(0, 200));
           else if (event === 'tool_result' && data?.ok === false) {

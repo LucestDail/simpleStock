@@ -46,6 +46,34 @@ function num(v) {
  * 숫자가 작아서 "오늘 별로 안 움직였네" 로 읽히는 게 더 나빴다 — **틀린 줄도 모른다.**
  * ⇒ **경계에서 한 번만** 퍼센트로 바꾸고, 이후 코드는 전부 퍼센트로 다룬다.
  */
+/**
+ * 금액과 매입액으로 수익률을 **직접 계산**한다. 증권사 값과 어긋나면 경고하고 **계산값을 쓴다**.
+ *
+ * ⚠️ 통화가 섞이면(원화+달러) 환율 없이는 합칠 수 없다 ⇒ 그때는 **계산하지 않고**
+ *    증권사 값을 그대로 쓴다(모르는 것을 지어내지 않는다).
+ * ⚠️ 매입액이 0이면 수익률이 정의되지 않는다 — 나누지 않는다.
+ */
+function deriveRatePct(amountObj, purchaseObj, reportedPct, label) {
+  const aK = num(amountObj?.krw) || 0;
+  const aU = num(amountObj?.usd) || 0;
+  const pK = num(purchaseObj?.krw) || 0;
+  const pU = num(purchaseObj?.usd) || 0;
+  const mixed = (aK && aU) || (pK && pU);
+  if (mixed) return reportedPct;                       // 통화 혼재 — 환율 없이 못 합친다
+  const amount = aU || aK;
+  const purchase = pU || pK;
+  if (!purchase) return reportedPct;                   // 0 으로 나누지 않는다
+  const derived = Math.round((amount / purchase) * 100 * 100) / 100;
+  if (reportedPct != null && Math.abs(derived - reportedPct) > 0.5) {
+    logWarn('toss.rate_mismatch', {
+      field: label, reported: reportedPct, derived,
+      // ⚠️ 금액은 로그에 안 남긴다(이 파일의 기존 방침) — 비율만으로 진단된다
+      note: '증권사가 준 수익률이 자기 금액과 맞지 않는다 — 계산값을 쓴다',
+    });
+  }
+  return derived;
+}
+
 function ratePct(v) {
   const n = num(v);
   return n == null ? null : Math.round(n * 100 * 10000) / 10000;
@@ -142,8 +170,34 @@ async function getHoldings({ fx = null } = {}) {
     purchase: pair(r?.totalPurchaseAmount, fxRate),
     value: pair(r?.marketValue?.amount, fxRate),
     profit: pair(r?.profitLoss?.amount, fxRate),
+    /**
+     * 🔴 **증권사 수익률이 자기 금액과 안 맞는다 — 그런데 우리는 그 이유를 모른다** (2026-10-01)
+     *
+     * 라이브 실측:
+     * ```
+     * profitLoss.amount   usd "220.235217"    ← +$220 (이익)
+     * profitLoss.rate     "-0.087"            ← -8.7%  🔴 **부호가 반대**
+     * totalPurchaseAmount usd "14146.884783"  ⇒ 220.24/14146.88 = **+1.56%**
+     * ```
+     * ⚠️ **오늘 생긴 일이 아니다.** 저장소에 캡처된 실제 응답(`tests/tossClient.test.js:448`)
+     *    에서도 amount −272.72 / purchase 15,539.90 = **−1.75%** 인데 rate 는 **−9.88%** 였다.
+     *    즉 **일관되게 약 8%p 어긋나는 필드**이고, 오늘은 보유 구성이 바뀌어 **부호까지** 갈렸다.
+     *
+     * 🔴 **그래서 덮어쓰지 않는다.** 그 필드가 "미실현만" 이 아니라 **실현 손익을 포함한
+     *    누적 수익률** 같은 다른 의미일 수 있다(사용자가 최근 QLD 99→90 · RAM 442→400 을
+     *    줄였다). **의미를 모르는 제3자 값을 우리 해석으로 갈아끼우면, 맞았을 때도 틀렸을
+     *    때도 아무도 모르게 된다.**
+     * ⇒ 원본은 `profitRate` 로 **그대로** 두고, 금액에서 유도한 값을 `profitRateDerived`
+     *   로 **나란히** 싣는다. 어긋나면 경고한다. 쓰는 쪽이 **무엇을 쓰는지 알고** 고르게 한다.
+     *
+     * ★ 이 결함이 드러난 경위: 모델이 우리 `profitRate`(-8.9%)를 안 믿고 **부분 합으로 다시
+     *   계산해** "+0.98%" 라고 답했고, 사용자가 그 불일치를 물었다. 모델이 믿었으면 묻힌다.
+     */
     profitRate: ratePct(r?.profitLoss?.rate),
+    profitRateDerived: deriveRatePct(r?.profitLoss?.amount, r?.totalPurchaseAmount, ratePct(r?.profitLoss?.rate), 'profit'),
     dailyProfit: pair(r?.dailyProfitLoss?.amount, fxRate),
+    // ⚠️ 일간은 **매입액 기준이 아니다**(전일 평가액 기준) ⇒ 우리가 다시 계산할 근거가 없다.
+    //    실측에서 금액과도 맞으므로 **증권사 값을 그대로 쓴다.** 고칠 것만 고친다.
     dailyRate: ratePct(r?.dailyProfitLoss?.rate),
     accountType: acc.type,
     /**

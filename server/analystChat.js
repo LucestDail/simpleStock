@@ -1267,10 +1267,41 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
      *    "해보겠습니다" 항목은 뺀다).
      */
     const stub = fake || (answer.trim().length < 200 && /(하겠습니다|보겠습니다|드리겠습니다)\s*\.?\s*$/.test(answer.trim()));
-    if (!stub || pass === 2) break;
+    if (!stub) break;
+    if (pass === 2) {
+      /**
+       * 🔴 **재시도까지 실패했을 때만 사용자에게 말한다.**
+       *    성공한 재시도는 **내부 복구**다(네트워크 재시도와 같다) — 완결된 답 뒤에
+       *    *"미완으로 끝나 한 번 더 요청합니다"* 가 붙으면 멀쩡한 답을 의심하게 만든다.
+       *    실제로 2026-10-01 에 사용자가 그 줄을 보고 *"뭐야 이게"* 라고 물었다.
+       * ⚠️ 그렇다고 조용하지도 않다 — **여전히 미완이면** 그건 사용자가 알아야 한다.
+       */
+      logWarn('chat.final_stub_after_retry', { turnId, chars: answer.trim().length });
+      emit('notice', { text: '답이 두 번 모두 미완으로 끝났습니다 — 다시 물어봐 주세요.' });
+      break;
+    }
     retriedFinal = true;
-    logWarn('chat.final_stub_retry', { turnId, chars: answer.trim().length });
-    emit('notice', { text: '답이 미완으로 끝나 한 번 더 완결을 요청합니다.' });
+    logWarn('chat.final_stub_retry', { turnId, chars: answer.trim().length, preview: answer.trim().slice(0, 160) });
+    /**
+     * 🔴🔴 **소비자에게 "지금까지 받은 것을 버려라" 고 말한다** (2026-10-01 실사고).
+     *
+     * 여기서 `answer = ''` 로 비우는 것은 **이 함수의 변수**일 뿐이다. 조각은 이미
+     * `emit('text_delta')` 로 **밖에 나간 뒤**이고, 텔레그램 쪽은 자기 누적기에
+     * `answer += data.text` 로 쌓기만 한다 ⇒ **pass1 + pass2 가 둘 다 발송된다.**
+     *
+     * 사용자가 실제로 받은 것(2026-10-01):
+     * ```
+     * (도구 호출)
+     * [도구 결과] get_portfolio({"summary":{"purchase":{...계좌 전체 JSON...}})
+     *
+     * 내 포트폴리오 — 3종목, 평가손익 +$188       ← pass2 의 정상 답
+     * ⚠️ 답이 미완으로 끝나 한 번 더 완결을 요청합니다.
+     * ```
+     * ⇒ **버리라고 안 하면 재시도가 "두 배로 보여주는" 기능이 된다.** 더 나쁜 것은
+     *   pass1 이 하필 **도구 결과 원문**(계좌 잔고·보유 전량)이라는 점이다.
+     * ★ 스트리밍은 되돌릴 수 없으니 **되돌리라는 신호**를 보내는 것이 유일한 수단이다.
+     */
+    emit('answer_restart', { reason: fake ? 'tool_markup' : 'stub', discarded: answer.length });
     contents.push({ role: 'model', parts: [{ text: answer }] });
     contents.push({ role: 'user', parts: [{ text: '[시스템] 방금 답은 미완이거나 도구 호출 흉내·중간과정이 섞였다. 결론부터 시작하는 짧고 완결된 답으로 다시 써라. "[도구 호출]"·"(도구 호출" 표기·사죄·과정 서술 절대 금지.' }] });
     answer = '';
