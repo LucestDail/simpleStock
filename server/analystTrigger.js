@@ -109,17 +109,45 @@ function trackUniverse(prev, held, targeted, now, watched = []) {
 
   for (const sym of heldSet) next[sym] = { role: 'held', since: prev?.[sym]?.since ?? now };
 
-  // 🔴 직전엔 있었는데 지금 없다 = 판 것이다 ⇒ **되살 자리를 봐 줄 대상**으로 남긴다
+  /**
+   * 🔴 직전엔 있었는데 지금 없다 = 판 것이다 ⇒ **되살 자리를 봐 줄 대상**으로 남긴다
+   *
+   * 🔴🔴 **"직전에 있었다" 가 아니라 "들고 있었다" 여야 한다** (2026-10-01 실측 수정).
+   *
+   *    종전 코드는 `prev` 의 **모든** 항목을 돌면서 보유만 빼고 전부 `reentry` 로 적었다.
+   *    그래서 `watch`(한 번도 안 산 관심종목)·`targeted` 가 **첫 틱 다음부터 전부
+   *    `reentry` 로 뒤바뀌었다.** 라이브 실측(2026-10-01 11:3x):
+   *      watch 플래그 **41** · universe 의 role = `{reentry: 39, held: 2}` · **watch 0**
+   *      (`reentry − watched = ∅` — 즉 39건 **전부**가 산 적 없는 관심종목이었다)
+   *
+   *    왜 조용했나: `v.exitedAt` 이 `undefined` 라 `exitedAt != null` 이 **false** 가 되어
+   *    만료 검사를 건너뛰고, 아래에서 `exitedAt ?? now` 로 **매 틱 새로 찍혔다.**
+   *    ⇒ 20일 만료가 **영원히 안 온다**(조건이 매번 리셋된다).
+   *
+   *    무엇이 아팠나: 프롬프트의 `## 되살/신규 진입 후보` 절이 이 role 로 라벨을 붙인다
+   *    (`reentry: '최근까지 보유했다 매도'`). ⇒ **산 적도 없는 종목을 "당신이 팔았던 종목"
+   *    이라고 모델에게 말하고 있었다.** 지어내지 말라고 가르치는 시스템이 **스스로
+   *    없는 보유 이력을 지어낸** 셈이다.
+   *
+   * ⇒ `wasHeld` 를 명시로 들고 다닌다. 보유에서 빠질 때만 켜지므로, **그 표시가 없는
+   *    항목은 되살이 될 수 없다.** 라이브의 잘못된 39건은 표시가 없어 자동으로
+   *    `watch` 로 되돌아간다(마이그레이션 코드가 따로 필요 없다 — 위 ∅ 로 무손실 확인).
+   */
   for (const [sym, v] of Object.entries(prev || {})) {
     if (heldSet.has(sym)) continue;
+    const wasHeld = v.role === 'held' || v.wasHeld === true;
+    if (!wasHeld) continue;                       // 산 적 없는 것은 되살이 아니다
     const exitedAt = v.role === 'held' ? now : v.exitedAt;
+    // ⚠️ 언제 팔았는지 모르면 **되살로 만들지 않는다.** 모르는 것을 `now` 로 메우면
+    //    만료가 매 틱 리셋돼 "20일 추적" 이 영구 추적이 된다(위 사고의 직접 원인).
+    if (!Number.isFinite(exitedAt)) continue;
     /**
      * 기한이 지나면 잊는다 — 영원히 들고 있으면 감시 대상이 계속 자란다.
      * ⚠️ 경계는 **`>=`** 다: `REENTRY_DAYS=20` 이면 **매도 20일째에 빠진다**(21일째가 아니라).
      *    `>` 로 두면 "20일 추적" 이라 적어 놓고 21일을 추적한다 — 문서와 코드가 어긋난다.
      */
-    if (exitedAt != null && now - exitedAt >= REENTRY_DAYS * DAY_MS) continue;
-    next[sym] = { role: 'reentry', exitedAt: exitedAt ?? now, since: v.since };
+    if (now - exitedAt >= REENTRY_DAYS * DAY_MS) continue;
+    next[sym] = { role: 'reentry', wasHeld: true, exitedAt, since: v.since };
   }
 
   // 사용자가 목표·손절을 찍은 것은 보유가 아니어도 본다
