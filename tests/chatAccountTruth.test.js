@@ -62,8 +62,8 @@ const HOLDINGS = {
     cash: { krw: { amount: 0 }, usd: { amount: 1429.06 } },
   },
   items: [
-    { symbol: 'QLD', name: 'ProShares Ultra QQQ', quantity: 90, avgPrice: 71.78, lastPrice: 96.54, profitRate: 34.5, dailyRate: 0.4, currency: 'USD' },
-    { symbol: 'RAM', name: 'Roundhill DRAM ETF', quantity: 400, avgPrice: 19.08, lastPrice: 13.98, profitRate: -26.7, dailyRate: -1.2, currency: 'USD' },
+    { symbol: 'QLD', name: 'QLD', officialName: 'ProShares Ultra QQQ', leverageFactor: 2, quantity: 90, avgPrice: 71.78, lastPrice: 96.54, profitRate: 34.5, dailyRate: 0.4, currency: 'USD' },
+    { symbol: 'RAM', name: 'RAM', officialName: 'Roundhill DRAM ETF', leverageFactor: 2, quantity: 400, avgPrice: 19.08, lastPrice: 13.98, profitRate: -26.7, dailyRate: -1.2, currency: 'USD' },
     { symbol: 'O', name: 'Realty Income', quantity: 1, avgPrice: 54.40, lastPrice: 54.50, profitRate: 0.2, dailyRate: 0.1, currency: 'USD' },
   ],
 };
@@ -307,4 +307,14 @@ test('오탐 축: 방침 없는 종목 매도는 안 막는다 (QLD)', async () 
   await run(chat, 'QLD 1주 팔아줘');
   assert.ok(!captured.warns.some((w) => w.ev === 'chat.policy_blocked'), '방침에 없는 종목을 막았다');
   assert.equal(captured.proposed.length, 1, '정상 제안이 등록되지 않았다');
+});
+
+test('🔴 정식명·레버리지가 계좌 절에 실린다 (도구 0회 턴에서는 이것이 유일한 출처다)', async () => {
+  const chat = fresh();
+  await run(chat, '내 자산 어때?');
+  const p = promptText();
+  assert.ok(p.includes('ProShares Ultra QQQ'), '정식명이 없다 — 모델은 "QLD" 가 무엇인지 모른다');
+  assert.ok(p.includes('Roundhill DRAM ETF'), 'RAM 정식명이 없다');
+  assert.match(p, /2배 레버리지/, '레버리지 배수가 없다 — "레버리지 줄일까" 를 판단할 수 없다');
+  assert.ok(!/QLD QLD|RAM RAM/.test(p), '티커가 두 번 적혔다');
 });

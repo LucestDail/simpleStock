@@ -373,9 +373,19 @@ function accountTruthSection(snap, err) {
     lines.push('보유 종목 **없음**(0종목) — 매도할 것이 없다.');
   } else {
     for (const it of items) {
+      /**
+       * 🔴 **정체(정식명·레버리지)를 함께 준다** (2026-10-01 배포 직후 실물에서 발견).
+       *    `name` 이 티커와 같은 종목이 있어 `QLD QLD`·`RAM RAM` 으로 나왔다 —
+       *    **도구 0회 턴에서는 이 절이 유일한 출처**라, 빠지면 모델은 RAM 이 2배
+       *    레버리지라는 것도, QLD 가 QQQ 2배라는 것도 모른 채 비중을 논한다.
+       *    (종전엔 `get_portfolio` 도구가 줬다 — 도구를 안 부르는 턴이 생기면서 구멍이 됐다.)
+       */
+      const name = it.officialName || it.name || '';
+      const lev = Number(it.leverageFactor) > 1 ? ` [${it.leverageFactor}배 레버리지]` : '';
       lines.push(
-        `- ${it.symbol} ${it.name || ''} — **${num(it.quantity, 0)}주** · 평단 ${num(it.avgPrice)}`
-        + ` · 현재 ${num(it.lastPrice)} (손익 ${num(it.profitRate)}% · 당일 ${num(it.dailyRate)}%)`
+        `- ${it.symbol} ${name === it.symbol ? '' : name}${lev} — **${num(it.quantity, 0)}주**`
+        + ` · 평단 ${num(it.avgPrice)} · 현재 ${num(it.lastPrice)}`
+        + ` (손익 ${num(it.profitRate)}% · 당일 ${num(it.dailyRate)}%)`
       );
     }
   }
