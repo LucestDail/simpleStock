@@ -308,6 +308,36 @@ function buildQuery(subject) {
   return official || name || symbol;
 }
 
+/** 티커 모양 — 공백 없는 영문 1~5자(미국) 또는 숫자 6자리(한국) */
+const TICKER_SHAPE = /^(?:[A-Za-z]{1,5}|\d{6})$/;
+
+/**
+ * 🔴 **맨 티커 질의는 아예 내보내지 않는다** (2026-10-01)
+ *
+ * 라이브 실측(my-computer 로그, 40시간 **6회**): `[web-search] 맨 티커 'QLD' 로 뉴스 검색`.
+ * 'QLD' 는 뉴스 인덱스에서 **호주 퀸즐랜드 럭비·5K 마라톤**이 이긴다 — 그 결과가 그대로
+ * 매매 판단 프롬프트에 실린다. **쓸모없는 결과로 프롬프트를 오염시키는 것보다 없는 게 낫다.**
+ *
+ * ❌ **접미어("QLD stock")로는 못 고친다** — 09-24 에 이미 실측으로 기각됐다
+ *    (`QLD stock`→소 목장 매물 · `RAM stock`→멕시코 마트 재고 할인). 모호성을 푸는 것은
+ *    **정식 종목명**뿐이고 그건 호출자만 안다(`officialName`).
+ *
+ * ⚠️ **"티커처럼 생겼다" 로 단정하지 않는다.** 판정 조건은 *질의가 그 주제의 **심볼과
+ *    정확히 같다***(= `officialName`·`name` 이 비어 티커로 떨어졌다는 **증거**)이다.
+ *    심볼이 없는 호출(채팅의 자유 질의 `{name: 사용자문구, symbol: ''}`)은 비교 기준이
+ *    없으므로 **건드리지 않는다** — 거기서 막으면 "NVDA 어때?" 같은 정당한 질문까지 죽는다.
+ *    ⇒ **오탐(정당한 검색을 죽임)과 놓침(쓰레기 유입)이 둘 다 해로우니 증거가 있는 쪽만 막는다.**
+ */
+function isBareTickerQuery(subject, query) {
+  // 시장 주제는 전용 문구를 만든다(여기 걸릴 수 없지만, 의도를 코드로 못박는다)
+  if (subject?.isMarket === true) return false;
+  const symbol = String(subject?.symbol || '').trim();
+  if (!symbol) return false;
+  const q = String(query || '').trim();
+  if (!TICKER_SHAPE.test(q)) return false;
+  return q.toUpperCase() === symbol.toUpperCase();
+}
+
 /**
  * 종목 시장 뉴스를 찾는다.
  *
@@ -334,8 +364,22 @@ async function searchMarketNews(subjects, { maxSubjects = 5 } = {}) {
     }
 
     const results = [];
+    let skipped = 0;
     for (const s of (subjects || []).slice(0, maxSubjects)) {
       const query = buildQuery(s);
+      /**
+       * 🔴 종목명을 못 구한 주제는 **검색하지 않는다**(위 `isBareTickerQuery` 참조).
+       * ⚠️ 조용히 빼지 않는다 — 결과 목록에 **건너뛴 표시로 남긴다.** 통째로 지우면
+       *    `asked` 건수가 거짓말을 하고, 호출자는 "검색했는데 결과가 없다" 로 읽는다.
+       * ⚠️ `error` 도 `text` 도 **넣지 않는다** — 건너뜀은 실패(`failedCount`)도
+       *    적중(`webHits`)도 아니다. 셋을 섞으면 어느 축도 못 센다.
+       */
+      if (isBareTickerQuery(s, query)) {
+        skipped += 1;
+        logWarn('mcp.bare_ticker_skipped', { symbol: s.symbol });
+        results.push({ symbol: s.symbol, name: s.name, query, skipped: 'bare-ticker' });
+        continue;
+      }
       try {
         const text = await callTool(tool.name, buildArgs(tool, query));
         results.push({ symbol: s.symbol, name: s.name, query, text: String(text).slice(0, 4000), source: extractSource(text) });
@@ -354,8 +398,8 @@ async function searchMarketNews(subjects, { maxSubjects = 5 } = {}) {
      *       모르는 것을 "정상" 으로 가정하는 것도, "저하" 로 가정하는 것도 둘 다 추측이다.
      */
     const degraded = results.some((r) => r.source && !/^brave/i.test(r.source));
-    logInfo('mcp.search_done', { tool: tool.name, asked: results.length, failed, degraded });
-    return { ok: true, tool: tool.name, results, failedCount: failed, degraded };
+    logInfo('mcp.search_done', { tool: tool.name, asked: results.length, failed, skipped, degraded });
+    return { ok: true, tool: tool.name, results, failedCount: failed, skippedCount: skipped, degraded };
   } catch (e) {
     logError('mcp.search_error', e, {});
     return { ok: false, tool: null, results: [], error: e.message, kind: e.kind || 'transport' };
@@ -500,6 +544,7 @@ module.exports = {
   McpError,
   action,
   buildQuery,
+  isBareTickerQuery,
   unwrapJsonString,
   extractSource,
   SEARCH_HINTS,

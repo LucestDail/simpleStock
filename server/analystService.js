@@ -212,6 +212,12 @@ const SYSTEM_PROMPT = [
  */
 const STANCES = new Set(['BUY', 'SELL', 'HOLD']);
 
+/**
+ * 매수 여력을 재는 통화 — `tossPortfolio` 가 현금을 **이 둘만** 받아 온다
+ * (`cash = { krw, usd, failed }`). 새 통화가 생기면 **거기와 여기를 같이** 고쳐야 한다.
+ */
+const CAPACITY_CURRENCIES = ['USD', 'KRW'];
+
 function pickString(obj, names) {
   for (const n of names) {
     const v = obj?.[n];
@@ -297,6 +303,12 @@ function asPosition(o) {
   };
 }
 
+/**
+ * 주문을 만들려 한 **흔적**으로 쓰는 키들 — 값이 아니라 **키의 존재**만 본다
+ * (`quantity: 0` 처럼 **틀린 값**이야말로 우리가 보고 싶은 반쪽 제안이다).
+ */
+const PROPOSAL_NUM_KEYS = ['quantity', 'qty', 'shares', 'amount', 'price', 'limitPrice', 'targetPrice'];
+
 function asProposal(o) {
   if (!o || typeof o !== 'object') return null;
   const side = (pickString(o, ['side', 'action', 'direction']) || '').toUpperCase();
@@ -312,7 +324,38 @@ function asProposal(o) {
   const price = num(['price', 'limitPrice', 'targetPrice']);
   // 🔴 네 칸이 다 있어야 제안이다 — 반쪽은 버린다(거부될 것을 만들지 않는다)
   const symbol = pickString(o, ['symbol', 'ticker', 'code']);
-  if (!symbol || !quantity || !price) return null;
+  if (!symbol || !quantity || !price) {
+    /**
+     * 🔴 **버려지는 경로는 조용하면 안 된다** (2026-10-01) — `asPosition` 의
+     *    `stance_unrecognized`(:263)와 **같은 가족**인데 이쪽만 빠져 있었다.
+     *
+     * 종전에는 말없이 `null` 을 돌려줬다. 그래서 `proposed:0` 을 볼 때
+     * **"모델이 제안을 안 냈다" 와 "반쪽 제안을 냈는데 우리가 버렸다" 가 원리상 구분되지
+     * 않았다** — 몇 건이 증발했는지 셀 방법이 아예 없었다.
+     *
+     * ⚠️ **제안처럼 생긴 것만** 짖는다. 이 함수는 파싱 중 **온갖 객체**에 불리고(모든
+     *    배열의 모든 원소), `side` 자리에는 `BUY|SELL` 이 **판단**으로도 들어온다
+     *    (`STANCES` 에 BUY·SELL 이 있다 — `{symbol, action:'BUY', confidence, rationale}`
+     *    같은 보유 판단이 여기까지 온다). 그걸 전부 짖으면 warn 이 소음이 되고,
+     *    **읽히지 않는 로그는 침묵과 같다.**
+     *    ⇒ 기준 = **수량·가격 칸을 하나라도 들고 왔는가**(= 주문을 만들려 한 흔적).
+     *       하나도 없으면 이탈이 아니라 **그냥 다른 객체**다.
+     */
+    const missing = [];
+    if (!symbol) missing.push('symbol');
+    if (!quantity) missing.push('quantity>0');
+    if (!price) missing.push('price>0');
+    const triedOrderFields = PROPOSAL_NUM_KEYS.some((k) => Object.prototype.hasOwnProperty.call(o, k));
+    if (triedOrderFields) {
+      logWarn('analyst.proposal_incomplete', {
+        symbol: symbol || null,
+        side,
+        missing,
+        received: JSON.stringify(o).slice(0, 240),
+      });
+    }
+    return null;
+  }
   return { symbol, side, quantity, price, reason: pickString(o, ['reason', 'rationale', 'why']) };
 }
 
@@ -538,6 +581,177 @@ const round2 = (n) => Math.round(Number(n) * 100) / 100;
  * @param {object} dash `/api/dashboard` 결과
  */
 /**
+ * 🔴 **"매수 제안 0건" 의 이유를 사실로 만든다** (2026-10-01)
+ *
+ * 실측 상태: 가용 현금 **USD 3.76 · KRW 0**(총 평가액 15,674 USD). 현금 버퍼 15% 는
+ * 2,351 USD 라 `orderService` 의 `cash-floor` 게이트는 **도달조차 불가능한 사문**이었다 —
+ * 신규 매수가 **물리적으로 불가능**한 상태인데 프롬프트도, 폰 브리핑도, 로그도 그 사실을
+ * **한 번도 말하지 않았다.** 사용자는 `proposed:0` 만 보고 "제안이 없다" 로 읽는다.
+ * ⇒ 침묵이 **"정상"과 "고장"을 똑같이 보이게** 만드는 그 자리다.
+ *
+ * ⚠️ **가격을 몰라도 판정되는 축이 먼저다.** 버퍼를 빼고 남는 금액이 0 이하면 *어떤 종목이든,
+ *    아무리 싸도* 1주를 못 산다 — 후보 목록도 시세도 필요 없다. 가격 비교(`below-min-price`)는
+ *    그 다음이고, 참조가는 **이미 들고 있는 종목의 현재가**를 쓴다(새 의존성을 만들지 않는다).
+ * ⚠️ **못 읽은 것과 0 은 다르다.** `cash[cur]` 이 없으면 `unknown` 이고, 그 통화가 하나라도
+ *    있으면 전체를 `blocked` 로 **단정하지 않는다** — "살 수 없다" 는 전부 읽고서만 하는 말이다.
+ * ⚠️ 버퍼 비율은 게이트를 실제로 거는 `orderService.CASH_FLOOR_PCT` 를 **그대로 읽는다**(복제 금지).
+ *
+ * @param {{cash?:{krw?:object,usd?:object,failed?:string[]}}|null} summary `dash.portfolio.summary`
+ * @param {Array<{currency?:string, marketValue?:number, lastPrice?:number}>} items 보유 종목
+ */
+function assessBuyingCapacity(summary, items = []) {
+  const floorPct = Number(orderService.CASH_FLOOR_PCT) || 0;
+  const list = Array.isArray(items) ? items : [];
+  const cash = summary?.cash || null;
+  const byCurrency = {};
+  for (const cur of CAPACITY_CURRENCIES) {
+    const slot = cash ? cash[cur.toLowerCase()] : null;
+    const amount = Number(slot?.amount);
+    if (!slot || !Number.isFinite(amount)) {
+      byCurrency[cur] = { state: 'unknown', cash: null, floor: null, available: null, minPrice: null };
+      continue;
+    }
+    const sameCur = list.filter((it) => String(it?.currency || '').toUpperCase() === cur);
+    // 🔴 `orderService` 와 **같은 식**이다(평가액 = 현금 + 그 통화 보유 평가금액)
+    const holdingsVal = sameCur.reduce((s, it) => s + (Number(it?.marketValue) || 0), 0);
+    const floor = (amount + holdingsVal) * (floorPct / 100);
+    const available = amount - floor;
+    const prices = sameCur.map((it) => Number(it?.lastPrice)).filter((v) => Number.isFinite(v) && v > 0);
+    // ⚠️ 보유가 없는 통화는 참조가가 **없다** — 그러면 가격 축으로는 판정하지 않는다
+    const minPrice = prices.length ? Math.min(...prices) : null;
+    let state = 'ok';
+    if (!(available > 0)) state = 'floor-exhausted';
+    else if (minPrice != null && available < minPrice) state = 'below-min-price';
+    byCurrency[cur] = { state, cash: amount, floor, available, minPrice };
+  }
+  const states = CAPACITY_CURRENCIES.map((c) => byCurrency[c].state);
+  const state = states.includes('ok') ? 'ok'
+    : states.includes('unknown') ? 'unknown'
+      : 'blocked';
+  return { state, byCurrency, floorPct };
+}
+
+/**
+ * 감시 종목 보고 문턱·표시 개수.
+ *
+ * ⚠️ `analystTrigger` 의 `MIN_MOVE_PCT`(1.5)와 **값은 같지만 같은 상수가 아니다** — 저쪽은
+ *    *"LLM 을 깨울 만한가"*(z≥2 AND |등락|≥1.5)이고 이쪽은 *"브리핑에 한 줄 적을 만한가"* 다.
+ *    질문이 다르니 **따로 조절되어야** 한다(트리거를 둔감하게 바꿔도 보고는 그대로여야 한다).
+ *    ★ 그래서 복제가 아니다 — 복제였다면 상수를 공개해 한 벌로 묶는 것이 맞다.
+ */
+const WATCH_REPORT_MIN_PCT = Math.max(0, Number(process.env.ANALYST_WATCH_REPORT_MIN_PCT ?? 1.5));
+const WATCH_REPORT_TOP_N = Math.max(1, Number(process.env.ANALYST_WATCH_REPORT_TOP_N ?? 8));
+
+const WATCH_ROLE_LABEL = { reentry: '되살후보', targeted: '목표지정', watch: '감시', held: '보유' };
+
+/**
+ * 🔴 **감시 종목 41개를 지켜보면서 판단에는 0개가 들어가고 있었다** (2026-10-01)
+ *
+ * `alertService.collectMomentumRows()` 가 5분마다 유니버스 **전체**의 등락·분포를 계산하는데,
+ * 그 rows 는 `trigger.decide()` 에만 쓰이고 **프롬프트로는 안 갔다.** 정기 회차의 `reasons` 에는
+ * 스케줄 사유 하나뿐이라 `## 되살/신규 진입 후보` 절(`kind==='momentum'` 만 읽는다)은 **항상 비었다.**
+ * ⇒ 모델이 보는 종목 = 보유 2 + 후보 2 = **4개**. 실측 당일 |3%| 이상이 6종이었는데 **한 줄도** 안 실렸다.
+ * 이 저장소가 반복해 밟은 ***"수집해 놓고 안 쓰는"*** 자리다.
+ *
+ * ⚠️ **절을 통째로 빼지 않는다.** 움직임이 없으면 *"특이 움직임 없음"* 이라고 **쓴다** —
+ *    *"조용했다"* 와 *"안 봤다"* 가 같아 보이면 안 된다(이 저장소가 제일 비싸게 배운 것).
+ *    그래서 rows 를 **못 받은 경우**는 조용한 경우와 **다른 문장**을 낸다.
+ * ⚠️ **추가 조회 0건** — 캔들·평가를 붙이면 회차당 수십 번의 외부 호출이 된다. 이미 받은 값만 쓴다.
+ * ⚠️ 보유 종목은 **뺀다** — `## 보유 종목` 절이 같은 등락을 더 자세히 싣는다(중복은 예산 낭비다).
+ *
+ * @param {Array|null|undefined} rows `collectMomentumRows()` 의 결과. **없는 것과 빈 것은 다르다.**
+ * @param {{heldSet?:Set<string>, nameOf?:(s:string)=>string|null, zOf?:(row:object)=>number|null}} opts
+ */
+function watchMovesSection(rows, { heldSet = new Set(), nameOf = () => null, zOf = () => null } = {}) {
+  const HEAD = '## 감시 종목 오늘의 움직임 (보유 밖 · **보고 대상**)';
+  const RULE = [
+    '🔴 **이 종목들은 제안 대상이 아니다.** 매수 제안의 티커는 위 "## 도구상자" 안에서만 고른다(기존 규칙 그대로).',
+    '   이 절의 쓰임은 **"오늘 무슨 일이 있었나"** 를 `marketView`·`momentumRead` 에 반영하는 것이다.',
+    '   ⚠️ 여기 티커로 매매를 제안하면 계좌·게이트 검증에서 **전부 거부**된다 — 지금보다 나빠진다.',
+  ];
+  if (!Array.isArray(rows)) {
+    /**
+     * 🔴 **"안 봤다" 를 "조용했다" 로 보이게 하지 않는다.** 분석이 트리거 밖(수동·크론)에서
+     *    돌면 rows 가 없다 — 그때 절을 빼면 모델도 사람도 *"감시 종목이 잠잠했다"* 로 읽는다.
+     */
+    return [HEAD, '⚠️ 이번 회차는 감시 종목 움직임을 **받지 못했습니다**(트리거 밖 실행).',
+      '   이 침묵은 *"조용했다"* 가 아니라 ***"안 봤다"*** 입니다 — 감시 종목에 대해 아무 말도 하지 마세요.'].join('\n');
+  }
+  const pool = rows.filter((r) => r && r.symbol && !heldSet.has(String(r.symbol).toUpperCase()));
+  const movers = pool
+    .filter((r) => Math.abs(Number(r.dailyChangePct)) >= WATCH_REPORT_MIN_PCT)
+    .sort((a, b) => Math.abs(Number(b.dailyChangePct)) - Math.abs(Number(a.dailyChangePct)));
+  if (!movers.length) {
+    return [HEAD, `오늘 특이 움직임 없음 — 감시 ${pool.length}종 전부 |${WATCH_REPORT_MIN_PCT}%| 미만입니다(조회는 **했습니다**).`].join('\n');
+  }
+  const shown = movers.slice(0, WATCH_REPORT_TOP_N);
+  const out = [HEAD];
+  for (const r of shown) {
+    const pct = Number(r.dailyChangePct);
+    const z = zOf(r);
+    const name = nameOf(r.symbol);
+    out.push(`- ${r.symbol}${name ? `(${name})` : ''} ${pct > 0 ? '+' : ''}${pct}%`
+      // ⚠️ z 는 **못 구할 수 있다**(표본 10일 미만·σ=0). 그때 0 으로 적으면 "평범하다" 는 거짓 판정이 된다
+      + ` · ${Number.isFinite(z) ? `${z.toFixed(1)}σ` : 'σ 판정불가'}`
+      + ` · ${WATCH_ROLE_LABEL[r.role] || r.role || '-'}`);
+  }
+  // 🔴 **조용히 자르지 않는다** — 자른 사실 자체를 적는다(안 적으면 8종이 전부인 줄 안다)
+  out.push(`(감시 ${pool.length}종 중 |${WATCH_REPORT_MIN_PCT}%| 이상 ${movers.length}종`
+    + `${movers.length > shown.length ? ` — 변동 큰 ${shown.length}종만 표시, 나머지 ${movers.length - shown.length}종 생략` : ''})`);
+  out.push(...RULE);
+  return out.join('\n');
+}
+
+/**
+ * 통화별 매수 여력을 **구간 이름**으로 — 로그에 금액 대신 들어가는 값.
+ * ⚠️ 판정을 다시 하지 않고 `assessBuyingCapacity` 의 state 를 **옮기기만** 한다.
+ *    여기서 다시 계산하면 로그와 브리핑이 어긋날 수 있다(판정은 한 곳이어야 한다).
+ */
+function capacityBand(d) {
+  switch (d?.state) {
+    case 'floor-exhausted': return 'none';
+    case 'below-min-price': return 'under_one_share';
+    case 'ok': return 'ok';
+    default: return 'unknown';
+  }
+}
+
+/** 사람이 읽는 한 줄 — **숫자를 적는다**("부족하다" 만으로는 소급 확인이 안 된다) */
+function capacityDetail(byCurrency) {
+  return CAPACITY_CURRENCIES.map((cur) => {
+    const d = byCurrency?.[cur];
+    if (!d || d.state === 'unknown') return `${cur} 확인 못 함`;
+    const dp = cur === 'KRW' ? 0 : 2;
+    const avail = Math.max(0, d.available).toFixed(dp);
+    return `${cur} 매수가능 ${avail}(현금 ${d.cash.toFixed(dp)} − 버퍼 ${Math.max(0, d.floor).toFixed(dp)})`;
+  }).join(' · ');
+}
+
+/**
+ * 🔴 **제안 0건의 이유를 한 줄로** — 이 한 줄이 이 변경의 핵심이다.
+ *    지금까지는 침묵이라 사용자가 "정상(살 게 없었다)" 과 "고장(살 수가 없다)" 을 구분할 수 없었다.
+ * ⚠️ 매수 여력 판정은 **매수에만** 걸린다 — 현금이 0 이어도 **매도 제안은 가능하다**.
+ *    그래서 문구를 "제안 불가" 가 아니라 "**신규 매수** 불가" 로 적는다.
+ */
+function describeNoProposal(reason, capacity, { proposed = 0, rejected = [] } = {}) {
+  const detail = capacityDetail(capacity?.byCurrency);
+  switch (reason) {
+    case 'no_buying_capacity':
+      return `현금 부족 — 버퍼(평가액의 ${capacity.floorPct}%)를 빼면 신규 매수에 쓸 돈이 남지 않습니다`
+        + ` (${detail}). 가장 싼 보유 종목 1주도 살 수 없는 상태입니다.`;
+    case 'cash_unknown':
+      return `현금을 확인하지 못했습니다 (${detail}) — 매수 수량의 근거가 없어 제안을 만들 수 없습니다.`;
+    case 'all_rejected': {
+      const why = [...new Set(rejected.map((r) => r?.error).filter(Boolean))].slice(0, 3);
+      return `모델이 ${proposed}건을 냈지만 **전부 거부**됐습니다${why.length ? ` — ${why.join(' / ')}` : ''}`;
+    }
+    case 'model_proposed_none':
+    default:
+      return `현금 여력은 있으나 (${detail}) 모델이 제안을 내지 않았습니다 — 판단이 "지금은 아니다" 였습니다.`;
+  }
+}
+
+/**
  * @param {object} opts
  * @param {boolean} [opts.dryRun] 🔴 **부작용 없이** 분석만 한다 — 텔레그램 발송도, 제안 생성도 안 한다.
  *   pm2: *"검증이 곧 발송이다. 칠 때마다 사용자가 알림을 받는다."* 맞는 지적이고,
@@ -748,6 +962,13 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     await new Promise((r) => setTimeout(r, 60));
   }
 
+  /**
+   * 🔴 **매수 여력을 프롬프트보다 먼저 판정한다** (2026-10-01) — 아래 `## 계좌` 절과
+   *    브리핑 본문·`analyst.no_proposal_reason` 로그가 **같은 한 판정**을 쓴다.
+   *    세 곳에서 각자 계산하면 하나가 어긋난 채 "채워진 척" 한다.
+   */
+  const capacity = assessBuyingCapacity(summary, items);
+
   const lines = [];
   lines.push('## 계좌');
   if (summary) {
@@ -763,11 +984,23 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     if (c) {
       const part = (cur, v) => (v ? `${cur} ${v.raw}` : `${cur} 확인 못 함`);
       lines.push(`현금(매수 가능): ${part('원화', c.krw)} · ${part('달러', c.usd)}`);
-      const krw = Number(c.krw?.amount || 0);
-      const usd = Number(c.usd?.amount || 0);
-      if (c.krw && c.usd && krw <= 0 && usd <= 0) {
-        // 🔴 살 돈이 없으면 **매수 제안 자체가 불가능**하다. 모델이 그걸 알아야 한다
-        lines.push('🔴 **현금이 사실상 0 입니다 — 신규 매수 제안을 내지 마세요.** 매도·보유 판단만 하세요.');
+      /**
+       * 🔴 **종전 판정이 실제 상태를 못 잡았다** (2026-10-01). 조건이 `krw<=0 && usd<=0`
+       *    이라, 실측 **USD 3.76**(> 0)에서 **한 번도 안 걸렸다** — 3.76 달러로는 아무것도
+       *    못 사는데 프롬프트는 "현금 있음" 으로 보였다. ⇒ 판정을 **버퍼 차감 후 잔액**으로
+       *    옮긴다(`assessBuyingCapacity`). 0 과의 비교가 아니라 **살 수 있는가**가 질문이다.
+       *
+       * ⚠️ **지시가 아니라 사실을 준다.** "사지 마라" 는 판단을 왜곡하지만 "살 수 없다" 는
+       *    제약이다. 제약을 알아야 모델이 남은 선택지(매도·보유)에 집중한다 —
+       *    사실을 숨기고 금지만 걸면 모델은 왜 금지인지 모른 채 서술을 지어낸다.
+       */
+      if (capacity.state === 'blocked') {
+        lines.push(
+          `🔴 **지금 신규 매수는 불가능합니다(사실).** 현금 버퍼(평가액의 ${capacity.floorPct}%)를 빼면`
+          + ` 매수에 쓸 수 있는 돈이 남지 않습니다 — ${capacityDetail(capacity.byCurrency)}.`,
+          '   가장 싼 보유 종목 1주조차 체결될 수 없습니다. 이것은 금지 지시가 아니라 **계좌의 상태**입니다.',
+          '   ⇒ **매도·보유 판단에 집중**하세요. 매수 아이디어는 수량·가격 제안 대신 "현금이 생기면" 조건으로 적으세요.',
+        );
       } else if (c.failed?.length) {
         lines.push(`⚠️ ${c.failed.join('·')} 현금을 못 받았습니다 — **매수 수량의 근거가 없으니 제안하지 마세요.**`);
       }
@@ -1080,6 +1313,39 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   }
 
   const heldSet = new Set(items.map((i) => String(i.symbol).toUpperCase()));
+
+  /**
+   * 🔴 **감시 종목의 오늘 움직임** (2026-10-01) — `alertService` 가 이미 계산해 넘겨 준 rows 를
+   *    그대로 쓴다(**새 호출 0건**). 상세·배경은 `watchMovesSection` 주석에.
+   * ⚠️ 종목명은 **로컬 관심종목 상태**에서만 가져온다(파일 읽기 · 네트워크 없음). 실패하면
+   *    이름 없이 티커만 적는다 — 이름 하나 때문에 절 전체를 잃지 않는다.
+   *    ⚠️ 이 경로는 `watchlistService` 의 `isSelfDeclaredStale` 시세 필터와 **무관**하다:
+   *       등락률은 `toss.getPrices`/`getCandles` 에서 오고 여기서는 **이름만** 읽는다.
+   */
+  {
+    let nameOf = () => null;
+    try {
+      const wl = require('./watchlistService').getWatchlistState();
+      const bySym = new Map();
+      for (const g of wl?.groups || []) {
+        for (const t of g?.tickers || []) {
+          const s = String(t?.symbol || '').toUpperCase();
+          if (s && t?.name && t.name !== t.symbol && !bySym.has(s)) bySym.set(s, String(t.name));
+        }
+      }
+      nameOf = (s) => bySym.get(String(s).toUpperCase()) || null;
+    } catch (e) {
+      // 조용히 넘기지 않는다 — 이름이 통째로 빠지면 KR 6자리 코드가 모델에게 무의미해진다
+      logWarn('analyst.watch_names_failed', { message: e.message });
+    }
+    lines.push('', watchMovesSection(trigger?.momentumRows, {
+      heldSet,
+      nameOf,
+      // ⚠️ z 는 **트리거가 쓰는 그 함수**로 센다 — 공식을 복제하면 두 숫자가 조용히 갈린다
+      zOf: (r) => require('./analystTrigger').zScore(r.dailyChangePct, r.history),
+    }));
+  }
+
   const reentry = [...new Map(
     (trigger?.reasons || [])
       .filter((r) => r.kind === 'momentum' && r.symbol && !heldSet.has(String(r.symbol).toUpperCase()))
@@ -1478,6 +1744,14 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
   if (useWebSearch) {
     if (!web?.ok) gaps.push(`웹 검색 사용 불가 — ${web?.error || '알 수 없음'}`);
     else if (web.failedCount) gaps.push(`웹 검색 일부 실패 (${web.failedCount}/${web.results.length}종목)`);
+    /**
+     * 🔴 **건너뛴 검색을 조용히 넘기지 않는다** (2026-10-01) — 정식 종목명을 못 구해
+     *    맨 티커 질의를 포기한 경우다(`mcp.bare_ticker_skipped`). 안 적으면 모델도
+     *    사용자도 **"그 종목 뉴스는 원래 없었다"** 로 읽는다. 실패는 아니지만 **결손이다.**
+     */
+    if (web.skippedCount) {
+      gaps.push(`정식 종목명을 못 구해 뉴스 검색을 건너뛴 종목 ${web.skippedCount}건 (맨 티커 검색은 엉뚱한 결과를 준다)`);
+    }
   } else {
     gaps.push('웹 검색을 끄고 분석했습니다.');
   }
@@ -1500,6 +1774,62 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     stances[k] = (stances[k] || 0) + 1;
     if (String(pos?.confidence || '').toUpperCase() === 'LOW') lowConfidence += 1;
   }
+
+  /**
+   * 🔴 **0건이 왜 0건인지 소급으로 셀 수 있어야 한다** (2026-10-01)
+   *
+   * 41.6시간 4회차 중 3회차가 `proposed:0`(전부 HOLD)이었는데, 그게 *"살 게 없었다"* 인지
+   * *"살 돈이 없었다"* 인지 **로그만으로는 영원히 알 수 없었다.** 그러면 "제안이 안 나온다" 는
+   * 사용자 체감에 대해 아무도 답을 못 한다.
+   *
+   * ⚠️ **매 회차 정확히 한 줄**을 낸다(제안이 나온 회차도 `has_proposals` 로). 0건일 때만
+   *    찍으면 *"줄이 없다"* 가 **"이유가 없다"와 "분석 자체가 안 돌았다"** 둘 다로 읽혀,
+   *    이 저장소가 반복해 밟은 **「0 읽기」** 가족에 그대로 들어간다.
+   * ⚠️ 현금은 **못 읽었으면 `null`**(= 모른다)이다 — 0 으로 적으면 "돈이 없다" 와
+   *    "조회가 실패했다" 가 같은 숫자가 된다.
+   * ⚠️ 매수 여력은 **매수에만** 걸린다 — 현금 0 이어도 SELL 제안은 나올 수 있으므로
+   *    제안이 실재하면 그쪽이 이유다(여력 판정으로 덮지 않는다).
+   */
+  const proposedCount = report.proposals?.length || 0;
+  const noProposalReason = dryRun && proposedCount ? 'dry_run_proposals'
+    : created.length ? 'has_proposals'
+      : proposedCount ? 'all_rejected'
+        : capacity.state === 'unknown' ? 'cash_unknown'
+          : capacity.state === 'blocked' ? 'no_buying_capacity'
+            : 'model_proposed_none';
+
+  logInfo('analyst.no_proposal_reason', {
+    reason: noProposalReason,
+    dryRun,
+    capacity: capacity.state,
+    floorPct: capacity.floorPct,
+    /**
+     * 🔴 **금액은 로그에 남기지 않는다 — 구간만 남긴다** (2026-10-01 판정).
+     *
+     * 첫 판은 `cashUsd`·`availableUsd` 같은 **실금액**을 실었다. `tossPortfolio.js:167`
+     * 의 *"금액·수량은 로그에 남기지 않는다. 건수와 성패만."* 과 정면으로 어긋난다 —
+     * 로그는 **디스크(journald)에 남고** 백업·오프사이트까지 따라간다.
+     *
+     * ⚠️ 그러면서 **목적은 잃지 않는다.** 이 줄의 목적은 *"왜 0건인가"* 를 소급으로 가르는
+     *    것이고, 그 질문에는 **구간이면 충분하다**(아래 세 값이 서로 다른 처방을 가리킨다):
+     *      `none`             버퍼를 빼면 남는 돈이 0 이하 — 가격과 무관하게 불가
+     *      `under_one_share`  남긴 하는데 가장 싼 보유 종목 1주 값에 못 미침
+     *      `ok`               살 수 있다 ⇒ 0건의 원인은 현금이 아니다
+     *      `unknown`          못 읽었다 — 0 이 아니다
+     * ★ 금액이 답하던 질문 중 **"언제쯤 가능해지나"** 만 못 답하는데, 그건 이 줄이 맡은
+     *   질문이 아니다. 필요해지면 금액이 아니라 **무차원 비율 구간**(available÷1주값)을
+     *   더하면 된다 — 금액을 되살릴 이유는 없다.
+     * ⚠️ 사용자 **브리핑 본문에는 금액을 그대로 둔다** — 본인 폰이고, 이미 평단·수량이
+     *    가는 자리다. 가리는 기준은 "민감하냐" 가 아니라 **"디스크에 남느냐"** 다.
+     */
+    cashBandUsd: capacityBand(capacity.byCurrency.USD),
+    cashBandKrw: capacityBand(capacity.byCurrency.KRW),
+    positions: report.positions?.length || 0,
+    stances,
+    proposed: proposedCount,
+    created: created.length,
+    rejected: rejected.length,
+  });
 
   logInfo('analyst.report', {
     /**
@@ -1630,6 +1960,18 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     // 제안은 `orderService` 가 **승인 버튼과 함께** 따로 쏘므로 여기서는 건수만 적는다
     if (created.length) lines.push('', `🟡 매매 제안 ${created.length}건 — 승인 버튼이 곧 옵니다`);
     /**
+     * 🔴 **0건으로 끝난 회차는 "왜 0건인지" 를 사용자에게 말한다** (2026-10-01).
+     *
+     * 지금까지 이 자리는 **침묵**이었다. 그래서 사용자 화면에서
+     *   · 현금이 없어 **구조적으로 제안이 불가능한 상태**(실측: USD 3.76 · 버퍼 2,351)와
+     *   · 모델이 보고 판단해서 **"지금은 아니다" 라고 한 정상 회차**가
+     * **똑같이 보였다.** 침묵이 정상과 고장을 같은 모양으로 만드는 그 자리다.
+     *
+     * ⚠️ 코드가 보장하는 사실이므로 `proseLines`(LLM 서술·토스라이팅 정제 대상)가 아니라
+     *    **여기(`lines`)** 에 넣는다 — 정제 모델이 "잡초" 로 쳐내면 안 되는 문장이다.
+     */
+    else lines.push('', `💤 매매 제안 0건 — ${describeNoProposal(noProposalReason, capacity, { proposed: proposedCount, rejected })}`);
+    /**
      * 🔴 **검색 품질 저하를 사용자가 보는 곳에도 코드로 적는다** (2026-09-28, pm1 지시).
      *    `web.degraded` 는 지금까지 **LLM 프롬프트에만**(1137행) 실렸다 — 모델이 그 귀띔을
      *    자기 문장에 반영하지 않으면 사용자는 저품질 출처였다는 걸 영영 모른다. "프롬프트는
@@ -1736,4 +2078,9 @@ async function decideOnContext({ contextText, regimeState = null }) {
   return { report, proposals: accepted, rejected };
 }
 
-module.exports = { analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport, computeTrade, decideOnContext, inverseGate, REPORT_SCHEMA, SYSTEM_PROMPT };
+module.exports = {
+  analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport,
+  computeTrade, decideOnContext, inverseGate, REPORT_SCHEMA, SYSTEM_PROMPT,
+  // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
+  assessBuyingCapacity, capacityDetail, capacityBand, describeNoProposal, watchMovesSection,
+};

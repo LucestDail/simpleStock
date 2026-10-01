@@ -1019,8 +1019,21 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
           st.analystCarry = []; // 실행에 들어갔으니 이월분을 비운다
           const why = trigger.describe(d.reasons);
           logInfo('analyst.triggered', { why, reasons: d.reasons });
+          /**
+           * 🔴 **감시 종목의 오늘 움직임을 분석에 함께 넘긴다** (2026-10-01)
+           *
+           * `collectMomentumRows` 는 5분마다 유니버스 **전체**(실측 41종)의 등락과 분포를
+           * 이미 계산한다. 그런데 그 rows 는 `trigger.decide()` 에만 쓰이고 **분석 프롬프트로는
+           * 안 갔다.** 정기 회차(preopen/open/mid/close)의 `reasons` 에는 스케줄 사유 하나뿐이라
+           * `## 되살/신규 진입 후보` 절은 `kind==='momentum'` 을 하나도 못 찾는다 ⇒ 모델이 보는
+           * 종목이 **보유 2 + 후보 2 = 4개**뿐이었다. 41종을 지켜보면서 판단에는 0개가 들어간 것 —
+           * 이 저장소가 반복해 밟은 ***"수집해 놓고 안 쓰는"*** 자리다.
+           *
+           * ⚠️ **새 API 호출이 0건**이다. 이미 받아 둔 값을 그대로 넘기기만 한다.
+           * ⚠️ 트리거 사유가 아니라 **보고 재료**다 — 제안 대상이 아님은 프롬프트가 못박는다.
+           */
           // 🔴 **틱을 막지 않는다** — 분석이 느리다고 알림이 밀리면 안 된다
-          Promise.resolve(analystRunner({ reasons: d.reasons, why }))
+          Promise.resolve(analystRunner({ reasons: d.reasons, why, momentumRows: rows }))
             .catch((e) => {
               logError('analyst.trigger_run_failed', e, { why });
               // 🔴 브리핑 실패를 폰에도 알린다 (2026-09-23) — 로그만 남기면 사용자는
