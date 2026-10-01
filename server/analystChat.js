@@ -293,6 +293,9 @@ const SYSTEM_PROMPT = [
   '- 🔴 과거 답변의 "제안 요약" 을 **그대로 다시 쓰지 않습니다.** 그건 그때 질문에 대한 답입니다.',
   '  (실측: "공격적으로 투자한다면 자산비율 조정?" 에 3시간 전 "전량 청산" 요약을 그대로 재탕했다.)',
   '- 숫자는 `## 계좌` 절만 근거입니다. 과거 대화에 적힌 수량·가격은 **낡은 값**입니다.',
+  '- 🔴 이전 답변의 수치는 `⟨옛값⟩` 으로 **가려져 있습니다**(그때 데이터라 지금은 틀립니다).',
+  '  그 표식을 답에 **절대 그대로 쓰지 마십시오.** 그 자리에 필요한 숫자는 `## 계좌` 에 있고,',
+  '  거기에도 없으면 그 수치는 **언급하지 않습니다.**',
   '',
   '## 🔴 주문은 내지 않습니다',
   '매수/매도가 필요하다고 판단되면 **제안으로 등록**됩니다(상단 HITL 목록).',
@@ -1507,6 +1510,12 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
      */
     const fake = /\[도구 호출\]|\(도구 호출|\[도구 결과\]/.test(answer);
     /**
+     * 🔴 **가림 표식이 답에 새면 그건 "과거 수치를 인용하려 했다" 는 신호**다 (2026-10-01 E2E).
+     *    실물: `"⟨옛값⟩주 남은 물량"`·`"배당률 ⟨옛값⟩"` — 사용자에게 그대로 나갔다.
+     *    프롬프트로 "쓰지 마라" 고 적었지만 **그것만 믿지 않는다**(09-30 에 이미 무시당했다).
+     */
+    const leaked = answer.includes(STALE);
+    /**
      * 🔴 **"확인해 보겠"만 잡고 "확인해 보겠습니다"는 못 잡았다** (2026-09-30 실측) —
      *    `확인해\s*보겠` 뒤에 `\s*\.?\s*$` 만 허용해서, 실제로 나온 "포트폴리를 확인해
      *    보겠습니다"(끝이 "습니다"로 닫힌 정상 종결어미)는 이 패턴에 안 걸려 17자 스텁이
@@ -1514,7 +1523,7 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
      *    보겠습니다"·"살펴보겠습니다" 를 전부 한 패턴으로 잡는다(부분집합이라 별도
      *    "해보겠습니다" 항목은 뺀다).
      */
-    const stub = fake || isStubAnswer(answer);
+    const stub = fake || leaked || isStubAnswer(answer);
     if (!stub) break;
     if (pass === 2) {
       /**
@@ -1551,8 +1560,20 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
      */
     emit('answer_restart', { reason: fake ? 'tool_markup' : 'stub', discarded: answer.length });
     contents.push({ role: 'model', parts: [{ text: answer }] });
-    contents.push({ role: 'user', parts: [{ text: '[시스템] 방금 답은 미완이거나 도구 호출 흉내·중간과정이 섞였다. 결론부터 시작하는 짧고 완결된 답으로 다시 써라. "[도구 호출]"·"(도구 호출" 표기·사죄·과정 서술 절대 금지.' }] });
+    contents.push({ role: 'user', parts: [{ text: '[시스템] 방금 답은 미완이거나 도구 호출 흉내·중간과정이 섞였거나 `⟨옛값⟩` 표식을 그대로 썼다. 결론부터 시작하는 짧고 완결된 답으로 다시 써라. `⟨옛값⟩` 은 **가려진 과거 수치**이니 그 자리에 `## 계좌` 의 지금 숫자를 쓰거나, 없으면 그 수치를 아예 언급하지 마라. "[도구 호출]"·"(도구 호출" 표기·사죄·과정 서술 절대 금지.' }] });
     answer = '';
+  }
+
+  /**
+   * 🔴 **재시도 뒤에도 표식이 남으면 코드가 지운다** (2026-10-01).
+   *    `⟨옛값⟩` 은 **모델에게만 보여야 하는 내부 표식**이다. 사용자 화면에 나가면
+   *    그건 결함으로 읽힌다 — 숫자가 틀린 것보다 낫지만 둘 다 안 되는 쪽이 맞다.
+   * ⚠️ 스트리밍은 되돌릴 수 없어 **저장본과 텔레그램 쪽만** 깨끗해진다. 그래서 위
+   *    재시도 축이 1차 방어이고 이건 마지막 그물이다.
+   */
+  if (answer.includes(STALE)) {
+    logWarn('chat.stale_marker_leaked', { turnId, count: answer.split(STALE).length - 1 });
+    answer = answer.replace(new RegExp(STALE, 'g'), '(수치 미확인)');
   }
 
   /**
@@ -1659,6 +1680,7 @@ module.exports = {
   accountTruthSection,
   isStubAnswer,
   maskStaleNumbers,
+  STALE,
   PROPOSAL_CLAIMED,
   currentSession,
   tokenize,

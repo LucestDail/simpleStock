@@ -406,3 +406,36 @@ test('🔴 recall 로 올라온 과거 답변도 가려진다 (세션 밖 경로
   assert.ok(p.includes('773') === false, 'recall 로 올라온 과거 가격이 그대로 실렸다');
   assert.ok(p.includes('2,652') === false, 'recall 로 올라온 과거 수량이 그대로 실렸다');
 });
+
+/**
+ * 🔴 **가림 표식이 사용자에게 새면 안 된다** (2026-10-01 E2E 실물 — 내가 만든 결함).
+ *    `"⟨옛값⟩주 남은 물량"`·`"배당률 ⟨옛값⟩"` 이 그대로 나갔다. 프롬프트에 "쓰지 마라" 를
+ *    적었지만 **그것만 믿지 않는다** — 1차는 재시도, 마지막은 코드가 지운다.
+ */
+test('🔴 답에 가림 표식이 남으면 한 번 다시 쓰게 한다', async () => {
+  let pass = 0;
+  const chat = fresh({ answer: '⟨옛값⟩주 남은 물량을 정리하세요.' });
+  // 두 번째 패스에서는 깨끗한 답을 주도록 스트림을 바꿔치기할 수 없으므로,
+  // 재시도가 **일어났다는 사실**(경고)과 최종 정리를 함께 본다
+  const ev = await run(chat, '어떻게 할까?');
+  pass = ev.filter((e) => e.e === 'answer_restart').length;
+  assert.equal(pass, 1, '표식이 샜는데 재시도가 안 걸렸다');
+  assert.ok(captured.warns.some((w) => w.ev === 'chat.stale_marker_leaked'),
+    '두 번째도 샜는데 코드가 지웠다는 기록이 없다');
+});
+
+test('🔴 끝까지 남은 표식은 사용자 눈에 보이지 않게 치환된다', async () => {
+  const chat = fresh({ answer: '배당률 ⟨옛값⟩ 입니다.' });
+  await run(chat, 'O 어때?');
+  const saved = require('node:fs').readFileSync(process.env.ANALYST_CHAT_FILE, 'utf8');
+  const last = saved.trim().split('\n').map(JSON.parse).filter((r) => r.role === 'assistant').pop();
+  assert.ok(!last.text.includes('⟨옛값⟩'), '저장본에 내부 표식이 그대로 남았다');
+  assert.match(last.text, /수치 미확인/, '표식을 지우기만 하고 자리를 안 메웠다');
+});
+
+test('오탐 축: 표식이 없는 정상 답은 재시도하지 않는다', async () => {
+  const chat = fresh({ answer: 'QLD 비중을 50%까지 줄이는 쪽을 권합니다. 레버리지 감쇠 때문입니다.' });
+  const ev = await run(chat, '어떻게 할까?');
+  assert.equal(ev.filter((e) => e.e === 'answer_restart').length, 0, '멀쩡한 답을 버리고 다시 썼다');
+  assert.ok(!captured.warns.some((w) => w.ev === 'chat.stale_marker_leaked'));
+});
