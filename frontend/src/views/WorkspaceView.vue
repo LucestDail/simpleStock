@@ -952,6 +952,27 @@ async function loadPortfolio() {
  *    "달러로는 얼마인가" 를 볼 방법이 없었다.
  * ⚠️ 환율을 못 읽어 `usd` 가 없으면 **원화로 떨어진다** — 빈칸을 보여주지 않는다.
  */
+/**
+ * 🔴 **금액과 일관된 손익률을 보여준다** (2026-10-02).
+ *    증권사 `profitRate` 가 자기 금액과 어긋난다(실측: 금액 +₩527,619 인데 −6.53%).
+ *    백엔드가 `profitRateDerived`(금액에서 유도)를 이미 주고 있는데 화면이 안 썼다.
+ * ⚠️ 증권사 값을 **지우지 않는다** — 실현손익 포함 같은 **다른 의미**일 수 있다(10-01 판단).
+ *    다르다는 사실만 `*` 와 툴팁으로 남긴다.
+ */
+const profitRateDiffers = computed(() => {
+  const a = Number(portfolio.value?.summary?.profitRate);
+  const b = Number(portfolio.value?.summary?.profitRateDerived);
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) > 0.5;
+});
+const profitRateShown = computed(() => {
+  const s2 = portfolio.value?.summary;
+  return profitRateDiffers.value && Number.isFinite(Number(s2?.profitRateDerived))
+    ? s2.profitRateDerived : s2?.profitRate;
+});
+const profitRateNote = computed(() => (profitRateDiffers.value
+  ? `금액에서 계산한 값입니다. 증권사 보고값은 ${pct(portfolio.value?.summary?.profitRate)} 로 다릅니다.`
+  : ''));
+
 const displayCcy = ref('KRW');
 /**
  * 손실 구간 보유 — 리스크 체크에 **그 종목만** 올린다.
@@ -1251,10 +1272,19 @@ onUnmounted(() => {
               <span class="kpi__value kpi__value--sub mono-num">{{ krwCell(portfolio.summary.purchase) }}</span>
             </div>
             <div class="kpi">
+              <!--
+                🔴 **금액과 비율이 서로 다른 말을 하고 있었다** (2026-10-02 실물).
+                   금액 `+₩527,619`(이익) 옆에 `−6.53%`(손실)가 **같은 색으로** 붙어 있었다.
+                   증권사가 주는 `profitRate` 가 자기 금액과 **일관되게 어긋난다**(알려진 괴리).
+                ⇒ 금액과 **일관된 쪽**(금액에서 유도한 값)을 보여주고, 다르면 그 사실을 표시한다.
+                   백엔드가 이미 `profitRateDerived` 를 계산해 분석 프롬프트에 싣고 있었다 —
+                   **화면만 안 쓰고 있었다**(*"수집해 놓고 안 쓰는"* 의 또 하나).
+                ⚠️ 증권사 값을 **지우지 않는다** — 의미가 다를 수 있어 툴팁으로 남긴다.
+              -->
               <span class="kpi__label">평가손익</span>
               <span class="kpi__value mono-num" :class="signClass(portfolio.summary.profit.krw ?? portfolio.summary.profit.usd)">
                 {{ krwCell(portfolio.summary.profit) }}
-                <small>{{ pct(portfolio.summary.profitRate) }}</small>
+                <small :title="profitRateNote">{{ pct(profitRateShown) }}<template v-if="profitRateDiffers">*</template></small>
               </span>
             </div>
             <div class="kpi">
