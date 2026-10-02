@@ -236,7 +236,21 @@ test('🔴 컴포넌트가 **남의 scoped 스타일**에 기대지 않는다', 
   for (const f of files) {
     const src = fs.readFileSync(path.join(dir, f), 'utf8');
     const tpl = (src.split('<template>')[1] || '').split('</template>')[0];
-    const own = new Set([...(src.split('<style scoped>')[1] || '').matchAll(/\.([a-z][a-z0-9_-]*)/g)].map((m) => m[1]));
+    /**
+     * 🔴 **하위 상태만 칠한 것을 "소유" 로 세지 않는다** (2026-10-02 실측 구멍).
+     *
+     * `OrderTicket.vue` 가 `.btn[disabled]` 한 줄만 갖고 있었는데 이 가드가
+     * **소유로 읽어 통과**시켰다 — 실제 화면에서는 `.btn` 기본 규칙이 없어
+     * **흰 박스에 흰 글자**로 나와 버튼이 거의 안 보였다(스크린샷이 잡았다).
+     * ★ *"면제 목록은 존재가 아니라 실제로 지탱하는가를 검사할 것"* 의 CSS 판이다.
+     *
+     * ⇒ **기본 규칙**(그 클래스로 끝나는 선택자)이 있을 때만 소유로 센다.
+     *   `.btn {` · `.btn, .x {` · `.a .btn {` 은 소유 — `.btn[disabled]` · `.btn:hover` 는 아니다.
+     */
+    const ownStyle = src.split('<style scoped>')[1] || '';
+    const own = new Set(
+      [...ownStyle.matchAll(/\.([a-z][a-z0-9_-]*)\s*(?=[,{])/g)].map((m) => m[1])
+    );
     const used = new Set();
     for (const m of tpl.matchAll(/class="([^"]+)"/g)) m[1].split(/\s+/).forEach((c) => used.add(c));
     for (const m of tpl.matchAll(/'([a-z][a-z0-9_-]*)':/g)) used.add(m[1]);

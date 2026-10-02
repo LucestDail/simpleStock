@@ -211,7 +211,21 @@ onMounted(async () => {
 .ticket__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
 .ticket__ack { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .ticket__btns { display: flex; gap: 6px; }
-/* ⚠️ `btn--xs` 는 **남의 scoped 클래스**였다 — 여기서 쓰면 스타일이 안 먹는다(가드가 잡았다) */
+/**
+ * 🔴 **버튼을 여기서 직접 칠한다** (2026-10-02 실물 확인).
+ *    `.btn` 은 WorkspaceView 의 **scoped** 스타일이라 이 컴포넌트에는 안 먹는다 —
+ *    실제로 **흰 박스에 흰 글자**로 나와 거의 안 보였다.
+ *    기존 CSS 가드는 `btn--xs`(정의가 아예 없는 것)만 잡았고, `.btn` 처럼
+ *    **다른 파일에 scoped 로 존재하는 것**은 못 봤다. 스크린샷이 잡았다.
+ * ⚠️ 토큰을 쓰되 **폴백 색을 반드시** 준다 — 토큰이 없으면 또 맨몸이 된다.
+ */
+.btn {
+  padding: 6px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+  background: var(--color-surface-2, #1e212a); color: var(--color-text, #e8ebf2);
+  border: 1px solid var(--color-border, rgba(255,255,255,.16));
+}
+.btn:hover:not([disabled]) { border-color: rgba(255,255,255,.32); }
+.btn--primary { background: #2f6df6; border-color: #2f6df6; color: #fff; font-weight: 600; }
 .ticket__trim { font-size: 11px; padding: 2px 8px; }
-.btn[disabled] { opacity: .45; cursor: not-allowed; }
+.btn[disabled] { opacity: .4; cursor: not-allowed; }
 </style>

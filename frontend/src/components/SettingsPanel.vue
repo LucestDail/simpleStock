@@ -337,14 +337,14 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
 
           <div v-for="(row, i) in form.targetRows" :key="i" class="sp__target">
             <!-- 🔴 자유 입력이 아니라 **보유에서 고른다** — 없는 종목에 기준선을 걸 수 없다 -->
-            <select v-model="row.symbol" class="input sp__xs">
+            <select v-model="row.symbol" class="sp__xs">
               <option value="">종목 선택</option>
               <option v-for="h in pickable(row.symbol)" :key="h.symbol" :value="h.symbol">
                 {{ h.name }} ({{ h.symbol }})
               </option>
             </select>
-            <input v-model="row.target" class="input sp__xs" type="number" placeholder="목표가" />
-            <input v-model="row.stop" class="input sp__xs" type="number" placeholder="손절가" />
+            <input v-model="row.target" class="sp__xs" type="number" placeholder="목표가" />
+            <input v-model="row.stop" class="sp__xs" type="number" placeholder="손절가" />
             <button class="sp__icon" aria-label="삭제" title="삭제" @click="form.targetRows.splice(i, 1)">×</button>
             <!-- ⚠️ 현재가를 옆에 적는다 — 없으면 기준선을 **감으로** 넣게 된다 -->
             <small v-if="priceOf(row.symbol) != null" class="sp__now mono-num">
@@ -415,6 +415,13 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
  *    글자색·배경이 지정되지 않아 브라우저 기본(어두운 배경 위 어두운 글자)이 됐다.
  *    ⇒ 이 컴포넌트가 **자기 입력 스타일을 갖는다.** 남의 scoped 에 기대지 않는다.
  */
+/**
+ * ⚠️ **`select` 가 빠져 있었다** (2026-10-02, 조인 CSS 가드가 찾음).
+ *    위 2026-09-21 주석이 "입력 스타일을 갖는다" 고 적어 놓고 `input`·`textarea` 만
+ *    칠해서, `<select>` 하나가 **브라우저 기본**(어두운 배경 위 밝은 박스)으로 남아 있었다.
+ *    ★*"한 곳 고치면 전수 훑는다"* 를 그때 안 한 자리다 — 같은 가족을 1년 뒤에 또 만났다.
+ */
+.sp select,
 .sp input[type='text'],
 .sp input[type='number'],
 .sp .sp__area {
