@@ -345,10 +345,21 @@ test('web_search 도구는 sanitize 를 거친 검색어만 내보낸다', async
 
 test('recall 은 관련된 과거 대화를 점수순으로 찾는다', () => {
   const chat = require('../server/analystChat');
+  /**
+   * ⚠️ **채움 행이 필요하다** — `score = log(N/df)` 이라 말뭉치가 작으면 **idf 가 0** 이 되어
+   *    아무것도 안 걸린다(10-01 에 같은 함정을 적어 뒀다). 2026-10-02 에 recall 대상에서
+   *    `assistant` 를 빼면서 이 픽스처의 N 이 3 → 2 로 줄어 **드러났다** —
+   *    제품 결함이 아니라 **픽스처가 작아서** 난 실패다.
+   * 🔴 `assistant` 줄은 이제 **대상이 아니다**(내 과거 답변을 끌어오면 되먹임이 된다 —
+   *    `tests/recallSelfFeedback.test.js` 참조). 그래서 '오늘 날씨' 줄은 user 로 둔다.
+   */
   const history = [
     { at: '2026-09-01T00:00:00Z', role: 'user', text: '삼성전자 비중 줄일까' },
-    { at: '2026-09-02T00:00:00Z', role: 'assistant', text: '오늘 날씨 얘기' },
+    { at: '2026-09-02T00:00:00Z', role: 'user', text: '오늘 날씨 얘기' },
     { at: '2026-09-03T00:00:00Z', role: 'user', text: '삼성전자 반도체 업황이 걱정된다' },
+    ...Array.from({ length: 12 }, (_, i) => ({
+      at: `2026-08-${String(i + 1).padStart(2, '0')}T00:00:00Z`, role: 'user', text: `무관한 질문 ${i}`,
+    })),
   ];
   const hits = chat.recall('삼성전자 반도체', { history });
   assert.equal(hits.length, 2, '관련 없는 줄까지 끌고 오면 맥락이 흐려진다');

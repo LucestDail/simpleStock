@@ -193,6 +193,11 @@ async function fetchPrecheck(id) {
   if (!res.ok) throw new Error(body.error || `사전 점검 실패 (${res.status})`);
   return body;
 }
+function ticketClose() {
+  // ⚠️ 닫은 사실을 기억한다 — 기록 안 하면 watch 가 **즉시 다시 연다**
+  if (ticketFor.value?.id) dismissedTickets.value.add(ticketFor.value.id);
+  ticketFor.value = null;
+}
 async function ticketApprove(p) { ticketFor.value = null; await decide(p, 'approve'); }
 async function ticketReject(p) { ticketFor.value = null; await decide(p, 'reject'); }
 /** 수량을 깎아 **새 제안으로** 만든다 — 기존 제안을 말없이 고치지 않는다(감사가 끊긴다) */
@@ -889,9 +894,49 @@ const pendingCount = computed(() => proposals.value.filter((p) => p.status === '
  * ★ 내가 이 버튼을 넣으며 적은 주석이 **"아직 레이어가 아니다"** 였다 —
  *   미완이라고 적어 두는 것과, 미완을 화면에 내보내는 것은 다른 일이다.
  */
+/**
+ * 🔴 **승인 대기 제안은 모달로 띄운다** (2026-10-02 사용자 지시).
+ *
+ * 종전엔 대화 로그 안 카드였고, 거기에 **거절된 제안까지 쌓여** 사용자가 *"뭐냐 이건?"*
+ * 이라고 했다(화면의 3건이 전부 `REJECTED`, 그중 하나는 **내가 만든 검증용 제안**).
+ * ⇒ **결정을 요구하는 것은 흐름을 막아야 하고, 지난 것은 보일 이유가 없다.**
+ */
+const pendingProposals = computed(() => proposals.value.filter((p) => p.status === 'PENDING'));
+
+/**
+ * ⚠️ **사용자가 닫은 것은 다시 안 띄운다** — 안 그러면 닫아도 계속 떠서
+ *    *"꺼지지 않는 창"* 이 된다. 같은 제안 id 를 기억한다.
+ * ⚠️ 그래도 **사라지지는 않는다** — 상단 `매매 제안 N` 배지가 남아 언제든 다시 열 수 있다.
+ */
+const dismissedTickets = ref(new Set());
+
+/**
+ * 🔴 **승인됐지만 아직 안 나간 주문** (2026-10-02 — 내가 지웠다가 자가 잡아 되살렸다).
+ *
+ * `OrderTicket` 주석이 *"승인 ≠ 전송. 실제 주문 전송은 **목록에서** 한 번 더 누른다"* 고
+ * 명시하는데, 제안 카드를 모달로 옮기면서 **그 목록을 통째로 지웠다.**
+ * 로직(`decide(p,'execute')`)은 남았는데 **부를 방법이 0개**였다 — 승인해도 주문을 못 낸다.
+ * ⚠️ `tests/liveModeUi.test.js` 가 잡았다. 안 잡혔으면 *"승인은 되는데 체결이 안 된다"* 를
+ *    사용자가 발견했을 것이다.
+ *
+ * ⇒ 모달은 **승인까지만**(되돌리기 어려운 문을 하나 더 만들지 않는다),
+ *   전송은 **항상 보이는 자리**에서 한 번 더. 승인 대기와 달리 이건 **지나가면 안 되는 것**이라
+ *   스크롤 밖 고정 영역에 둔다.
+ */
+const approvedProposals = computed(() => proposals.value.filter((p) => p.status === 'APPROVED'));
 function focusProposals() {
-  document.querySelector('.props')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const next = pendingProposals.value[0];
+  if (next) { dismissedTickets.value.delete(next.id); ticketFor.value = next; }
 }
+/**
+ * 🔴 **새 제안이 생기면 자동으로 연다** — HITL 은 사람이 **봐야** 성립한다.
+ *    폰 알림은 가지만 화면을 보고 있는 사람에겐 아무 일도 안 일어나던 자리다.
+ */
+watch(pendingProposals, (list) => {
+  if (ticketFor.value) return;                       // 이미 뭔가 열려 있으면 가로채지 않는다
+  const next = list.find((p) => !dismissedTickets.value.has(p.id));
+  if (next) ticketFor.value = next;
+}, { deep: false });
 
 const leveragePct = computed(() => Number(portfolio.value?.weights?.leveragePct));
 const leverageWord = computed(() => {
@@ -1684,6 +1729,31 @@ onUnmounted(() => {
             </div>
             <!-- 🔴 **언제·왜 돌았는지** 보여준다 — 자동 실행으로 바뀌었으니 안 그러면 언제 것인지 모른다 -->
           </template>
+
+          <!--
+            🔴 **승인됐지만 아직 안 나간 주문** — 스크롤에 묻히면 안 되는 것이다.
+               승인은 되돌릴 수 있지만 **전송은 되돌릴 수 없다** ⇒ 모달이 아니라
+               항상 보이는 자리에서 한 번 더 누른다(`OrderTicket` 주석의 "목록" 이 여기다).
+          -->
+          <div v-if="approvedProposals.length" class="sendq">
+            <h3 class="panel__h">승인됨 · 전송 대기 <small>{{ approvedProposals.length }}</small></h3>
+            <article v-for="p in approvedProposals" :key="p.id" class="sendq__row">
+              <span class="sendq__what">
+                <b :class="p.side === 'BUY' ? 'up' : 'down'">{{ p.side === 'BUY' ? '매수' : '매도' }}</b>
+                {{ p.symbol }} <span class="mono-num">{{ p.quantity }}</span>주
+                <span class="mono-num">{{ p.price }}</span>
+              </span>
+              <span class="sendq__act">
+                <button class="btn btn--xs" @click="decide(p, 'reject')">취소</button>
+                <!-- 🔴 버튼 이름은 **모드에서 유도**한다 — 박아 두면 모의/실거래가 같은 말을 한다 -->
+                <button
+                  class="btn btn--xs"
+                  :class="ordersMode === 'live' ? 'btn--danger' : 'btn--soft'"
+                  @click="decide(p, 'execute')"
+                >{{ ordersMode === 'live' ? '🔴 실주문 전송' : '실행(모의)' }}</button>
+              </span>
+            </article>
+          </div>
           <div ref="chatBox" class="chat__log" @scroll="onChatScroll">
             <!--
               🔴 **분석 결과는 대화의 첫 발언이다** — 따로 뜯어 둔 카드가 아니다.
@@ -1889,51 +1959,18 @@ onUnmounted(() => {
                  자연어로 부탁한 매수/매도가 **같은 흐름 안에서** 제안으로 나타나고 거기서 승인한다.
               ⚠️ 대화 로그 **안**에 둔다 — 로그가 스크롤되므로 새 제안이 생기면 자연스럽게 눈에 든다.
             -->
-            <div v-if="proposals.length" class="props">
-              <h3 class="panel__h">매매 제안 <small>승인해야 진행됩니다</small></h3>
-              <article v-for="p in proposals" :key="p.id" class="prop" :class="`prop--${p.side.toLowerCase()}`">
-                <header class="prop__head">
-                  <span class="prop__side">{{ p.conditional ? '예약 ' : '' }}{{ p.side === 'BUY' ? '매수' : '매도' }}</span>
-                  <span class="prop__sym">{{ p.symbol }}</span>
-                  <span class="prop__status">{{ statusLabel(p) }}</span>
-                </header>
-                <!-- 예약(조건부)은 즉시 주문과 다르게 그린다 — 승인해도 감시가 도달 전엔 체결되지 않는다 -->
-                <dl v-if="p.conditional" class="prop__grid">
-                  <div><dt>감시가</dt><dd class="mono-num">{{ p.conditional.triggerPrice }}</dd></div>
-                  <div><dt>{{ p.conditional.orderType === 'MARKET' ? '시장가' : '주문가' }}</dt><dd class="mono-num">{{ p.conditional.orderType === 'MARKET' ? '—' : p.conditional.orderPrice }}</dd></div>
-                  <div><dt>수량</dt><dd class="mono-num">{{ p.quantity }}</dd></div>
-                  <div><dt>예약 만료</dt><dd class="mono-num">{{ p.conditional.expireDate }}</dd></div>
-                </dl>
-                <dl v-else class="prop__grid">
-                  <div><dt>수량</dt><dd class="mono-num">{{ p.quantity }}</dd></div>
-                  <div><dt>지정가</dt><dd class="mono-num">{{ p.price }}</dd></div>
-                  <div><dt>평가금액</dt><dd class="mono-num">{{ (p.quantity * p.price).toLocaleString() }}</dd></div>
-                </dl>
-                <p class="prop__why">{{ p.reason }}</p>
-                <div v-if="p.status === 'PENDING'" class="prop__act">
-                  <button class="btn btn--sm" @click="decide(p, 'reject')">거절</button>
-                  <!--
-                    🔴 **검토가 기본 동선이다** (2026-10-02). 종전엔 근거 한 줄만 보고
-                       바로 승인해야 했다 — 잔고·장 운영시간·미체결·체결 후 비중을 모른 채.
-                    ⚠️ 바로 승인하는 길도 남긴다 — 익숙한 사용자의 길을 끊지 않는다.
-                  -->
-                  <button class="btn btn--sm btn--primary" @click="ticketFor = p">검토 후 승인</button>
-                  <button class="btn btn--sm btn--soft" @click="decide(p, 'approve')">바로 승인</button>
-                </div>
-                <div v-else-if="p.status === 'APPROVED'" class="prop__act">
-                  <!--
-                    🔴 **버튼 이름이 사실을 말한다.** 종전엔 `실행(모의)` 로 박혀 있어서
-                    스위치를 켜는 순간 이름이 거짓이 됐다. 서버가 주는 모드로 갈린다.
-                  -->
-                  <button
-                    class="btn btn--sm"
-                    :class="ordersMode === 'live' ? 'btn--danger' : 'btn--soft'"
-                    @click="decide(p, 'execute')"
-                  >{{ ordersMode === 'live' ? '🔴 실주문 전송' : '실행(모의)' }}</button>
-                </div>
-                <p v-else-if="p.result" class="prop__note">{{ p.result.note }}</p>
-              </article>
-            </div>
+            <!--
+              🔴 **매매 제안은 채팅이 아니라 모달로** (2026-10-02 사용자 지시).
+                 *"매도 제안, 매수 제안은 채팅이 아니라 모달로 제시하라고"*
+
+                 오늘 낮에 HITL 을 대화 로그 안으로 옮겼는데, 그러자 **거절된 제안까지
+                 계속 쌓여** 사용자가 *"뭐냐 이건?"* 이라고 했다. 실제로 화면의 3건이
+                 전부 `REJECTED` 였고 그중 하나는 **내가 아침에 만든 검증용 제안**이었다.
+
+              ⇒ 제안은 **승인 대기(PENDING)인 것만**, **모달**(`OrderTicket`)로 띄운다.
+                 결정을 요구하는 것은 흐름을 막아야 하고, 지난 것은 보일 이유가 없다.
+              ⚠️ 예약 주문은 **제안이 아니라 현황**이라 여기 남긴다(다른 층이다).
+            -->
 
 
             <!-- 거래소에 걸려 감시 중인 예약(조건부) 주문 — 제안과 다른 층이다 -->
@@ -1988,7 +2025,7 @@ onUnmounted(() => {
       v-if="ticketFor"
       :proposal="ticketFor"
       :fetch-precheck="fetchPrecheck"
-      @close="ticketFor = null"
+      @close="ticketClose"
       @approve="ticketApprove"
       @reject="ticketReject"
       @trim="ticketTrim"
@@ -2580,6 +2617,13 @@ onUnmounted(() => {
 }
 
 /* ── 통합 애널리스트 패널 머리 (2026-10-02) ───────────────────────── */
+.sendq { margin: var(--space-xs) var(--space-base) 0; padding: var(--space-sm);
+  border: 1px solid var(--color-warn); border-radius: var(--rounded-md); background: var(--color-warn-soft); }
+.sendq__row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm);
+  margin-top: var(--space-xs); font-size: var(--text-xs); }
+.sendq__what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sendq__act { display: flex; gap: var(--space-xs); flex-shrink: 0; }
+
 .chat__title { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; }
 .chat__badge {
   font-size: var(--text-2xs); font-weight: 700; letter-spacing: 0.1em;

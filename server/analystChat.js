@@ -765,6 +765,11 @@ const RECALL_MAX_DF_RATIO = Number(process.env.ANALYST_RECALL_MAX_DF_RATIO) || 0
  *   규칙이 진다. ★한 규칙을 조이는 대신 **다른 축으로 가른다.**
 /** 낱말 하나만 겹쳤을 때, 이 건수 이하로만 나오는 낱말이어야 "주제가 같다" 고 본다 */
 const RECALL_RARE_DF = Number(process.env.ANALYST_RECALL_RARE_DF) || 2;
+/**
+ * 한국어 **활용형 꼬리** — 이것으로 끝나는 토큰은 주제어가 아니다(동사·형용사의 어미).
+ * ⚠️ 명사가 우연히 이 꼬리를 갖는 경우(예: `고민`)를 피하려고 **2글자 이상 꼬리**만 쓴다.
+ */
+const INFLECTION_TAIL = /(으면|라면|하면|지만|니까|어서|아서|면서|거나|는데|은데|ㄴ데|볼까|을까|ㄹ까|같은데|겠다|네요|세요|나요|가요|어요|아요|해요|한다|된다|이다|있다|없다)$/;
 /** 이 건수 미만이면 "흔한 낱말" 판정 자체를 하지 않는다(표본이 없다) */
 const RECALL_MIN_CORPUS = Number(process.env.ANALYST_RECALL_MIN_CORPUS) || 10;
 
@@ -773,7 +778,20 @@ function recall(query, { limit = RECALL_LIMIT, history = null, excludeTurnId = n
   if (!terms.length) return [];
 
   const rows = (history || readHistory()).filter((r) => {
-    if (r.role !== 'user' && r.role !== 'assistant') return false;
+    /**
+     * 🔴 **내 과거 답변은 끌어오지 않는다** (2026-10-02 라이브 실사고로 추가).
+     *
+     * 사용자: *"QLD 100불 넘으면 또 하락할거같은데… RAM+QLD 상쇄분으로 더 현금만들고 기다려볼까"*
+     * → 답변은 **금리 인상 수혜주**를 찾고 *"관심 업종 있으신가요?"* 로 끝났다.
+     * 재현해 보니 **09-26 의 내 아이온큐 답변**이 `넘으면` **한 낱말**로 걸렸다(score 3.48).
+     *
+     * ★ 사용자의 과거 질문은 **의도**를 담지만, 내 과거 답변은 **그 의도에 대한 내 해석**이다.
+     *   해석을 다시 끌어오면 **빗나간 답이 다음 턴의 근거가 되는 되먹임**이 된다 —
+     *   09-24 의 아이온큐가 8일을 살아남은 것도 같은 구조다.
+     * ⚠️ 잃는 것: *"전에 뭐라고 했지"* 류 질문에서 내 답을 못 집어온다. 그건 **세션 창**
+     *    (`currentSession`)이 이미 담당한다 — 이어지는 대화는 그쪽으로 들어온다.
+     */
+    if (r.role !== 'user') return false;
     if (excludeTurnId && r.turnId === excludeTurnId) return false;        // ③
     if (String(r.text || '').startsWith(TOOL_RESULT_PREFIX)) return false; // ④
     return true;
@@ -818,7 +836,17 @@ function recall(query, { limit = RECALL_LIMIT, history = null, excludeTurnId = n
      * ★ 두 축이 **서로 다른 실패를 막는다**: 비율은 말버릇을, 개수는 "우연히 한 낱말 겹침" 을.
      *   하나만 두면 다른 쪽으로 샌다.
      */
-    const onlyOneCommonHit = hits.length === 1 && df.get(hits[0]) > RECALL_RARE_DF;
+    /**
+     * 🔴 **한국어 활용형이 "희귀 주제어" 로 오판된다** (2026-10-02).
+     *    형태소 분석이 없으니 `넘으면`·`기다려볼까`·`하락할거같은데` 가 df 1~2 로 잡혀
+     *    **희귀어 = 주제어** 예외를 타고 들어온다. 실제로 `넘으면` 하나로 엉뚱한 답변이 걸렸다.
+     * ⇒ 어미로 끝나는 토큰에는 **희귀어 예외를 주지 않는다**(일치가 그것뿐이면 거부).
+     * ⚠️ 금지목록이라 불완전하다 — 그러나 **방향이 안전**하다. 빠뜨리면 recall 이 한 번
+     *    덜 될 뿐이고, 잘못 넣으면 **엉뚱한 주제가 답을 덮는다.**
+     */
+    const onlyHit = hits.length === 1 ? hits[0] : null;
+    const inflected = onlyHit ? INFLECTION_TAIL.test(onlyHit) : false;
+    const onlyOneCommonHit = hits.length === 1 && (inflected || df.get(hits[0]) > RECALL_RARE_DF);
     if (score > 0 && !onlyOneCommonHit) {
       const r = rows[i];
       scored.push({ score: Number(score.toFixed(2)), at: r.at, turnId: r.turnId || null, role: r.role, hits, text: String(r.text || '').slice(0, 400) });
