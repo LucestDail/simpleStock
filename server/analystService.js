@@ -1839,6 +1839,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    * ⚠️ **한 번만** 다시 묻는다 — 무한히 되물으면 분석 한 번이 예산을 다 태운다.
    * ⚠️ 재요청이 더 나쁘게 나올 수도 있으므로 **판단이 더 많이 잡힌 쪽을** 쓴다(회귀 방지).
    */
+  /** stance 는 BUY/SELL 인데 제안이 없는 종목 — 폰 본문에 사실대로 적는다 */
+  let stanceGap = [];
   const heldSymbols = items.map((h) => String(h.symbol).toUpperCase());
   if (heldSymbols.length && report.positions.length < heldSymbols.length) {
     const missing = heldSymbols.filter(
@@ -2124,6 +2126,30 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
           : capacity.state === 'blocked' ? 'no_buying_capacity'
             : 'model_proposed_none';
 
+  /**
+   * 🔴 **판단과 제안이 끊겼다** (2026-10-02 실측).
+   *
+   * 같은 계좌·같은 국면에서 3회 돌리니 한 회차가 `stances ["SELL","SELL","SELL"]` 인데
+   * **`proposals` 는 0건**이었다. 모델이 *"팔아야 한다"* 고 결론 내리고도 수량·가격을
+   * 못 정해 배열을 비워 둔 것이다. 사용자 화면에는 **"매매 제안 0건"** 만 남고,
+   * *"모델이 지금은 아니라고 했다"* 와 **구분이 안 된다** — 침묵이 두 상태를 같게 만드는
+   * 그 자리다(이 저장소가 09-28 하루 전체를 쓴 축).
+   *
+   * ⚠️ **코드가 제안을 지어내지 않는다.** 수량·가격은 주문의 핵심이고, 모델이 못 정한 것을
+   *    코드가 채우면 그건 판단이 아니라 날조다. 대신 **사실을 말한다.**
+   */
+  {
+    const acted = new Set((report.proposals || []).map((p) => String(p.symbol || '').toUpperCase()));
+    const gap = (report.positions || [])
+      .filter((p) => !p._codeFilled && /^(BUY|SELL)$/.test(String(p.stance || '').toUpperCase()))
+      .map((p) => ({ symbol: String(p.symbol || '').toUpperCase(), stance: String(p.stance).toUpperCase() }))
+      .filter((p) => !acted.has(p.symbol));
+    if (gap.length) {
+      logWarn('analyst.stance_without_proposal', { items: gap, proposals: (report.proposals || []).length });
+      stanceGap = gap;
+    }
+  }
+
   logInfo('analyst.no_proposal_reason', {
     reason: noProposalReason,
     dryRun,
@@ -2355,6 +2381,14 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
      *    **여기(`lines`)** 에 넣는다 — 정제 모델이 "잡초" 로 쳐내면 안 되는 문장이다.
      */
     else lines.push('', `💤 매매 제안 0건 — ${describeNoProposal(noProposalReason, capacity, { proposed: proposedCount, rejected })}`);
+    /**
+     * 🔴 **"팔라고 해놓고 제안이 없다" 를 사용자에게 말한다** — 안 적으면 "제안 0건" 이
+     *    *"모델이 지금은 아니라고 했다"* 로 읽힌다. 그건 사실이 아니다.
+     */
+    if (stanceGap.length) {
+      lines.push('', `🔴 판단은 났는데 제안이 없습니다 — ${stanceGap.map((x) => `${x.symbol} ${x.stance}`).join(' · ')}`
+        + ' (모델이 수량·가격을 정하지 못했습니다. 직접 정하시거나 다시 분석을 돌려 주세요.)');
+    }
     /**
      * 🔴 **검색 품질 저하를 사용자가 보는 곳에도 코드로 적는다** (2026-09-28, pm1 지시).
      *    `web.degraded` 는 지금까지 **LLM 프롬프트에만**(1137행) 실렸다 — 모델이 그 귀띔을

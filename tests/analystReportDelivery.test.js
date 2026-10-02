@@ -142,3 +142,50 @@ test('오탐 축: 종목 판단이 0건이면 근거 절을 만들지 않는다'
     }];
   }
 });
+
+/**
+ * 🔴 **판단과 제안이 끊긴 것을 사용자에게 말한다** — 2026-10-02 실측
+ *
+ * 같은 계좌·같은 국면에서 3회 돌리니 한 회차가 `stances ["SELL","SELL","SELL"]` 인데
+ * **`proposals` 는 0건**이었다. 모델이 *"팔아야 한다"* 고 결론 내리고도 수량·가격을
+ * 못 정해 배열을 비워 둔 것이다.
+ * 화면에는 **"매매 제안 0건"** 만 남아서 *"모델이 지금은 아니라고 했다"* 와 **구분이 안 됐다.**
+ *
+ * ⚠️ 코드가 제안을 **지어내지 않는다** — 수량·가격은 주문의 핵심이고, 못 정한 것을
+ *    코드가 채우면 판단이 아니라 날조다. 사실만 말한다.
+ */
+test('🔴 stance 는 SELL 인데 제안이 없으면 폰에 그 사실을 적는다', async () => {
+  REPORT.positions = [
+    { symbol: 'QLD', stance: 'SELL', confidence: 'MEDIUM', rationale: '레버리지 축소', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' },
+    { symbol: 'RAM', stance: 'HOLD', confidence: 'LOW', rationale: '보유', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' },
+  ];
+  REPORT.proposals = [];
+  try {
+    const analyst = fresh();
+    await analyst.analyze(DASH(), { useWebSearch: false });
+    await new Promise((r) => setTimeout(r, 60));
+    const b = body();
+    assert.match(b, /판단은 났는데 제안이 없습니다/, `🔴 "제안 0건" 과 구분이 안 된다: ${b.slice(0, 300)}`);
+    assert.match(b, /QLD SELL/, '어느 종목이 그런지 안 적혔다');
+    assert.ok(!/RAM SELL/.test(b), 'HOLD 종목까지 끌어왔다(오탐)');
+  } finally { REPORT.proposals = []; }
+});
+
+test('오탐 축: 제안이 실제로 있으면 그 말을 하지 않는다', async () => {
+  REPORT.positions = [{ symbol: 'QLD', stance: 'SELL', confidence: 'MEDIUM', rationale: 'x', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' }];
+  REPORT.proposals = [{ symbol: 'QLD', side: 'SELL', quantity: 5, price: 96.5, reason: '축소' }];
+  try {
+    const analyst = fresh();
+    await analyst.analyze(DASH(), { useWebSearch: false });
+    await new Promise((r) => setTimeout(r, 60));
+    assert.ok(!/판단은 났는데 제안이 없습니다/.test(body()), '제안이 있는데 없다고 했다');
+  } finally { REPORT.proposals = []; }
+});
+
+test('오탐 축: 전부 HOLD 면 아무 말도 안 한다', async () => {
+  REPORT.positions = [{ symbol: 'QLD', stance: 'HOLD', confidence: 'LOW', rationale: 'x', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' }];
+  const analyst = fresh();
+  await analyst.analyze(DASH(), { useWebSearch: false });
+  await new Promise((r) => setTimeout(r, 60));
+  assert.ok(!/판단은 났는데/.test(body()), 'HOLD 뿐인데 경고가 났다');
+});

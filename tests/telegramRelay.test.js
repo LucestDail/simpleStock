@@ -66,7 +66,50 @@ test('🔴 내 채팅의 질문이 애널리스트로 릴레이되고 답이 돌
   assert.deepEqual(chatCalls, ['RAM 지금 어때?'], '🔴 chat 에 안 넘어갔다');
   const all = texts().join('\n');
   assert.match(all, /RAM은 -25\.7%입니다\./, `🔴 답이 안 돌아왔다: ${all}`);
-  assert.match(all, /확인한 것: get_portfolio/, '어떤 도구를 썼는지 안 보인다');
+  /**
+   * 🔴 **정상 회차에는 도구 목록을 안 보낸다** (2026-10-02 사용자 지적:
+   *    *"계속 지금 도구 목록 보여주고 난리났는데"*).
+   *    `get_portfolio` 는 **내부 식별자**라 사용자에게 뜻이 없고, 매 회차 붙으니
+   *    답을 읽는 데 방해만 된다(실측: 280자 답에 59자가 이 꼬리였다).
+   * ⚠️ 이 단언은 종전과 **반대**다 — 바뀐 이유를 여기 적어 둔다.
+   *    아래 "실패가 있으면 보인다" 와 **한 쌍**이어야 한다(취지는 그대로다).
+   */
+  assert.ok(!/확인한 것/.test(all), `🔴 정상 회차인데 도구 목록이 붙었다: ${all}`);
+});
+
+/**
+ * 🔴 **실패가 있으면 무엇을 봤는지 보여준다** — 어제 고친 *"텔레그램이 자기고발을 삼킨다"*
+ *    의 취지는 그대로다. 없앤 게 아니라 **조건을 바꿨다.**
+ */
+test('🔴 도구 실패가 있으면 도구 목록이 보인다 (취지 보존)', async () => {
+  const bot = fresh({
+    chatImpl: ({ emit }) => {
+      emit('tool_call', { name: 'get_portfolio' });
+      emit('tool_result', { name: 'web_search', ok: false, error: '쿼터 초과' });
+      emit('text_delta', { text: '검색 없이 답합니다.' });
+    },
+  });
+  await bot.handleUserMessage({ chat: { id: '999' }, text: 'RAM 어때?' });
+  const all = texts().join('\n');
+  assert.match(all, /확인한 것: get_portfolio/, '🔴 실패 회차인데 무엇을 봤는지 안 보인다');
+  assert.match(all, /web_search 실패/, '🔴 도구 실패를 삼켰다');
+});
+
+/**
+ * 🔴 **배선 축** — `stripLeadingMeta` 를 **실제로 통과시키는가**.
+ *    순수 함수 테스트만으로는 호출 한 줄을 지워도 전부 초록이다(변이 실측으로 확인했다).
+ */
+test('🔴 첫머리 메타 서술이 폰까지 가지 않는다 (배선)', async () => {
+  const bot = fresh({
+    chatImpl: ({ emit }) => {
+      emit('text_delta', { text: '(사용자의 질문 "RAM 어때?"에 대한 답을 준비 중입니다.)\n\n' });
+      emit('text_delta', { text: 'RAM은 -25.7% 손실 구간입니다. 손절선을 먼저 정하세요.' });
+    },
+  });
+  await bot.handleUserMessage({ chat: { id: '999' }, text: 'RAM 어때?' });
+  const all = texts().join('\n');
+  assert.ok(!/준비 중입니다/.test(all), `🔴 메타 서술이 폰으로 갔다: ${all}`);
+  assert.match(all, /RAM은 -25\.7% 손실 구간입니다/, '본문이 훼손됐다');
 });
 
 test('🔴 남의 채팅은 릴레이하지 않는다', async () => {

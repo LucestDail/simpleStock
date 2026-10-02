@@ -56,6 +56,28 @@ function status() {
   };
 }
 
+/**
+ * 🔴 **첫머리 메타 서술을 걷어낸다** (2026-10-02 실물).
+ *    `"(사용자의 질문 \"금리상승기에는 주식 뭘 사야하지?\"에 대한 답을 준비 중입니다.)"` 로
+ *    시작하는 답이 그대로 폰에 갔다. 모델이 **자기 사고 과정**을 답에 쓴 것이고,
+ *    `isStubAnswer`(미완)에도 `fake`(도구 호출 흉내)에도 안 걸린다 — 새 축이다.
+ *
+ * ⚠️ **첫 줄의 괄호 블록만** 본다. 본문 중간의 괄호는 정상적인 보충 설명이다
+ *    (예: "QLD(2배 레버리지)는…"). 넓게 잡으면 멀쩡한 답을 훼손한다.
+ * ⚠️ 괄호를 떼고 **남는 게 없으면 원문을 돌려준다** — 답을 통째로 지우는 것보다
+ *    메타 서술이 보이는 쪽이 낫다.
+ */
+function stripLeadingMeta(text) {
+  const t = String(text || '').trimStart();
+  const m = /^\((?:[^)]|\)(?!\s*$))*\)\s*/.exec(t);
+  if (!m) return text;
+  const head = m[0];
+  // 메타로 읽히는 표현이 있을 때만 — 괄호로 시작한다고 전부 메타는 아니다
+  if (!/준비 중|답변드리겠|답을 드리|생각해|정리하겠|분석 중|확인 중|사용자의 질문/.test(head)) return text;
+  const rest = t.slice(head.length).trimStart();
+  return rest.length >= 20 ? rest : text;
+}
+
 async function api(method, body) {
   const res = await fetch(`https://api.telegram.org/bot${TOKEN}/${method}`, {
     method: 'POST',
@@ -413,9 +435,25 @@ async function handleUserMessage(msg) {
       clearInterval(keepTyping);
     }
     if (!answer.trim()) answer = '(모델이 빈 답을 냈습니다 — 다시 물어봐 주세요)';
-    if (toolsUsed.length) answer += `\n\n🔧 확인한 것: ${[...new Set(toolsUsed)].join(' · ')}`;
+    /**
+     * 🔴 **성공한 도구 목록은 보내지 않는다** (2026-10-02 사용자 지적:
+     *    *"계속 지금 도구 목록 보여주고 난리났는데"*).
+     *
+     * 매 답변 끝에 `🔧 확인한 것: get_portfolio · get_candles · …` 가 붙고 있었다.
+     * `get_portfolio` 는 **내부 식별자**라 사용자에게 아무 뜻이 없고, 정상 회차마다
+     * 붙으니 **답을 읽는 데 방해만** 된다(실측: 280자 답에 59자가 이 꼬리였다).
+     *
+     * ⚠️ **없애는 게 아니라 조건을 바꾼다.** 어제 *"텔레그램이 자기고발을 삼킨다"* 를
+     *    고친 취지(실패를 숨기지 않는다)는 그대로다 — **실패가 하나라도 있을 때만** 보여준다.
+     *    그때는 "무엇을 보고 답했나" 가 판단에 필요하다. 전부 성공이면 그건 소음이다.
+     * ★ *"경고를 새로 만들면 빈도를 재라"*(09-30)의 같은 가족 — 매번 뜨는 것은 안 읽힌다.
+     */
+    if (toolsUsed.length && notices.length) {
+      answer += `\n\n🔧 확인한 것: ${[...new Set(toolsUsed)].join(' · ')}`;
+    }
     // 🔴 경고는 **답 뒤에** 붙인다 — 답을 가리지 않으면서 숨기지도 않는다
     if (notices.length) answer += `\n\n⚠️ ${[...new Set(notices)].join('\n⚠️ ')}`;
+    answer = stripLeadingMeta(answer);
     answer = toPlainText(answer);
     // 텔레그램 한 메시지 상한 4096 — 자르지 말고 나눠 보낸다(잘리면 근거 숫자가 사라진다)
     for (let i = 0; i < answer.length; i += 3800) {
@@ -493,6 +531,6 @@ function _resetForTest() {
   consecutiveErrors = 0;
 }
 
-module.exports = {
+module.exports = { stripLeadingMeta,
   handleUserMessage, // 릴레이 검증용
   clearProposalButtons, start, stop, status, isConfigured, sendProposal, handleCallback, pollOnce, _resetForTest };
