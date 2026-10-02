@@ -165,6 +165,24 @@ async function build({
     parts: Object.fromEntries(parts.map((p) => [p.name, p.ok ? { ok: true } : { ok: false, error: p.error, kind: p.kind }])),
     failedCount: failed.length,
     portfolio: holdings.ok ? holdings.data : null,
+    /**
+     * 🔴 **비중을 화면에도 준다** (2026-10-02 와이어프레임 대조).
+     *    `portfolioWeights` 는 브리핑 프롬프트에만 실리고 **화면엔 한 줄도 안 갔다** —
+     *    레버리지 합계 **90.7%** 같은 사실을 사용자가 볼 방법이 없었다.
+     *    와이어프레임의 "자산 비중 바 + 레버리지 노출 [높음]" 이 정확히 이 데이터다.
+     * ⚠️ 계산은 **한 함수**(analystService.portfolioWeights)를 쓴다 — 두 벌이면 화면과
+     *    브리핑이 다른 숫자를 보여준다(이 저장소가 반복해 밟은 자리).
+     * ⚠️ 못 구하면 `null` 이다 — 0% 로 채우면 "레버리지 없음" 으로 읽힌다.
+     */
+    weights: (() => {
+      if (!holdings.ok) return null;
+      try {
+        return require('./analystService').portfolioWeights(
+          holdings.data?.items || [], holdings.data?.summary || null,
+          require('./regimeService').readCatalog()
+        );
+      } catch { return null; }
+    })(),
     momentum,
     momentumPct,
     stockInfo: info.ok ? info.data : {},

@@ -769,6 +769,24 @@ const portfolio = ref(null);
 const portfolioError = ref('');
 const portfolioLoading = ref(false);
 
+/**
+ * 🔴 **레버리지 노출 등급** (2026-10-02). 숫자만 주면 사용자가 "90.7% 가 높은 건가" 를
+ *    매번 판단해야 한다. 와이어프레임이 `[%] 높음` 으로 **등급까지** 보여주는 이유다.
+ * ⚠️ 경계는 국면 매뉴얼(`leverage_concentration`: leveragePct >= 50)과 **같은 수**로 맞춘다 —
+ *    화면이 "보통" 이라는데 브리핑이 "쏠림" 이라고 하면 둘 중 하나를 안 믿게 된다.
+ */
+const leveragePct = computed(() => Number(portfolio.value?.weights?.leveragePct));
+const leverageWord = computed(() => {
+  const p = leveragePct.value;
+  if (!Number.isFinite(p)) return '';
+  return p >= 50 ? '높음' : p >= 25 ? '보통' : '낮음';
+});
+const leverageTone = computed(() => {
+  const p = leveragePct.value;
+  if (!Number.isFinite(p)) return '';
+  return p >= 50 ? 'alloc__flag--danger' : p >= 25 ? 'alloc__flag--warn' : 'alloc__flag--ok';
+});
+
 /** 내 실제 보유 — 토스에서 **매번 읽는다**(저장하지 않는다) */
 async function loadPortfolio() {
   portfolioLoading.value = true;
@@ -1063,6 +1081,48 @@ onUnmounted(() => {
               <span class="kpi__value mono-num" :class="signClass(portfolio.summary.dailyProfit.krw ?? portfolio.summary.dailyProfit.usd)">
                 {{ krwCell(portfolio.summary.dailyProfit) }}
                 <small>{{ pct(portfolio.summary.dailyRate) }}</small>
+              </span>
+            </div>
+          </div>
+
+          <!--
+            🔴 **자산 비중 + 레버리지 노출** (2026-10-02 와이어프레임 대조)
+            백엔드는 레버리지 합계 **90.7%** 를 이미 계산해 브리핑 프롬프트에 싣고 있었는데
+            **화면엔 한 줄도 안 갔다.** 사용자가 자기 쏠림을 볼 방법이 없었다.
+            ⚠️ `weights` 가 없으면 **절을 통째로 안 그린다** — 0% 로 그리면 "레버리지 없음" 으로 읽힌다.
+          -->
+          <div v-if="portfolio.weights" class="alloc">
+            <div class="alloc__bar">
+              <span
+                v-for="h in portfolio.weights.holdings" :key="h.symbol"
+                class="alloc__seg" :class="{ 'alloc__seg--lev': h.leverage > 1 }"
+                :style="{ width: h.pct + '%' }"
+                :title="`${h.symbol} ${h.pct}%${h.leverage > 1 ? ` (${h.leverage}배)` : ''}`"
+              ></span>
+              <span
+                class="alloc__seg alloc__seg--cash"
+                :style="{ width: portfolio.weights.cashPct + '%' }"
+                :title="`현금 ${portfolio.weights.cashPct}%`"
+              ></span>
+            </div>
+            <div class="alloc__legend">
+              <span v-for="h in portfolio.weights.holdings" :key="h.symbol" class="alloc__item">
+                <i class="alloc__dot" :class="{ 'alloc__dot--lev': h.leverage > 1 }"></i>
+                {{ h.symbol }}<em v-if="h.leverage > 1">{{ h.leverage }}x</em>
+                <b class="mono-num">{{ h.pct }}%</b>
+              </span>
+              <span class="alloc__item">
+                <i class="alloc__dot alloc__dot--cash"></i>현금 <b class="mono-num">{{ portfolio.weights.cashPct }}%</b>
+              </span>
+            </div>
+            <div class="alloc__flags">
+              <span class="alloc__flag" :class="leverageTone">
+                레버리지 노출 <b class="mono-num">{{ portfolio.weights.leveragePct }}%</b>
+                <small>{{ leverageWord }}</small>
+              </span>
+              <!-- ⚠️ 분모가 틀렸을 수 있다는 사실을 **숨기지 않는다** -->
+              <span v-if="portfolio.weights.krwCashUnconverted > 0" class="alloc__flag alloc__flag--warn">
+                ⚠️ 환율 미확인 — 원화 현금이 비중 분모에서 빠졌습니다
               </span>
             </div>
           </div>
@@ -2048,6 +2108,34 @@ onUnmounted(() => {
 .up { color: var(--color-up); }
 .down { color: var(--color-down); }
 .flat { color: var(--color-body); }
+
+/* ── 자산 비중 + 레버리지 노출 (2026-10-02 와이어프레임) ─────────────── */
+.alloc { display: flex; flex-direction: column; gap: var(--space-xs); margin-top: var(--space-sm); }
+.alloc__bar {
+  display: flex; height: 10px; border-radius: 999px; overflow: hidden;
+  background: var(--color-surface-2, rgba(255,255,255,.06));
+}
+.alloc__seg { height: 100%; background: var(--color-accent, #4c8dff); }
+/* 🔴 레버리지 구간은 **눈에 띄게** — 사용자가 쏠림을 한눈에 봐야 한다 */
+.alloc__seg--lev { background: repeating-linear-gradient(45deg, #e0603a, #e0603a 4px, #b8482a 4px, #b8482a 8px); }
+.alloc__seg--cash { background: var(--color-muted, #8b93a7); opacity: .45; }
+.alloc__legend { display: flex; flex-wrap: wrap; gap: var(--space-sm); font-size: var(--text-xs); color: var(--color-muted); }
+.alloc__item { display: inline-flex; align-items: center; gap: 4px; }
+.alloc__item b { color: var(--color-text); }
+.alloc__item em { font-style: normal; font-size: 10px; opacity: .8; }
+.alloc__dot { width: 8px; height: 8px; border-radius: 2px; background: var(--color-accent, #4c8dff); display: inline-block; }
+.alloc__dot--lev { background: #e0603a; }
+.alloc__dot--cash { background: var(--color-muted, #8b93a7); opacity: .45; }
+.alloc__flags { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+.alloc__flag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px; border-radius: 999px; font-size: var(--text-xs);
+  border: 1px solid var(--color-border, rgba(255,255,255,.12));
+}
+.alloc__flag small { opacity: .85; }
+.alloc__flag--ok { border-color: rgba(70,180,120,.45); color: #5fc48f; }
+.alloc__flag--warn { border-color: rgba(230,170,60,.5); color: #e0ad48; }
+.alloc__flag--danger { border-color: rgba(224,96,58,.6); color: #ef7a55; background: rgba(224,96,58,.08); }
 
 .momentum { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
 .momentum__label { font-size: var(--text-xs); color: var(--color-muted); }

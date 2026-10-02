@@ -149,8 +149,23 @@ app.get('/api/portfolio', async (req, res) => {
     const data = await tossPortfolio.getHoldings({
       fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || mkt?.provider || null } : null,
     });
+    /**
+     * 🔴 **비중을 화면에도 준다** (2026-10-02 와이어프레임 대조).
+     *    `portfolioWeights` 는 브리핑 프롬프트에만 실리고 **화면엔 한 줄도 안 갔다** —
+     *    레버리지 합계 **90.7%** 를 사용자가 볼 방법이 없었다. 와이어프레임의
+     *    "자산 비중 바 + 레버리지 노출 [높음]" 이 정확히 이 데이터다.
+     * ⚠️ 계산은 **한 함수**를 쓴다 — 두 벌이면 화면과 브리핑이 다른 숫자를 보여준다.
+     * ⚠️ 못 구하면 `null`(0% 로 채우면 "레버리지 없음" 으로 읽힌다).
+     */
+    let weights = null;
+    try {
+      weights = require('./server/analystService').portfolioWeights(
+        data.items || [], data.summary || null, require('./server/regimeService').readCatalog()
+      );
+    } catch (e) { logWarn('portfolio.weights_failed', { message: e.message }); }
     return res.json({
       ...data,
+      weights,
       momentum: tossPortfolio.pickMomentum(data.items, Number(req.query.momentum) || 3),
     });
   } catch (error) {
@@ -654,9 +669,24 @@ app.post('/api/orders/proposals/:id/execute', async (req, res) => {
 app.get('/api/regime', (req, res) => {
   const regime = require('./server/regimeService');
   const state = regime.getState();
+  /**
+   * 🔴 **매크로 축을 화면이 읽을 수 있게 한국어 라벨로도 준다** (2026-10-02).
+   *    `state.macro` 는 영문 키(rising/stress/narrow…)라 화면이 또 번역표를 들어야 하고,
+   *    그러면 **라벨이 두 벌**이 된다(프롬프트 한 벌 + 화면 한 벌). 한 벌로 보낸다.
+   */
+  const KO = regime.MACRO_KO || {};
+  const m = state?.macro || null;
+  const macroLabels = m ? [
+    m.rates && `${KO.rates?.[m.rates] || m.rates}${m.rateShape ? `(${KO.rateShape?.[m.rateShape] || m.rateShape})` : ''}`,
+    m.credit && (KO.credit?.[m.credit] || m.credit),
+    m.dollar && (KO.dollar?.[m.dollar] || m.dollar),
+    m.breadth && `시장폭 ${KO.breadth?.[m.breadth] || m.breadth}`,
+    m.realRate && (KO.realRate?.[m.realRate] || m.realRate),
+  ].filter(Boolean) : [];
   return res.json({
     state,
-    scenarios: state ? regime.matchScenarios(state, regime.readPlaybook()).map((s) => ({ id: s.id, name: s.name })) : [],
+    macroLabels,
+    scenarios: state ? regime.matchScenarios(state, regime.readPlaybook()).map((s) => ({ id: s.id, name: s.name, priority: s.priority ?? 50, via: s.via || null })) : [],
   });
 });
 
