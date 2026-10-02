@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import PriceChart from '../components/PriceChart.vue';
 import SettingsPanel from '../components/SettingsPanel.vue';
+import OrderTicket from '../components/OrderTicket.vue';
 import { useWatchlist } from '../composables/useWatchlist';
 import { useUi } from '../composables/useUi';
 import { formatMarketClock } from '../lib/marketClock';
@@ -34,6 +35,8 @@ const refreshing = ref(false);
 
 
 let clockTimer = null;
+/** 🔴 `n초 전` 이 멈춰 있으면 그것도 거짓이다 — 1초마다 올린다 */
+let freshTimer = null;
 let regimeTimer = null;
 let pollTimer = null;
 let es = null;
@@ -174,6 +177,44 @@ async function onRefreshMarket() {
  */
 const report = ref(null);
 const proposals = ref([]);
+
+/**
+ * 🔴 **주문 티켓** (2026-10-02 — 와이어프레임 ⑨). 종전에는 제안 카드에 수량·지정가만 있고
+ *    **무엇을 근거로 승인하는지**가 화면에 없었다 — 잔고·장 운영시간·미체결·체결 후 비중이
+ *    전부 보이지 않았다.
+ * ⚠️ 새 집행 경로를 만들지 않는다 — 모달의 주 버튼은 기존과 **같은 `approve`** 다.
+ */
+const ticketFor = ref(null);
+async function fetchPrecheck(id) {
+  const res = await apiFetch(`/api/orders/proposals/${encodeURIComponent(id)}/precheck`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `사전 점검 실패 (${res.status})`);
+  return body;
+}
+async function ticketApprove(p) { ticketFor.value = null; await decide(p, 'approve'); }
+async function ticketReject(p) { ticketFor.value = null; await decide(p, 'reject'); }
+/** 수량을 깎아 **새 제안으로** 만든다 — 기존 제안을 말없이 고치지 않는다(감사가 끊긴다) */
+async function ticketTrim({ proposal, quantity }) {
+  ticketFor.value = null;
+  try {
+    const res = await apiFetch('/api/orders/proposals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        symbol: proposal.symbol, side: proposal.side, type: 'LIMIT',
+        quantity, price: proposal.price,
+        reason: `${proposal.reason || ''} (사전 점검에서 ${proposal.quantity}→${quantity}주로 축소)`.trim(),
+        source: 'manual', notify: false,
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || '축소 제안을 만들지 못했습니다.');
+    notify({ message: `${quantity}주로 줄인 제안을 만들었습니다.`, tone: 'success' });
+    await loadProposals();
+  } catch (e) {
+    notify({ message: e.message || '축소 제안 실패', tone: 'error' });
+  }
+}
 /** 'live' | 'dry-run' — 서버가 말하는 **실제** 모드. 화면이 지어내지 않는다 */
 const ordersMode = ref('dry-run');
 const analystLoading = ref(false);
@@ -775,6 +816,52 @@ const portfolioLoading = ref(false);
  * ⚠️ 경계는 국면 매뉴얼(`leverage_concentration`: leveragePct >= 50)과 **같은 수**로 맞춘다 —
  *    화면이 "보통" 이라는데 브리핑이 "쏠림" 이라고 하면 둘 중 하나를 안 믿게 된다.
  */
+/**
+ * 🔴 **모듈 상태 규칙** (2026-10-02 — 와이어프레임 "모듈 상태 규칙" 표)
+ * ```
+ * 정상  마지막 동기화 < 갱신주기 × 2   "n초 전" 회색
+ * 지연  갱신주기 × 2 초과              주황 칩 "지연 · 마지막 hh:mm" + 값 유지
+ * 로딩  최초 로드                      ⚠️ "불러오는 중…" **고착 금지** · 10s 타임아웃 → 오류
+ * ```
+ * 종전엔 동기화 시각이 **화면에 아예 없었다** — 테이블 수량과 대화 수량이 어긋나도
+ * (실측: 테이블 RAM 300주 vs 대화 400주) **언제 읽은 값인지** 알 방법이 없었다.
+ */
+const PORTFOLIO_PERIOD_MS = 30_000;
+const nowTick = ref(Date.now());
+const portfolioAgeSec = computed(() => {
+  const at = Date.parse(portfolio.value?.asOf || '');
+  if (!Number.isFinite(at)) return null;
+  return Math.max(0, Math.round((nowTick.value - at) / 1000));
+});
+const portfolioFreshness = computed(() => {
+  if (portfolioError.value) return 'error';
+  if (portfolioLoading.value && !portfolio.value) return 'loading';
+  const age = portfolioAgeSec.value;
+  if (age == null) return 'unknown';
+  return age * 1000 > PORTFOLIO_PERIOD_MS * 2 ? 'stale' : 'fresh';
+});
+const portfolioFreshLabel = computed(() => {
+  const age = portfolioAgeSec.value;
+  switch (portfolioFreshness.value) {
+    case 'loading': return '불러오는 중…';
+    case 'error': return '동기화 실패';
+    case 'unknown': return '동기화 시각 모름';
+    case 'stale': return `지연 · ${age}초 전`;
+    default: return `${age}초 전`;
+  }
+});
+
+/** 🔴 **단일 종목 최대 비중** — 레버리지와 다른 축의 쏠림이다(와이어프레임 "리스크 칩") */
+const topWeight = computed(() => {
+  const h = portfolio.value?.weights?.holdings;
+  return Array.isArray(h) && h.length ? h[0] : null;
+});
+const topWeightTone = computed(() => {
+  const p = Number(topWeight.value?.pct);
+  if (!Number.isFinite(p)) return '';
+  return p >= 50 ? 'alloc__flag--danger' : p >= 35 ? 'alloc__flag--warn' : 'alloc__flag--ok';
+});
+
 const leveragePct = computed(() => Number(portfolio.value?.weights?.leveragePct));
 const leverageWord = computed(() => {
   const p = leveragePct.value;
@@ -790,8 +877,15 @@ const leverageTone = computed(() => {
 /** 내 실제 보유 — 토스에서 **매번 읽는다**(저장하지 않는다) */
 async function loadPortfolio() {
   portfolioLoading.value = true;
+  /**
+   * 🔴 **10초 타임아웃** (2026-10-02 — 와이어프레임 상태 규칙: *"스켈레톤 … 고착 금지,
+   *    10s 타임아웃 → 오류"*). 종전엔 응답이 안 오면 `불러오는 중…` 이 **영원히** 남았고,
+   *    사용자는 그걸 **정상 대기**로 읽었다. 침묵이 고장을 정상처럼 보이게 하는 그 자리다.
+   */
+  const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = setTimeout(() => ctl?.abort(), 10_000);
   try {
-    const res = await apiFetch('/api/portfolio');
+    const res = await apiFetch('/api/portfolio', ctl ? { signal: ctl.signal } : undefined);
     if (res.ok) {
       portfolio.value = await res.json();
       // 🔴 진입 시 첫 보유 종목을 고른다(사용자 지시). 이미 고른 게 있으면 안 덮는다
@@ -805,8 +899,11 @@ async function loadPortfolio() {
     portfolioError.value = body.error || `보유 현황을 불러오지 못했습니다 (${res.status})`;
   } catch (e) {
     portfolio.value = null;
-    portfolioError.value = e.message || '보유 현황을 불러오지 못했습니다.';
+    portfolioError.value = e.name === 'AbortError'
+      ? '보유 현황이 10초 안에 오지 않았습니다 — 다시 시도해 주세요.'
+      : (e.message || '보유 현황을 불러오지 못했습니다.');
   } finally {
+    clearTimeout(timer);
     portfolioLoading.value = false;
   }
 }
@@ -922,6 +1019,7 @@ onMounted(async () => {
   regimeTimer = setInterval(loadRegime, 5 * 60 * 1000);
   restartDashTimer();
   clockTimer = setInterval(() => {
+  freshTimer = setInterval(() => { nowTick.value = Date.now(); }, 1000);
     clock.value = formatMarketClock();
   }, 1000);
   pollTimer = setInterval(() => {
@@ -936,6 +1034,7 @@ onUnmounted(() => {
   if (regimeTimer) clearInterval(regimeTimer);
   if (activityTimer) clearInterval(activityTimer);
   if (clockTimer) clearInterval(clockTimer);
+  if (freshTimer) clearInterval(freshTimer);
   if (pollTimer) clearInterval(pollTimer);
   if (dashTimer) clearInterval(dashTimer);
   if (es) es.close();
@@ -1043,8 +1142,15 @@ onUnmounted(() => {
             <h2>내 자산</h2>
             <span v-if="portfolio?.items?.length" class="group__count mono-num">{{ portfolio.items.length }}</span>
           </div>
-          <span v-if="portfolioLoading" class="assets__note">불러오는 중…</span>
-          <span v-else-if="portfolio?.summary?.fx" class="assets__note">
+          <!--
+            🔴 **동기화 상태를 항상 보여준다** (와이어프레임 ① "토스 동기화 · n초 전").
+               종전엔 시각이 **화면에 아예 없어서**, 테이블 수량과 대화 수량이 어긋나도
+               (실측: RAM 300주 vs 400주) 언제 읽은 값인지 알 방법이 없었다.
+          -->
+          <span class="assets__sync" :class="`assets__sync--${portfolioFreshness}`">
+            TOSS 동기화 · {{ portfolioFreshLabel }}
+          </span>
+          <span v-if="portfolio?.summary?.fx" class="assets__note">
             ≈ USD/KRW {{ Number(portfolio.summary.fx.rate).toLocaleString('ko-KR') }} 환산
           </span>
         </header>
@@ -1119,6 +1225,13 @@ onUnmounted(() => {
               <span class="alloc__flag" :class="leverageTone">
                 레버리지 노출 <b class="mono-num">{{ portfolio.weights.leveragePct }}%</b>
                 <small>{{ leverageWord }}</small>
+              </span>
+              <!-- 🔴 레버리지와 **다른 축**의 쏠림 — 1배만 들고도 한 종목에 몰릴 수 있다 -->
+              <span v-if="topWeight" class="alloc__flag" :class="topWeightTone">
+                단일 최대 <b class="mono-num">{{ topWeight.symbol }} {{ topWeight.pct }}%</b>
+              </span>
+              <span class="alloc__flag" :class="portfolio.weights.cashPct < 5 ? 'alloc__flag--warn' : 'alloc__flag--ok'">
+                현금 <b class="mono-num">{{ portfolio.weights.cashPct }}%</b>
               </span>
               <!-- ⚠️ 분모가 틀렸을 수 있다는 사실을 **숨기지 않는다** -->
               <span v-if="portfolio.weights.krwCashUnconverted > 0" class="alloc__flag alloc__flag--warn">
@@ -1308,7 +1421,13 @@ onUnmounted(() => {
                 <p class="prop__why">{{ p.reason }}</p>
                 <div v-if="p.status === 'PENDING'" class="prop__act">
                   <button class="btn btn--sm" @click="decide(p, 'reject')">거절</button>
-                  <button class="btn btn--sm btn--primary" @click="decide(p, 'approve')">승인</button>
+                  <!--
+                    🔴 **검토가 기본 동선이다** (2026-10-02). 종전엔 근거 한 줄만 보고
+                       바로 승인해야 했다 — 잔고·장 운영시간·미체결·체결 후 비중을 모른 채.
+                    ⚠️ 바로 승인하는 길도 남긴다 — 익숙한 사용자의 길을 끊지 않는다.
+                  -->
+                  <button class="btn btn--sm btn--primary" @click="ticketFor = p">검토 후 승인</button>
+                  <button class="btn btn--sm btn--soft" @click="decide(p, 'approve')">바로 승인</button>
                 </div>
                 <div v-else-if="p.status === 'APPROVED'" class="prop__act">
                   <!--
@@ -1672,6 +1791,17 @@ onUnmounted(() => {
 
     <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" @saved="loadDashboard(); restartDashTimer()" />
   </div>
+
+    <!-- 🔴 주문 티켓 · 사전 점검 (와이어프레임 ⑨) -->
+    <OrderTicket
+      v-if="ticketFor"
+      :proposal="ticketFor"
+      :fetch-precheck="fetchPrecheck"
+      @close="ticketFor = null"
+      @approve="ticketApprove"
+      @reject="ticketReject"
+      @trim="ticketTrim"
+    />
 </template>
 
 <style scoped>
@@ -2136,6 +2266,11 @@ onUnmounted(() => {
 .alloc__flag--ok { border-color: rgba(70,180,120,.45); color: #5fc48f; }
 .alloc__flag--warn { border-color: rgba(230,170,60,.5); color: #e0ad48; }
 .alloc__flag--danger { border-color: rgba(224,96,58,.6); color: #ef7a55; background: rgba(224,96,58,.08); }
+/* 동기화 상태 칩 — 와이어프레임 "모듈 상태 규칙" */
+.assets__sync { font-size: var(--text-xs); color: var(--color-muted); }
+.assets__sync--stale { color: #e0ad48; }
+.assets__sync--error { color: #ef7a55; }
+.assets__sync--loading { opacity: .7; }
 
 .momentum { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
 .momentum__label { font-size: var(--text-xs); color: var(--color-muted); }

@@ -650,6 +650,30 @@ app.post('/api/orders/proposals', async (req, res) => {
   return res.status(r.ok ? 201 : 400).json(r);
 });
 
+/**
+ * 🔴 **주문 사전 점검** (2026-10-02 — 와이어프레임 ⑨ "제안 → 승인 → 토스 주문 플로우").
+ *
+ * 종전 화면에는 **제안 → 실제 주문 경로가 없었다.** 사람이 승인 버튼을 누를 때
+ * *무엇을 근거로* 누르는지가 화면에 없었다 — 잔고·장 운영시간·미체결·체결 후 비중이
+ * 전부 보이지 않았다.
+ * ⚠️ 이 엔드포인트는 **읽기 전용**이다. 아무것도 집행하지 않는다.
+ */
+app.get('/api/orders/proposals/:id/precheck', async (req, res) => {
+  const p = orderService.list().find((x) => x.id === req.params.id);
+  if (!p) return res.status(404).json({ ok: false, error: '제안을 찾을 수 없습니다.' });
+  try {
+    const r = await require('./server/orderPrecheck').precheck(p, {
+      // ⚠️ 미체결 조회는 **있으면** 쓴다 — 없으면 precheck 가 `unknown` 으로 정직하게 적는다
+      getOpenOrders: typeof tossClient?.getOpenOrders === 'function'
+        ? (sym) => tossClient.getOpenOrders(sym) : null,
+    });
+    return res.json({ ok: true, ...r });
+  } catch (e) {
+    logError('orders.precheck_failed', e, { id: req.params.id });
+    return res.status(502).json({ ok: false, error: e.message || '사전 점검에 실패했습니다.' });
+  }
+});
+
 app.post('/api/orders/proposals/:id/approve', (req, res) => {
   const r = orderService.approve(req.params.id);
   return res.status(r.ok ? 200 : 400).json(r);
