@@ -218,3 +218,28 @@ test('🔴 재요청 로그가 **채택 여부**를 말한다 — `after:0` 이 
   // 채택 판정과 로그가 **같은 값**을 봐야 한다(따로 계산하면 갈라진다)
   assert.match(src, /if \(keptCount && improved\)/, '판정이 로그와 다른 식을 쓴다');
 });
+
+test('🔴 비교식 안의 숫자는 기간이다 — `정배열(종가>20>60)` 오탐 재발 방지', () => {
+  const REF = { RAM: { last: 14.73 }, QLD: { last: 97.49 } };
+  // 라이브에서 실제로 걸렸던 문장(ratio 4.07) — 이동평균 기간이지 가격이 아니다
+  assert.deepStrictEqual(
+    P.findPriceOutliers([{ symbol: 'RAM', rationale: '정배열(종가>20>60)로 추세 자체는 살아있으나' }], REF), []);
+  assert.deepStrictEqual(
+    P.findPriceOutliers([{ symbol: 'RAM', rationale: '역배열(종가<20<60) 상태' }], REF), []);
+  // 진짜 이탈은 그대로 잡는다
+  assert.deepStrictEqual(
+    P.findPriceOutliers([
+      { symbol: 'QLD', scenarioUp: '20일선(약 806) 회복' },
+      { symbol: 'RAM', scenarioDown: '90.97 까지 반등 여지' },
+    ], REF).map((h) => `${h.symbol}:${h.raw}`), ['QLD:806', 'RAM:90.97']);
+});
+
+test('🔴 두 배열의 역할이 **지시문과 스키마 둘 다**에 적혀 있다', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const raw = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
+  // ⚠️ 여기서는 주석을 지우지 않는다 — **프롬프트 문자열 자체**를 보는 자다
+  assert.match(raw, /## holdings \(보유 종목 판단\)/, '지시문이 holdings 를 설명하지 않는다');
+  assert.match(raw, /## positions \(매수 후보 판단\)/, '지시문이 positions 를 설명하지 않는다');
+  assert.match(raw, /description: '매수 후보/, '스키마가 positions 를 설명하지 않는다');
+  // 🔴 설명이 없으면 모델이 한쪽을 통째로 비운다(3회 연속 후보 0건으로 실측됐다)
+});

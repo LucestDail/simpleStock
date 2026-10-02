@@ -47,6 +47,17 @@ function priceNumbers(text) {
     if (!Number.isFinite(n)) continue;
     const after = s.slice(m.index + raw.length);
     if (UNIT_AFTER.test(after)) continue;          // 단위가 붙었다 = 가격 아님
+    /**
+     * 🔴 **비교식 안의 숫자는 기간이다** (2026-10-02 — 같은 자의 **두 번째** 오탐).
+     *    `정배열(종가>20>60)` 의 `60` 이 RAM(14.73)의 4.07배로 걸렸다. 이동평균 **기간**인데
+     *    뒤에 `)` 가 와서 `UNIT_AFTER` 를 비껴갔다.
+     * ⇒ 숫자 **바로 앞이 부등호**(`20>60` 의 60)거나 **바로 뒤가 부등호**(`종가>20>` 의 20)면
+     *    가격이 아니라 **비교 대상**이다.
+     * ★ 이 가드의 처방은 **문장 교체**라 오탐 하나하나가 멀쩡한 설명을 지운다 —
+     *   그래서 계속 **좁히는 쪽**으로 기운다.
+     */
+    const before = s.slice(Math.max(0, m.index - 1), m.index);
+    if (/[><≥≤]/.test(before) || /^\s*[><≥≤]/.test(after)) continue;
     if (Number.isInteger(n) && n >= 1900 && n <= 2100) continue; // 연도
     if (Math.abs(n) < 1) continue;                  // 비율·확률
     out.push({ raw, n, index: m.index });
