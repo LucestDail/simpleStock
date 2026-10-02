@@ -75,6 +75,37 @@ function refHint(text, index) {
   return null;
 }
 
+/**
+ * 🔴 **가격 자리에 0 을 쓰는 것** (2026-10-02 사용자 지적: *"o 는 진입 0.00, 손절 0.00,
+ *    목표 0.00 이거 대체 뭐하는 짓이야"*).
+ *
+ * `priceNumbers` 는 `< 1` 을 **일부러 거른다**(비율·확률이 대부분이라). 그래서
+ * `진입 0.00` 은 가격 이탈 검사에 **원리상 안 걸린다** — 또 "자가 안 보는 축" 이다.
+ * ⇒ **가격을 가리키는 낱말 바로 뒤의 0** 만 좁게 잡는다. 그건 비율이 아니라
+ *   **값을 못 정했다는 뜻**이고, 사용자에게는 의미 없는 숫자가 보인다.
+ * ⚠️ `수익률 0.00%`·`변동 0.00` 같은 **정당한 0** 은 건드리지 않는다 —
+ *    앞 낱말이 가격 표지일 때만 본다.
+ */
+const PRICE_LABEL_ZERO = /(진입|손절|목표|매수가|매도가|지정가|entry|stop|target)\s*(가|가격|price)?\s*[:：=(]?\s*0+(\.0+)?(?![.\d])/gi;
+
+/** 산문에서 **값을 못 정한 가격 자리**를 찾는다 */
+function findZeroLevels(positions = []) {
+  const hits = [];
+  for (const p of positions || []) {
+    if (p?._codeFilled) continue;
+    const sym = String(p?.symbol || '').toUpperCase();
+    for (const f of FIELDS) {
+      const text = String(p?.[f] || '');
+      if (!text) continue;
+      for (const m of text.matchAll(PRICE_LABEL_ZERO)) {
+        hits.push({ symbol: sym, field: f, raw: m[0].trim(),
+          context: text.slice(Math.max(0, m.index - 14), m.index + m[0].length + 12) });
+      }
+    }
+  }
+  return hits;
+}
+
 /** 검사 대상 필드 — 모델이 쓴 산문만 본다(코드가 채운 자리는 제외) */
 const FIELDS = ['scenarioUp', 'scenarioDown', 'rationale', 'risk'];
 
@@ -225,6 +256,6 @@ function driftNote(hits) {
 
 module.exports = {
   priceNumbers, findPriceOutliers, unverifiable, retryNote, replaceWithFacts, refHint,
-  findSubjectDrift, driftNote,
+  findSubjectDrift, driftNote, findZeroLevels, PRICE_LABEL_ZERO,
   UNIT_AFTER, FIELDS,
 };

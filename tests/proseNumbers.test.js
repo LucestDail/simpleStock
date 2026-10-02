@@ -243,3 +243,40 @@ test('🔴 두 배열의 역할이 **지시문과 스키마 둘 다**에 적혀 
   assert.match(raw, /description: '매수 후보/, '스키마가 positions 를 설명하지 않는다');
   // 🔴 설명이 없으면 모델이 한쪽을 통째로 비운다(3회 연속 후보 0건으로 실측됐다)
 });
+
+/**
+ * 🔴 **가격 자리의 0** — `priceNumbers` 가 `<1` 을 걸러 **원리상 안 걸리던 축**
+ *    (2026-10-02 사용자: *"o 는 진입 0.00, 손절 0.00, 목표 0.00 이거 대체 뭐하는 짓이야"*).
+ * ★ 가드를 하나 붙일 때마다 **그 가드가 안 보는 축**이 드러난다 —
+ *   가격 이탈 → 주제 이탈 → 가격 자리의 0. 같은 단계에 계속 쌓는 이유다.
+ */
+test('🔴 가격 자리의 0 을 잡는다', () => {
+  const hits = P.findZeroLevels([
+    { symbol: 'O', rationale: '진입 0.00, 손절 0.00, 목표 0.00 으로 판단 보류' },
+  ]);
+  assert.deepStrictEqual(hits.map((h) => h.raw), ['진입 0.00', '손절 0.00', '목표 0.00']);
+});
+
+test('⚠️ 정당한 0 은 건드리지 않는다 — 오탐이 나면 멀쩡한 보합 설명이 죽는다', () => {
+  assert.deepStrictEqual(P.findZeroLevels([
+    { symbol: 'QLD', rationale: '당일 수익률 0.00% 로 보합, 변동 0.00, 거래량 0 건' },
+    { symbol: 'RAM', scenarioUp: '목표 31.5 도달 시 추가 상승' },
+    { symbol: 'O', risk: '20일선 0.5% 아래' },
+  ]), []);
+});
+
+test('코드가 채운 자리는 검사하지 않는다', () => {
+  assert.deepStrictEqual(
+    P.findZeroLevels([{ symbol: 'O', _codeFilled: true, rationale: '진입 0.00' }]), []);
+});
+
+test('🔴 배선 — 세 축이 **같은 단계**에서 함께 판정되고 합산으로 채택된다', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+  assert.match(src, /prose\.findZeroLevels\(report\.positions\)/, '검출이 배선되지 않았다');
+  assert.match(src, /analyst\.prose_zero_level/, '검출 로그가 없다');
+  assert.match(src, /outliers\.length \|\| drift\.length \|\| zeros\.length/, '재요청 조건에 빠졌다');
+  // 🔴 **합산**으로 채택해야 한 축의 회귀를 안 받는다
+  assert.match(src, /stillBad\.length \+ stillDrift\.length \+ stillZero\.length/, '합산 판정이 아니다');
+});

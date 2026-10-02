@@ -1816,7 +1816,23 @@ onUnmounted(() => {
                 <p>{{ ps.rationale }}</p>
 
                 <dl v-if="ps.entry || ps.stop || ps.target" class="pos__lv">
-                  <div v-if="ps.entry"><dt>진입</dt><dd class="mono-num">{{ ps.entry }}</dd></div>
+                  <!--
+                    🔴 **숫자만 있고 맥락이 없어서 "뭔 말도 안 되는 수치" 로 보였다** (2026-10-02).
+                       `진입 29.59` 가 현재가 28.44 보다 높은 건지 낮은 건지 화면에 안 적혔다.
+                       `+4%` 면 추격매수, `-5%` 면 지정가 대기 — **전혀 다른 제안**인데
+                       숫자만 보면 구분이 안 된다. ⇒ 괴리를 **진입 옆에** 붙인다.
+                  -->
+                  <div v-if="ps.entry">
+                    <dt>진입</dt>
+                    <dd class="mono-num">
+                      {{ ps.entry }}
+                      <small v-if="ps.trade?.entryGapPct != null"
+                             :class="ps.trade.entryGapPct > 0 ? 'down' : 'up'"
+                             :title="ps.trade.entryGapPct > 0 ? '현재가보다 높다 — 추격매수' : '현재가보다 낮다 — 지정가 대기'">
+                        {{ ps.trade.entryGapPct > 0 ? '+' : '' }}{{ ps.trade.entryGapPct }}%
+                      </small>
+                    </dd>
+                  </div>
                   <div v-if="ps.stop"><dt>손절</dt><dd class="mono-num">{{ ps.stop }}</dd></div>
                   <div v-if="ps.target"><dt>목표</dt><dd class="mono-num">{{ ps.target }}</dd></div>
                   <div v-if="ps.trade?.sizedQuantity != null">
@@ -1824,6 +1840,13 @@ onUnmounted(() => {
                   </div>
                 </dl>
                 <p v-if="ps.trade?.sizeNote" class="pos__rrbad">{{ ps.trade.sizeNote }}</p>
+                <!--
+                  🔴 **이미 달성된 목표를 조용히 두지 않는다** — QLD 목표 97 이 현재가 97.6
+                     아래였는데 화면은 그냥 `목표 97` 만 보여줬다. 손익비(rr)는 코드가
+                     이미 `null` 로 만들지만, **왜 비었는지**를 적지 않으면 사용자는
+                     "계산이 안 됐나" 로 읽는다.
+                -->
+                <p v-if="ps.trade?.levelNote" class="pos__rrbad">🔴 {{ ps.trade.levelNote }}</p>
                 <p v-if="ps.scenarioUp" class="pos__sc pos__sc--up">▲ {{ ps.scenarioUp }}</p>
                 <p v-if="ps.scenarioDown" class="pos__sc pos__sc--dn">▼ {{ ps.scenarioDown }}</p>
 

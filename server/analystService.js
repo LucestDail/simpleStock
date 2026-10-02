@@ -661,7 +661,25 @@ function summarizeCandles(rows) {
  *    매수/매도 구분도 없다. 그래서 이름을 `rrAfterFee`(수수료 반영)로 두고
  *    *"실제 비용"* 이라고 부르지 않는다. **모르는 것을 아는 척하지 않는다.**
  */
-function computeTrade({ side, entry, stop, target, riskBudget, costRate }) {
+/**
+ * 🔴 **현재가와의 관계를 안 보면 모순이 통과한다** (2026-10-02 사용자 지적).
+ *
+ * 화면 실측:
+ * ```
+ * QLD  진입 92.53 · 손절 89.50 · 목표 97.00   ← 현재가 97.6
+ * UUP  진입 29.59 · 손절 28.20 · 목표 31.50   ← 현재가 28.44
+ * ```
+ * 종전 검증은 **방향**(`stop < entry < target`)만 봤고 둘 다 **통과**한다.
+ * 그런데 **QLD 목표 97 은 현재가 97.6 보다 낮다** — 사자마자 달성된 목표다. 말이 안 된다.
+ * UUP 는 진입이 현재가보다 **4% 높은데**(추격매수) 화면에 그 사실이 안 적힌다.
+ *
+ * ⇒ `last`(현재가)를 받아 **① 목표가 이미 달성됐는지 ② 진입이 현재가에서 얼마나 먼지**를
+ *   함께 낸다. ⚠️ **값을 지우지 않는다** — 모델이 쓴 숫자는 남기고 **사실을 덧붙인다**
+ *   (사용자가 보고 판단해야 한다). 다만 **손익비(rr)는 null 로** 만든다 —
+ *   달성된 목표로 계산한 rr 은 **거짓 확신**이다.
+ * ⚠️ `last` 를 못 구하면 **검사하지 않는다**(통과가 아니라 미검사) — `levelNote` 가 안 붙는다.
+ */
+function computeTrade({ side, entry, stop, target, riskBudget, costRate, last }) {
   const e = Number(entry);
   const s2 = Number(stop);
   const t = Number(target);
@@ -676,10 +694,30 @@ function computeTrade({ side, entry, stop, target, riskBudget, costRate }) {
   }
 
   const out = { perShareRisk: round2(perShareRisk), riskPct: round2((perShareRisk / e) * 100) };
+  /**
+   * 🔴 현재가 대비 **진입 괴리** — 화면이 이걸 안 보여줘서 사용자가 *"29? 28?"* 를 물었다.
+   *    `+4%` 면 추격매수, `-5%` 면 지정가 대기다. 숫자만 보면 구분이 안 된다.
+   */
+  const px = Number(last);
+  const hasPx = Number.isFinite(px) && px > 0;
+  if (hasPx) out.entryGapPct = round2(((e - px) / px) * 100);
+
   if (Number.isFinite(t) && t > 0) {
     const reward = isBuy ? t - e : e - t;
     out.rr = reward > 0 ? round2(reward / perShareRisk) : null;
     if (out.rr === null) out.rrNote = '목표가가 진입 대비 이익 방향이 아닙니다';
+    /**
+     * 🔴 **이미 달성된 목표**는 손익비를 계산할 자격이 없다.
+     *    매수인데 목표 ≤ 현재가(또는 매도인데 목표 ≥ 현재가)면, 그 목표는
+     *    *"지금 당장 청산하라"* 와 같은 말이다 — 제안으로서 의미가 없다.
+     */
+    if (hasPx) {
+      const reached = isBuy ? t <= px : t >= px;
+      if (reached) {
+        out.rr = null;
+        out.levelNote = `목표 ${round2(t)} 가 현재가 ${round2(px)} 기준 이미 달성된 수준입니다`;
+      }
+    }
     /**
      * 🔴 **수수료를 반영한 손익비** — 종전 R/R 은 비용을 무시했다.
      *    왕복 0.2% 는 폭이 좁은 거래에서 손익비를 눈에 띄게 깎는다.
@@ -2067,6 +2105,17 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     const nameBySym = {};
     for (const h of items) nameBySym[String(h.symbol || '').toUpperCase()] = h.name || '';
     const drift = prose.findSubjectDrift(report.positions, knownSyms, nameBySym);
+    /**
+     * 🔴 **가격 자리의 0** — `priceNumbers` 가 `<1` 을 거르므로 **원리상 안 걸리던 축**.
+     *    사용자: *"o 는 진입 0.00, 손절 0.00, 목표 0.00 이거 대체 뭐하는 짓이야"*
+     *    ⇒ 가격 이탈·주제 이탈과 **같은 단계**에서 함께 본다(자를 하나씩 더 붙여 온 이유다).
+     */
+    const zeros = prose.findZeroLevels(report.positions);
+    if (zeros.length) {
+      logWarn('analyst.prose_zero_level', {
+        hits: zeros.map((z) => ({ symbol: z.symbol, field: z.field, raw: z.raw, context: z.context })),
+      });
+    }
     if (drift.length) {
       logWarn('analyst.prose_subject_drift', {
         hits: drift.map((d) => ({ symbol: d.symbol, others: d.others })),
@@ -2080,7 +2129,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       checked: report.positions.filter((p) => !p._codeFilled).length - notChecked.length,
       outliers: outliers.length, unverifiable: notChecked,
     });
-    if (outliers.length || drift.length) {
+    if (outliers.length || drift.length || zeros.length) {
       if (outliers.length) logWarn('analyst.prose_price_outlier', {
         // ⚠️ `context` 를 함께 — 없으면 **교체된 뒤 오탐인지 가릴 수 없다**(실제로 겪었다)
         hits: outliers.map((h) => ({ symbol: h.symbol, field: h.field, raw: h.raw, current: h.current, ratio: h.ratio, context: h.context })),
@@ -2093,6 +2142,10 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
             // ⚠️ 두 가지가 동시에 틀릴 수 있다 — **둘 다** 돌려준다(하나만 주면 다른 쪽이 또 틀린다)
             ...(outliers.length ? [prose.retryNote(outliers, refBySymbol)] : []),
             ...(drift.length ? [prose.driftNote(drift)] : []),
+            ...(zeros.length ? [['## 🔴 가격 자리에 0 을 쓴 종목이 있습니다 — 다시 답하세요',
+              ...zeros.map((z) => `- **${z.symbol}** ${z.field}: "${z.context}"`),
+              '값을 정할 수 없으면 **그 칸을 비우십시오**(0 이 아니라 생략). 0 은 "가격이 0" 이라는 뜻이라 사용자에게 의미가 없습니다.',
+            ].join('\n')] : []),
           ].join('\n'),
           // 🔴 **보유 전용 자리**를 가진 스키마 — 후보와 경쟁시키지 않는다(위 reportSchemaFor 참조)
           schema: reportSchemaFor(items.map((h) => h.symbol)),
@@ -2103,6 +2156,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       const fixed = shapeReport(fixRaw);
       const stillBad = prose.findPriceOutliers(fixed.positions, refBySymbol);
       const stillDrift = prose.findSubjectDrift(fixed.positions, knownSyms, nameBySym);
+      const stillZero = prose.findZeroLevels(fixed.positions);
       /**
        * 🔴 **`after: 0` 이 "고쳐졌다" 로 읽히면 안 된다** (2026-10-02 라이브에서 드러났다).
        *    재요청이 어긋남을 0으로 만들어도 **종목 수가 줄면 채택하지 않는다**(회귀 방지).
@@ -2111,7 +2165,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
        *    ★ 09-28 *"플래그가 거짓말했다"* 와 같은 가족 — **조용한 것보다 나쁜 것은
        *      틀린 확신을 주는 것이다.**
        */
-      const improved = (stillBad.length + stillDrift.length) < (outliers.length + drift.length);
+      const improved = (stillBad.length + stillDrift.length + stillZero.length) < (outliers.length + drift.length + zeros.length);
       /**
        * 🔴 **개수만 보면 종목이 갈려도 받는다** (같은 회차에서 실제로 일어났다).
        *    `got:4 had:3` 이라 채택했는데 그 4개가 **전부 후보**였고 보유는 0개였다.
@@ -2124,6 +2178,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       logInfo('analyst.prose_price_retry', {
         before: outliers.length, after: stillBad.length,
         driftBefore: drift.length, driftAfter: stillDrift.length,
+        zeroBefore: zeros.length, zeroAfter: stillZero.length,
         got: fixed.positions.length, had: report.positions.length,
         adopted: improved && keptCount,
         // ⚠️ 거부 이유를 **갈라서** 적는다 — "개수가 줄었다" 와 "종목이 바뀌었다" 는 다른 사고다
@@ -2305,6 +2360,12 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     }
     const calc = computeTrade({
       side: ps.stance, entry: ps.entry, stop: ps.stop, target: ps.target, riskBudget: budget,
+      /**
+       * ⚠️ 현재가는 **보유면 lastPrice, 후보면 tech.last** 다. 한쪽만 보면
+       *    후보 종목이 통째로 미검사가 된다(UUP 가 정확히 그 경우였다).
+       */
+      last: Number(held?.lastPrice) || Number(tech?.[String(ps.symbol).toUpperCase()]?.last)
+        || Number(tech?.[ps.symbol]?.last) || null,
       // ⚠️ 통화가 아니라 **시장**으로 고른다(US/KR 요율이 다르다). 못 받았으면 안 넘긴다 — 0 으로 치지 않는다
       costRate: fees?.[held?.currency === 'USD' ? 'US' : 'KR'] ?? undefined,
     });
