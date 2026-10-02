@@ -1883,10 +1883,21 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   /** stance 는 BUY/SELL 인데 제안이 없는 종목 — 폰 본문에 사실대로 적는다 */
   let stanceGap = [];
   const heldSymbols = items.map((h) => String(h.symbol).toUpperCase());
-  if (heldSymbols.length && report.positions.length < heldSymbols.length) {
-    const missing = heldSymbols.filter(
-      (s) => !report.positions.some((p) => String(p.symbol).toUpperCase() === s)
-    );
+  /**
+   * 🔴 **개수로 판정하면 종목이 통째로 바뀌어도 통과한다** (2026-10-02 라이브 dryRun).
+   *
+   * 종전 조건은 `report.positions.length < heldSymbols.length` 였다. 그런데 실제로
+   * **보유 3종(O·QLD·RAM)인데 모델이 후보 3종(SOXX·VONG·XLV)을 내면 `3 < 3` 이 거짓**이라
+   * 이 가드가 **발동조차 안 한다.** 그 회차의 최종 보고서에는 **보유 종목이 0개**였다 —
+   * 사용자가 보는 화면에 자기 보유 판단이 통째로 없는 상태다.
+   *
+   * ⇒ **집합 차이로 판정한다.** `missing` 은 어차피 아래에서 계산하고 있었다 —
+   *    *"수집해 놓고 안 쓰는"* 의 판정판이다(값은 있는데 조건이 그걸 안 봤다).
+   */
+  const missing = heldSymbols.filter(
+    (s) => !report.positions.some((p) => String(p.symbol).toUpperCase() === s)
+  );
+  if (missing.length) {
     logWarn('analyst.positions_short', { got: report.positions.length, need: heldSymbols.length, missing });
     const retryRaw = await generateStructuredOutput(
       {
@@ -2034,13 +2045,25 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
        *      틀린 확신을 주는 것이다.**
        */
       const improved = (stillBad.length + stillDrift.length) < (outliers.length + drift.length);
-      const keptCount = fixed.positions.length >= report.positions.length;
+      /**
+       * 🔴 **개수만 보면 종목이 갈려도 받는다** (같은 회차에서 실제로 일어났다).
+       *    `got:4 had:3` 이라 채택했는데 그 4개가 **전부 후보**였고 보유는 0개였다.
+       *    ⇒ **원본에 있던 심볼이 하나라도 빠지면 거부**한다. 개수는 그다음이다.
+       */
+      const hadSyms = new Set(report.positions.map((p) => String(p.symbol || '').toUpperCase()));
+      const fixedSyms = new Set(fixed.positions.map((p) => String(p.symbol || '').toUpperCase()));
+      const lostSyms = [...hadSyms].filter((x) => !fixedSyms.has(x));
+      const keptCount = fixed.positions.length >= report.positions.length && lostSyms.length === 0;
       logInfo('analyst.prose_price_retry', {
         before: outliers.length, after: stillBad.length,
         driftBefore: drift.length, driftAfter: stillDrift.length,
         got: fixed.positions.length, had: report.positions.length,
         adopted: improved && keptCount,
-        why: improved && keptCount ? 'ok' : (!keptCount ? 'fewer_positions' : 'not_improved'),
+        // ⚠️ 거부 이유를 **갈라서** 적는다 — "개수가 줄었다" 와 "종목이 바뀌었다" 는 다른 사고다
+        why: improved && keptCount ? 'ok'
+          : lostSyms.length ? 'lost_symbols'
+            : fixed.positions.length < report.positions.length ? 'fewer_positions' : 'not_improved',
+        lost: lostSyms,
       });
       /**
        * ⚠️ **재요청이 더 나쁠 수도 있다** — 판단 수가 줄지 않았고 어긋남이 줄었을 때만 채택한다.
