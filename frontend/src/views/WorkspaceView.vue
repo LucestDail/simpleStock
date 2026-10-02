@@ -1550,73 +1550,15 @@ onUnmounted(() => {
             <p class="analyst__mom">{{ report.momentumRead }}</p>
 
             <!-- 🔴 제안 — 승인해야만 진행된다. 실행은 아직 no-op 이다 -->
-            <div v-if="proposals.length" class="props">
-              <h3 class="panel__h">매매 제안 <small>승인해야 진행됩니다</small></h3>
-              <article v-for="p in proposals" :key="p.id" class="prop" :class="`prop--${p.side.toLowerCase()}`">
-                <header class="prop__head">
-                  <span class="prop__side">{{ p.conditional ? '예약 ' : '' }}{{ p.side === 'BUY' ? '매수' : '매도' }}</span>
-                  <span class="prop__sym">{{ p.symbol }}</span>
-                  <span class="prop__status">{{ statusLabel(p) }}</span>
-                </header>
-                <!-- 예약(조건부)은 즉시 주문과 다르게 그린다 — 승인해도 감시가 도달 전엔 체결되지 않는다 -->
-                <dl v-if="p.conditional" class="prop__grid">
-                  <div><dt>감시가</dt><dd class="mono-num">{{ p.conditional.triggerPrice }}</dd></div>
-                  <div><dt>{{ p.conditional.orderType === 'MARKET' ? '시장가' : '주문가' }}</dt><dd class="mono-num">{{ p.conditional.orderType === 'MARKET' ? '—' : p.conditional.orderPrice }}</dd></div>
-                  <div><dt>수량</dt><dd class="mono-num">{{ p.quantity }}</dd></div>
-                  <div><dt>예약 만료</dt><dd class="mono-num">{{ p.conditional.expireDate }}</dd></div>
-                </dl>
-                <dl v-else class="prop__grid">
-                  <div><dt>수량</dt><dd class="mono-num">{{ p.quantity }}</dd></div>
-                  <div><dt>지정가</dt><dd class="mono-num">{{ p.price }}</dd></div>
-                  <div><dt>평가금액</dt><dd class="mono-num">{{ (p.quantity * p.price).toLocaleString() }}</dd></div>
-                </dl>
-                <p class="prop__why">{{ p.reason }}</p>
-                <div v-if="p.status === 'PENDING'" class="prop__act">
-                  <button class="btn btn--sm" @click="decide(p, 'reject')">거절</button>
-                  <!--
-                    🔴 **검토가 기본 동선이다** (2026-10-02). 종전엔 근거 한 줄만 보고
-                       바로 승인해야 했다 — 잔고·장 운영시간·미체결·체결 후 비중을 모른 채.
-                    ⚠️ 바로 승인하는 길도 남긴다 — 익숙한 사용자의 길을 끊지 않는다.
-                  -->
-                  <button class="btn btn--sm btn--primary" @click="ticketFor = p">검토 후 승인</button>
-                  <button class="btn btn--sm btn--soft" @click="decide(p, 'approve')">바로 승인</button>
-                </div>
-                <div v-else-if="p.status === 'APPROVED'" class="prop__act">
-                  <!--
-                    🔴 **버튼 이름이 사실을 말한다.** 종전엔 `실행(모의)` 로 박혀 있어서
-                    스위치를 켜는 순간 이름이 거짓이 됐다. 서버가 주는 모드로 갈린다.
-                  -->
-                  <button
-                    class="btn btn--sm"
-                    :class="ordersMode === 'live' ? 'btn--danger' : 'btn--soft'"
-                    @click="decide(p, 'execute')"
-                  >{{ ordersMode === 'live' ? '🔴 실주문 전송' : '실행(모의)' }}</button>
-                </div>
-                <p v-else-if="p.result" class="prop__note">{{ p.result.note }}</p>
-              </article>
-            </div>
-
-            <!-- 거래소에 걸려 감시 중인 예약(조건부) 주문 — 제안과 다른 층이다 -->
-            <div v-if="conditionalOrders.length || conditionalError" class="props">
-              <h3 class="panel__h">예약 주문 <small>거래소가 감시가 도달을 지켜보는 중</small></h3>
-              <p v-if="conditionalError" class="prop__rej">⚠️ {{ conditionalError }}</p>
-              <article v-for="o in conditionalOrders" :key="o.conditionalOrderId || o.id" class="prop">
-                <header class="prop__head">
-                  <span class="prop__side">예약 {{ (o.first?.orderSide || o.orderSide) === 'BUY' ? '매수' : '매도' }}</span>
-                  <span class="prop__sym">{{ o.symbol }}</span>
-                  <span class="prop__status">{{ o.status || 'OPEN' }}</span>
-                </header>
-                <dl class="prop__grid">
-                  <div><dt>감시가</dt><dd class="mono-num">{{ o.first?.triggerPrice ?? '—' }}</dd></div>
-                  <div><dt>주문가</dt><dd class="mono-num">{{ o.first?.orderPrice ?? '시장가' }}</dd></div>
-                  <div><dt>수량</dt><dd class="mono-num">{{ o.quantity }}</dd></div>
-                  <div><dt>만료</dt><dd class="mono-num">{{ o.expireDate ?? '—' }}</dd></div>
-                </dl>
-                <div class="prop__act">
-                  <button class="btn btn--sm" @click="cancelConditional(o)">예약 취소</button>
-                </div>
-              </article>
-            </div>
+            <!--
+              🔴 **매매 제안·예약 주문은 아래 「애널리스트와 대화」 안으로 옮겼다** (2026-10-02).
+                 사용자: *"이럴거면 그냥 매매분석이랑 애널리스트와 대화를 합쳐. HITL 이랑 주식에
+                 대해서 자연어로 문의, 답변, 자연어 기반의 매수/매도가 진행되어야 하는데 이게 뭐야."*
+                 맞는 지적이었다 — 서버는 이미 `propose_order`·`propose_conditional_order` 를 쥐고
+                 있어서 **자연어로 "QLD 10주 팔아줘" 하면 제안이 생긴다.** 그런데 화면이 그 제안을
+                 **다른 카드**에 띄워서, 대화에서 시킨 일의 결과를 다른 데서 찾아야 했다.
+              ⇒ 제안은 **대화가 끝나는 자리**에 둔다. 승인·거절도 거기서 한다.
+            -->
 
             <div v-if="report.rejected?.length" class="props">
               <h3 class="panel__h">버려진 제안</h3>
@@ -1918,6 +1860,79 @@ onUnmounted(() => {
               <span v-else-if="!m.done" class="msg__wait">생각 중…</span>
               <p v-if="m.notice" class="msg__notice">{{ m.notice }}</p>
             </article>
+            <!--
+              🔴 **HITL 은 대화의 끝에 있어야 한다** (2026-10-02 — 위 analyst 절 참조).
+                 자연어로 부탁한 매수/매도가 **같은 흐름 안에서** 제안으로 나타나고 거기서 승인한다.
+              ⚠️ 대화 로그 **안**에 둔다 — 로그가 스크롤되므로 새 제안이 생기면 자연스럽게 눈에 든다.
+            -->
+            <div v-if="proposals.length" class="props">
+              <h3 class="panel__h">매매 제안 <small>승인해야 진행됩니다</small></h3>
+              <article v-for="p in proposals" :key="p.id" class="prop" :class="`prop--${p.side.toLowerCase()}`">
+                <header class="prop__head">
+                  <span class="prop__side">{{ p.conditional ? '예약 ' : '' }}{{ p.side === 'BUY' ? '매수' : '매도' }}</span>
+                  <span class="prop__sym">{{ p.symbol }}</span>
+                  <span class="prop__status">{{ statusLabel(p) }}</span>
+                </header>
+                <!-- 예약(조건부)은 즉시 주문과 다르게 그린다 — 승인해도 감시가 도달 전엔 체결되지 않는다 -->
+                <dl v-if="p.conditional" class="prop__grid">
+                  <div><dt>감시가</dt><dd class="mono-num">{{ p.conditional.triggerPrice }}</dd></div>
+                  <div><dt>{{ p.conditional.orderType === 'MARKET' ? '시장가' : '주문가' }}</dt><dd class="mono-num">{{ p.conditional.orderType === 'MARKET' ? '—' : p.conditional.orderPrice }}</dd></div>
+                  <div><dt>수량</dt><dd class="mono-num">{{ p.quantity }}</dd></div>
+                  <div><dt>예약 만료</dt><dd class="mono-num">{{ p.conditional.expireDate }}</dd></div>
+                </dl>
+                <dl v-else class="prop__grid">
+                  <div><dt>수량</dt><dd class="mono-num">{{ p.quantity }}</dd></div>
+                  <div><dt>지정가</dt><dd class="mono-num">{{ p.price }}</dd></div>
+                  <div><dt>평가금액</dt><dd class="mono-num">{{ (p.quantity * p.price).toLocaleString() }}</dd></div>
+                </dl>
+                <p class="prop__why">{{ p.reason }}</p>
+                <div v-if="p.status === 'PENDING'" class="prop__act">
+                  <button class="btn btn--sm" @click="decide(p, 'reject')">거절</button>
+                  <!--
+                    🔴 **검토가 기본 동선이다** (2026-10-02). 종전엔 근거 한 줄만 보고
+                       바로 승인해야 했다 — 잔고·장 운영시간·미체결·체결 후 비중을 모른 채.
+                    ⚠️ 바로 승인하는 길도 남긴다 — 익숙한 사용자의 길을 끊지 않는다.
+                  -->
+                  <button class="btn btn--sm btn--primary" @click="ticketFor = p">검토 후 승인</button>
+                  <button class="btn btn--sm btn--soft" @click="decide(p, 'approve')">바로 승인</button>
+                </div>
+                <div v-else-if="p.status === 'APPROVED'" class="prop__act">
+                  <!--
+                    🔴 **버튼 이름이 사실을 말한다.** 종전엔 `실행(모의)` 로 박혀 있어서
+                    스위치를 켜는 순간 이름이 거짓이 됐다. 서버가 주는 모드로 갈린다.
+                  -->
+                  <button
+                    class="btn btn--sm"
+                    :class="ordersMode === 'live' ? 'btn--danger' : 'btn--soft'"
+                    @click="decide(p, 'execute')"
+                  >{{ ordersMode === 'live' ? '🔴 실주문 전송' : '실행(모의)' }}</button>
+                </div>
+                <p v-else-if="p.result" class="prop__note">{{ p.result.note }}</p>
+              </article>
+            </div>
+
+
+            <!-- 거래소에 걸려 감시 중인 예약(조건부) 주문 — 제안과 다른 층이다 -->
+            <div v-if="conditionalOrders.length || conditionalError" class="props">
+              <h3 class="panel__h">예약 주문 <small>거래소가 감시가 도달을 지켜보는 중</small></h3>
+              <p v-if="conditionalError" class="prop__rej">⚠️ {{ conditionalError }}</p>
+              <article v-for="o in conditionalOrders" :key="o.conditionalOrderId || o.id" class="prop">
+                <header class="prop__head">
+                  <span class="prop__side">예약 {{ (o.first?.orderSide || o.orderSide) === 'BUY' ? '매수' : '매도' }}</span>
+                  <span class="prop__sym">{{ o.symbol }}</span>
+                  <span class="prop__status">{{ o.status || 'OPEN' }}</span>
+                </header>
+                <dl class="prop__grid">
+                  <div><dt>감시가</dt><dd class="mono-num">{{ o.first?.triggerPrice ?? '—' }}</dd></div>
+                  <div><dt>주문가</dt><dd class="mono-num">{{ o.first?.orderPrice ?? '시장가' }}</dd></div>
+                  <div><dt>수량</dt><dd class="mono-num">{{ o.quantity }}</dd></div>
+                  <div><dt>만료</dt><dd class="mono-num">{{ o.expireDate ?? '—' }}</dd></div>
+                </dl>
+                <div class="prop__act">
+                  <button class="btn btn--sm" @click="cancelConditional(o)">예약 취소</button>
+                </div>
+              </article>
+            </div>
           </div>
 
           <!-- 위를 읽는 중에 새 답이 오면 **끌어내리지 않고** 알려만 준다 -->
@@ -2176,53 +2191,51 @@ onUnmounted(() => {
 }
 @media (min-width: 1180px) {
   /**
-   * 🔴 **열 배치를 와이어프레임대로 바꿨다** (2026-10-02 2차).
+   * 🔴 **4열로 간다** (2026-10-02 3차 — 사용자 지시 두 건을 한 번에 푼다).
    *
-   * 종전 배치를 **라이브 DOM 에서 직접 재어** 보니 이랬다:
-   * ```
-   *        열1 869px          열2 246px     열3 525px
-   *   행1  내 자산            관심종목      AI 분석
-   *   행2  뉴스                 랭킹         대화
-   *   행3  차트                  ↑            ↑
-   * ```
-   * 와이어프레임은 **완전히 다른 축**이다:
-   * ```
-   *        열1 340px          열2 1fr       열3 400px
-   *        내 자산            종목 차트     AI 에이전트
-   *        보유 종목           (크게)        매매 제안
-   *        관심종목           뉴스·랭킹       대화
-   * ```
-   * ⇒ **차트가 주인공**이고(가운데 가장 넓게), 좌열은 *"내가 가진 것"*,
-   *   우열은 *"에이전트가 말하는 것"* 으로 **역할이 갈린다.** 종전엔 차트가
-   *   좌열 맨 아래에 깔려 있어서 **제일 큰 칸을 자산 표가 쓰고 있었다.**
+   * ① *"뉴스 정보랑 랭킹 정보도 합쳐서 세로로 잘라서 사용해. 랭킹 정보는 y 축이 길어야 하는데
+   *    저러면 아무것도 안보이잖아."* — 종전엔 뉴스와 랭킹이 가운데 열에 **가로로 쌓여**
+   *    각각 **179px** 뿐이었다(실측). 랭킹은 순위 목록이라 **세로가 길어야 쓸모가 있다.**
+   * ② *"매매분석이랑 애널리스트와 대화를 합쳐"* — 우열을 **한 덩어리**로 읽히게 한다.
    *
-   * ⚠️ 폭은 **px 고정(340·400)** 이다 — 와이어프레임이 그렇게 잡았고, 좌·우는
-   *    내용 폭이 정해진 패널이라 늘어나 봐야 여백만 생긴다. **가운데만 1fr** 로
-   *    남는 폭을 전부 차트가 가져간다.
-   * ⚠️ 행은 비율(fr)이다 — 창 높이에 따라 달라지므로 **픽셀로 읽지 말 것.**
+   * ```
+   *      열1 340     열2 1fr        열3 1fr       열4 400
+   *  행1  내 자산      ← 종목 차트 (2열을 걸친다) →   애널리스트(요약·판단)
+   *  행2  관심종목      ↑              ↑            대화 + 매매 제안(HITL)
+   *  행3  관심종목     뉴스           랭킹              ↑
+   * ```
+   * ⇒ 뉴스·랭킹이 **좌우로 갈라져** 각각 행3 전체 높이를 쓴다(179 → 약 400px).
+   * ⚠️ 차트는 2·3열을 **걸쳐야** 한다 — 안 그러면 주인공이 반으로 줄어든다.
    */
   .deck {
-    grid-template-columns: minmax(0, 340px) minmax(0, 1fr) minmax(0, 400px);
-    grid-template-rows: minmax(0, 30fr) minmax(0, 26fr) minmax(0, 22fr) minmax(0, 22fr);
+    grid-template-columns: minmax(0, 340px) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 400px);
+    grid-template-rows: minmax(0, 30fr) minmax(0, 26fr) minmax(0, 44fr);
     overflow: hidden;
   }
-  /* 좌열 — 내가 가진 것 */
   /**
-   * 🔴 **자산 카드가 1행만 쓰면 보유 목록이 0px 로 눌린다** (2026-10-02 실측).
-   *    KPI 3줄 + 비중 바 + 모멘텀이 카드 높이를 다 먹고, `.holdings__scroll` 은
+   * 좌열 — 내가 가진 것.
+   * 🔴 **자산은 2행을 써야 한다** (2026-10-02 — 같은 실패 모드를 **두 번** 밟았다).
+   *    1행(≈246px)만 주면 히어로+비중바가 다 먹고 `.holdings__scroll` 이
    *    `flex:1; min-height:0` 이라 **조용히 높이 0** 이 된다 — 오류도 경고도 없이
-   *    **방금 만든 보유 목록이 화면에서 통째로 사라졌다.**
-   *    ⇒ 자산은 2행, 관심종목은 나머지 2행.
+   *    **보유 목록이 화면에서 사라진다.** 4행→3행으로 바꾸면서 그대로 재발했다.
+   *    ★ 행 수를 바꿀 때마다 이 칸을 다시 재야 한다. 자동으로 따라오지 않는다.
    */
   .deck > .assets { grid-column: 1; grid-row: 1 / span 2; }
-  .deck > .strip { grid-column: 1; grid-row: 3 / span 2; }
-  /* 가운데 — 종목(차트가 가장 큰 칸을 쓴다) */
-  .deck > .cell--chart { grid-column: 2; grid-row: 1 / span 2; }
+  .deck > .strip { grid-column: 1; grid-row: 3; }
+  /* 가운데 — 종목. 차트가 두 열을 걸쳐 가장 큰 칸을 쓴다 */
+  .deck > .cell--chart { grid-column: 2 / span 2; grid-row: 1 / span 2; }
   .deck > .news { grid-column: 2; grid-row: 3; }
-  .deck > .layout__signals { grid-column: 2; grid-row: 4; }
-  /* 우열 — 에이전트가 말하는 것 */
-  .deck > .analyst { grid-column: 3; grid-row: 1 / span 2; }
-  .deck > .chat { grid-column: 3; grid-row: 3 / span 2; }
+  .deck > .layout__signals { grid-column: 3; grid-row: 3; }
+  /* 우열 — 에이전트. 요약(위)과 대화·HITL(아래)이 한 덩어리로 읽힌다 */
+  .deck > .analyst { grid-column: 4; grid-row: 1; }
+  .deck > .chat { grid-column: 4; grid-row: 2 / span 2; }
+  /**
+   * ⚠️ **두 카드를 하나처럼 붙인다** — 사이 틈과 마주보는 모서리를 없앤다.
+   *    따로 떨어져 있으면 *"분석"* 과 *"대화"* 가 다른 물건으로 보이고,
+   *    그게 사용자가 *"이게 뭐야"* 라고 한 바로 그 느낌이다.
+   */
+  .deck > .analyst { border-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .deck > .chat { border-top-left-radius: 0; border-top-right-radius: 0; margin-top: calc(var(--space-sm) * -1); }
 }
 /* 칸을 넘기지 않는다 — 내용은 **각 카드 안에서** 스크롤한다 */
 .deck > * { min-width: 0; min-height: 0; }

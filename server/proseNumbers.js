@@ -1,0 +1,153 @@
+/**
+ * 산문 속 **가격 수치** 검증 (2026-10-02 라이브 실사고)
+ *
+ * ## 무슨 일이 있었나
+ * 15:30 KRX 마감 회차에서 프롬프트는 정확한 값을 줬다:
+ * ```
+ * QLD  현재 96.84 · 20일선 92.69 · 60일선 90.13
+ * RAM  현재 14.55 · 20일선 13.67
+ * ```
+ * 그런데 모델은 이렇게 썼다:
+ * ```
+ * QLD  "20일선(약 806) 회복 시 …"  · "60일선(약 732) 이탈 시 …"
+ * RAM  "20일선(46.10) 이탈 시 …"   · "52주 고점(48.80) 경신 시도"
+ * ```
+ * **데이터를 줬는데 무시하고 지어냈다.** QLD 806 은 실제가의 **8배**다.
+ * 텔레그램 요약엔 안 갔지만 **웹 화면(`WorkspaceView` 시나리오 줄)에 그대로 뜬다** —
+ * 사용자가 "806까지 회복하면" 으로 읽으면 완전히 틀린 판단을 한다.
+ *
+ * ## 🔴 프롬프트로는 못 고친다
+ * 프롬프트에 *"근거 없는 수치는 쓰지 않습니다"* 가 **이미 있었고 안 지켜졌다.**
+ * 이 저장소가 2026-09-14 에 배운 것: **프롬프트로 못 고치는 것을 프롬프트로 고치려 하지 말고,
+ * 코드가 거부하고 이유를 다음 프롬프트에 돌려준다.**
+ *
+ * ## ⚠️ 자를 만들면 자의 판별력부터 잰다
+ * 첫 판은 "현재가의 2.5배 밖" 만 봤는데 **오탐이 났다** — `20일선`의 **20**,
+ * `52주`의 **52**, `60일선`의 **60**, 변동성 `1.11%` 가 전부 걸렸다.
+ * ⇒ **단위가 붙은 숫자는 가격이 아니다.** 아래 `UNIT_AFTER` 가 그 축이고,
+ *    `tests/proseNumbers.test.js` 가 **그날 실제로 나온 문장들**로 양방향을 잠근다
+ *    (QLD·RAM 은 걸려야 하고, BRK.B·O 는 안 걸려야 한다).
+ */
+
+/**
+ * 숫자 바로 뒤에 오면 **그 숫자는 가격이 아니다**.
+ * ⚠️ 금지목록처럼 보이지만 아니다 — 여기 없는 단위가 나오면 **가격으로 보고 검사**하므로
+ *    빠뜨려도 **놓침이 아니라 오탐** 쪽으로 기운다. 오탐은 재요청 비용일 뿐이고
+ *    놓침은 틀린 숫자가 화면에 뜨는 것이다. **덜 위험한 쪽으로 기울여 둔다.**
+ */
+const UNIT_AFTER = /^\s*(%|퍼센트|일선|일봉|일|주|개월|년|회|건|배|명|개|σ|시그마|분|초|위|호가|틱)/;
+
+/** 가격처럼 보이는 숫자만 뽑는다 */
+function priceNumbers(text) {
+  const s = String(text || '');
+  const out = [];
+  for (const m of s.matchAll(/-?\d[\d,]*(?:\.\d+)?/g)) {
+    const raw = m[0];
+    const n = Number(raw.replace(/,/g, ''));
+    if (!Number.isFinite(n)) continue;
+    const after = s.slice(m.index + raw.length);
+    if (UNIT_AFTER.test(after)) continue;          // 단위가 붙었다 = 가격 아님
+    if (Number.isInteger(n) && n >= 1900 && n <= 2100) continue; // 연도
+    if (Math.abs(n) < 1) continue;                  // 비율·확률
+    out.push({ raw, n, index: m.index });
+  }
+  return out;
+}
+
+/** 이 숫자가 어느 기준값을 말하려던 것인가 — 바로 앞 낱말로 짐작한다(교체 문구에만 쓴다) */
+function refHint(text, index) {
+  const before = String(text || '').slice(Math.max(0, index - 14), index);
+  if (/20일선/.test(before)) return 'ma20';
+  if (/60일선/.test(before)) return 'ma60';
+  if (/고점|신고가/.test(before)) return 'high';
+  if (/저점|신저가/.test(before)) return 'low';
+  return null;
+}
+
+/** 검사 대상 필드 — 모델이 쓴 산문만 본다(코드가 채운 자리는 제외) */
+const FIELDS = ['scenarioUp', 'scenarioDown', 'rationale', 'risk'];
+
+/**
+ * 보유·후보 종목 산문에서 **기준값과 동떨어진 가격 수치**를 찾는다.
+ *
+ * @param {Array} positions  보고서의 positions
+ * @param {Object} refBySymbol  { SYM: {last, ma20, ma60, swingHigh, swingLow} }
+ * @param {number} factor  허용 배수(기본 2.5 — 20·60일선·52주 고저가 전부 이 안에 든다)
+ */
+function findPriceOutliers(positions = [], refBySymbol = {}, { factor = 2.5 } = {}) {
+  const hits = [];
+  for (const p of positions || []) {
+    // ⚠️ 코드가 채운 자리는 **모델이 쓴 글이 아니다** — 검사하면 자기 글을 검사하는 것이다
+    if (p?._codeFilled) continue;
+    const sym = String(p?.symbol || '').toUpperCase();
+    const ref = refBySymbol[sym];
+    const cur = Number(ref?.last);
+    // ⚠️ 기준이 없으면 **통과가 아니라 미검사**다 — 호출자가 셀 수 있게 따로 돌려준다
+    if (!(cur > 0)) continue;
+    for (const f of FIELDS) {
+      const text = p?.[f];
+      if (!text) continue;
+      for (const { raw, n, index } of priceNumbers(text)) {
+        const a = Math.abs(n);
+        if (a <= cur * factor && a >= cur / factor) continue;
+        hits.push({
+          symbol: sym, field: f, raw, value: n, current: cur,
+          ratio: Math.round((a / cur) * 100) / 100,
+          hint: refHint(text, index),
+        });
+      }
+    }
+  }
+  return hits;
+}
+
+/** 기준값이 없어 **검사하지 못한** 종목 — 0건을 "통과" 로 읽지 않기 위해 함께 센다 */
+function unverifiable(positions = [], refBySymbol = {}) {
+  return (positions || [])
+    .filter((p) => p && !p._codeFilled)
+    .map((p) => String(p.symbol || '').toUpperCase())
+    .filter((s) => !(Number(refBySymbol[s]?.last) > 0));
+}
+
+/** 모델에게 돌려줄 문구 — **맞는 값을 함께 준다**(거부만 하면 같은 답을 또 낸다) */
+function retryNote(hits, refBySymbol) {
+  const bySym = new Map();
+  for (const h of hits) {
+    if (!bySym.has(h.symbol)) bySym.set(h.symbol, []);
+    bySym.get(h.symbol).push(h);
+  }
+  const out = ['## 🔴 직전 답변에 **제공하지 않은 가격**이 들어갔습니다 — 다시 답하세요'];
+  for (const [sym, list] of bySym) {
+    const r = refBySymbol[sym] || {};
+    const fmt = (v) => (Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '-');
+    out.push(
+      `- **${sym}**: ${list.map((h) => `\`${h.raw}\`(${h.field})`).join(', ')} 는 현재가 ${fmt(r.last)} 의 `
+      + `${list[0].ratio}배 수준입니다. 이 종목의 실제 값은 `
+      + `현재가 ${fmt(r.last)} · 20일선 ${fmt(r.ma20)} · 60일선 ${fmt(r.ma60)}`
+      + (r.swingLow != null || r.swingHigh != null ? ` · 최근20일 스윙 ${fmt(r.swingLow)}~${fmt(r.swingHigh)}` : '')
+      + ' 입니다.'
+    );
+  }
+  out.push('**위 숫자만** 인용하세요. 다른 종목·지수의 값을 가져오지 마세요.');
+  return out.join('\n');
+}
+
+/**
+ * 재요청까지 실패하면 **그 문장을 코드가 교체한다.**
+ * ⚠️ 조용히 지우지 않는다 — 무엇이 일어났는지 화면에 적는다(사용자가 이유를 알아야 한다).
+ * ⚠️ 코드가 "지어내는" 것이 아니다 — 쓰는 값은 **우리가 모델에게 준 바로 그 값**이다.
+ */
+function replaceWithFacts(position, ref) {
+  const fmt = (v) => (Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '-');
+  return {
+    ...position,
+    scenarioUp: `20일선 ${fmt(ref?.ma20)} 회복 시 반등 시도 (코드 대체 — 모델이 제공하지 않은 수치를 썼습니다)`,
+    scenarioDown: `60일선 ${fmt(ref?.ma60)} 이탈 시 추가 하락 (코드 대체 — 모델이 제공하지 않은 수치를 썼습니다)`,
+    _priceFabricated: true,
+  };
+}
+
+module.exports = {
+  priceNumbers, findPriceOutliers, unverifiable, retryNote, replaceWithFacts, refHint,
+  UNIT_AFTER, FIELDS,
+};

@@ -4,6 +4,8 @@ const orderService = require('./orderService');
 const toss = require('./tossClient');
 const stockIdentity = require('./stockIdentity');
 const mcp = require('./mcpClient');
+// 🔴 모델이 지어낸 가격을 거르는 검증 단계 (2026-10-02)
+const prose = require('./proseNumbers');
 const rating = require('./stockRating');
 const activity = require('./activityLog');
 const telegram = require('./telegramService');
@@ -1947,6 +1949,82 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
         dataGaps: retried.dataGaps.length ? retried.dataGaps : report.dataGaps,
         proposals: retried.proposals.length ? retried.proposals : report.proposals,
       };
+    }
+  }
+
+  /**
+   * 🔴 **모델이 지어낸 가격을 통과시키지 않는다** (2026-10-02 라이브 실사고 → 사용자 지시
+   *    *"지어내면 안되지. 내부 검증 단계를 거쳐."*).
+   *
+   * 15:30 KRX 마감 회차에서 프롬프트는 `QLD 현재 96.84 · 20일선 92.69` 를 **줬는데**
+   * 모델이 `"20일선(약 806)"` 이라고 썼다(실제가의 **8배**). RAM 은 13.67 → 46.10.
+   * 텔레그램 요약엔 안 갔지만 **화면 시나리오 줄에 그대로 떴다** — 사용자가
+   * *"806까지 회복하면"* 으로 읽으면 완전히 틀린 판단을 한다.
+   *
+   * ★ 프롬프트에는 *"근거 없는 수치는 쓰지 않습니다"* 가 **이미 있었고 안 지켜졌다.**
+   *   ⇒ 이 워크스페이스의 규율대로 **코드가 거부하고 이유를 다음 프롬프트에 돌려준다.**
+   *
+   * 3단: ①검출 → ②맞는 값을 들고 **한 번** 재요청 → ③그래도 틀리면 **코드가 사실로 교체**.
+   * ⚠️ 재요청은 한 번뿐이다 — 무한히 되물으면 분석 한 번이 예산을 다 태운다.
+   * ⚠️ 교체본은 **우리가 모델에게 준 값**으로만 쓴다(코드도 지어내지 않는다).
+   */
+  {
+    const refBySymbol = {};
+    for (const [sym, t] of Object.entries(tech || {})) {
+      if (t && Number(t.last) > 0) refBySymbol[String(sym).toUpperCase()] = t;
+    }
+    const outliers = prose.findPriceOutliers(report.positions, refBySymbol);
+    const notChecked = prose.unverifiable(report.positions, refBySymbol);
+    // ⚠️ **검사 못 한 것을 통과로 보여주지 않는다** — 0건이 "다 맞았다" 가 아닐 수 있다
+    logInfo('analyst.prose_price_check', {
+      checked: report.positions.filter((p) => !p._codeFilled).length - notChecked.length,
+      outliers: outliers.length, unverifiable: notChecked,
+    });
+    if (outliers.length) {
+      logWarn('analyst.prose_price_outlier', {
+        hits: outliers.map((h) => ({ symbol: h.symbol, field: h.field, raw: h.raw, current: h.current, ratio: h.ratio })),
+      });
+      const fixRaw = await generateStructuredOutput(
+        {
+          systemPrompt: SYSTEM_PROMPT,
+          userPrompt: [lines.join('\n'), '', prose.retryNote(outliers, refBySymbol)].join('\n'),
+          schema: REPORT_SCHEMA,
+          logLabel: 'trade_analyst_price_fix',
+        },
+        { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
+      );
+      const fixed = shapeReport(fixRaw);
+      const stillBad = prose.findPriceOutliers(fixed.positions, refBySymbol);
+      logInfo('analyst.prose_price_retry', { before: outliers.length, after: stillBad.length, got: fixed.positions.length });
+      /**
+       * ⚠️ **재요청이 더 나쁠 수도 있다** — 판단 수가 줄지 않았고 어긋남이 줄었을 때만 채택한다.
+       *    (`positions_short` 재시도가 이미 같은 규율을 쓴다 — 회귀 방지)
+       */
+      if (fixed.positions.length >= report.positions.length && stillBad.length < outliers.length) {
+        report = {
+          ...report,
+          positions: fixed.positions,
+          marketView: fixed.marketView || report.marketView,
+          momentumRead: fixed.momentumRead || report.momentumRead,
+        };
+      }
+      // ③ 그래도 남은 것은 코드가 사실로 교체한다 — 조용히 지우지 않고 표식을 남긴다
+      const remain = prose.findPriceOutliers(report.positions, refBySymbol);
+      if (remain.length) {
+        const badSyms = new Set(remain.map((h) => h.symbol));
+        logWarn('analyst.prose_price_fabricated', {
+          symbols: [...badSyms],
+          action: 'replaced_with_facts',
+          hits: remain.map((h) => ({ symbol: h.symbol, field: h.field, raw: h.raw, current: h.current })),
+        });
+        report = {
+          ...report,
+          positions: report.positions.map((p) =>
+            badSyms.has(String(p.symbol || '').toUpperCase())
+              ? prose.replaceWithFacts(p, refBySymbol[String(p.symbol).toUpperCase()])
+              : p),
+        };
+      }
     }
   }
 

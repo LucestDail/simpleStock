@@ -50,6 +50,8 @@ const orderService = require('./server/orderService');
 const telegram = require('./server/telegramService');
 const analyst = require('./server/analystService');
 const mcp = require('./server/mcpClient');
+// 🔴 정식 종목명 — `/api/news` 가 맨 티커로 떨어지지 않게 (2026-10-02)
+const stockIdentity = require('./server/stockIdentity');
 const analystChat = require('./server/analystChat');
 const analystDream = require('./server/analystDream');
 const tape = require('./server/tickerTapeService');
@@ -513,7 +515,31 @@ app.get('/api/news', async (req, res) => {
   const symbol = String(req.query.symbol || '').trim();
   const name = String(req.query.name || '').trim();
   if (!symbol && !name) return res.status(400).json({ error: 'symbol 또는 name 이 필요합니다.' });
-  const r = await mcp.searchMarketNews([{ symbol, name }], { maxSubjects: 1 });
+  /**
+   * 🔴 **정식 종목명을 여기서 직접 구한다** (2026-10-02 — 사용자: *"이거 왜 안고쳐? 원래 잘 되었잖아"*).
+   *
+   * 브리핑 경로는 `officialName` 이 붙은 보유 items 를 넘기는데, **이 화면 경로는
+   * `{symbol, name}` 둘만** 넘기고 있었다. 미국 ETF 는 토스 `name` 이 곧 티커라
+   * (`QLD` → `QLD`) `buildQuery` 가 맨 티커로 떨어지고 → 가드가 **정당하게 거절**한다
+   * ⇒ 화면에 *"종목명이 없어 검색하지 않았습니다"*. **같은 결손이 한쪽에서만 고쳐져 있었다.**
+   *
+   * ⚠️ *"원래 잘 되었잖아"* 도 맞다 — 10-01 가드 **전**에는 맨 티커로 물어 **아무거나**
+   *    가져왔다(`QLD`→퀸즐랜드 럭비 · `RAM`→PC 램 품귀). 보이기는 했지만 **틀린 뉴스**였다.
+   *
+   * ⚠️ 프론트가 보내게 하지 않는다 — 관심종목·랭킹처럼 **정식명을 모르는 호출자**가 있고,
+   *    그러면 그 경로에서 또 빠진다. **값을 아는 자리(서버)에서 해결한다.**
+   * ⚠️ 못 구해도 검색은 그대로 시도한다 — 가드가 판정하게 두고 여기서 가로채지 않는다.
+   */
+  let officialName = null;
+  if (symbol) {
+    try {
+      const idMap = await stockIdentity.fetchIdentity([symbol]);
+      officialName = idMap.get(symbol)?.englishName || null;
+    } catch (e) {
+      logWarn('news.identity_failed', { symbol, message: e?.message });
+    }
+  }
+  const r = await mcp.searchMarketNews([{ symbol, name, officialName }], { maxSubjects: 1 });
   if (!r.ok) {
     // ⚠️ "뉴스가 없다" 와 "못 받았다" 를 화면이 구분할 수 있게 kind 를 그대로 준다
     return res.status(200).json({ ok: false, error: r.error, kind: r.kind, items: [] });
