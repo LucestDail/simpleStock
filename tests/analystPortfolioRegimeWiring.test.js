@@ -90,3 +90,32 @@ test('🔴 현금 과다도 **내 포트폴리오** 국면으로 잡힌다', asy
   ], 9000), { useWebSearch: false });
   assert.match(prompt, /현금 과다/, '현금 90% 인데 기회비용 매뉴얼이 안 떴다');
 });
+
+/**
+ * 🔴 **괴리를 코드가 빼서 준다** — 2026-10-02 09:04 라이브 실측
+ *
+ * 레버리지 합계 **90.7%** 인데 발동 매뉴얼은 *"레버리지 0~10%"* 를 말했다.
+ * 괴리가 80%p 인데 **제안이 0건**(`model_proposed_none`)이었다 —
+ * 현재 비중과 기준 배분을 **따로** 주고 뺄셈을 모델에게 맡긴 탓이다.
+ * ⇒ 숫자를 **빼서** 준다. 행동으로 옮기기 쉬운 형태로.
+ */
+test('🔴 레버리지 괴리를 %p 와 금액으로 계산해 준다', async () => {
+  const analyst = fresh();
+  await analyst.analyze(DASH([
+    { symbol: 'QLD', market: 'US', marketValue: 8690, leverageFactor: 2, quantity: 90, lastPrice: 96.5 },
+    { symbol: 'RAM', market: 'US', marketValue: 5600, leverageFactor: 2, quantity: 400, lastPrice: 14 },
+  ], 1375), { useWebSearch: false });
+  assert.ok(prompt, '프롬프트를 못 붙잡았다 — 아래 단언이 공허하다');
+  assert.match(prompt, /레버리지 괴리/, '🔴 괴리를 계산해 주지 않았다 — 모델이 뺄셈을 해야 한다');
+  assert.match(prompt, /\d+(\.\d+)?%p 초과/, '초과분이 %p 로 안 적혔다');
+  assert.match(prompt, /어치 축소가 필요하다/, '금액으로 환산해 주지 않았다');
+  assert.match(prompt, /아무것도 제안하지 않는 것은 답이 아니다/, '0건으로 끝내도 된다고 읽을 여지를 남겼다');
+});
+
+test('오탐 축: 레버리지가 기준 안이면 괴리를 적지 않는다', async () => {
+  const analyst = fresh();
+  await analyst.analyze(DASH([
+    { symbol: 'SPY', market: 'US', marketValue: 5000, leverageFactor: 1, quantity: 5, lastPrice: 1000 },
+  ], 5000), { useWebSearch: false });
+  assert.ok(!/레버리지 괴리/.test(prompt), '레버리지가 0인데 괴리를 적었다');
+});

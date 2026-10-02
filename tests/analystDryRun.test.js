@@ -215,8 +215,19 @@ test('🔴 되물은 결과가 더 적으면 첫 답을 지킨다', async () => 
   ];
   const analyst = fresh();
   const r = await analyst.analyze(HELD, { dryRun: true });
-  assert.equal(r.positions.length, 1, '🔴 빈 재요청으로 덮어썼다');
+  /**
+   * ⚠️ **모델이 실제로 판단한 것**으로 센다 (2026-10-02). 재시도까지 실패하면 코드가
+   *    `_codeFilled` 자리를 채우므로 총 개수로 세면 이 단언이 공허해진다 —
+   *    재요청이 첫 답을 덮어썼는지는 **진짜 판단 쪽**을 봐야 갈린다.
+   */
+  const real = r.positions.filter((p) => !p._codeFilled);
+  assert.equal(real.length, 1, '🔴 빈 재요청으로 덮어썼다');
+  assert.equal(real[0].symbol, 'QLD');
   assert.equal(r.marketView, '첫 시황');
+  // 🔴 그리고 **빠진 종목은 자리가 채워져 화면에서 사라지지 않는다**
+  const filled = r.positions.filter((p) => p._codeFilled);
+  assert.ok(filled.length >= 1, '판단을 못 받은 보유 종목이 보고서에서 통째로 사라졌다');
+  assert.match(filled[0].rationale, /판단 자체가 없습니다/, '"판단 없음" 이 사실대로 안 적혔다');
 });
 
 /** ⚠️ **한 번만** 되묻는다 — 무한히 되물으면 분석 한 번이 예산을 다 태운다 */

@@ -54,7 +54,7 @@
    },
    "steps": [
     "공격 축(tech_broad·semiconductor) 유지·확대 허용 — ⚠️ 배분 상한 없음(사용자 결정 09-24: 비율 규칙 없이 운영)",
-    "현금이 있으면 '매수 후보 기술 위치' 절에서 추세가 선 후보(종가>20일선>60일선)로 **분할 매수 제안을 내라** — 그 절의 숫자가 확신 근거로 충분하다(뉴스가 없어도 된다). confidence 는 LOW/MEDIUM 로 정직하게",
+    "현금이 있으면 '매수 후보 기술 위치' 절에서 추세가 선 후보(종가>20일선>60일선)로 **분할 매수 제안을 내라** — 그 절의 숫자가 확신 근거로 충분하다(뉴스가 없어도 된다). confidence 를 과장하지 말고 정직하게",
     "보유 수익 종목은 손절선을 끌어올린다(스윙로우 갱신 시 예약 매도 갱신 제안)"
    ],
    "_categoriesNote": "steps 는 tech_broad·semiconductor 만 지목하지만 modelPortfolio 가 SPY·SSO(sp_broad)·SCHD(dividend)·TQQQ/UPRO(sp_broad) 를 **기준 배분으로 보여준다** — 그 둘이 빠지면 프롬프트가 '배당 SCHD 0~10%' 라고 가리키면서 동시에 '목록 밖 티커는 거부한다' 고 막는 모순이 된다(2026-10-01). 기존 두 키를 앞에 두어 후보 우선순위는 종전 그대로다.",
@@ -90,7 +90,7 @@
     "tech_broad",
     "semiconductor",
     "staples",
-    "healthcare",
+    "healthcare_pharma",
     "gold",
     "dividend"
    ],
@@ -121,7 +121,7 @@
    "categories": [
     "inverse_hedge",
     "staples",
-    "healthcare",
+    "healthcare_pharma",
     "bonds",
     "gold"
    ],
@@ -174,7 +174,7 @@
     "kr_broad"
    ],
    "modelPortfolio": {
-    "1배 광범위(QQQ/SPY, KR 이면 069500)": "단계 금액 전부",
+    "1배 광범위(QQQ/SPY · 한국 시장이면 069500)": "단계 금액 전부",
     "_설명": "VIX 20+/25+/30+/35+ 도달 시 가용 현금의 10/20/30/40% 를 지정가 분할 — 공포에 사는 규칙. 레버리지 진입은 밴드 3(30+)부터 소액"
    },
    "priority": 94
@@ -191,7 +191,7 @@
    ],
    "categories": [
     "defense",
-    "energy",
+    "energy_oil_gas",
     "gold"
    ],
    "modelPortfolio": {
@@ -220,8 +220,8 @@
     "short_bonds",
     "tech_broad",
     "semiconductor",
-    "energy",
-    "financials"
+    "energy_oil_gas",
+    "financials_banks"
    ],
    "modelPortfolio": {
     "단기국채(SHY) — 현금 대용": "20~35%",
@@ -265,10 +265,10 @@
    ],
    "categories": [
     "short_bonds",
-    "financials",
+    "financials_banks",
     "gold",
     "tech_broad",
-    "energy"
+    "energy_oil_gas"
    ],
    "modelPortfolio": {
     "단기국채(SHY)": "15~30%",
@@ -305,8 +305,8 @@
     "⚠️ 금리 하락 + 신용 경색 조합은 '완화' 가 아니라 **위험회피**다 — 그때는 이 매뉴얼이 아니라 credit_stress 를 따른다."
    ],
    "categories": [
-    "reits",
-    "utilities",
+    "real_estate_reits",
+    "utilities_sector",
     "bonds",
     "dividend",
     "tech_broad"
@@ -388,7 +388,7 @@
    "categories": [
     "short_bonds",
     "staples",
-    "healthcare",
+    "healthcare_pharma",
     "gold"
    ],
    "modelPortfolio": {
@@ -470,7 +470,7 @@
     "⚠️ 물가연동채(TIPS)는 '인플레 헤지' 지만 **실질금리가 오르면 같이 내린다** — 이 국면에서 TIPS 매수는 함정이다(2026-10-02 실측: 하락)."
    ],
    "categories": [
-    "energy",
+    "energy_oil_gas",
     "gold",
     "short_bonds",
     "staples"
@@ -519,7 +519,7 @@
     "tech_broad",
     "semiconductor",
     "sp_broad",
-    "reits",
+    "real_estate_reits",
     "dividend"
    ],
    "modelPortfolio": {
@@ -763,7 +763,7 @@
    "categories": [
     "short_bonds",
     "staples",
-    "healthcare",
+    "healthcare_pharma",
     "megacap_quality"
    ],
    "modelPortfolio": {
@@ -836,7 +836,7 @@
    "categories": [
     "short_bonds",
     "gold",
-    "energy",
+    "energy_oil_gas",
     "staples"
    ],
    "modelPortfolio": {
@@ -874,8 +874,8 @@
    "categories": [
     "emerging",
     "materials_industrials",
-    "energy",
-    "financials"
+    "energy_oil_gas",
+    "financials_banks"
    ],
    "modelPortfolio": {
     "신흥국": "10~20%",
@@ -973,7 +973,7 @@
     "trend": "up"
    },
    "steps": [
-    "KR 과 US 추세가 갈리면 **같은 매뉴얼을 두 시장에 적용하지 않는다** — 발동 근원(via)을 보고 그 시장에만 적용한다.",
+    "국장과 미장의 추세가 갈리면 **같은 매뉴얼을 두 시장에 적용하지 않는다** — 발동 근원(via)을 보고 그 시장에만 적용한다.",
     "원화 자산은 **환율**이 수익률의 절반이다. 달러 강세면 원화 환산이 부풀려 보인다.",
     "⚠️ 국장 종목은 **원화 현금**이 있어야 산다 — 달러 현금으로 제안하지 마라."
    ],
@@ -986,7 +986,7 @@
    },
    "cases": [
     {
-     "trigger": "KR 상승·US 하락(또는 반대)",
+     "trigger": "국장 상승·미장 하락(또는 반대)",
      "action": "각 시장에 해당 매뉴얼만 적용",
      "invalidate": "두 시장이 다시 같이 움직이면 디커플링 종료"
     }
@@ -1012,7 +1012,7 @@
     "⚠️ 원자재 ETF 는 **롤 비용**이 있다 — 현물 가격이 올라도 ETF 가 못 따라갈 수 있다."
    ],
    "categories": [
-    "energy",
+    "energy_oil_gas",
     "materials_industrials",
     "gold",
     "agri"

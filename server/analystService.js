@@ -1169,8 +1169,14 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   /**
    * 🔴 **현재 비중 vs 국면 기준선** — 괴리를 모르면 리밸런싱은 원리상 불가능하다.
    */
+  /**
+   * 🔴 **한 번만 계산해 함수 전체에서 쓴다** (2026-10-02). 처음엔 이 블록 안에서만 만들었는데,
+   *    뒤에 오는 국면 블록이 그 값을 **못 봤다**(블록 스코프 + 순서 역전) — 레버리지 괴리
+   *    계산이 `active is not defined` 로 **조용히 실패**하고 있었다. 테스트가 잡았다.
+   */
+  const weights = portfolioWeights(items, summary, require('./regimeService').readCatalog());
   {
-    const w = portfolioWeights(items, summary, require('./regimeService').readCatalog());
+    const w = weights;
     if (w) {
       lines.push('', '## 현재 비중 (현금 포함 · 코드 계산 — 이 숫자를 그대로 써라)');
       lines.push(`- 종목: ${w.holdings.map((h) => `${h.symbol} ${h.pct}%${h.leverage > 1 ? `(${h.leverage}배)` : ''}`).join(' · ')}`);
@@ -1344,7 +1350,6 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
      *    모름을 "맞다" 로 읽지 않는 규율은 여기도 같다.
      */
     let active = scenarios;
-    const weights = portfolioWeights(items, summary, regime.readCatalog());
     if (weights) {
       try {
         active = regime.matchScenarios({ ...state, portfolio: weights }, regime.readPlaybook());
@@ -1352,6 +1357,34 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     }
     const sec = regime.promptSection(state, active);
     if (sec) lines.push('', sec);
+    /**
+     * 🔴 **괴리를 코드가 빼서 준다** (2026-10-02 09:04 라이브 실측).
+     *    레버리지 **90.7%** 인데 발동 매뉴얼은 *"레버리지 0~10%"* 를 말했고, 괴리가 80%p 인데
+     *    **제안이 0건**(`model_proposed_none`)이었다 — 현재 비중과 기준 배분을 **따로** 주고
+     *    뺄셈을 모델에게 맡긴 탓이다.
+     * ⚠️ 파싱되는 것만 한다 — 못 읽으면 **아무 말도 안 한다**(지어내지 않는다).
+     * ⚠️ 기준이 여럿이면 **가장 엄한 것**을 쓴다(위험을 줄이는 쪽이 이긴다는 우선순위와 같은 방향).
+     */
+    if (weights) {
+      const targets = [];
+      for (const sc of active || []) {
+        for (const [k, v] of Object.entries(sc.modelPortfolio || {})) {
+          if (k === '_설명' || !/레버리지/.test(k)) continue;
+          const nums = String(v).match(/\d+(?:\.\d+)?/g);
+          if (nums && nums.length) targets.push({ scenario: sc.name, max: Math.max(...nums.map(Number)) });
+        }
+      }
+      if (targets.length) {
+        const tight = targets.reduce((x, y) => (y.max < x.max ? y : x));
+        const over = Math.round((weights.leveragePct - tight.max) * 10) / 10;
+        if (over > 0) {
+          lines.push('', `🔴 **레버리지 괴리: 현재 ${weights.leveragePct}% vs 기준 ${tight.max}% — ${over}%p 초과**`
+            + ` (${tight.scenario}). 기준선까지 줄이려면 약 ${Math.round((over / 100) * weights.total)} 어치 축소가 필요하다.`);
+          lines.push('   ⚠️ 한 번에 다 팔라는 뜻이 아니다 — **분할 축소 제안**을 내고, 추세가 강하면 속도를 늦춰라.'
+            + ' 다만 **아무것도 제안하지 않는 것은 답이 아니다.**');
+        }
+      }
+    }
     // 🔴 매수 후보 실데이터 — 이름만 주면 모델이 정직하게 침묵한다(시뮬 E: 현금 있어도 제안 0)
     const cand = await regime.candidateSection(active, {
       heldSymbols: items.map((i) => i.symbol),
@@ -1831,6 +1864,39 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     );
     const retried = shapeReport(retryRaw);
     logInfo('analyst.retry_done', { before: report.positions.length, after: retried.positions.length });
+    /**
+     * 🔴 **재시도까지 실패하면 코드가 자리를 채운다** (2026-10-02 라이브 실측).
+     *
+     * 09:04 KRX 개장 회차: 프롬프트에 *"하나도 빠뜨리지 말라"* 를 넣고 재시도까지 돌렸는데
+     * **두 번 다 O(리얼티 인컴)를 뺐다**(`positions_short missing:["O"]` → `before:2 after:2`).
+     * ⇒ *"프롬프트로 못 고치는 것을 프롬프트로 고치려 하지 말 것"* — 두 번 확인됐다.
+     *
+     * ⚠️ **판단을 지어내지 않는다.** 채우는 것은 **"판단을 못 받았다" 는 사실**이다.
+     *    stance=HOLD(행동 없음) · confidence=LOW · rationale 에 그대로 적는다.
+     *    사용자는 적어도 **그 종목이 방치되지 않았다**는 것을 보게 된다.
+     * ⚠️ 이 자리는 `proposals` 를 만들지 않는다 — 판단이 없는데 주문을 낼 수는 없다.
+     */
+    {
+      const got = new Set((retried.positions.length > report.positions.length ? retried : report)
+        .positions.map((p) => String(p.symbol || '').toUpperCase()));
+      const stillMissing = heldSymbols.filter((sym) => !got.has(sym));
+      if (stillMissing.length) {
+        logWarn('analyst.positions_filled_by_code', { symbols: stillMissing, after: 'retry' });
+        const filler = stillMissing.map((sym) => ({
+          symbol: sym, stance: 'HOLD', confidence: 'LOW',
+          // 🔴 **코드가 채운 자리**라는 표식 — 아래 누락 경고가 이걸 보고 **여전히 짖는다**.
+          //    채웠다고 경고까지 사라지면 "판단을 받았다" 와 "자리만 채웠다" 가 같아진다.
+          _codeFilled: true,
+          rationale: '🔴 모델이 두 번(본 요청·재요청) 모두 이 종목 판단을 내지 않았습니다 — '
+            + '판단이 "보유 유지" 라서가 아니라 **판단 자체가 없습니다.** 직접 확인이 필요합니다.',
+          risk: '판단을 받지 못해 리스크를 평가하지 못했습니다.',
+          evidence: [], entry: null, stop: null, target: null,
+          scenarioUp: '', scenarioDown: '',
+        }));
+        if (retried.positions.length > report.positions.length) retried.positions.push(...filler);
+        else report = { ...report, positions: [...report.positions, ...filler] };
+      }
+    }
     // 되물어서 더 잡혔을 때만 바꾼다. 시황은 **있는 쪽을** 남긴다(재요청이 시황을 비우기도 한다)
     if (retried.positions.length > report.positions.length) {
       report = {
@@ -2257,7 +2323,15 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
      * ★ 0건은 잡으면서 부분 누락은 못 잡는 모양 — 이 저장소가 반복해 밟은 자리다.
      *    **집합의 차**로 본다(건수 비교가 아니라).
      */
-    const judged = new Set((report.positions || []).map((p) => String(p.symbol || '').toUpperCase()));
+    /**
+     * ⚠️ **코드가 채운 자리는 "판단 받음" 이 아니다** (2026-10-02). 재시도까지 실패하면
+     *    코드가 `_codeFilled` 항목을 넣어 **종목이 화면에서 사라지지 않게** 한다 —
+     *    그런데 그걸 판단으로 세면 경고가 꺼지고, *"판단을 받았다"* 와 *"자리만 채웠다"* 가
+     *    같아진다. 이 저장소가 반복해 밟은 *"검사 안 한 것을 통과로 보여주지 않는다"* 다.
+     */
+    const judged = new Set((report.positions || [])
+      .filter((p) => !p._codeFilled)
+      .map((p) => String(p.symbol || '').toUpperCase()));
     const missed = heldSymbols.filter((sym) => !judged.has(String(sym).toUpperCase()));
     if (missed.length) {
       lines.push('', `⚠️ 보유 ${missed.length}종(${missed.join('·')}) 판단이 빠졌습니다`
