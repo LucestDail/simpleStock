@@ -210,3 +210,77 @@ button:focus:not(:focus-visible) {
 *::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ──────────────────────────────────────────────────────────────────
+ * 🔴 **라이트 테마** (2026-10-02 — 와이어프레임 수용)
+ *
+ * 와이어프레임(`종합 주식·ETF 트래커 와이어프레임.html`)은 **밝은 바탕에 흰 카드**이고
+ * 상단 우측에 **테마 토글(☀)** 이 있다. 종전 화면은 **다크 고정**이었다 —
+ * 사용자: *"와이어프레임 디자인이 하나도 반영 안된거 같은데?"* 맞는 지적이었다.
+ *
+ * ⚠️ 색은 **토큰만** 덮는다. 컴포넌트 CSS 를 건드리면 두 테마가 갈라지고,
+ *    그때부터 한쪽만 고치는 일이 시작된다(이 저장소가 반복해 배운 축).
+ * ⚠️ 상승/하락 색은 **라이트에서 더 진하게** — 흰 바탕에 파스텔은 안 읽힌다.
+ * ────────────────────────────────────────────────────────────────── */
+:root[data-theme='light'] {
+  --color-primary: #2f6df6;
+  --color-primary-hover: #2a62dd;
+  --color-primary-active: #2455c2;
+  --color-primary-soft: rgba(47, 109, 246, 0.10);
+  --color-primary-line: rgba(47, 109, 246, 0.34);
+  --color-on-primary: #ffffff;
+
+  --color-ai: #7c3aed;
+  --color-ai-soft: rgba(124, 58, 237, 0.08);
+  --color-ai-line: rgba(124, 58, 237, 0.26);
+
+  /* 바탕은 살짝 따뜻한 회색, 카드는 순백 — 와이어프레임 그대로 */
+  --color-canvas: #f4f4f2;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-surface-sunken: #fafaf9;
+  --color-surface-hover: rgba(0, 0, 0, 0.035);
+
+  --color-hairline: rgba(0, 0, 0, 0.09);
+  --color-hairline-soft: rgba(0, 0, 0, 0.055);
+  --color-hairline-strong: rgba(0, 0, 0, 0.16);
+
+  --color-ink: #16181d;
+  --color-body: #41464f;
+  --color-muted: #6b7280;
+  --color-faint: #9aa1ac;
+
+  /**
+   * 🔴 **손익 색의 의미는 바꾸지 않았다** (2026-10-02 — 의도적 이탈).
+   *    와이어프레임은 **한국 관례**(상승=빨강 ▲6.01% · 하락=파랑 ▼1.19%)인데
+   *    현재 앱은 **미국 관례**(상승=초록 · 하락=빨강)로 돌고 있다.
+   *    ⚠️ 손익 색을 **말없이 뒤집으면 손실을 이익으로 오독**할 수 있다 — 실제 돈이 걸린
+   *       화면에서 그건 디자인 선택이 아니라 사고다. **사용자 확인 전까지 의미는 유지**하고,
+   *       밝은 바탕에서 읽히도록 **채도·명도만** 라이트용으로 낮춘다.
+   *    ⇒ 바꾸려면 이 네 줄만 교체하면 된다(한 곳에 모아 둔 이유).
+   */
+  --color-up: #0e8a5f;
+  --color-up-soft: rgba(14, 138, 95, 0.10);
+  --color-down: #d1453b;
+  --color-down-soft: rgba(209, 69, 59, 0.10);
+  --color-flat: #6b7280;
+  --color-flat-soft: rgba(0, 0, 0, 0.05);
+
+  --color-danger: #d1453b;
+  --color-danger-soft: rgba(209, 69, 59, 0.09);
+  --color-warn: #b8701a;
+  --color-warn-soft: rgba(184, 112, 26, 0.10);
+  --color-open: #15803d;
+  --color-open-soft: rgba(21, 128, 61, 0.10);
+  --color-closed-soft: rgba(0, 0, 0, 0.05);
+
+  --color-bg: #f4f4f2;
+  --color-border: rgba(0, 0, 0, 0.09);
+  --color-surface-dark: #16181d;
+  --color-surface-strong: #0f1115;
+  --color-on-dark: #ffffff;
+  --color-on-dark-soft: rgba(255, 255, 255, 0.72);
+
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.05), 0 1px 1px rgba(0, 0, 0, 0.03);
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.10);
+}

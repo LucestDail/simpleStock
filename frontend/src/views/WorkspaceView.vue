@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import PriceChart from '../components/PriceChart.vue';
 import SettingsPanel from '../components/SettingsPanel.vue';
 import OrderTicket from '../components/OrderTicket.vue';
+import { useTheme } from '../composables/useTheme';
 import { useWatchlist } from '../composables/useWatchlist';
 import { useUi } from '../composables/useUi';
 import { formatMarketClock } from '../lib/marketClock';
@@ -27,6 +28,7 @@ const {
 } = useWatchlist();
 const { notify, confirmAction } = useUi();
 
+const { theme, toggle: toggleTheme } = useTheme();
 const clock = ref(formatMarketClock());
 const newGroupName = ref('');
 const tickerInputs = ref({}); // groupId -> { query, market }
@@ -862,6 +864,36 @@ const topWeightTone = computed(() => {
   return p >= 50 ? 'alloc__flag--danger' : p >= 35 ? 'alloc__flag--warn' : 'alloc__flag--ok';
 });
 
+/**
+ * 🔴 **장 세션을 말로 쓴다** (2026-10-02 — 와이어프레임 상단 바 `● KR 정규장 12:24`).
+ *    종전엔 `KST 12:24` + 색 점뿐이라 **점 색을 외워야** 열렸는지 알 수 있었다.
+ * ⚠️ 모르는 상태를 "마감" 으로 적지 않는다 — 결손과 마감은 다르다.
+ */
+const SESSION_KO = { open: '정규장', regular: '정규장', pre: '프리장', after: '애프터', closed: '마감' };
+function sessionWord(key) {
+  const st = sessions.value?.[key]?.state;
+  return st ? (SESSION_KO[st] || st) : '확인 중';
+}
+/** 🔴 상단에서 **승인 대기 건수**를 바로 본다 — 와이어프레임의 `매매 제안 ❷` */
+const pendingCount = computed(() => proposals.value.filter((p) => p.status === 'PENDING').length);
+
+/**
+ * ⚠️ **아직 레이어가 아니다** (2026-10-02). 와이어프레임 ⑧ 은 *"상시 패널 → 상단 'AI 대화'
+ *    버튼으로 여는 우측 레이어"* 인데, 지금은 **그 패널로 데려가 입력에 포커스**만 한다.
+ *    레이어화는 채팅 전체를 옮기는 작업이라 이번 범위에서 뺐다 —
+ *    버튼이 **아무것도 안 하는 것**보다는 데려가는 쪽이 낫고, 안 한 것은 적어 둔다.
+ */
+function focusChat() {
+  // ⚠️ 선택자는 **실제 마크업에서 확인**했다 — 추측으로 두면 버튼이 조용히 아무것도 안 한다
+  const panel = document.querySelector('section.chat');
+  const el = panel?.querySelector('input.input');
+  panel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (el && typeof el.focus === 'function') setTimeout(() => el.focus(), 350);
+}
+function focusProposals() {
+  document.querySelector('.props')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 const leveragePct = computed(() => Number(portfolio.value?.weights?.leveragePct));
 const leverageWord = computed(() => {
   const p = leveragePct.value;
@@ -914,9 +946,28 @@ async function loadPortfolio() {
  *  - `converted:true` 면 계산값이므로 `≈` 를 붙인다
  *  - `krw:null` 이면 **환율을 모른다**는 뜻이다. 0 으로 보여주지 않는다("0원" 으로 읽힌다)
  */
+/**
+ * 🔴 **표시 통화 토글** (2026-10-02 — 와이어프레임 내 자산 우측 `₩ | $`).
+ *    달러 자산을 들고 있으면 **원화 환산은 환율 효과가 섞인다.** 종전엔 원화로만 보여서
+ *    "달러로는 얼마인가" 를 볼 방법이 없었다.
+ * ⚠️ 환율을 못 읽어 `usd` 가 없으면 **원화로 떨어진다** — 빈칸을 보여주지 않는다.
+ */
+const displayCcy = ref('KRW');
+/**
+ * 손실 구간 보유 — 리스크 체크에 **그 종목만** 올린다.
+ * ⚠️ 전부 올리면 수익 종목까지 섞여 "리스크" 라는 말이 흐려진다.
+ */
+const lossHoldings = computed(() => (portfolio.value?.items || []).filter((h) => Number(h.profitRate) < -10));
+
+/** 종목별 비중 — **계산은 서버 한 곳**(portfolioWeights)에서 온다(두 벌이면 갈라진다) */
+function weightOf(sym) {
+  const h = portfolio.value?.weights?.holdings?.find((x) => x.symbol === String(sym).toUpperCase());
+  return h ? `${h.pct}%` : '—';
+}
 function krwCell(p) {
   if (!p) return '—';
-  if (p.krw == null) return p.usd != null ? `$${Number(p.usd).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '—';
+  if (displayCcy.value === 'USD' && p.usd != null) return money(p.usd, 'USD');
+  if (p.krw == null) return p.usd != null ? money(p.usd, 'USD') : '—';
   return `${p.converted ? '≈' : ''}${money(p.krw, 'KRW')}`;
 }
 
@@ -1059,15 +1110,20 @@ onUnmounted(() => {
         ★ 흐르는 값은 **지나가면 못 본다.** 늘 봐야 하는 시간·환율은 **고정 칸**이고,
           훑어보는 지수들만 흐른다. 앞판은 시간까지 흘려보내서 시계 구실을 못 했다.
       -->
+      <!--
+        🔴 **장 상태를 말로** 쓴다 (와이어프레임 `● KR 정규장 12:24` / `● US 마감 23:24 ET`).
+           종전엔 `KST 12:24` + 색 점뿐이라 **점 색을 외워야** 열렸는지 알 수 있었다.
+      -->
       <div class="clockchip">
-        <span class="clockchip__zone">KST</span>
-        <span class="clockchip__time mono-num">{{ clock.kst.time }}</span>
         <span class="dot" :class="`dot--${sessions?.kr?.state || 'closed'}`" aria-hidden="true"></span>
+        <span class="clockchip__zone">KR {{ sessionWord('kr') }}</span>
+        <span class="clockchip__time mono-num">{{ clock.kst.time }}</span>
       </div>
       <div class="clockchip">
-        <span class="clockchip__zone">ET</span>
-        <span class="clockchip__time mono-num">{{ clock.us.time }}</span>
         <span class="dot" :class="`dot--${sessions?.us?.state || 'closed'}`" aria-hidden="true"></span>
+        <span class="clockchip__zone">US {{ sessionWord('us') }}</span>
+        <span class="clockchip__time mono-num">{{ clock.us.time }}</span>
+        <span class="clockchip__zone">ET</span>
       </div>
 
       <!-- 시장 국면 (코드 판정) — 데몬이 5분마다 갱신, 전이는 폰 알림 -->
@@ -1101,11 +1157,31 @@ onUnmounted(() => {
       </div>
 
       <div class="topbar__meta">
-        <!-- ⚠️ 환율은 위 고정 칸으로 옮겼다 — 같은 값을 두 번 두지 않는다 -->
+        <!-- 🔴 **토스 동기화 상태를 상단에도** — 와이어프레임 `토스 동기화 6초 전` -->
+        <span class="clockchip" :class="`clockchip--${portfolioFreshness}`" title="토스 계좌 마지막 동기화">
+          <span class="clockchip__zone">토스 동기화</span>
+          <span class="clockchip__time">{{ portfolioFreshLabel }}</span>
+        </span>
+        <!--
+          🔴 **승인 대기 건수를 상단에서 본다** (와이어프레임 `매매 제안 ❷`).
+             종전엔 우측 패널을 스크롤해야만 알 수 있었다.
+          ⚠️ 0건이면 **버튼 자체를 안 그린다** — `매매 제안 0` 은 매번 뜨는 소음이다.
+        -->
+        <button v-if="pendingCount" class="btn btn--sm btn--primary topbar__pend" @click="focusProposals">
+          매매 제안 <b class="mono-num">{{ pendingCount }}</b>
+        </button>
+        <button class="btn btn--sm topbar__ai" @click="focusChat">AI 대화</button>
         <div class="metric">
           <span class="metric__label">종목</span>
           <span class="metric__value mono-num">{{ totalTickers }}</span>
         </div>
+        <!-- 🔴 테마 토글 — 와이어프레임 상단 우측 ☀ (종전엔 다크 고정이었다) -->
+        <button
+          class="btn btn--icon"
+          :aria-label="theme === 'light' ? '어두운 테마로' : '밝은 테마로'"
+          :title="theme === 'light' ? '어두운 테마로' : '밝은 테마로'"
+          @click="toggleTheme"
+        >{{ theme === 'light' ? '☾' : '☀' }}</button>
         <!-- 🔴 사용자: *"헤더의 설정 버튼 너무 작은데 좀 크기 키워줘"* -->
         <button class="btn btn--icon" aria-label="운영 설정" title="운영 설정" @click="settingsOpen = true">⚙</button>
         <button class="btn btn--icon" :disabled="refreshing" aria-label="시세 갱신" title="시세 갱신" @click="onRefreshMarket">
@@ -1150,6 +1226,11 @@ onUnmounted(() => {
           <span class="assets__sync" :class="`assets__sync--${portfolioFreshness}`">
             TOSS 동기화 · {{ portfolioFreshLabel }}
           </span>
+          <!-- 🔴 와이어프레임 `₩ | $` — 달러 자산은 원화 환산에 **환율 효과가 섞인다** -->
+          <div class="ccy" role="group" aria-label="표시 통화">
+            <button class="ccy__b" :class="{ 'ccy__b--on': displayCcy === 'KRW' }" @click="displayCcy = 'KRW'">₩</button>
+            <button class="ccy__b" :class="{ 'ccy__b--on': displayCcy === 'USD' }" @click="displayCcy = 'USD'">$</button>
+          </div>
           <span v-if="portfolio?.summary?.fx" class="assets__note">
             ≈ USD/KRW {{ Number(portfolio.summary.fx.rate).toLocaleString('ko-KR') }} 환산
           </span>
@@ -1165,7 +1246,8 @@ onUnmounted(() => {
               <span class="kpi__value mono-num">{{ krwCell(portfolio.summary.value) }}</span>
             </div>
             <div class="kpi">
-              <span class="kpi__label">매입금액<template v-if="portfolio.summary.purchase.usd"> · USD 보유</template></span>
+              <!-- 와이어프레임 라벨: "투자원금" — "매입금액" 보다 무엇인지 분명하다 -->
+              <span class="kpi__label">투자원금</span>
               <span class="kpi__value kpi__value--sub mono-num">{{ krwCell(portfolio.summary.purchase) }}</span>
             </div>
             <div class="kpi">
@@ -1254,7 +1336,8 @@ onUnmounted(() => {
             <thead>
               <tr>
                 <th>종목</th><th class="ta-r">수량</th><th class="ta-r">평단</th>
-                <th class="ta-r">현재가</th><th class="ta-r">평가손익</th><th class="ta-r">오늘</th>
+                <th class="ta-r">현재가</th><th class="ta-r">평가금액</th>
+                <th class="ta-r">평가손익</th><th class="ta-r">비중</th><th class="ta-r">오늘</th>
               </tr>
             </thead>
             <tbody>
@@ -1278,10 +1361,27 @@ onUnmounted(() => {
                 <td class="ta-r mono-num">{{ h.quantity }}</td>
                 <td class="ta-r mono-num">{{ money(h.avgPrice, h.currency) }}</td>
                 <td class="ta-r mono-num">{{ money(h.lastPrice, h.currency) }}</td>
+                <!-- 🔴 와이어프레임 `평가금액` 열 — 수량×현재가를 사용자가 암산하게 두지 않는다 -->
+                <td class="ta-r mono-num">{{ money(h.marketValue, h.currency) }}</td>
                 <td class="ta-r mono-num" :class="signClass(h.profit)">
                   {{ money(h.profit, h.currency) }} <small>{{ pct(h.profitRate) }}</small>
                 </td>
+                <!-- 🔴 비중 열 — 리스크 칩의 숫자가 **어느 종목에서 왔는지** 여기서 갈린다 -->
+                <td class="ta-r mono-num">{{ weightOf(h.symbol) }}</td>
                 <td class="ta-r mono-num" :class="signClass(h.dailyRate)">{{ pct(h.dailyRate) }}</td>
+              </tr>
+              <!--
+                🔴 **현금 행** (와이어프레임 내 자산 테이블 맨 아래).
+                   종전엔 현금이 KPI 한 칸에만 있어 **보유와 같은 축으로 비교할 수 없었다** —
+                   "현금이 몇 %인가" 를 보려면 머리로 계산해야 했다.
+              -->
+              <tr v-if="portfolio.weights" class="holdings__row holdings__row--cash">
+                <td><span class="holdings__name">현금</span></td>
+                <td class="ta-r">—</td><td class="ta-r">—</td><td class="ta-r">—</td>
+                <td class="ta-r mono-num">{{ cashCell(portfolio.summary.cash) }}</td>
+                <td class="ta-r">—</td>
+                <td class="ta-r mono-num">{{ portfolio.weights.cashPct }}%</td>
+                <td class="ta-r">—</td>
               </tr>
             </tbody>
           </table>
@@ -1384,11 +1484,41 @@ onUnmounted(() => {
           </p>
 
           <template v-else>
-            <!-- ★ 새 기능이 **실제로 돌았다는 증거**를 화면에 둔다 — 0 이면 스스로 알려준다 -->
-            <p v-if="report.web" class="analyst__src">
-              <template v-if="report.web.ok">웹 검색 {{ report.web.hits }}건 반영 · {{ report.web.tool }}</template>
-              <template v-else>웹 검색 미반영 — {{ report.web.error }}</template>
-            </p>
+            <!--
+              🔴 **메타를 칩으로 묶는다** (와이어프레임 `10.2 09:06 · KRX 개장` `웹 검색 4건`
+                 `잔고 스냅샷 12:24`). 종전엔 산문 두 줄로 흩어져 있어, 이 분석이
+                 **언제·무엇을 보고** 나온 것인지 한눈에 안 들어왔다.
+              ★ 특히 **잔고 스냅샷 시각**이 없으면, 분석이 인용한 수량과 화면 수량이
+                어긋나도 어느 쪽이 낡은 것인지 판정할 수 없다(10-02 실사고의 축).
+            -->
+            <div class="meta">
+              <span v-if="report.at" class="meta__chip">
+                {{ new Date(report.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}
+                <template v-if="report.trigger?.why"> · {{ report.trigger.why }}</template>
+              </span>
+              <span v-if="report.web" class="meta__chip" :class="{ 'meta__chip--warn': !report.web.ok }">
+                <template v-if="report.web.ok">웹 검색 {{ report.web.hits }}건</template>
+                <template v-else>웹 검색 미반영</template>
+              </span>
+              <span v-if="portfolio?.asOf" class="meta__chip">잔고 스냅샷 {{ new Date(portfolio.asOf).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) }}</span>
+            </div>
+            <p v-if="report.web && !report.web.ok" class="analyst__src">웹 검색 미반영 — {{ report.web.error }}</p>
+
+            <!--
+              🔴 **리스크 체크** (와이어프레임 ③ 의 표). 시황 글만 읽으면 *"내 포지션이
+                 지금 어떤 위험에 놓였나"* 가 안 보인다 — 숫자로 못박는다.
+              ⚠️ 비중은 **서버 한 곳**(portfolioWeights)에서 온다. 화면이 따로 계산하면
+                 분석 프롬프트의 숫자와 갈라진다.
+            -->
+            <div v-if="portfolio?.weights" class="risk">
+              <h3 class="panel__h">리스크 체크</h3>
+              <dl class="risk__grid">
+                <div><dt>레버리지 노출</dt><dd class="mono-num" :class="leverageTone">{{ portfolio.weights.leveragePct }}%</dd></div>
+                <div v-if="topWeight"><dt>단일 종목 최대 비중</dt><dd class="mono-num" :class="topWeightTone">{{ topWeight.pct }}% {{ topWeight.symbol }}</dd></div>
+                <div v-for="h in lossHoldings" :key="h.symbol"><dt>{{ h.symbol }} 평단 대비</dt><dd class="mono-num down">{{ pct(h.profitRate) }}</dd></div>
+                <div><dt>현금 비중</dt><dd class="mono-num">{{ portfolio.weights.cashPct }}%</dd></div>
+              </dl>
+            </div>
             <!-- 🔴 **언제·왜 돌았는지** 보여준다 — 자동 실행으로 바뀌었으니 안 그러면 언제 것인지 모른다 -->
             <p v-if="report.at || report.trigger?.why" class="analyst__when">
               <template v-if="report.at">{{ new Date(report.at).toLocaleString('ko-KR') }}</template>
@@ -2266,6 +2396,32 @@ onUnmounted(() => {
 .alloc__flag--ok { border-color: rgba(70,180,120,.45); color: #5fc48f; }
 .alloc__flag--warn { border-color: rgba(230,170,60,.5); color: #e0ad48; }
 .alloc__flag--danger { border-color: rgba(224,96,58,.6); color: #ef7a55; background: rgba(224,96,58,.08); }
+/* 상단 바 — 와이어프레임 `매매 제안 ❷` / `AI 대화` */
+.topbar__pend { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.topbar__pend b { background: rgba(255,255,255,.22); border-radius: 999px; padding: 0 6px; }
+.topbar__ai { white-space: nowrap; }
+/* ₩|$ 토글 — 와이어프레임 내 자산 우측 */
+.ccy { display: inline-flex; border: 1px solid var(--color-hairline-strong); border-radius: var(--rounded-md); overflow: hidden; }
+.ccy__b { background: none; border: 0; color: var(--color-muted); font-size: var(--text-xs); padding: 2px 8px; cursor: pointer; }
+.ccy__b--on { background: var(--color-ink); color: var(--color-surface); }
+/* 현금 행 — 보유와 같은 축에 둔다 */
+.holdings__row--cash { cursor: default; }
+.holdings__row--cash td { color: var(--color-body); }
+/* 분석 메타 칩 · 리스크 체크 — 와이어프레임 ③ */
+.meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--space-xs); }
+.meta__chip {
+  font-size: var(--text-2xs); color: var(--color-body);
+  background: var(--color-flat-soft); border-radius: var(--rounded-pill); padding: 2px 8px;
+}
+.meta__chip--warn { color: var(--color-warn); background: var(--color-warn-soft); }
+.risk { margin-top: var(--space-sm); }
+.risk__grid { display: flex; flex-direction: column; gap: 3px; margin: 4px 0 0; }
+.risk__grid > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: var(--text-xs); }
+.risk__grid dt { color: var(--color-muted); margin: 0; }
+.risk__grid dd { margin: 0; }
+.clockchip--stale .clockchip__time { color: var(--color-warn); }
+.clockchip--error .clockchip__time { color: var(--color-danger); }
+
 /* 동기화 상태 칩 — 와이어프레임 "모듈 상태 규칙" */
 .assets__sync { font-size: var(--text-xs); color: var(--color-muted); }
 .assets__sync--stale { color: #e0ad48; }
