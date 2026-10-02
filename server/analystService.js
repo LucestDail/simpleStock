@@ -2005,7 +2005,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     });
     if (outliers.length || drift.length) {
       if (outliers.length) logWarn('analyst.prose_price_outlier', {
-        hits: outliers.map((h) => ({ symbol: h.symbol, field: h.field, raw: h.raw, current: h.current, ratio: h.ratio })),
+        // ⚠️ `context` 를 함께 — 없으면 **교체된 뒤 오탐인지 가릴 수 없다**(실제로 겪었다)
+        hits: outliers.map((h) => ({ symbol: h.symbol, field: h.field, raw: h.raw, current: h.current, ratio: h.ratio, context: h.context })),
       });
       const fixRaw = await generateStructuredOutput(
         {
@@ -2024,18 +2025,29 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       const fixed = shapeReport(fixRaw);
       const stillBad = prose.findPriceOutliers(fixed.positions, refBySymbol);
       const stillDrift = prose.findSubjectDrift(fixed.positions, knownSyms, nameBySym);
+      /**
+       * 🔴 **`after: 0` 이 "고쳐졌다" 로 읽히면 안 된다** (2026-10-02 라이브에서 드러났다).
+       *    재요청이 어긋남을 0으로 만들어도 **종목 수가 줄면 채택하지 않는다**(회귀 방지).
+       *    실제로 `after:0` 인데 `got:2 < positions:4` 라 버렸고, 로그만 보면
+       *    **고쳐진 것처럼 보였다.** ⇒ **채택 여부와 그 이유를 같은 줄에 적는다.**
+       *    ★ 09-28 *"플래그가 거짓말했다"* 와 같은 가족 — **조용한 것보다 나쁜 것은
+       *      틀린 확신을 주는 것이다.**
+       */
+      const improved = (stillBad.length + stillDrift.length) < (outliers.length + drift.length);
+      const keptCount = fixed.positions.length >= report.positions.length;
       logInfo('analyst.prose_price_retry', {
         before: outliers.length, after: stillBad.length,
         driftBefore: drift.length, driftAfter: stillDrift.length,
-        got: fixed.positions.length,
+        got: fixed.positions.length, had: report.positions.length,
+        adopted: improved && keptCount,
+        why: improved && keptCount ? 'ok' : (!keptCount ? 'fewer_positions' : 'not_improved'),
       });
       /**
        * ⚠️ **재요청이 더 나쁠 수도 있다** — 판단 수가 줄지 않았고 어긋남이 줄었을 때만 채택한다.
        *    (`positions_short` 재시도가 이미 같은 규율을 쓴다 — 회귀 방지)
        */
       // ⚠️ **둘을 합쳐서** 나아졌는지 본다 — 한쪽만 보면 다른 쪽 회귀를 채택한다
-      if (fixed.positions.length >= report.positions.length
-          && (stillBad.length + stillDrift.length) < (outliers.length + drift.length)) {
+      if (keptCount && improved) {
         report = {
           ...report,
           positions: fixed.positions,

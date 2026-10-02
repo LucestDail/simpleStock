@@ -89,11 +89,29 @@ function findPriceOutliers(positions = [], refBySymbol = {}, { factor = 2.5 } = 
       if (!text) continue;
       for (const { raw, n, index } of priceNumbers(text)) {
         const a = Math.abs(n);
-        if (a <= cur * factor && a >= cur / factor) continue;
+        /**
+         * 🔴 **과대만 본다** (2026-10-02 라이브 오탐 → 좁힘).
+         *
+         * 첫 판은 양쪽(`cur*2.5` 초과 **또는** `cur/2.5` 미만)을 봤고 **라이브에서 오탐이 났다**:
+         * QLD(현재 97.49) 산문의 `20` 이 ratio 0.21 로 걸려 **멀쩡했을 수 있는 시나리오가
+         * 코드 문구로 교체됐다.** 작은 정수는 거의 항상 기간·배수·순번이지 가격이 아니다.
+         *
+         * 지금까지 **진짜 이탈 3건이 전부 과대**였다(806 vs 96.84 · 46.10 vs 14.55 ·
+         * 90.97 vs 14.73). 오탐 1건만 과소였다.
+         *
+         * ⚠️ **놓치는 것을 적어 둔다**: *"QLD 가 9.6까지 하락"* 같은 **과소 날조는 안 잡힌다.**
+         *    그래도 이쪽이 맞다 — 이 가드의 처방은 **문장 교체**라, 오탐은 멀쩡한 설명을
+         *    지운다. *"오탐이 해롭다" 와 "놓침이 해롭다" 가 둘 다 참일 때, 처방이 파괴적인
+         *    쪽이면 오탐을 먼저 줄인다.*
+         */
+        if (a <= cur * factor) continue;
         hits.push({
           symbol: sym, field: f, raw, value: n, current: cur,
           ratio: Math.round((a / cur) * 100) / 100,
           hint: refHint(text, index),
+          // ⚠️ **걸린 문맥을 남긴다** — 안 남기면 사후에 오탐인지 가릴 수 없다
+          //    (실제로 QLD 원문이 교체돼 버려 무엇이 걸렸는지 영영 못 봤다).
+          context: String(text).slice(Math.max(0, index - 18), index + raw.length + 14),
         });
       }
     }

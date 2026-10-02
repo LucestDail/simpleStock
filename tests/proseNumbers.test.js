@@ -192,3 +192,29 @@ test('🔴 배선 — analyze() 가 주제 이탈도 실제로 탄다', () => {
   // ⚠️ **둘을 합쳐서** 나아졌는지 보는가 — 한쪽만 보면 다른 쪽 회귀를 채택한다
   assert.match(src, /stillBad\.length \+ stillDrift\.length/, '합산 판정이 없다');
 });
+
+test('🔴 과소는 안 잡는다 — 라이브 오탐(`20` vs 97.49)을 되풀이하지 않는다', () => {
+  const REF = { QLD: { last: 97.49, ma20: 92.72, ma60: 90.14 } };
+  // 작은 정수는 거의 항상 기간·배수·순번이다. 이 가드의 처방이 **문장 교체**라
+  // 오탐은 멀쩡한 설명을 지운다 ⇒ 처방이 파괴적인 쪽이면 오탐을 먼저 줄인다.
+  assert.deepStrictEqual(P.findPriceOutliers([{ symbol: 'QLD', scenarioDown: '20 이평선 이탈 시' }], REF), []);
+  assert.deepStrictEqual(P.findPriceOutliers([{ symbol: 'QLD', scenarioDown: '5 거래일 내 반등' }], REF), []);
+  // 과대는 그대로 잡는다
+  assert.strictEqual(P.findPriceOutliers([{ symbol: 'QLD', scenarioUp: '20일선(약 806) 회복' }], REF).length, 1);
+});
+
+test('⚠️ 걸린 문맥을 남긴다 — 교체된 뒤에는 원문을 못 본다', () => {
+  const REF = { RAM: { last: 14.73 } };
+  const [h] = P.findPriceOutliers([{ symbol: 'RAM', scenarioDown: '90.97 까지 반등 여지' }], REF);
+  assert.ok(h.context && h.context.includes('90.97'), '문맥이 비었다');
+});
+
+test('🔴 재요청 로그가 **채택 여부**를 말한다 — `after:0` 이 "고쳐졌다" 로 읽히면 안 된다', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+  assert.match(src, /adopted:/, '채택 여부가 로그에 없다');
+  assert.match(src, /fewer_positions/, '거부 이유가 로그에 없다');
+  // 채택 판정과 로그가 **같은 값**을 봐야 한다(따로 계산하면 갈라진다)
+  assert.match(src, /if \(keptCount && improved\)/, '판정이 로그와 다른 식을 쓴다');
+});
