@@ -63,3 +63,47 @@ test('🔴 배선 — 호출부가 보유·후보 **둘 다**에서 현재가를
   assert.match(src, /tech\?\.\[String\(ps\.symbol\)\.toUpperCase\(\)\]\?\.last/,
     '🔴 후보 종목 현재가를 안 넘긴다 — UUP 가 정확히 그 경우였다');
 });
+
+/**
+ * 🔴 **괴리가 크면 "먼 가격" 이 아니라 그 종목 가격이 아니다** (2026-10-02 22:07 회차 실측)
+ *
+ * ```
+ * RAM  entry=29.59  stop=28.20  target=31.50   ← RAM 현재가 14.50
+ * ```
+ * 진입이 **실제가의 2배**(+104%)인데 방향 검사는 통과하고 **손익비 1.37 까지 계산돼**
+ * 화면에 떴다. 모델은 **71일 고점(≈28.7)을 진입으로** 썼다 — 근거는 있지만 제안이 아니다.
+ * ★ 틀린 진입으로 낸 rr 은 **"1.37" 이라는 그럴듯한 숫자**가 되어 사용자를 설득한다.
+ *   그게 제일 위험하다.
+ */
+test('🔴 진입이 현재가에서 +104% — 손익비를 내지 않고 사실을 적는다', () => {
+  const t = computeTrade({ side: 'HOLD', entry: 29.59, stop: 28.2, target: 31.5, last: 14.5 });
+  assert.strictEqual(t.entryFar, true);
+  assert.strictEqual(t.rr, null, '🔴 틀린 진입으로 낸 rr 이 사용자를 설득한다');
+  assert.strictEqual(t.rrAfterFee, null);
+  assert.match(t.levelNote || '', /가격대가 맞는지/);
+  assert.strictEqual(t.entryGapPct, 104.07);
+  // ⚠️ 모델이 쓴 값 자체는 **지우지 않는다**
+  assert.ok(t.perShareRisk > 0);
+});
+
+test('⚠️ 오탐 0 — 정당한 ±30% 레벨은 살아 있다', () => {
+  /**
+   * ⚠️ **처음에 쓴 케이스가 틀렸다** — `entry 70 · last 100 · target 84` 는 목표가
+   *    현재가 **아래**라 *"이미 달성"* 판정이 **맞다**(자가 맞고 내 케이스가 틀렸다).
+   *    ⇒ 목표는 **현재가 위**로 둬서 **괴리 축만** 재게 한다. 한 테스트가 두 축을
+   *      섞어 재면 어느 쪽이 걸렸는지 알 수 없다.
+   */
+  for (const [entry, last] of [[92.53, 97.6], [130, 100], [70, 100]]) {
+    const target = Math.max(entry, last) * 1.2;      // 항상 현재가 위
+    const t = computeTrade({ side: 'BUY', entry, stop: entry * 0.95, target, last });
+    assert.ok(!t.entryFar, `정당한 레벨이 죽었다: entry=${entry} last=${last}`);
+    assert.ok(t.rr > 0, `rr 이 사라졌다: entry=${entry} last=${last} → ${JSON.stringify(t)}`);
+  }
+});
+
+test('⚠️ 상한은 설정으로 바꿀 수 있고 **기본이 넉넉하다**', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
+  assert.match(src, /ANALYST_ENTRY_GAP_MAX_PCT/, '운영에서 조절할 수 없으면 오탐 시 코드를 고쳐야 한다');
+  assert.match(src, /\|\| 50;/, '기본값이 좁으면 정당한 레벨을 죽인다');
+});

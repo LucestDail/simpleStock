@@ -688,6 +688,12 @@ function summarizeCandles(rows) {
  *   달성된 목표로 계산한 rr 은 **거짓 확신**이다.
  * ⚠️ `last` 를 못 구하면 **검사하지 않는다**(통과가 아니라 미검사) — `levelNote` 가 안 붙는다.
  */
+/**
+ * 진입가가 현재가에서 이만큼 벗어나면 **가격대 자체를 의심한다**(2026-10-02).
+ * ⚠️ 넉넉히 잡는다 — 정당한 레벨을 죽이는 쪽이 더 해롭다(관측 오류는 +104% 로 한참 밖).
+ */
+const ENTRY_GAP_MAX_PCT = Number(process.env.ANALYST_ENTRY_GAP_MAX_PCT) || 50;
+
 function computeTrade({ side, entry, stop, target, riskBudget, costRate, last }) {
   const e = Number(entry);
   const s2 = Number(stop);
@@ -709,7 +715,29 @@ function computeTrade({ side, entry, stop, target, riskBudget, costRate, last })
    */
   const px = Number(last);
   const hasPx = Number.isFinite(px) && px > 0;
-  if (hasPx) out.entryGapPct = round2(((e - px) / px) * 100);
+  if (hasPx) {
+    out.entryGapPct = round2(((e - px) / px) * 100);
+    /**
+     * 🔴 **괴리가 크면 그건 "먼 가격" 이 아니라 그 종목 가격이 아니다** (2026-10-02 실측).
+     *
+     * 22:07 회차: `RAM entry=29.59 stop=28.20 target=31.50` — **RAM 현재가는 14.50** 이다.
+     * 진입이 **실제가의 2배**(+104%)인데 방향 검사(`stop<entry<target`)는 통과하고
+     * **손익비 1.37 까지 계산돼** 화면에 떴다. 사용자: *"진입 29? 손절 28? 뭔 말도 안 되는 수치"*
+     *
+     * 왜 29.59 가 나왔나: 프롬프트가 *"스윙 고저를 근거로"* 라 했고, RAM 의 71일 고점이
+     * 약 28.7 이다 — 모델이 **고점을 진입으로** 썼다. 근거는 있지만 **현재가에서 2배 위**를
+     * 진입으로 삼는 것은 제안이 아니다.
+     *
+     * ⚠️ 상한은 **50%** 로 넉넉히 둔다 — 급등락 종목에서 정당한 ±30% 레벨을 죽이면
+     *    가드가 제품을 해친다. 관측된 오류는 **+104%** 로 한참 밖이다.
+     * ⚠️ 값은 **지우지 않는다**. `rr` 만 null 로 하고 사실을 적는다 — 판단은 사람이 한다.
+     */
+    const gap = Math.abs(out.entryGapPct);
+    if (gap > ENTRY_GAP_MAX_PCT) {
+      out.levelNote = `진입 ${round2(e)} 가 현재가 ${round2(px)} 에서 ${out.entryGapPct > 0 ? '+' : ''}${out.entryGapPct}% 떨어져 있습니다 — 이 종목의 가격대가 맞는지 확인이 필요합니다`;
+      out.entryFar = true;
+    }
+  }
 
   if (Number.isFinite(t) && t > 0) {
     const reward = isBuy ? t - e : e - t;
@@ -749,6 +777,12 @@ function computeTrade({ side, entry, stop, target, riskBudget, costRate, last })
     out.sizedQuantity = Math.floor(riskBudget / perShareRisk);
     if (out.sizedQuantity < 1) out.sizeNote = '위험예산이 1주 위험액보다 작습니다';
   }
+  /**
+   * 🔴 **가격대가 의심스러우면 손익비를 보여주지 않는다** — 틀린 진입으로 계산한 rr 은
+   *    "1.37" 이라는 **그럴듯한 숫자**가 되어 사용자를 설득한다. 그게 제일 위험하다.
+   */
+  if (out.entryFar) { out.rr = null; out.rrAfterFee = null; }
+
   return out;
 }
 
