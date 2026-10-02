@@ -1973,6 +1973,29 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     for (const [sym, t] of Object.entries(tech || {})) {
       if (t && Number(t.last) > 0) refBySymbol[String(sym).toUpperCase()] = t;
     }
+    /**
+     * 🔴 **주제가 바뀌는 축을 함께 본다** (2026-10-02 dryRun 실측).
+     *    `QLD` 의 시나리오가 `SOXX` 를 말했는데 **가격 자는 `outliers: 0`** 이었다 —
+     *    산문에 **숫자가 0개**라 볼 것이 없었기 때문이다.
+     *    ★ 같은 회차에서 한 자는 통과하고 다른 축이 통째로 틀렸다 ⇒ **자를 하나만 두면
+     *      모델이 그 자가 안 보는 쪽으로 빠진다.**
+     * ⚠️ 아는 종목 목록은 **보유 + 후보 + 보고서에 등장한 심볼** 의 합집합이다 —
+     *    좁게 잡으면 "다른 종목" 을 인식 못 해 조용히 통과한다.
+     */
+    const knownSyms = [...new Set([
+      ...items.map((h) => String(h.symbol || '').toUpperCase()),
+      ...report.positions.map((p) => String(p.symbol || '').toUpperCase()),
+      ...(report.proposals || []).map((p) => String(p.symbol || '').toUpperCase()),
+    ])].filter(Boolean);
+    const nameBySym = {};
+    for (const h of items) nameBySym[String(h.symbol || '').toUpperCase()] = h.name || '';
+    const drift = prose.findSubjectDrift(report.positions, knownSyms, nameBySym);
+    if (drift.length) {
+      logWarn('analyst.prose_subject_drift', {
+        hits: drift.map((d) => ({ symbol: d.symbol, others: d.others })),
+      });
+    }
+
     const outliers = prose.findPriceOutliers(report.positions, refBySymbol);
     const notChecked = prose.unverifiable(report.positions, refBySymbol);
     // ⚠️ **검사 못 한 것을 통과로 보여주지 않는다** — 0건이 "다 맞았다" 가 아닐 수 있다
@@ -1980,14 +2003,19 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       checked: report.positions.filter((p) => !p._codeFilled).length - notChecked.length,
       outliers: outliers.length, unverifiable: notChecked,
     });
-    if (outliers.length) {
-      logWarn('analyst.prose_price_outlier', {
+    if (outliers.length || drift.length) {
+      if (outliers.length) logWarn('analyst.prose_price_outlier', {
         hits: outliers.map((h) => ({ symbol: h.symbol, field: h.field, raw: h.raw, current: h.current, ratio: h.ratio })),
       });
       const fixRaw = await generateStructuredOutput(
         {
           systemPrompt: SYSTEM_PROMPT,
-          userPrompt: [lines.join('\n'), '', prose.retryNote(outliers, refBySymbol)].join('\n'),
+          userPrompt: [
+            lines.join('\n'), '',
+            // ⚠️ 두 가지가 동시에 틀릴 수 있다 — **둘 다** 돌려준다(하나만 주면 다른 쪽이 또 틀린다)
+            ...(outliers.length ? [prose.retryNote(outliers, refBySymbol)] : []),
+            ...(drift.length ? [prose.driftNote(drift)] : []),
+          ].join('\n'),
           schema: REPORT_SCHEMA,
           logLabel: 'trade_analyst_price_fix',
         },
@@ -1995,12 +2023,19 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       );
       const fixed = shapeReport(fixRaw);
       const stillBad = prose.findPriceOutliers(fixed.positions, refBySymbol);
-      logInfo('analyst.prose_price_retry', { before: outliers.length, after: stillBad.length, got: fixed.positions.length });
+      const stillDrift = prose.findSubjectDrift(fixed.positions, knownSyms, nameBySym);
+      logInfo('analyst.prose_price_retry', {
+        before: outliers.length, after: stillBad.length,
+        driftBefore: drift.length, driftAfter: stillDrift.length,
+        got: fixed.positions.length,
+      });
       /**
        * ⚠️ **재요청이 더 나쁠 수도 있다** — 판단 수가 줄지 않았고 어긋남이 줄었을 때만 채택한다.
        *    (`positions_short` 재시도가 이미 같은 규율을 쓴다 — 회귀 방지)
        */
-      if (fixed.positions.length >= report.positions.length && stillBad.length < outliers.length) {
+      // ⚠️ **둘을 합쳐서** 나아졌는지 본다 — 한쪽만 보면 다른 쪽 회귀를 채택한다
+      if (fixed.positions.length >= report.positions.length
+          && (stillBad.length + stillDrift.length) < (outliers.length + drift.length)) {
         report = {
           ...report,
           positions: fixed.positions,
@@ -2009,6 +2044,32 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
         };
       }
       // ③ 그래도 남은 것은 코드가 사실로 교체한다 — 조용히 지우지 않고 표식을 남긴다
+      /**
+       * 🔴 주제 이탈은 **코드가 대신 써 줄 수 없다** — 가격처럼 "우리가 준 값" 이 없다.
+       *    ⇒ 조용히 두지 않고 **그 문장을 비우고 무슨 일이 있었는지 적는다.**
+       *       틀린 종목 이야기를 그대로 두면 사용자가 그걸 그 종목 근거로 읽는다.
+       */
+      const remainDrift = prose.findSubjectDrift(report.positions, knownSyms, nameBySym);
+      if (remainDrift.length) {
+        const bad = new Set(remainDrift.map((d) => d.symbol));
+        logWarn('analyst.prose_subject_drift_unfixed', {
+          symbols: [...bad], action: 'cleared_with_notice',
+          hits: remainDrift.map((d) => ({ symbol: d.symbol, others: d.others })),
+        });
+        report = {
+          ...report,
+          positions: report.positions.map((p) => (bad.has(String(p.symbol || '').toUpperCase())
+            ? {
+              ...p,
+              scenarioUp: '', scenarioDown: '',
+              rationale: `🔴 모델이 두 번 모두 **다른 종목(${remainDrift.find((d) => d.symbol === String(p.symbol).toUpperCase())?.others.join(', ')}) 이야기**를 했습니다 — `
+                + '이 종목에 대한 판단이 아닙니다. 직접 확인이 필요합니다.',
+              _subjectDrift: true,
+            }
+            : p)),
+        };
+      }
+
       const remain = prose.findPriceOutliers(report.positions, refBySymbol);
       if (remain.length) {
         const badSyms = new Set(remain.map((h) => h.symbol));

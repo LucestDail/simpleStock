@@ -147,7 +147,55 @@ function replaceWithFacts(position, ref) {
   };
 }
 
+
+/**
+ * 🔴 **주제가 바뀌는 것** — 가격 검증이 원리상 못 보는 축 (2026-10-02 dryRun 실측)
+ *
+ * ```
+ * QLD scenarioUp: "SOXX가 20일선을 지키며 고점을 경신하면 상승 추세가 이어질 것입니다."
+ * RAM scenarioUp: "반도체 모멘텀이 지속되며 SOXX가 120일 고점을 돌파하면 상승할 수 있습니다."
+ * ```
+ * QLD(나스닥100 2배)의 시나리오가 **SOXX(반도체 ETF)** 기준이다. 종목이 통째로 바뀌었다.
+ * 그 회차의 `prose_price_check` 는 **`outliers: 0`** 이었다 — 산문에 **숫자가 0개**라
+ * 가격 자가 볼 것이 없었기 때문이다. ★ *"0건이 통과가 아니다"* 의 또 다른 얼굴.
+ *
+ * ## ⚠️ 오탐 축을 먼저 정했다
+ * **다른 티커를 말하는 것 자체는 정상**이다 — QLD 는 QQQ 2배라 *"QQQ 가 오르면 QLD 도"* 가
+ * 자연스럽고, RAM 은 DRAM·반도체를 말해야 한다. 막으면 **멀쩡한 설명을 죽인다.**
+ * ⇒ 좁게 판정한다: **자기 자신을 한 번도 안 부르면서 다른 종목만 주어로 쓰는 경우.**
+ *    `QLD` 도 `리얼티 인컴` 같은 자기 이름도 안 나오고 `SOXX` 만 나오면 — 그건 바뀐 것이다.
+ */
+function findSubjectDrift(positions = [], knownSymbols = [], nameBySymbol = {}) {
+  const known = [...new Set((knownSymbols || []).map((s) => String(s).toUpperCase()).filter(Boolean))];
+  const hits = [];
+  for (const p of positions || []) {
+    if (p?._codeFilled) continue;
+    const sym = String(p?.symbol || '').toUpperCase();
+    if (!sym) continue;
+    const text = FIELDS.map((f) => p?.[f] || '').join(' ');
+    if (!text.trim()) continue;
+    const says = (s) => new RegExp(`(^|[^A-Za-z0-9.])${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^A-Za-z0-9.]|$)`, 'i').test(text);
+    // 자기 티커 또는 자기 이름(한글 포함)을 부르는가
+    const selfName = String(nameBySymbol[sym] || '').trim();
+    if (says(sym) || (selfName && text.includes(selfName))) continue;
+    const others = known.filter((k) => k !== sym && says(k));
+    if (others.length) hits.push({ symbol: sym, others, sample: text.slice(0, 90) });
+  }
+  return hits;
+}
+
+/** 모델에게 돌려줄 문구 — **무엇을 틀렸는지 종목 단위로** 짚는다 */
+function driftNote(hits) {
+  return [
+    '## 🔴 직전 답변이 **다른 종목 이야기를 하고 있습니다** — 다시 답하세요',
+    ...hits.map((h) => `- **${h.symbol}** 의 판단인데 본문이 ${h.others.join(', ')} 만 말합니다: "${h.sample}…"`),
+    '각 종목의 `rationale`·`risk`·`scenarioUp`·`scenarioDown` 은 **그 종목 자신**에 대한 것이어야 합니다.',
+    '기초자산·업종을 근거로 드는 것은 좋지만, **그 종목 이름을 반드시 함께** 쓰세요.',
+  ].join('\n');
+}
+
 module.exports = {
   priceNumbers, findPriceOutliers, unverifiable, retryNote, replaceWithFacts, refHint,
+  findSubjectDrift, driftNote,
   UNIT_AFTER, FIELDS,
 };

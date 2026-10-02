@@ -127,3 +127,68 @@ test('🔴 배선이 살아 있다 — analyze() 가 실제로 이 검증을 탄
   assert.match(src, /analyst\.prose_price_fabricated/, '최종 교체 로그가 없다');
   assert.match(src, /trade_analyst_price_fix/, '재요청 경로가 없다');
 });
+
+/**
+ * 🔴 **주제 이탈** — 가격 자가 원리상 못 보는 축 (2026-10-02 dryRun 실측)
+ *
+ * 아래 문장은 지어낸 게 아니라 **그 회차에 실제로 나온 것**이다. 그리고 그 회차의
+ * `prose_price_check` 는 **`outliers: 0`** 이었다 — 산문에 **숫자가 0개**였기 때문이다.
+ * ★ *"한 자가 통과했다"* 가 *"맞다"* 가 아니다. **자를 하나만 두면 모델이 그 자가
+ *   안 보는 쪽으로 빠진다.**
+ */
+const DRIFT_LIVE = [
+  { symbol: 'QLD', scenarioUp: 'SOXX가 20일선을 지키며 고점을 경신하면 상승 추세가 이어질 것입니다.',
+    scenarioDown: 'SOXX가 20일선을 이탈하면 하락 추세로 전환될 가능성이 있습니다.' },
+  { symbol: 'RAM', scenarioUp: '반도체 모멘텀이 지속되며 SOXX가 120일 고점을 돌파하면 상승할 수 있습니다.',
+    scenarioDown: '레버리지 감쇠로 횡보 시 가치가 하락할 수 있습니다.' },
+  { symbol: 'UUP', scenarioUp: '달러가 120일 고점을 돌파하면 추가 상승이 가능합니다.',
+    rationale: 'UUP 는 달러 지수를 추종한다' },
+];
+const KNOWN = ['QLD', 'RAM', 'UUP', 'O', 'SOXX', 'QQQ'];
+const NAMES = { O: '리얼티 인컴', QLD: 'QLD', RAM: 'RAM' };
+
+test('🔴 주제가 바뀐 것을 잡는다 — QLD·RAM 이 SOXX 를 말한다', () => {
+  const hits = P.findSubjectDrift(DRIFT_LIVE, KNOWN, NAMES);
+  assert.deepStrictEqual(hits.map((h) => h.symbol).sort(), ['QLD', 'RAM']);
+  assert.deepStrictEqual(hits.find((h) => h.symbol === 'QLD').others, ['SOXX']);
+});
+
+test('⚠️ 오탐 0 — 기초자산을 근거로 드는 것은 정상이다', () => {
+  // 🔴 이걸 막으면 **멀쩡한 설명을 죽인다** — QLD 는 QQQ 2배라 QQQ 를 말해야 한다
+  const ok = [
+    { symbol: 'QLD', scenarioUp: 'QQQ 가 오르면 QLD 도 2배로 따라간다' },
+    { symbol: 'RAM', rationale: 'DRAM 업황이 돌면 RAM 도 회복한다', risk: 'SOXX 와 상관이 높다' },
+    { symbol: 'O', scenarioUp: '리얼티 인컴의 월배당은 유지된다' },   // 한글 이름으로만 부름
+    { symbol: 'UUP', scenarioUp: '달러가 120일 고점을 돌파하면', rationale: 'UUP 는 달러 지수 추종' },
+  ];
+  assert.deepStrictEqual(P.findSubjectDrift(ok, KNOWN, NAMES), []);
+});
+
+test('⚠️ 아는 종목 목록이 좁으면 조용히 통과한다 — 그것을 드러낸다', () => {
+  // SOXX 를 모르면 "다른 종목" 으로 인식 못 한다 ⇒ 호출부가 합집합을 넘겨야 한다
+  assert.deepStrictEqual(P.findSubjectDrift(DRIFT_LIVE, ['QLD', 'RAM'], NAMES), []);
+  assert.strictEqual(P.findSubjectDrift(DRIFT_LIVE, KNOWN, NAMES).length, 2);
+});
+
+test('코드가 채운 자리는 검사하지 않는다', () => {
+  assert.deepStrictEqual(
+    P.findSubjectDrift([{ symbol: 'QLD', _codeFilled: true, scenarioUp: 'SOXX 이야기' }], KNOWN, NAMES), []);
+});
+
+test('재요청 문구가 **어느 종목이 무엇으로 바뀌었는지** 짚는다', () => {
+  const note = P.driftNote(P.findSubjectDrift(DRIFT_LIVE, KNOWN, NAMES));
+  assert.match(note, /QLD/); assert.match(note, /RAM/); assert.match(note, /SOXX/);
+});
+
+test('🔴 배선 — analyze() 가 주제 이탈도 실제로 탄다', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+  for (const call of ['prose.findSubjectDrift(', 'prose.driftNote(']) {
+    assert.ok(src.includes(call), `배선이 끊겼다: ${call}`);
+  }
+  assert.match(src, /analyst\.prose_subject_drift/, '검출 로그가 없다');
+  assert.match(src, /analyst\.prose_subject_drift_unfixed/, '최종 처리 로그가 없다');
+  // ⚠️ **둘을 합쳐서** 나아졌는지 보는가 — 한쪽만 보면 다른 쪽 회귀를 채택한다
+  assert.match(src, /stillBad\.length \+ stillDrift\.length/, '합산 판정이 없다');
+});
