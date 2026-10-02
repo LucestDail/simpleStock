@@ -2155,7 +2155,15 @@ onUnmounted(() => {
 @media (min-width: 1180px) {
   .deck {
     grid-template-columns: minmax(0, 53fr) minmax(0, 15fr) minmax(0, 32fr);
-    grid-template-rows: minmax(0, 183fr) minmax(0, 131fr) minmax(0, 278fr);
+    /**
+     * 🔴 **1행을 키웠다** (2026-10-02 — 와이어프레임 수용 후 실측).
+     *    `내 자산` 에 **비중 열 + 현금 행 + 리스크 칩**이 들어가면서 표가 **112px 모자랐다**
+     *    (보이는 110 vs 내용 222 · 4행 × 약 50px + 머리글).
+     *    ⚠️ 현금 행이 스크롤 아래 숨으면 **새로 넣은 것이 안 보이는 것**과 같다.
+     * ⚠️ 비율(fr)이라 창 높이에 따라 달라진다 — 여기 숫자는 **비율이지 픽셀이 아니다.**
+     *    183→248 은 1행을 약 35% 키운 것이고, 2·3행에서 고르게 가져왔다.
+     */
+    grid-template-rows: minmax(0, 248fr) minmax(0, 110fr) minmax(0, 234fr);
     overflow: hidden;
   }
   /* 중·우열이 행2~3 을 세로로 먹는다 */
@@ -2381,7 +2389,8 @@ onUnmounted(() => {
 .alloc__seg--cash { background: var(--color-muted, #8b93a7); opacity: .45; }
 .alloc__legend { display: flex; flex-wrap: wrap; gap: var(--space-sm); font-size: var(--text-xs); color: var(--color-muted); }
 .alloc__item { display: inline-flex; align-items: center; gap: 4px; }
-.alloc__item b { color: var(--color-text); }
+/* ⚠️ `--color-text` 는 **없는 토큰**이었다 — 선언이 조용히 버려졌다(가드가 찾음) */
+.alloc__item b { color: var(--color-ink); }
 .alloc__item em { font-style: normal; font-size: 10px; opacity: .8; }
 .alloc__dot { width: 8px; height: 8px; border-radius: 2px; background: var(--color-accent, #4c8dff); display: inline-block; }
 .alloc__dot--lev { background: #e0603a; }
@@ -2441,6 +2450,8 @@ onUnmounted(() => {
 
 /* 표만 스크롤 · 머리글은 붙어 있는다(스크롤해도 어느 열인지 잃지 않게) */
 .holdings__scroll { flex: 1; min-height: 0; overflow-y: auto; }
+/* ⚠️ 행을 조여 같은 공간에 **현금 행까지** 들어가게 한다(와이어프레임은 4행이 다 보인다) */
+.holdings td { padding-top: var(--space-xxs); padding-bottom: var(--space-xxs); }
 .holdings { width: 100%; border-collapse: collapse; font-size: var(--text-md); }
 .holdings thead th { position: sticky; top: 0; z-index: 1; background: var(--color-surface); }
 .holdings th {
@@ -2985,7 +2996,8 @@ a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
 .pos__sc--dn { color: var(--color-down); }
 
 /* 종목 계층 평가 — 접어 두고, 펼치면 10항목이 다 보인다 */
-.rt { margin: 4px 0 0; border-top: 1px solid var(--color-line); padding-top: 4px; }
+/* ⚠️ `--color-line` 도 **없는 토큰**이었다 — 구분선이 아예 안 그려지고 있었다 */
+.rt { margin: 4px 0 0; border-top: 1px solid var(--color-hairline); padding-top: 4px; }
 .rt summary { cursor: pointer; font-size: var(--text-2xs); color: var(--color-body); list-style: none; display: flex; gap: 4px; align-items: baseline; }
 .rt summary::-webkit-details-marker { display: none; }
 .rt summary::before { content: '▸'; color: var(--color-faint); }
