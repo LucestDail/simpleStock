@@ -1852,6 +1852,8 @@ onUnmounted(() => {
                     <dt>진입</dt>
                     <dd class="mono-num">
                       {{ ps.entry }}
+                      <!-- ⚠️ 코드가 현재가로 메운 자리라는 표시 — 모델이 정한 값과 구분된다 -->
+                      <small v-if="ps._entryFromPrice" class="pos__auto" title="모델이 진입가를 비워 현재가로 채웠습니다">자동</small>
                       <small v-if="ps.trade?.entryGapPct != null"
                              :class="ps.trade.entryGapPct > 0 ? 'down' : 'up'"
                              :title="ps.trade.entryGapPct > 0 ? '현재가보다 높다 — 추격매수' : '현재가보다 낮다 — 지정가 대기'">
@@ -3232,6 +3234,8 @@ a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
  *    사용자가 *"29? 28?"* 처럼 기준 없는 숫자로 본다.
  */
 .pos__lv--now { padding-right: 8px; border-right: 1px solid var(--color-hairline); }
+/* 코드가 메운 값 — 모델이 정한 숫자와 섞이면 안 된다 */
+.pos__auto { color: var(--color-muted); font-weight: 500; }
 .pos__lv--now dt { color: var(--color-body) !important; }
 .pos__lv--now dd { font-weight: 700; color: var(--color-ink); }
 .pos__lv dt { font-size: var(--text-2xs); color: var(--color-faint); }

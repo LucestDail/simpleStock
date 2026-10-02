@@ -2391,6 +2391,31 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   const riskPct = Number(getDashboardSettings().riskPerTradePct);
   const accountKrw = Number(summary?.value?.krw) || 0;
   for (const ps of report.positions) {
+    /**
+     * 🔴 **진입만 비어 오는 반쪽을 메운다** (2026-10-02 라이브 실측).
+     *
+     * `QLD entry=null stop=92.70 target=103.72` — 손절·목표는 있는데 **진입이 없다.**
+     * 그러면 `computeTrade` 가 `진입가 없음` 으로 끝나 **손익비·수량이 통째로 안 나오고**,
+     * 화면엔 `손절 92.7 · 목표 103.72` 만 떠서 **무엇 대비 손절인지 알 수 없다.**
+     *
+     * ⚠️ 내가 프롬프트에 *"값을 못 정하면 비우십시오"* 를 넣은 **직후** 나왔다 —
+     *    모델이 그 지시를 **진입에도** 적용했다. ★**지시를 하나 넣으면 그게 어디까지
+     *    적용될지 본다** — 의도한 칸(0 대신 비우기)을 넘어 번졌다.
+     *
+     * ⇒ 진입이 비고 손절·목표 중 하나라도 있으면 **현재가를 진입으로** 쓴다.
+     *   지어내는 것이 아니다 — 프롬프트가 이미 *"이미 보유면 **현재가 기준**"* 이라 정의했고,
+     *   현재가는 **우리가 받은 사실**이다. 다만 **그렇게 했다는 표시를 남긴다.**
+     */
+    if (!ps.entry && (ps.stop || ps.target)) {
+      const held0 = items.find((h) => String(h.symbol).toUpperCase() === String(ps.symbol).toUpperCase());
+      const px0 = Number(held0?.lastPrice)
+        || Number(tech?.[String(ps.symbol).toUpperCase()]?.last) || Number(tech?.[ps.symbol]?.last);
+      if (px0 > 0) {
+        ps.entry = px0;
+        ps._entryFromPrice = true;
+        logWarn('analyst.entry_filled_from_price', { symbol: ps.symbol, price: px0 });
+      }
+    }
     if (!ps.entry || !ps.stop) continue;
     // ⚠️ 계좌는 원화, 종목은 달러일 수 있다 — 통화가 섞이면 수량이 엉뚱해진다.
     //    보유 종목의 통화를 찾아 **같은 통화로** 예산을 환산한다.

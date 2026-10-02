@@ -107,3 +107,31 @@ test('⚠️ 상한은 설정으로 바꿀 수 있고 **기본이 넉넉하다**
   assert.match(src, /ANALYST_ENTRY_GAP_MAX_PCT/, '운영에서 조절할 수 없으면 오탐 시 코드를 고쳐야 한다');
   assert.match(src, /\|\| 50;/, '기본값이 좁으면 정당한 레벨을 죽인다');
 });
+
+/**
+ * 🔴 **진입만 비어 오는 반쪽** (2026-10-02 라이브 — 프롬프트를 고친 직후 나왔다)
+ *
+ * `QLD entry=null stop=92.70 target=103.72` — 손절·목표는 있는데 **진입이 없다.**
+ * `computeTrade` 가 `진입가 없음` 으로 끝나 **손익비·수량이 통째로 안 나오고**,
+ * 화면엔 `손절 92.7 · 목표 103.72` 만 떠서 **무엇 대비 손절인지 알 수 없다.**
+ *
+ * ⚠️ 내가 *"값을 못 정하면 비우십시오"* 를 넣은 **직후** 났다 —
+ *    ★**지시를 하나 넣으면 그게 어디까지 적용될지 본다.** 의도한 칸(0 대신 비우기)을 넘어 번졌다.
+ */
+test('🔴 진입이 비면 현재가로 메우고 **표시를 남긴다**', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+  assert.match(src, /if \(!ps\.entry && \(ps\.stop \|\| ps\.target\)\)/, '반쪽을 메우는 분기가 없다');
+  assert.match(src, /_entryFromPrice = true/, '🔴 코드가 메웠다는 표시가 없으면 모델 값과 구분이 안 된다');
+  assert.match(src, /analyst\.entry_filled_from_price/, '메운 사실이 로그에 안 남는다');
+  // ⚠️ **전부 비어 있으면 메우지 않는다** — 그건 "레벨 없음" 이지 반쪽이 아니다
+  assert.match(src, /ps\.stop \|\| ps\.target/, '조건이 좁지 않으면 레벨 없는 종목까지 메운다');
+});
+
+test('⚠️ 화면이 **코드가 메운 값**을 구분해 보여준다', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const vue = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'views', 'WorkspaceView.vue'), 'utf8');
+  assert.match(vue, /ps\._entryFromPrice/, '화면이 표시를 안 읽는다');
+  assert.match(vue, /\.pos__auto \{/, '🔴 클래스에 규칙이 없으면 맨몸으로 나간다');
+});
