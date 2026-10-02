@@ -1,4 +1,5 @@
 const { logInfo, logWarn, logError } = require('./logger');
+const { normalizeOfficialName } = require('./officialName');
 
 /**
  * my-computer MCP 클라이언트 (2026-09-21)
@@ -304,7 +305,14 @@ function buildQuery(subject) {
    *    ⇒ **officialName(종목 정체, 어제 신설) 우선** — 보유 items 에는 이미 붙어 있다.
    *    ⚠️ 여기도 정해진 칸만 읽는다(officialName·name·symbol) — 자유 질의 금지 불변.
    */
-  const official = String(subject?.officialName || '').trim();
+  /**
+   * 🔴 **정식명을 그대로 쓰면 같은 운용사의 다른 상품이 올라온다** (2026-10-02 양방향 실측).
+   *    `'PROSHARES TRUST PSHS ULTRA QQQ'` → 5건 중 **오염 4**(TQQQ·QID·UltraPro **Short** QQQ).
+   *    법인 수식어·중복 축약만 떼면 **오염 0**. 적중 수는 안 변한다(소형 ETF 는 자체 뉴스가 드물다)
+   *    — 얻는 것은 *"더 많이"* 가 아니라 **"반대 방향 근거가 안 섞인다"** 다.
+   *    ⚠️ 방향·배수(LONG/SHORT/ULTRA/2X)는 **절대 안 뗀다** — `officialName.js` 참조.
+   */
+  const official = normalizeOfficialName(String(subject?.officialName || '').trim());
   return official || name || symbol;
 }
 

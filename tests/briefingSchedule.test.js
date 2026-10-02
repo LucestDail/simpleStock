@@ -252,11 +252,18 @@ test('🔴 buildQuery 가 시장 주제에 **다른 질의**를 낸다 — 그�
 
 test('buildQuery: officialName 이 있으면 그것으로, 없으면 name/symbol 폴백', () => {
   const { buildQuery } = require('../server/mcpClient');
-  assert.equal(buildQuery({ name: 'QLD', symbol: 'QLD', officialName: 'PROSHARES TRUST PSHS ULTRA QQQ' }), 'PROSHARES TRUST PSHS ULTRA QQQ');
+  /**
+   * ⚠️ **기대값이 2026-10-02 에 바뀌었다** — 정식명이 **정규화되어** 나간다.
+   *    원본 `'PROSHARES TRUST PSHS ULTRA QQQ'` 는 라이브 A/B 에서 5건 중 **오염 4**
+   *    (TQQQ·QID·UltraPro **Short** QQQ)였고, 법인 수식어·중복 축약만 떼면 **오염 0** 이다.
+   *    근거·양방향 표·"안 바꾸는 것" 목록은 `tests/officialName.test.js` 에 있다.
+   *    ★ 이 줄은 **정식명 우선**을 지키는 자이고, 그 성질은 그대로다.
+   */
+  assert.equal(buildQuery({ name: 'QLD', symbol: 'QLD', officialName: 'PROSHARES TRUST PSHS ULTRA QQQ' }), 'PROSHARES ULTRA QQQ');
   assert.equal(buildQuery({ name: '삼성전자', symbol: '005930' }), '삼성전자');
   assert.equal(buildQuery({ symbol: 'XOM' }), 'XOM');
   // 🔴 보유 종목엔 market('US')이 있어도 **종목 질의**여야 한다 / 시장 주제는 isMarket 으로만
-  assert.equal(buildQuery({ name: 'QLD', symbol: 'QLD', market: 'US', officialName: 'PROSHARES TRUST PSHS ULTRA QQQ' }), 'PROSHARES TRUST PSHS ULTRA QQQ');
+  assert.equal(buildQuery({ name: 'QLD', symbol: 'QLD', market: 'US', officialName: 'PROSHARES TRUST PSHS ULTRA QQQ' }), 'PROSHARES ULTRA QQQ');
   assert.equal(buildQuery({ name: '코스피', symbol: 'KR', isMarket: true }), '코스피 증시 마감 시황');
 });
 

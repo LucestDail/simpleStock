@@ -1475,21 +1475,162 @@ onUnmounted(() => {
         </div>
       </article>
     </section>
-        <section class="analyst">
-          <header class="analyst__head">
-            <div class="analyst__title">
-              <span class="analyst__badge">AI</span>
-              <h2>매매 분석</h2>
-            </div>
-            <button class="btn btn--ai" :disabled="analystLoading" @click="runAnalyst">
-              {{ analystLoading ? '분석 중…' : '분석 실행' }}
+
+        <section class="news">
+          <header class="news__head">
+            <h3 class="panel__h">
+              뉴스
+              <small v-if="selected.symbol">{{ selected.name || selected.symbol }}</small>
+            </h3>
+            <button class="iconbtn" :disabled="!selected.symbol || news.loading" aria-label="뉴스 새로고침" title="뉴스 새로고침" @click="loadNews">
+              {{ news.loading ? '…' : '⟳' }}
             </button>
+          </header>
+          <p v-if="!selected.symbol" class="panel__empty">종목을 고르면 뉴스를 찾습니다.</p>
+          <p v-else-if="news.loading" class="panel__empty">검색 중…</p>
+          <!-- 🔴 "없다" 와 "못 받았다" 를 구분해 보여준다 -->
+          <p v-else-if="news.error" class="panel__err">{{ news.error }}</p>
+          <p v-else-if="!news.items.length" class="panel__empty">검색 결과가 없습니다.</p>
+          <ul v-else class="news__list">
+            <li v-for="n in news.items" :key="n.rank">
+              <a v-if="n.url" :href="n.url" target="_blank" rel="noopener" class="news__title">{{ n.title }}</a>
+              <span v-else class="news__title">{{ n.title }}</span>
+              <!-- ⚠️ 날짜를 반드시 보여준다 — 실측에서 **6개월 지난 기사**가 섞여 왔다 -->
+              <time v-if="n.when" class="news__when">{{ n.when }}</time>
+            </li>
+          </ul>
+        </section>
+      <!-- 행3·1열 : 차트 -->
+      <div class="cell cell--chart">
+        <!-- ── 조각 실패를 숨기지 않는다 ─────────────────────── -->
+        <p v-if="dashError" class="banner banner--error">{{ dashError }}</p>
+        <p v-else-if="dash && dash.failedCount" class="banner banner--warn">
+          일부 데이터를 못 받았습니다 ({{ dash.failedCount }}건) —
+          <template v-for="(p, k) in dash.parts" :key="k">
+            <span v-if="p.ok === false">{{ k }}: {{ p.error }} ({{ p.kind }}) </span>
+          </template>
+        </p>
+        <!-- ── 차트 + 호가 ────────────────────────────────────── -->
+        <PriceChart :symbol="selected.symbol" :name="selected.name" />
+      </div>
+
+      <!-- 행2~3·2열 : 🔴 **랭킹만**(가이드: "랭킹 정보만 표출") -->
+      <aside class="layout__signals">
+          <div class="signals">
+
+
+            <!--
+              🔴 2026-09-21 사용자: *"타이틀이랑 하단 정보가 안 맞는데. 차라리 그냥 정형화된
+                 테이블로 라도 하지"* ⇒ 목록을 **표**로 바꿨다.
+              ★ 목록형은 **어느 제목에 속한 줄인지**가 들여쓰기로만 표현돼서, 그룹이 4개로
+                늘어나자 제목과 내용이 어긋나 보였다. 표는 **열이 뜻을 고정**한다.
+              ⚠️ 그룹을 한 번에 다 펼치지 않고 **탭으로 하나씩** 본다 — 네 덩어리를 세로로
+                 쌓으면 어느 것이 어느 제목 밑인지 다시 헷갈린다.
+            -->
+            <div class="panel">
+              <h3 class="panel__h">랭킹</h3>
+              <p v-if="partError('rankings')" class="panel__err">{{ partError('rankings').error }}</p>
+              <template v-else>
+                <div v-if="rankKeys.length" class="rank__tabs">
+                  <button
+                    v-for="k in rankKeys" :key="k"
+                    class="rank__tab" :class="{ 'rank__tab--on': k === rankTab }"
+                    @click="rankTab = k"
+                  >{{ rankLabel(k) }}</button>
+                </div>
+                <p v-if="!rankKeys.length" class="panel__empty">랭킹을 불러오지 못했습니다.</p>
+                <template v-else-if="activeRank">
+                  <!-- 🔴 이 종류만 실패했으면 그렇게 말한다("없음" 과 다르다) -->
+                  <p v-if="activeRank.error" class="rank__err">{{ activeRank.error }}</p>
+                  <p v-else-if="!activeRank.rows?.length" class="panel__empty">해당 종목 없음</p>
+                  <div v-else class="rtable__scroll">
+                  <table class="rtable">
+                    <thead>
+                      <tr><th class="rtable__n">#</th><th>종목</th><th class="rtable__r">등락률</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in visibleRankRows" :key="row.symbol">
+                        <td class="rtable__n mono-num">{{ row.rank }}</td>
+                        <td>
+                          <!-- ⚠️ 이름이 없으면 코드를 보여준다(빈칸보다 낫다) -->
+                          <button class="linkish" :title="row.symbol" @click="pickSymbol(row.symbol, row.name || row.symbol)">
+                            {{ row.name || row.symbol }}
+                          </button>
+                          <!-- 🔴 이름이 붙었을 때만 코드를 따로 보여준다(같은 값을 두 번 쓰지 않는다) -->
+                          <small v-if="row.name" class="rtable__sym mono-num">{{ row.symbol }}</small>
+                        </td>
+                        <td class="rtable__r mono-num" :class="signClass(row.changePct)">{{ pct(row.changePct) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  </div>
+                </template>
+              </template>
+
+              <!--
+                🔴 사용자: *"검색은 최하단에 붙여줘."*
+                ★ 검색은 **결과를 본 뒤에** 쓰는 것이라 목록 아래가 맞다 —
+                  위에 있으면 매번 랭킹을 한 칸 밀어낸다.
+              -->
+
+              <!--
+                🔴 사용자: *"티커/한국 주식 검색창 제공 · 클릭시 좌측 차트 반응"*
+                ⚠️ 이건 **거르는 칸이 아니라 찾는 칸**이다 — 랭킹에 없는 종목도
+                   코드를 넣으면 차트를 띄울 수 있어야 검색창의 뜻이 산다.
+              -->
+              <form class="rank__find" @submit.prevent="findSymbol">
+                <input v-model="rankQuery" class="input input--xs" placeholder="종목명·티커 (예: 삼성전자)" />
+                <button class="iconbtn" type="submit" :disabled="!rankQuery.trim() || findBusy" aria-label="조회" title="조회">
+                  {{ findBusy ? '…' : '🔍' }}
+                </button>
+              </form>
+              <p v-if="findError" class="panel__err">{{ findError }}</p>
+            </div>
+          </div>
+      </aside>
+        <!-- ── 애널리스트와 채팅 (레이아웃 지시: 우열) ─────────── -->
+        <section class="chat">
+          <!--
+            🔴 **매매 분석 패널을 없애고 대화 하나로 합쳤다** (2026-10-02 3차 — 사용자:
+               *"매매 분석도 자연어로 하고 대화도 자연어인데 이거를 왜 뜯는거야.
+                 기능 전면적으로 재편해."*).
+
+            맞는 지적이었다. 서버는 **처음부터 한 몸**이다 — 같은 모델이 같은 도구
+            (`propose_order`·`get_portfolio`·`web_search`)를 쓰고, 둘 다 자연어다.
+            화면만 `매매 분석`/`애널리스트와 대화` 두 카드로 **뜯어 놓고 있었다** ⇒
+            대화에서 시킨 일의 결과를 다른 카드에서 찾아야 했다.
+
+            ⇒ 이제 **하나의 흐름**이다:
+               머리말(분석 시각·웹검색·리스크) → 분석 보고서 → 대화 → 매매 제안(HITL) → 입력
+            ⚠️ `분석 실행` 은 **사람이 부르는 또 하나의 발화**다 — 버튼을 없애지 않은 이유는
+               정기 회차 밖에서 즉시 돌리고 싶을 때가 있어서다(자연어로도 된다).
+          -->
+          <header class="chat__head">
+            <div class="chat__title">
+              <span class="chat__badge">AI</span>
+              <h3 class="panel__h">애널리스트</h3>
+            </div>
+            <div class="chat__headacts">
+              <button class="btn btn--ai btn--sm" :disabled="analystLoading" @click="runAnalyst">
+                {{ analystLoading ? '분석 중…' : '분석 실행' }}
+              </button>
+              <button
+                class="iconbtn"
+                :disabled="clearing || !messages.length"
+                aria-label="대화 초기화"
+                title="대화 이력을 지웁니다(서버 기록도 함께)"
+                @click="clearChat"
+              >{{ clearing ? '…' : '🗑' }}</button>
+            </div>
           </header>
 
           <!--
-            🔴 사용자: *"웹 검색은 당연히 해야하는거니까 저 체크 표시랑 웹 검색 저거 빼"*
-            ⇒ 선택지를 없애고 **항상 켠다.** 다만 **붙었는지**는 여전히 보여야 한다 —
-              안 보이면 "검색이 안 돈 것" 과 "검색했는데 별 게 없던 것" 이 똑같아진다.
+            🔴 **상시 지표는 스크롤 밖에 고정한다** (2026-10-02).
+               합치고 나서 실제로 띄워 보니 `리스크 체크`·분석 메타가 **대화 로그 안**으로
+               들어가 자동 스크롤에 묻혔다 — 레버리지 노출·현금 비중은 **매 순간 보여야 하는**
+               값이라 묻히면 "없어진" 것과 같다.
+            ⚠️ 반대로 **분석 산문·종목 판단은 로그 안**에 있어야 한다 — 그건 "그때 한 말" 이고
+               대화와 같은 시간축에 놓여야 되묻기가 자연스럽다.
           -->
           <p v-if="mcpState && mcpState.effective !== 'live'" class="analyst__warn">
             웹 검색 미연결 — {{ mcpState.reason === 'url_or_token_missing' ? '주소·토큰 없음' : '꺼짐' }}
@@ -1542,6 +1683,20 @@ onUnmounted(() => {
               </dl>
             </div>
             <!-- 🔴 **언제·왜 돌았는지** 보여준다 — 자동 실행으로 바뀌었으니 안 그러면 언제 것인지 모른다 -->
+          </template>
+          <div ref="chatBox" class="chat__log" @scroll="onChatScroll">
+            <!--
+              🔴 **분석 결과는 대화의 첫 발언이다** — 따로 뜯어 둔 카드가 아니다.
+                 아래 메시지들과 **같은 스크롤 안**에 있어서, 분석을 보고 바로 되묻고
+                 그 자리에서 제안을 승인하는 한 흐름이 된다.
+            -->
+
+          <!--
+            🔴 사용자: *"웹 검색은 당연히 해야하는거니까 저 체크 표시랑 웹 검색 저거 빼"*
+            ⇒ 선택지를 없애고 **항상 켠다.** 다만 **붙었는지**는 여전히 보여야 한다 —
+              안 보이면 "검색이 안 돈 것" 과 "검색했는데 별 게 없던 것" 이 똑같아진다.
+          -->
+            <template v-if="report">
             <p v-if="report.at || report.trigger?.why" class="analyst__when">
               <template v-if="report.at">{{ new Date(report.at).toLocaleString('ko-KR') }}</template>
               <template v-if="report.trigger?.why"> · {{ report.trigger.why }}</template>
@@ -1692,137 +1847,6 @@ onUnmounted(() => {
               </li>
             </ol>
           </div>
-        </section>
-
-        <section class="news">
-          <header class="news__head">
-            <h3 class="panel__h">
-              뉴스
-              <small v-if="selected.symbol">{{ selected.name || selected.symbol }}</small>
-            </h3>
-            <button class="iconbtn" :disabled="!selected.symbol || news.loading" aria-label="뉴스 새로고침" title="뉴스 새로고침" @click="loadNews">
-              {{ news.loading ? '…' : '⟳' }}
-            </button>
-          </header>
-          <p v-if="!selected.symbol" class="panel__empty">종목을 고르면 뉴스를 찾습니다.</p>
-          <p v-else-if="news.loading" class="panel__empty">검색 중…</p>
-          <!-- 🔴 "없다" 와 "못 받았다" 를 구분해 보여준다 -->
-          <p v-else-if="news.error" class="panel__err">{{ news.error }}</p>
-          <p v-else-if="!news.items.length" class="panel__empty">검색 결과가 없습니다.</p>
-          <ul v-else class="news__list">
-            <li v-for="n in news.items" :key="n.rank">
-              <a v-if="n.url" :href="n.url" target="_blank" rel="noopener" class="news__title">{{ n.title }}</a>
-              <span v-else class="news__title">{{ n.title }}</span>
-              <!-- ⚠️ 날짜를 반드시 보여준다 — 실측에서 **6개월 지난 기사**가 섞여 왔다 -->
-              <time v-if="n.when" class="news__when">{{ n.when }}</time>
-            </li>
-          </ul>
-        </section>
-      <!-- 행3·1열 : 차트 -->
-      <div class="cell cell--chart">
-        <!-- ── 조각 실패를 숨기지 않는다 ─────────────────────── -->
-        <p v-if="dashError" class="banner banner--error">{{ dashError }}</p>
-        <p v-else-if="dash && dash.failedCount" class="banner banner--warn">
-          일부 데이터를 못 받았습니다 ({{ dash.failedCount }}건) —
-          <template v-for="(p, k) in dash.parts" :key="k">
-            <span v-if="p.ok === false">{{ k }}: {{ p.error }} ({{ p.kind }}) </span>
-          </template>
-        </p>
-        <!-- ── 차트 + 호가 ────────────────────────────────────── -->
-        <PriceChart :symbol="selected.symbol" :name="selected.name" />
-      </div>
-
-      <!-- 행2~3·2열 : 🔴 **랭킹만**(가이드: "랭킹 정보만 표출") -->
-      <aside class="layout__signals">
-          <div class="signals">
-
-
-            <!--
-              🔴 2026-09-21 사용자: *"타이틀이랑 하단 정보가 안 맞는데. 차라리 그냥 정형화된
-                 테이블로 라도 하지"* ⇒ 목록을 **표**로 바꿨다.
-              ★ 목록형은 **어느 제목에 속한 줄인지**가 들여쓰기로만 표현돼서, 그룹이 4개로
-                늘어나자 제목과 내용이 어긋나 보였다. 표는 **열이 뜻을 고정**한다.
-              ⚠️ 그룹을 한 번에 다 펼치지 않고 **탭으로 하나씩** 본다 — 네 덩어리를 세로로
-                 쌓으면 어느 것이 어느 제목 밑인지 다시 헷갈린다.
-            -->
-            <div class="panel">
-              <h3 class="panel__h">랭킹</h3>
-              <p v-if="partError('rankings')" class="panel__err">{{ partError('rankings').error }}</p>
-              <template v-else>
-                <div v-if="rankKeys.length" class="rank__tabs">
-                  <button
-                    v-for="k in rankKeys" :key="k"
-                    class="rank__tab" :class="{ 'rank__tab--on': k === rankTab }"
-                    @click="rankTab = k"
-                  >{{ rankLabel(k) }}</button>
-                </div>
-                <p v-if="!rankKeys.length" class="panel__empty">랭킹을 불러오지 못했습니다.</p>
-                <template v-else-if="activeRank">
-                  <!-- 🔴 이 종류만 실패했으면 그렇게 말한다("없음" 과 다르다) -->
-                  <p v-if="activeRank.error" class="rank__err">{{ activeRank.error }}</p>
-                  <p v-else-if="!activeRank.rows?.length" class="panel__empty">해당 종목 없음</p>
-                  <div v-else class="rtable__scroll">
-                  <table class="rtable">
-                    <thead>
-                      <tr><th class="rtable__n">#</th><th>종목</th><th class="rtable__r">등락률</th></tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="row in visibleRankRows" :key="row.symbol">
-                        <td class="rtable__n mono-num">{{ row.rank }}</td>
-                        <td>
-                          <!-- ⚠️ 이름이 없으면 코드를 보여준다(빈칸보다 낫다) -->
-                          <button class="linkish" :title="row.symbol" @click="pickSymbol(row.symbol, row.name || row.symbol)">
-                            {{ row.name || row.symbol }}
-                          </button>
-                          <!-- 🔴 이름이 붙었을 때만 코드를 따로 보여준다(같은 값을 두 번 쓰지 않는다) -->
-                          <small v-if="row.name" class="rtable__sym mono-num">{{ row.symbol }}</small>
-                        </td>
-                        <td class="rtable__r mono-num" :class="signClass(row.changePct)">{{ pct(row.changePct) }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  </div>
-                </template>
-              </template>
-
-              <!--
-                🔴 사용자: *"검색은 최하단에 붙여줘."*
-                ★ 검색은 **결과를 본 뒤에** 쓰는 것이라 목록 아래가 맞다 —
-                  위에 있으면 매번 랭킹을 한 칸 밀어낸다.
-              -->
-
-              <!--
-                🔴 사용자: *"티커/한국 주식 검색창 제공 · 클릭시 좌측 차트 반응"*
-                ⚠️ 이건 **거르는 칸이 아니라 찾는 칸**이다 — 랭킹에 없는 종목도
-                   코드를 넣으면 차트를 띄울 수 있어야 검색창의 뜻이 산다.
-              -->
-              <form class="rank__find" @submit.prevent="findSymbol">
-                <input v-model="rankQuery" class="input input--xs" placeholder="종목명·티커 (예: 삼성전자)" />
-                <button class="iconbtn" type="submit" :disabled="!rankQuery.trim() || findBusy" aria-label="조회" title="조회">
-                  {{ findBusy ? '…' : '🔍' }}
-                </button>
-              </form>
-              <p v-if="findError" class="panel__err">{{ findError }}</p>
-            </div>
-          </div>
-      </aside>
-        <!-- ── 애널리스트와 채팅 (레이아웃 지시: 우열) ─────────── -->
-        <section class="chat">
-          <header class="chat__head">
-            <h3 class="panel__h">애널리스트와 대화</h3>
-            <div class="chat__headacts">
-              <span class="chat__tools">도구 {{ 7 }}개</span>
-              <button
-                class="iconbtn"
-                :disabled="clearing || !messages.length"
-                aria-label="대화 초기화"
-                title="대화 이력을 지웁니다(서버 기록도 함께)"
-                @click="clearChat"
-              >{{ clearing ? '…' : '🗑' }}</button>
-            </div>
-          </header>
-
-          <div ref="chatBox" class="chat__log" @scroll="onChatScroll">
             <p v-if="!messages.length" class="panel__empty">
               보유 종목·시황을 물어보세요. 필요하면 시세·차트·뉴스를 <b>직접 찾아서</b> 답합니다.
             </p>
@@ -2226,16 +2250,13 @@ onUnmounted(() => {
   .deck > .cell--chart { grid-column: 2 / span 2; grid-row: 1 / span 2; }
   .deck > .news { grid-column: 2; grid-row: 3; }
   .deck > .layout__signals { grid-column: 3; grid-row: 3; }
-  /* 우열 — 에이전트. 요약(위)과 대화·HITL(아래)이 한 덩어리로 읽힌다 */
-  .deck > .analyst { grid-column: 4; grid-row: 1; }
-  .deck > .chat { grid-column: 4; grid-row: 2 / span 2; }
   /**
-   * ⚠️ **두 카드를 하나처럼 붙인다** — 사이 틈과 마주보는 모서리를 없앤다.
-   *    따로 떨어져 있으면 *"분석"* 과 *"대화"* 가 다른 물건으로 보이고,
-   *    그게 사용자가 *"이게 뭐야"* 라고 한 바로 그 느낌이다.
+   * 우열 — **패널 하나다** (2026-10-02 3차).
+   * 종전엔 `매매 분석` 과 `애널리스트와 대화` 를 두 칸에 나눠 두고 테두리만 붙여 놨는데,
+   * 사용자가 *"이거를 왜 뜯는거야"* 라고 한 게 정확했다 — **붙여 놓은 두 개**는
+   * 여전히 두 개다. 섹션 자체를 합쳤으므로 칸도 하나다.
    */
-  .deck > .analyst { border-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-  .deck > .chat { border-top-left-radius: 0; border-top-right-radius: 0; margin-top: calc(var(--space-sm) * -1); }
+  .deck > .chat { grid-column: 4; grid-row: 1 / span 3; }
 }
 /* 칸을 넘기지 않는다 — 내용은 **각 카드 안에서** 스크롤한다 */
 .deck > * { min-width: 0; min-height: 0; }
@@ -2557,6 +2578,29 @@ onUnmounted(() => {
   border: 1px solid var(--color-warn); color: var(--color-warn);
   font-size: var(--text-2xs); font-weight: 700; vertical-align: 1px;
 }
+
+/* ── 통합 애널리스트 패널 머리 (2026-10-02) ───────────────────────── */
+.chat__title { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; }
+.chat__badge {
+  font-size: var(--text-2xs); font-weight: 700; letter-spacing: 0.1em;
+  padding: 2px 6px; border-radius: var(--rounded-xs);
+  background: var(--color-ai-soft); color: var(--color-ai);
+}
+.chat__headacts { display: flex; align-items: center; gap: var(--space-xs); flex-shrink: 0; }
+/**
+ * 🔴 **고정 영역과 스크롤 영역 사이에 선을 긋는다** (2026-10-02 실측).
+ *    선이 없으니 스크롤로 **반쯤 잘린 글자**가 리스크 체크 바로 밑에 붙어 보여서
+ *    "글자가 겹쳤다" 로 읽혔다. 스크롤 영역은 **어디서 시작하는지 보여야** 한다.
+ */
+.chat > .meta { margin: 0 var(--space-base); }
+.chat > .risk { margin: var(--space-xs) var(--space-base) 0; }
+.chat__log {
+  border-top: 1px solid var(--color-hairline);
+  padding-top: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+/* 보고서 본문과 대화 메시지 사이에도 경계를 둔다 — 같은 스크롤이지만 다른 종류의 글이다 */
+.chat__log > .tl { padding-top: var(--space-sm); border-top: 1px solid var(--color-hairline-soft); }
 
 .assets__sync { font-size: var(--text-xs); color: var(--color-muted); }
 .assets__sync--stale { color: #e0ad48; }
