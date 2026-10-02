@@ -924,6 +924,23 @@ const dismissedTickets = ref(new Set());
  *   스크롤 밖 고정 영역에 둔다.
  */
 const approvedProposals = computed(() => proposals.value.filter((p) => p.status === 'APPROVED'));
+/**
+ * 종목의 **현재가** — 보유면 포트폴리오, 아니면 관심종목 시세에서 찾는다.
+ * ⚠️ 못 찾으면 `null` 을 돌려 **아무것도 안 그린다** — 0 을 그리면 "가격이 0" 으로 읽힌다.
+ */
+function priceOf(symbol) {
+  const sym = String(symbol || '').toUpperCase();
+  const held = (portfolio.value?.items || []).find((h) => String(h.symbol).toUpperCase() === sym);
+  const px = Number(held?.lastPrice);
+  if (px > 0) return px;
+  for (const g of groups.value || []) {
+    const hit = (g.items || []).find((i) => String(i.symbol).toUpperCase() === sym);
+    const v = Number(hit?.lastPrice ?? hit?.price);
+    if (v > 0) return v;
+  }
+  return null;
+}
+
 function focusProposals() {
   const next = pendingProposals.value[0];
   if (next) { dismissedTickets.value.delete(next.id); ticketFor.value = next; }
@@ -1815,7 +1832,16 @@ onUnmounted(() => {
                 </header>
                 <p>{{ ps.rationale }}</p>
 
+                <!--
+                  🔴 **현재가가 없으면 레벨을 판정할 수 없다** (2026-10-02 사용자 지적).
+                     카드에 `진입 29.59 · 손절 28.2 · 목표 31.5` 만 있고 **현재가가 없어서**
+                     그게 추격매수인지 지정가 대기인지, 목표가 이미 지났는지를 알 수 없었다.
+                     ⇒ 맨 앞에 현재가를 둔다 — 나머지 숫자는 전부 이것과의 관계로 읽힌다.
+                -->
                 <dl v-if="ps.entry || ps.stop || ps.target" class="pos__lv">
+                  <div v-if="priceOf(ps.symbol)" class="pos__lv--now">
+                    <dt>현재</dt><dd class="mono-num">{{ priceOf(ps.symbol) }}</dd>
+                  </div>
                   <!--
                     🔴 **숫자만 있고 맥락이 없어서 "뭔 말도 안 되는 수치" 로 보였다** (2026-10-02).
                        `진입 29.59` 가 현재가 28.44 보다 높은 건지 낮은 건지 화면에 안 적혔다.
@@ -3200,6 +3226,14 @@ a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
 .pos__rrbad { font-size: var(--text-2xs); color: var(--color-down); margin: 2px 0 0; }
 .pos__lv { display: flex; flex-wrap: wrap; gap: 8px; margin: 3px 0 0; }
 .pos__lv div { display: flex; gap: 3px; align-items: baseline; }
+/**
+ * 🔴 **현재가는 기준점이라 눈에 먼저 들어와야 한다** (2026-10-02).
+ *    나머지 레벨은 전부 이 숫자와의 관계로 읽힌다 — 같은 무게로 늘어놓으면
+ *    사용자가 *"29? 28?"* 처럼 기준 없는 숫자로 본다.
+ */
+.pos__lv--now { padding-right: 8px; border-right: 1px solid var(--color-hairline); }
+.pos__lv--now dt { color: var(--color-body) !important; }
+.pos__lv--now dd { font-weight: 700; color: var(--color-ink); }
 .pos__lv dt { font-size: var(--text-2xs); color: var(--color-faint); }
 .pos__lv dd { margin: 0; font-size: var(--text-xs); color: var(--color-body); }
 .pos__sc { margin: 2px 0 0; font-size: var(--text-2xs); }
