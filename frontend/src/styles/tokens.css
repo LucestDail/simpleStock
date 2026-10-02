@@ -90,12 +90,21 @@
   --color-on-dark-soft: var(--color-muted);
 
   /* ── 글꼴 ─────────────────────────────────────────── */
-  /* Pretendard = 한글·라틴을 한 벌로 처리하고 tabular figures 를 지원한다.
-     ⚠️ 없으면 system-ui 로 떨어진다. 숫자는 아래 .mono-num 이 따로 잡는다. */
-  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
+  /**
+   * 🔴 **받아 놓고 안 쓰던 상태였다** (2026-10-02 발견).
+   *    `index.html` 은 **Inter + JetBrains Mono** 를 받는데 이 토큰은 **Pretendard** 를
+   *    가리켰다 — Pretendard 는 어디서도 안 받으므로 본문은 내내 **시스템 폰트**로 떴고,
+   *    받아 둔 Inter 는 **한 글자도 안 쓰였다.** 두 파일이 서로 다른 말을 하고 있었다.
+   *    ★ 이 저장소가 여러 번 밟은 *"수집해 놓고 안 쓰는"* 의 글꼴판이다.
+   *
+   * ⇒ 와이어프레임이 쓰는 **IBM Plex Sans KR / IBM Plex Mono** 로 양쪽을 맞춘다.
+   *   한글·라틴이 한 가족이라 섞여도 획 굵기가 튀지 않고, Mono 는 숫자 폭이 고정이다.
+   * ⚠️ 폰트가 안 받아져도 화면은 살아야 하므로 뒤에 시스템 폰트를 둔다.
+   */
+  --font-sans: 'IBM Plex Sans KR', -apple-system, BlinkMacSystemFont,
     system-ui, 'Segoe UI', Roboto, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
   --font-display: var(--font-sans);
-  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, 'Cascadia Mono', Menlo, monospace;
+  --font-mono: 'IBM Plex Mono', 'SF Mono', ui-monospace, 'Cascadia Mono', Menlo, monospace;
 
   /* ── 크기 ─────────────────────────────────────────── */
   --text-2xs: 10px;
@@ -223,32 +232,51 @@ button:focus:not(:focus-visible) {
  * ⚠️ 상승/하락 색은 **라이트에서 더 진하게** — 흰 바탕에 파스텔은 안 읽힌다.
  * ────────────────────────────────────────────────────────────────── */
 :root[data-theme='light'] {
-  --color-primary: #2f6df6;
-  --color-primary-hover: #2a62dd;
-  --color-primary-active: #2455c2;
-  --color-primary-soft: rgba(47, 109, 246, 0.10);
-  --color-primary-line: rgba(47, 109, 246, 0.34);
+  /**
+   * 🔴 **와이어프레임에서 직접 뽑은 값이다** (2026-10-02 2차 — 렌더해서 실측).
+   *
+   * 1차 때는 배경만 밝게(`#f4f4f2`) 하고 **파랑·보라 크롬을 그대로 뒀다.** 사용자:
+   * *"와이어프레임 준용해서 반영하라고 했는데 왜 화면이 변한게 없는거야 도대체."*
+   * 맞는 지적이었다 — 와이어프레임의 핵심은 밝기가 아니라 **디자인 언어**다:
+   *
+   *   무채색 본문 + **실선 1px 테두리** + 색은 딱 둘 (AI 파랑 · 경고 주황)
+   *
+   * 종전은 파랑 primary + 보라 AI + **알파 헤어라인**이라, 배경만 바꾸면
+   * **같은 화면이 조금 밝아진 것**으로 보인다. 그래서 체감이 0이었다.
+   *
+   * ⚠️ 값은 추측이 아니라 **헤드리스로 렌더해 DOM 인라인 스타일에서 읽은 것**이다
+   *    (와이어프레임이 2중 gzip 포장이라 텍스트 grep 으로는 안 나온다).
+   */
+  --color-primary: #2b54c8;
+  --color-primary-hover: #2449ad;
+  --color-primary-active: #1e3d93;
+  --color-primary-soft: rgba(43, 84, 200, 0.09);
+  --color-primary-line: rgba(43, 84, 200, 0.32);
   --color-on-primary: #ffffff;
 
-  --color-ai: #7c3aed;
-  --color-ai-soft: rgba(124, 58, 237, 0.08);
-  --color-ai-line: rgba(124, 58, 237, 0.26);
+  /* AI 도 같은 파랑이다 — 와이어프레임에 보라가 없다(색이 늘수록 강조가 죽는다) */
+  --color-ai: #2b54c8;
+  --color-ai-soft: rgba(43, 84, 200, 0.07);
+  --color-ai-line: rgba(43, 84, 200, 0.26);
 
-  /* 바탕은 살짝 따뜻한 회색, 카드는 순백 — 와이어프레임 그대로 */
-  --color-canvas: #f4f4f2;
+  --color-canvas: #eeeeeb;
   --color-surface: #ffffff;
   --color-surface-raised: #ffffff;
-  --color-surface-sunken: #fafaf9;
-  --color-surface-hover: rgba(0, 0, 0, 0.035);
+  --color-surface-sunken: #f7f7f5;
+  --color-surface-hover: rgba(28, 28, 26, 0.045);
 
-  --color-hairline: rgba(0, 0, 0, 0.09);
-  --color-hairline-soft: rgba(0, 0, 0, 0.055);
-  --color-hairline-strong: rgba(0, 0, 0, 0.16);
+  /**
+   * ⚠️ **알파가 아니라 실선이다.** 와이어프레임의 카드 경계가 또렷한 이유가 이것 —
+   *    알파 헤어라인은 바탕이 밝으면 거의 사라져서 "카드" 가 안 보인다.
+   */
+  --color-hairline: #cfcfca;
+  --color-hairline-soft: #e2e2de;
+  --color-hairline-strong: #8e8e88;
 
-  --color-ink: #16181d;
-  --color-body: #41464f;
-  --color-muted: #6b7280;
-  --color-faint: #9aa1ac;
+  --color-ink: #1c1c1a;
+  --color-body: #3a3a36;
+  --color-muted: #5e5e59;
+  --color-faint: #8e8e88;
 
   /**
    * 🔴 **손익 색의 의미는 바꾸지 않았다** (2026-10-02 — 의도적 이탈).
@@ -266,18 +294,19 @@ button:focus:not(:focus-visible) {
   --color-flat: #6b7280;
   --color-flat-soft: rgba(0, 0, 0, 0.05);
 
-  --color-danger: #d1453b;
-  --color-danger-soft: rgba(209, 69, 59, 0.09);
-  --color-warn: #b8701a;
-  --color-warn-soft: rgba(184, 112, 26, 0.10);
+  --color-danger: #c0392b;
+  --color-danger-soft: rgba(192, 57, 43, 0.09);
+  /* 와이어프레임이 「레버리지 노출 높음」에 쓴 바로 그 주황 */
+  --color-warn: #b5560f;
+  --color-warn-soft: rgba(181, 86, 15, 0.10);
   --color-open: #15803d;
   --color-open-soft: rgba(21, 128, 61, 0.10);
-  --color-closed-soft: rgba(0, 0, 0, 0.05);
+  --color-closed-soft: rgba(28, 28, 26, 0.05);
 
-  --color-bg: #f4f4f2;
-  --color-border: rgba(0, 0, 0, 0.09);
-  --color-surface-dark: #16181d;
-  --color-surface-strong: #0f1115;
+  --color-bg: #eeeeeb;
+  --color-border: #cfcfca;
+  --color-surface-dark: #1c1c1a;
+  --color-surface-strong: #121210;
   --color-on-dark: #ffffff;
   --color-on-dark-soft: rgba(255, 255, 255, 0.72);
 

@@ -49,6 +49,38 @@ const { logInfo, logWarn } = require('./logger');
 const LAST_FILE = process.env.ANALYST_LAST_FILE
   || require('node:path').join(__dirname, '..', 'data', 'analyst-last.json');
 
+/**
+ * 🔴 **모델에게 보낸 프롬프트를 남긴다** (2026-10-02 — 판정을 가능하게 하는 전제).
+ *
+ * 프롬프트는 *"제공된 숫자를 그대로 인용합니다. 근거 없는 수치는 쓰지 않습니다"* 를
+ * 요구하는데, **그게 지켜졌는지 확인할 방법이 없었다** — 라이브 회차의 입력이 어디에도
+ * 안 남아 있어서, 보고서의 숫자가 **우리가 준 것인지 지어낸 것인지** 영영 가를 수 없었다.
+ * ⇒ 입력을 남겨야 감사가 성립한다. *"판정하려면 원자료를 남겨야 한다"*(Probius 09-11:
+ *   원자료를 안 남겨 소급 채점이 영영 불가능했던 그 자리).
+ *
+ * ⚠️ `analyst-last.json` 에 넣지 않는다 — 그 파일은 **화면이 읽는다**(13k자가 매번 오간다).
+ * ⚠️ 한 회차분만 덮어쓴다(감사 로그가 아니라 "마지막 입력" 이다).
+ * ⚠️ 계좌 수량·금액이 들어 있다 — `data/` 는 이미 보유 스냅샷을 담고 있고 같은 권한이다.
+ */
+const LAST_PROMPT_FILE = process.env.ANALYST_LAST_PROMPT_FILE
+  || require('node:path').join(__dirname, '..', 'data', 'analyst-last-prompt.txt');
+
+function savePrompt(text) {
+  try {
+    const fs = require('node:fs');
+    fs.mkdirSync(require('node:path').dirname(LAST_PROMPT_FILE), { recursive: true });
+    const tmp = `${LAST_PROMPT_FILE}.tmp`;
+    fs.writeFileSync(tmp, String(text || ''));
+    fs.renameSync(tmp, LAST_PROMPT_FILE);
+  } catch (e) {
+    // ⚠️ 감사 보조물이라 실패해도 브리핑을 막지 않는다 — 다만 조용하지 않다
+    logWarn('analyst.save_prompt_failed', { message: e.message });
+  }
+}
+function readLastPrompt() {
+  try { return require('node:fs').readFileSync(LAST_PROMPT_FILE, 'utf8'); } catch { return null; }
+}
+
 function saveLast(report) {
   try {
     const fs = require('node:fs');
@@ -1809,10 +1841,17 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   if (userInstruction) lines.push('', `## 사용자 추가 지시`, userInstruction);
 
   const started = Date.now();
+  /**
+   * 🔴 **보낸 입력을 남긴다** — 이게 있어야 *"보고서의 숫자가 우리가 준 것인가"* 를
+   *    사후에 판정할 수 있다(위 savePrompt 주석 참조). dryRun 도 남긴다 — 검증 회차도
+   *    같은 자로 재야 한다.
+   */
+  const userPrompt = lines.join('\n');
+  savePrompt(userPrompt);
   const raw = await generateStructuredOutput(
     {
       systemPrompt: SYSTEM_PROMPT,
-      userPrompt: lines.join('\n'),
+      userPrompt,
       schema: REPORT_SCHEMA,
       logLabel: 'trade_analyst',
     },
@@ -2503,7 +2542,7 @@ async function decideOnContext({ contextText, regimeState = null, holdings = [] 
   return { report, proposals: accepted, rejected };
 }
 
-module.exports = { portfolioWeights,
+module.exports = { savePrompt, readLastPrompt, LAST_PROMPT_FILE, portfolioWeights,
   analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport,
   computeTrade, decideOnContext, inverseGate, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)

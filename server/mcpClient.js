@@ -376,7 +376,20 @@ async function searchMarketNews(subjects, { maxSubjects = 5 } = {}) {
        */
       if (isBareTickerQuery(s, query)) {
         skipped += 1;
-        logWarn('mcp.bare_ticker_skipped', { symbol: s.symbol });
+        /**
+         * 🔴 **심볼만 찍으면 원인을 못 가른다** (2026-10-02). 종전 로그는 `{symbol:'QLD'}`
+         *    뿐이라 *"정식명을 못 받았나 / 다른 이유인가"* 를 가를 수 없었고, 실제로
+         *    `stockIdentity` 의 6시간 실패 캐시가 범인인 것을 찾는 데 로그가 아무 도움이
+         *    못 됐다. ⇒ **질의와 "어느 칸이 비었나" 를 함께 싣는다.**
+         *    ⚠️ 싣는 것은 **빈 칸 여부(boolean)** 지 값이 아니다 — 자유 문자열을 로그로
+         *       흘리면 수량·금액이 샐 수 있다는 이 모듈의 불변이 깨진다.
+         */
+        logWarn('mcp.bare_ticker_skipped', {
+          symbol: s.symbol,
+          query,
+          hasOfficialName: Boolean(String(s?.officialName || '').trim()),
+          nameEqualsSymbol: String(s?.name || '').trim().toUpperCase() === String(s?.symbol || '').trim().toUpperCase(),
+        });
         results.push({ symbol: s.symbol, name: s.name, query, skipped: 'bare-ticker' });
         continue;
       }

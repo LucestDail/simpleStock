@@ -20,6 +20,19 @@ const { logWarn } = require('./logger');
 
 /** 정적 정보(정식명·배수·상장일)다 — 하루 안에 바뀌지 않는다. 6시간이면 충분하다. */
 const CACHE_MS = 6 * 60 * 60 * 1000;
+/**
+ * 🔴 **못 받은 것은 6시간 캐시하면 안 된다** (2026-10-02 라이브 실사고).
+ *
+ * 종전엔 성공·실패를 **같은 6시간**으로 캐시했다. 그래서 조회가 **한 번** 빗나가면
+ * 그 종목은 6시간 동안 `officialName` 이 없고, `mcpClient.buildQuery` 가 티커로
+ * 떨어져 **웹 검색이 통째로 건너뛰어진다**(`mcp.bare_ticker_skipped`). 실제로
+ * 04:56 회차에서 QLD·RAM 검색이 전부 죽었는데 **그 사이 `/api/portfolio` 는 정상**이라
+ * (캐시가 그 뒤 갱신됨) 증상만 보면 "검색 기능이 퇴행했다" 로 읽힌다.
+ *
+ * ⚠️ 그렇다고 캐시를 아예 빼면 **매 틱 토스를 두드린다**(정체 하나에 호출이 샌다 —
+ *    원래 이 캐시가 생긴 이유다). ⇒ **성공은 길게, 실패는 짧게.**
+ */
+const MISS_CACHE_MS = 10 * 60 * 1000;
 /** sym → { at, info } */
 const cache = new Map();
 
@@ -35,18 +48,30 @@ async function fetchIdentity(symbols) {
   const misses = [];
   for (const s of want) {
     const hit = cache.get(s);
-    if (hit && now - hit.at < CACHE_MS) out.set(s, hit.info);
+    // ⚠️ 유효기간이 **성공/실패로 갈린다** — 실패를 길게 들고 있으면 그게 곧 장애다
+    const ttl = hit && hit.info ? CACHE_MS : MISS_CACHE_MS;
+    if (hit && now - hit.at < ttl) out.set(s, hit.info);
     else misses.push(s);
   }
   if (misses.length) {
     try {
       const fresh = await toss.getStockInfo(misses);
+      const absent = [];
       for (const s of misses) {
         const info = fresh.get(s) || null;
-        // 못 받은 심볼도 캐시한다 — 매 틱 다시 두드리면 정체 하나에 호출이 샌다
+        // 못 받은 심볼도 캐시한다 — 매 틱 다시 두드리면 정체 하나에 호출이 샌다.
+        // 다만 **짧게**(MISS_CACHE_MS) 들고 있다가 곧 다시 묻는다.
         cache.set(s, { at: now, info });
         if (info) out.set(s, info);
+        else absent.push(s);
       }
+      /**
+       * 🔴 **"응답은 왔는데 그 심볼이 없었다" 가 종전엔 로그 0건이었다.**
+       *    `identity.fetch_failed` 는 **예외(전체 실패)** 에서만 난다 — 이 저장소가
+       *    여러 번 밟은 *"형제 중 하나만 빠진다"* 가 여기선 **관측조차 안 됐다.**
+       *    정식명이 없으면 그 종목은 웹 검색에서 통째로 빠지므로 조용하면 안 된다.
+       */
+      if (absent.length) logWarn('identity.missing', { symbols: absent, asked: misses.length });
     } catch (e) {
       logWarn('identity.fetch_failed', { symbols: misses.length, kind: e?.kind, message: e?.message });
     }
@@ -122,4 +147,8 @@ function _resetForTest() {
   cache.clear();
 }
 
-module.exports = { fetchIdentity, enrich, describeLine, sectionFromItems, _resetForTest };
+module.exports = {
+  fetchIdentity, enrich, describeLine, sectionFromItems, _resetForTest,
+  // ⚠️ 유효기간은 **테스트가 관계를 잠글 수 있게** 내보낸다 — 숨겨 두면 둘이 같아져도 아무도 모른다
+  CACHE_MS, MISS_CACHE_MS,
+};

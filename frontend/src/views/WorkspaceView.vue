@@ -878,18 +878,17 @@ function sessionWord(key) {
 const pendingCount = computed(() => proposals.value.filter((p) => p.status === 'PENDING').length);
 
 /**
- * ⚠️ **아직 레이어가 아니다** (2026-10-02). 와이어프레임 ⑧ 은 *"상시 패널 → 상단 'AI 대화'
- *    버튼으로 여는 우측 레이어"* 인데, 지금은 **그 패널로 데려가 입력에 포커스**만 한다.
- *    레이어화는 채팅 전체를 옮기는 작업이라 이번 범위에서 뺐다 —
- *    버튼이 **아무것도 안 하는 것**보다는 데려가는 쪽이 낫고, 안 한 것은 적어 둔다.
+ * 🔴 **`AI 대화` 상단 버튼은 뺐다** (2026-10-02 — 사용자: *"상단에 AI 대화는 또 뭐야"*).
+ *
+ * 와이어프레임을 **렌더해서 상단바를 실제로 읽어 보니** 거기엔 그런 버튼이 없다
+ * (로고 · 국면 칩 · 지수 티커 · 지표 편집 · 시계 · 아이콘 버튼 둘이 전부다).
+ * 채팅은 **우측 컬럼 안 인라인**으로 있고, 그건 이 앱이 이미 그렇게 하고 있다.
+ * ⇒ 버튼은 *"스크롤해서 데려다 주는"* 일만 했으므로 **추가 가치가 0**이었고,
+ *   상단바에서 자리만 차지하며 "이건 뭐지" 를 만들었다.
+ *
+ * ★ 내가 이 버튼을 넣으며 적은 주석이 **"아직 레이어가 아니다"** 였다 —
+ *   미완이라고 적어 두는 것과, 미완을 화면에 내보내는 것은 다른 일이다.
  */
-function focusChat() {
-  // ⚠️ 선택자는 **실제 마크업에서 확인**했다 — 추측으로 두면 버튼이 조용히 아무것도 안 한다
-  const panel = document.querySelector('section.chat');
-  const el = panel?.querySelector('input.input');
-  panel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  if (el && typeof el.focus === 'function') setTimeout(() => el.focus(), 350);
-}
 function focusProposals() {
   document.querySelector('.props')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -1191,7 +1190,6 @@ onUnmounted(() => {
         <button v-if="pendingCount" class="btn btn--sm btn--primary topbar__pend" @click="focusProposals">
           매매 제안 <b class="mono-num">{{ pendingCount }}</b>
         </button>
-        <button class="btn btn--sm topbar__ai" @click="focusChat">AI 대화</button>
         <div class="metric">
           <span class="metric__label">종목</span>
           <span class="metric__value mono-num">{{ totalTickers }}</span>
@@ -1261,45 +1259,50 @@ onUnmounted(() => {
         <p v-else-if="!portfolio" class="banner banner--empty">토스 연동을 설정하면 실제 보유가 표시됩니다.</p>
 
         <template v-else>
-          <div class="kpis">
-            <div class="kpi">
-              <span class="kpi__label">평가금액</span>
-              <span class="kpi__value mono-num">{{ krwCell(portfolio.summary.value) }}</span>
-            </div>
-            <div class="kpi">
-              <!-- 와이어프레임 라벨: "투자원금" — "매입금액" 보다 무엇인지 분명하다 -->
-              <span class="kpi__label">투자원금</span>
-              <span class="kpi__value kpi__value--sub mono-num">{{ krwCell(portfolio.summary.purchase) }}</span>
-            </div>
-            <div class="kpi">
-              <!--
-                🔴 **금액과 비율이 서로 다른 말을 하고 있었다** (2026-10-02 실물).
-                   금액 `+₩527,619`(이익) 옆에 `−6.53%`(손실)가 **같은 색으로** 붙어 있었다.
-                   증권사가 주는 `profitRate` 가 자기 금액과 **일관되게 어긋난다**(알려진 괴리).
-                ⇒ 금액과 **일관된 쪽**(금액에서 유도한 값)을 보여주고, 다르면 그 사실을 표시한다.
-                   백엔드가 이미 `profitRateDerived` 를 계산해 분석 프롬프트에 싣고 있었다 —
-                   **화면만 안 쓰고 있었다**(*"수집해 놓고 안 쓰는"* 의 또 하나).
-                ⚠️ 증권사 값을 **지우지 않는다** — 의미가 다를 수 있어 툴팁으로 남긴다.
-              -->
-              <span class="kpi__label">평가손익</span>
-              <span class="kpi__value mono-num" :class="signClass(portfolio.summary.profit.krw ?? portfolio.summary.profit.usd)">
+          <!--
+            🔴 **박스 5개 → 와이어프레임의 압축 히어로** (2026-10-02 2차).
+
+            좌열이 340px 가 되면서 KPI 박스가 **288px** 를 먹었고, 그 탓에
+            `보유 종목` 목록이 **117px(4행 중 2행)** 만 받았다. 와이어프레임의 `내 자산`
+            카드는 박스가 없다 — **큰 숫자 하나 + 한 줄 요약 + 비중 바 + 작은 2칸**이다.
+            ⇒ 값은 하나도 안 버리고 **배치만** 바꾼다(투자원금·주문가능은 아래 2칸으로).
+          -->
+          <div class="hero">
+            <span class="hero__label">평가금액</span>
+            <span class="hero__value mono-num">{{ krwCell(portfolio.summary.value) }}</span>
+            <!--
+              🔴 **금액과 비율이 서로 다른 말을 하고 있었다** (2026-10-02 실물).
+                 금액 `+₩527,619`(이익) 옆에 `−6.53%`(손실)가 **같은 색으로** 붙어 있었다.
+                 증권사 `profitRate` 가 자기 금액과 **일관되게 어긋난다**(알려진 괴리).
+              ⇒ 금액과 **일관된 쪽**(금액에서 유도한 값)을 보여주고, 다르면 `*` 로 표시한다.
+              ⚠️ 증권사 값을 **지우지 않는다** — 의미가 다를 수 있어 툴팁으로 남긴다.
+            -->
+            <span class="hero__line">
+              <span class="mono-num" :class="signClass(portfolio.summary.profit.krw ?? portfolio.summary.profit.usd)">
                 {{ krwCell(portfolio.summary.profit) }}
                 <small :title="profitRateNote">{{ pct(profitRateShown) }}<template v-if="profitRateDiffers">*</template></small>
               </span>
-            </div>
-            <div class="kpi">
-              <!-- 🔴 2026-09-22 사용자: "웹 화면에 내 잔고 잔액이 안보이는데" —
-                   서버는 summary.cash 를 이미 주고 있었다(어제 배선). 화면만 안 그렸다.
-                   ⚠️ 라벨은 "주문 가능 현금" — 예수금 총액과 다를 수 있어 정직하게 붙인다 -->
-              <span class="kpi__label">주문 가능 현금</span>
-              <span class="kpi__value kpi__value--sub mono-num">{{ cashCell(portfolio.summary.cash) }}</span>
-            </div>
-            <div class="kpi">
-              <span class="kpi__label">오늘</span>
-              <span class="kpi__value mono-num" :class="signClass(portfolio.summary.dailyProfit.krw ?? portfolio.summary.dailyProfit.usd)">
+              <span class="hero__sep">·</span>
+              <span class="hero__today">오늘</span>
+              <span class="mono-num" :class="signClass(portfolio.summary.dailyProfit.krw ?? portfolio.summary.dailyProfit.usd)">
                 {{ krwCell(portfolio.summary.dailyProfit) }}
                 <small>{{ pct(portfolio.summary.dailyRate) }}</small>
               </span>
+            </span>
+          </div>
+
+          <div class="minis">
+            <!-- 와이어프레임 라벨: "투자원금" — "매입금액" 보다 무엇인지 분명하다 -->
+            <div class="mini">
+              <span class="mini__label">투자원금</span>
+              <span class="mini__value mono-num">{{ krwCell(portfolio.summary.purchase) }}</span>
+            </div>
+            <!-- 🔴 2026-09-22 사용자: "웹 화면에 내 잔고 잔액이 안보이는데" —
+                 서버는 summary.cash 를 이미 주고 있었다. 화면만 안 그렸다.
+                 ⚠️ 라벨은 "주문 가능" — 예수금 총액과 다를 수 있어 정직하게 붙인다 -->
+            <div class="mini">
+              <span class="mini__label">주문 가능</span>
+              <span class="mini__value mono-num">{{ cashCell(portfolio.summary.cash) }}</span>
             </div>
           </div>
 
@@ -1361,61 +1364,50 @@ onUnmounted(() => {
           </div>
 
           <!-- 🔴 **표만** 스크롤한다 — 요약은 위에 남는다 -->
-          <div class="holdings__scroll">
-          <table class="holdings">
-            <thead>
-              <tr>
-                <th>종목</th><th class="ta-r">수량</th><th class="ta-r">평단</th>
-                <th class="ta-r">현재가</th><th class="ta-r">평가금액</th>
-                <th class="ta-r">평가손익</th><th class="ta-r">비중</th><th class="ta-r">오늘</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="h in portfolio.items"
-                :key="h.symbol"
-                class="holdings__row"
-                :class="{ 'holdings__row--on': selected.symbol === h.symbol }"
-                @click="pickSymbol(h.symbol, h.name)"
-              >
-                <td>
-                  <span class="holdings__name">
-                    {{ h.name }}
-                    <!-- 🔴 레버리지는 판단의 전제 — 사용자도 "RAM" 만 보면 무엇인지 모른다 -->
-                    <span v-if="Number(h.leverageFactor) >= 2" class="holdings__lev">{{ h.leverageFactor }}x</span>
-                  </span>
-                  <span class="holdings__meta" :title="h.officialName || ''">
-                    {{ h.market }} · {{ h.symbol }}<template v-if="h.officialName"> · {{ h.officialName }}</template>
-                  </span>
-                </td>
-                <td class="ta-r mono-num">{{ h.quantity }}</td>
-                <td class="ta-r mono-num">{{ money(h.avgPrice, h.currency) }}</td>
-                <td class="ta-r mono-num">{{ money(h.lastPrice, h.currency) }}</td>
-                <!-- 🔴 와이어프레임 `평가금액` 열 — 수량×현재가를 사용자가 암산하게 두지 않는다 -->
-                <td class="ta-r mono-num">{{ money(h.marketValue, h.currency) }}</td>
-                <td class="ta-r mono-num" :class="signClass(h.profit)">
-                  {{ money(h.profit, h.currency) }} <small>{{ pct(h.profitRate) }}</small>
-                </td>
-                <!-- 🔴 비중 열 — 리스크 칩의 숫자가 **어느 종목에서 왔는지** 여기서 갈린다 -->
-                <td class="ta-r mono-num">{{ weightOf(h.symbol) }}</td>
-                <td class="ta-r mono-num" :class="signClass(h.dailyRate)">{{ pct(h.dailyRate) }}</td>
-              </tr>
-              <!--
-                🔴 **현금 행** (와이어프레임 내 자산 테이블 맨 아래).
-                   종전엔 현금이 KPI 한 칸에만 있어 **보유와 같은 축으로 비교할 수 없었다** —
-                   "현금이 몇 %인가" 를 보려면 머리로 계산해야 했다.
-              -->
-              <tr v-if="portfolio.weights" class="holdings__row holdings__row--cash">
-                <td><span class="holdings__name">현금</span></td>
-                <td class="ta-r">—</td><td class="ta-r">—</td><td class="ta-r">—</td>
-                <td class="ta-r mono-num">{{ cashCell(portfolio.summary.cash) }}</td>
-                <td class="ta-r">—</td>
-                <td class="ta-r mono-num">{{ portfolio.weights.cashPct }}%</td>
-                <td class="ta-r">—</td>
-              </tr>
-            </tbody>
-          </table>
-          </div>
+          <!--
+            🔴 **8열 표 → 2줄 행으로 바꿨다** (2026-10-02 2차 — 와이어프레임 수용).
+
+            와이어프레임의 좌열은 **340px** 이고 `보유 종목` 카드는 한 종목당 **두 줄**이다
+            (`{sym}{tag} … {pl}` / `{meta} … 오늘 {today}`). 종전 8열 표는 **681px** 라
+            그 열에 넣으면 **절반 넘게 잘린다**(실측 681 vs 보이는 313).
+            ⚠️ **열을 지운 게 아니라 접은 것**이다 — 수량·평단·현재가·비중은 둘째 줄
+               `meta` 로 전부 살아 있다. 값을 버리면 "화면이 좁아서 못 본다" 가 된다.
+          -->
+          <ul class="holdings__scroll holds">
+            <li
+              v-for="h in portfolio.items"
+              :key="h.symbol"
+              class="hold"
+              :class="{ 'hold--on': selected.symbol === h.symbol }"
+              @click="pickSymbol(h.symbol, h.name)"
+            >
+              <span class="hold__name">
+                {{ h.name }}
+                <!-- 🔴 레버리지는 판단의 전제 — 사용자도 "RAM" 만 보면 무엇인지 모른다 -->
+                <span v-if="Number(h.leverageFactor) >= 2" class="hold__lev">{{ h.leverageFactor }}x</span>
+              </span>
+              <span class="hold__val mono-num">{{ money(h.marketValue, h.currency) }}</span>
+              <span class="hold__meta" :title="h.officialName || ''">
+                {{ h.market }} · {{ h.symbol }} · <span class="mono-num">{{ h.quantity }}</span>주 ·
+                평단 <span class="mono-num">{{ money(h.avgPrice, h.currency) }}</span>
+              </span>
+              <span class="hold__pl mono-num" :class="signClass(h.profit)">
+                {{ money(h.profit, h.currency) }} <small>{{ pct(h.profitRate) }}</small>
+                <small class="hold__today" :class="signClass(h.dailyRate)">오늘 {{ pct(h.dailyRate) }}</small>
+              </span>
+            </li>
+            <!--
+              🔴 **현금 행** (와이어프레임 내 자산 맨 아래).
+                 종전엔 현금이 KPI 한 칸에만 있어 **보유와 같은 축으로 비교할 수 없었다** —
+                 "현금이 몇 %인가" 를 보려면 머리로 계산해야 했다.
+            -->
+            <li v-if="portfolio.weights" class="hold hold--cash">
+              <span class="hold__name">현금</span>
+              <span class="hold__val mono-num">{{ cashCell(portfolio.summary.cash) }}</span>
+              <span class="hold__meta">주문 가능 잔고</span>
+              <span class="hold__pl mono-num">비중 {{ portfolio.weights.cashPct }}%</span>
+            </li>
+          </ul>
         </template>
       </section>
     <section class="strip">
@@ -2183,22 +2175,54 @@ onUnmounted(() => {
   overflow-y: auto;
 }
 @media (min-width: 1180px) {
+  /**
+   * 🔴 **열 배치를 와이어프레임대로 바꿨다** (2026-10-02 2차).
+   *
+   * 종전 배치를 **라이브 DOM 에서 직접 재어** 보니 이랬다:
+   * ```
+   *        열1 869px          열2 246px     열3 525px
+   *   행1  내 자산            관심종목      AI 분석
+   *   행2  뉴스                 랭킹         대화
+   *   행3  차트                  ↑            ↑
+   * ```
+   * 와이어프레임은 **완전히 다른 축**이다:
+   * ```
+   *        열1 340px          열2 1fr       열3 400px
+   *        내 자산            종목 차트     AI 에이전트
+   *        보유 종목           (크게)        매매 제안
+   *        관심종목           뉴스·랭킹       대화
+   * ```
+   * ⇒ **차트가 주인공**이고(가운데 가장 넓게), 좌열은 *"내가 가진 것"*,
+   *   우열은 *"에이전트가 말하는 것"* 으로 **역할이 갈린다.** 종전엔 차트가
+   *   좌열 맨 아래에 깔려 있어서 **제일 큰 칸을 자산 표가 쓰고 있었다.**
+   *
+   * ⚠️ 폭은 **px 고정(340·400)** 이다 — 와이어프레임이 그렇게 잡았고, 좌·우는
+   *    내용 폭이 정해진 패널이라 늘어나 봐야 여백만 생긴다. **가운데만 1fr** 로
+   *    남는 폭을 전부 차트가 가져간다.
+   * ⚠️ 행은 비율(fr)이다 — 창 높이에 따라 달라지므로 **픽셀로 읽지 말 것.**
+   */
   .deck {
-    grid-template-columns: minmax(0, 53fr) minmax(0, 15fr) minmax(0, 32fr);
-    /**
-     * 🔴 **1행을 키웠다** (2026-10-02 — 와이어프레임 수용 후 실측).
-     *    `내 자산` 에 **비중 열 + 현금 행 + 리스크 칩**이 들어가면서 표가 **112px 모자랐다**
-     *    (보이는 110 vs 내용 222 · 4행 × 약 50px + 머리글).
-     *    ⚠️ 현금 행이 스크롤 아래 숨으면 **새로 넣은 것이 안 보이는 것**과 같다.
-     * ⚠️ 비율(fr)이라 창 높이에 따라 달라진다 — 여기 숫자는 **비율이지 픽셀이 아니다.**
-     *    183→248 은 1행을 약 35% 키운 것이고, 2·3행에서 고르게 가져왔다.
-     */
-    grid-template-rows: minmax(0, 248fr) minmax(0, 110fr) minmax(0, 234fr);
+    grid-template-columns: minmax(0, 340px) minmax(0, 1fr) minmax(0, 400px);
+    grid-template-rows: minmax(0, 30fr) minmax(0, 26fr) minmax(0, 22fr) minmax(0, 22fr);
     overflow: hidden;
   }
-  /* 중·우열이 행2~3 을 세로로 먹는다 */
-  .deck > .layout__signals { grid-column: 2; grid-row: 2 / span 2; }
-  .deck > .chat { grid-column: 3; grid-row: 2 / span 2; }
+  /* 좌열 — 내가 가진 것 */
+  /**
+   * 🔴 **자산 카드가 1행만 쓰면 보유 목록이 0px 로 눌린다** (2026-10-02 실측).
+   *    KPI 3줄 + 비중 바 + 모멘텀이 카드 높이를 다 먹고, `.holdings__scroll` 은
+   *    `flex:1; min-height:0` 이라 **조용히 높이 0** 이 된다 — 오류도 경고도 없이
+   *    **방금 만든 보유 목록이 화면에서 통째로 사라졌다.**
+   *    ⇒ 자산은 2행, 관심종목은 나머지 2행.
+   */
+  .deck > .assets { grid-column: 1; grid-row: 1 / span 2; }
+  .deck > .strip { grid-column: 1; grid-row: 3 / span 2; }
+  /* 가운데 — 종목(차트가 가장 큰 칸을 쓴다) */
+  .deck > .cell--chart { grid-column: 2; grid-row: 1 / span 2; }
+  .deck > .news { grid-column: 2; grid-row: 3; }
+  .deck > .layout__signals { grid-column: 2; grid-row: 4; }
+  /* 우열 — 에이전트가 말하는 것 */
+  .deck > .analyst { grid-column: 3; grid-row: 1 / span 2; }
+  .deck > .chat { grid-column: 3; grid-row: 3 / span 2; }
 }
 /* 칸을 넘기지 않는다 — 내용은 **각 카드 안에서** 스크롤한다 */
 .deck > * { min-width: 0; min-height: 0; }
@@ -2376,33 +2400,53 @@ onUnmounted(() => {
   flex-direction: column;
   gap: var(--space-sm);
 }
+/**
+ * 🔴 **좁은 열에서 제목이 세로로 쪼개졌다** (2026-10-02 실측 — `내/자/산`).
+ *    `.assets__head` 가 flex 인데 우측 `assets__note`(동기화·환율 안내)가 길어서,
+ *    좌측 제목이 **글자 하나 폭까지** 눌렸다. flex 아이템의 기본 `min-width:auto` 가
+ *    내용 때문에 안 먹는 상황이라 **명시적으로 줄바꿈을 막고 줄어들지 않게** 한다.
+ * ⚠️ 대신 **note 쪽이 줄어들고 넘치면 말줄임** — 둘 다 안 줄면 카드가 가로로 터진다.
+ */
 .assets__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
-.assets__title { display: flex; align-items: center; gap: var(--space-sm); }
-.assets__title h2 { margin: 0; font-size: var(--text-base); font-weight: 700; color: var(--color-ink); }
+.assets__title { display: flex; align-items: center; gap: var(--space-sm); flex-shrink: 0; }
+.assets__title h2 { margin: 0; font-size: var(--text-base); font-weight: 700; color: var(--color-ink); white-space: nowrap; }
 .assets__badge {
   font-size: var(--text-2xs); font-weight: 700; letter-spacing: 0.1em;
   padding: 2px 6px; border-radius: var(--rounded-xs);
   background: var(--color-primary-soft); color: var(--color-primary);
 }
-.assets__note { font-size: var(--text-xs); color: var(--color-muted); }
+.assets__note { font-size: var(--text-xs); color: var(--color-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-.kpis {
-  display: grid;
-  /* 2026-09-22 사용자: "5개 한 줄에" — 현금 카드가 추가되며 4열이 4+1 로 접혔다 */
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--space-xs);
+/* ── 내 자산 히어로 (2026-10-02 와이어프레임) ─────────────────────────
+   큰 숫자 하나가 "지금 얼마인가" 를 말하고, 아래 한 줄이 "얼마 벌었나 / 오늘 어떤가" 를
+   말한다. 박스로 쪼개면 다섯 개가 같은 무게가 돼서 **무엇을 먼저 볼지 알 수 없다.** */
+.hero { display: flex; flex-direction: column; gap: 1px; }
+.hero__label { font-size: var(--text-2xs); letter-spacing: 0.06em; color: var(--color-faint); }
+.hero__value {
+  font-size: var(--text-3xl); font-weight: 600; color: var(--color-ink);
+  line-height: 1.15; letter-spacing: -0.02em;
 }
-.kpi {
+.hero__line {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 5px;
+  font-size: var(--text-md); font-weight: 600;
+}
+.hero__line small { font-size: var(--text-xs); margin-left: 3px; opacity: 0.85; }
+.hero__sep { color: var(--color-hairline-strong); }
+.hero__today { color: var(--color-muted); font-weight: 500; font-size: var(--text-xs); }
+
+/* 배경 정보 2칸 — 와이어프레임의 `[레버리지 노출][주문 가능]` 자리 */
+.minis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-xs); }
+.mini {
   display: flex; flex-direction: column; gap: 1px;
-  padding: var(--space-sm) var(--space-base);
-  background: var(--color-surface-sunken);
-  border-radius: var(--rounded-md);
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-hairline); border-radius: var(--rounded-md);
+  min-width: 0;
 }
-.kpi__label { font-size: var(--text-2xs); letter-spacing: 0.06em; color: var(--color-faint); }
-/* 🔴 사용자: *"내 자산 부분 크기 좀 더 줄여"* — 상단으로 올라가므로 한 줄을 낮춘다 */
-.kpi__value { font-size: var(--text-sm); font-weight: 700; color: var(--color-ink); }
-.kpi__value--sub { font-size: var(--text-xs); color: var(--color-body); font-weight: 600; }
-.kpi__value small { font-size: var(--text-xs); font-weight: 600; margin-left: 6px; opacity: 0.85; }
+.mini__label { font-size: var(--text-2xs); letter-spacing: 0.06em; color: var(--color-faint); }
+.mini__value {
+  font-size: var(--text-xs); font-weight: 600; color: var(--color-body);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .up { color: var(--color-up); }
 .down { color: var(--color-down); }
 .flat { color: var(--color-body); }
@@ -2435,17 +2479,14 @@ onUnmounted(() => {
 .alloc__flag--ok { border-color: rgba(70,180,120,.45); color: #5fc48f; }
 .alloc__flag--warn { border-color: rgba(230,170,60,.5); color: #e0ad48; }
 .alloc__flag--danger { border-color: rgba(224,96,58,.6); color: #ef7a55; background: rgba(224,96,58,.08); }
-/* 상단 바 — 와이어프레임 `매매 제안 ❷` / `AI 대화` */
+/* 상단 바 — 와이어프레임 `매매 제안 ❷` (`AI 대화` 는 10-02 에 뺐다 — 위 주석 참조) */
 .topbar__pend { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .topbar__pend b { background: rgba(255,255,255,.22); border-radius: 999px; padding: 0 6px; }
-.topbar__ai { white-space: nowrap; }
 /* ₩|$ 토글 — 와이어프레임 내 자산 우측 */
 .ccy { display: inline-flex; border: 1px solid var(--color-hairline-strong); border-radius: var(--rounded-md); overflow: hidden; }
 .ccy__b { background: none; border: 0; color: var(--color-muted); font-size: var(--text-xs); padding: 2px 8px; cursor: pointer; }
 .ccy__b--on { background: var(--color-ink); color: var(--color-surface); }
 /* 현금 행 — 보유와 같은 축에 둔다 */
-.holdings__row--cash { cursor: default; }
-.holdings__row--cash td { color: var(--color-body); }
 /* 분석 메타 칩 · 리스크 체크 — 와이어프레임 ③ */
 .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--space-xs); }
 .meta__chip {
@@ -2462,6 +2503,48 @@ onUnmounted(() => {
 .clockchip--error .clockchip__time { color: var(--color-danger); }
 
 /* 동기화 상태 칩 — 와이어프레임 "모듈 상태 규칙" */
+/* ── 보유 종목 — 와이어프레임의 2줄 행 (2026-10-02) ─────────────────────
+   좌열이 340px 라 8열 표가 안 들어간다. 한 종목 = **2행 2열**:
+     이름[레버리지]   평가금액
+     시장·심볼·수량·평단·비중   손익(비율) 오늘
+   ⚠️ 두 줄 다 **한 줄 안에서 말줄임** — 넘치면 카드가 가로로 터진다 */
+.holdings__scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.holds { list-style: none; margin: 0; padding: 0; }
+.hold {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 var(--space-sm);
+  /* ⚠️ 행 높이가 곧 "몇 종목이 스크롤 없이 보이나" 다 — 실측 69px 에서 조였다 */
+  padding: var(--space-xs) var(--space-xs);
+  border-bottom: 1px solid var(--color-hairline-soft);
+  cursor: pointer;
+  font-size: var(--text-md);
+  line-height: 1.35;
+}
+.hold:last-child { border-bottom: none; }
+.hold:hover { background: var(--color-surface-hover); }
+.hold--on { background: var(--color-primary-soft); }
+.hold--cash { cursor: default; }
+.hold--cash .hold__name, .hold--cash .hold__pl { color: var(--color-body); }
+.hold__name {
+  font-weight: 600; color: var(--color-ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hold__val { text-align: right; font-weight: 600; color: var(--color-ink); }
+.hold__meta {
+  font-size: var(--text-xs); color: var(--color-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hold__pl { text-align: right; font-size: var(--text-xs); font-weight: 600; white-space: nowrap; }
+.hold__pl small { opacity: 0.85; margin-left: 3px; }
+/* 오늘은 손익 아래 한 칸 더 — 좁은 열에서 옆으로 붙이면 줄이 터진다 */
+.hold__today { display: block; margin: 1px 0 0; font-weight: 500; }
+.hold__lev {
+  margin-left: 4px; padding: 0 4px; border-radius: var(--rounded-xs);
+  border: 1px solid var(--color-warn); color: var(--color-warn);
+  font-size: var(--text-2xs); font-weight: 700; vertical-align: 1px;
+}
+
 .assets__sync { font-size: var(--text-xs); color: var(--color-muted); }
 .assets__sync--stale { color: #e0ad48; }
 .assets__sync--error { color: #ef7a55; }
@@ -2481,15 +2564,6 @@ onUnmounted(() => {
 /* 표만 스크롤 · 머리글은 붙어 있는다(스크롤해도 어느 열인지 잃지 않게) */
 .holdings__scroll { flex: 1; min-height: 0; overflow-y: auto; }
 /* ⚠️ 행을 조여 같은 공간에 **현금 행까지** 들어가게 한다(와이어프레임은 4행이 다 보인다) */
-.holdings td { padding-top: var(--space-xxs); padding-bottom: var(--space-xxs); }
-.holdings { width: 100%; border-collapse: collapse; font-size: var(--text-md); }
-.holdings thead th { position: sticky; top: 0; z-index: 1; background: var(--color-surface); }
-.holdings th {
-  text-align: left; font-size: var(--text-2xs); font-weight: 600; letter-spacing: 0.06em;
-  color: var(--color-faint); padding: 0 var(--space-sm) var(--space-xs);
-  border-bottom: 1px solid var(--color-hairline-soft);
-}
-.holdings td { padding: 5px var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); }
 /*
   🔴 2026-09-21 사용자: *"수량 평단, 평가손익 금일 변동치가 각 항목과 위치가 안맞는데"*
      원인은 데이터가 아니라 **CSS 특이도**였다 — `.holdings th`(0,1,1)가 `.ta-r`(0,1,0)를
@@ -2498,20 +2572,6 @@ onUnmounted(() => {
   ★ 눈으로는 "데이터가 밀렸다" 로 보이지만 실제로 움직인 건 **헤더**다 —
     증상과 원인이 반대편에 있어서 데이터 정렬을 아무리 고쳐도 안 맞았을 자리.
 */
-.holdings th.ta-r, .holdings td.ta-r { text-align: right; }
-.holdings tr:last-child td { border-bottom: none; }
-.holdings__name { display: block; font-weight: 600; color: var(--color-ink); }
-.holdings__meta {
-  display: block; font-size: var(--text-xs); color: var(--color-faint);
-  /* 정식명이 길다("ROUNDHILL T-REX 2X …") — 칸을 밀지 말고 자른다. 전체는 title 로 */
-  max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.holdings__lev {
-  display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 4px;
-  font-size: var(--text-xs); font-weight: 700; line-height: 1.5;
-  color: var(--color-warn, #b45309); background: color-mix(in srgb, currentColor 14%, transparent);
-}
-.holdings small { font-size: var(--text-xs); opacity: 0.85; margin-left: 4px; }
 .ta-r { text-align: right; }
 
 /* ── 관심 테마 스트립 (상단) ───────────────────────── */
@@ -2671,9 +2731,6 @@ onUnmounted(() => {
   border-color: transparent;
   color: var(--color-warn);
 }
-.holdings__row { cursor: pointer; }
-.holdings__row:hover { background: var(--color-surface-hover); }
-.holdings__row--on { background: var(--color-primary-soft); }
 .ticker__id[role='button'] { cursor: pointer; }
 
 /* ── 보드 ─────────────────────────────────────────── */
