@@ -131,6 +131,11 @@ const REPORT_SCHEMA = {
     dataGaps: { type: 'array', items: { type: 'string' }, maxItems: 8 },
     positions: {
       type: 'array',
+      /**
+       * ⚠️ 이제 **후보 전용 자리**다 — 보유는 `holdings`(아래 `reportSchemaFor`)가 받는다.
+       *    종전엔 둘이 여기서 경쟁했고 비중 0.7% 인 O 가 네 회차 연속 밀려났다.
+       * ⚠️ 상한은 남긴다 — 출력 길이 = 시간이고, 상한 없이 6,905~9,762토큰을 써서 캡에 잘린 적이 있다.
+       */
       maxItems: 6,
       items: {
         type: 'object',
@@ -169,6 +174,54 @@ const REPORT_SCHEMA = {
   },
   required: ['marketView', 'momentumRead', 'dataGaps', 'positions', 'proposals'],
 };
+
+/**
+ * 🔴 **보유 종목에 자리를 따로 준다** (2026-10-02 — O 누락 네 회차 연속의 원인).
+ *
+ * ## 무엇이 일어났나
+ * `positions` 는 **보유와 후보가 함께 들어가는 한 배열**이고 `maxItems: 6` 이다.
+ * 도구상자가 커지면서 후보가 7~10종이 되자 모델이 **후보 위주로 답하고 보유를 밀어냈다.**
+ * 19:27 회차가 정확히 그 모양이다 — 후보 7 + QLD·RAM, 그리고 **O 누락.**
+ * O 는 **2주 · $107 · 비중 0.7%** 라 **가장 먼저 버려진다.**
+ *
+ * ## 🔴 프롬프트로는 네 번 다 실패했다
+ * 지시문에 *"보유 종목은 하나도 빠뜨리지 말고 전부 판단하십시오"* 가 **이미 있고**,
+ * 재요청 프롬프트에도 종목명을 찍어서 다시 요구한다. **네 회차 모두 안 들었다.**
+ * ⇒ 이 워크스페이스의 규율대로 **프롬프트로 못 고치는 것은 구조로 바꾼다.**
+ *
+ * ## 처방 — 경쟁을 없앤다
+ * 보유 전용 배열 `holdings` 를 두고 **`minItems = maxItems = 보유 개수`**,
+ * `symbol` 은 **보유 티커 enum**. 자리가 따로 있으면 후보와 경쟁하지 않는다.
+ * ⚠️ `shapeReport` 는 **응답의 모든 배열을 훑어** `asPosition` 으로 모으므로
+ *    (그래서 `got:9` 같은 수가 나온다) **합치는 코드를 따로 쓸 필요가 없다.**
+ * ⚠️ `minItems` 가 모델을 억지로 채우게 해 지어내기를 유발할 수 있다 — 그러나
+ *    보유 종목은 **실재하고 시세·평단·이동평균을 전부 줬다.** 지어낼 것이 없고,
+ *    최악이라도 `HOLD · LOW` 는 **코드가 대신 채우는 지금보다 낫다.**
+ * ⚠️ 보유가 없으면 원래 스키마를 그대로 쓴다 — 빈 enum 은 스키마를 깨뜨린다.
+ */
+function reportSchemaFor(heldSymbols = []) {
+  // ⚠️ trim 을 빠뜨려 ' qld ' 가 그대로 enum 에 들어갔다 — 자가 잡았다(2026-10-02)
+  const syms = [...new Set((heldSymbols || []).map((x) => String(x || '').trim().toUpperCase()).filter(Boolean))];
+  if (!syms.length) return REPORT_SCHEMA;
+  const base = REPORT_SCHEMA.properties.positions.items;
+  return {
+    ...REPORT_SCHEMA,
+    properties: {
+      ...REPORT_SCHEMA.properties,
+      holdings: {
+        type: 'array',
+        minItems: syms.length,
+        maxItems: syms.length,
+        description: `사용자가 **실제로 들고 있는** ${syms.length}개 종목 전부 — ${syms.join(', ')}. 하나도 빠뜨리지 말 것. 비중이 작아도 뺄 수 없다.`,
+        items: {
+          ...base,
+          properties: { ...base.properties, symbol: { type: 'string', enum: syms } },
+        },
+      },
+    },
+    required: [...REPORT_SCHEMA.required, 'holdings'],
+  };
+}
 
 const SYSTEM_PROMPT = [
   '당신은 **퀀트 모멘텀 분석가**입니다. 이야기가 아니라 **가격·추세·상대강도·변동성**으로 판단합니다.',
@@ -1854,7 +1907,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     {
       systemPrompt: SYSTEM_PROMPT,
       userPrompt,
-      schema: REPORT_SCHEMA,
+      // 🔴 **보유 전용 자리**를 가진 스키마 — 후보와 경쟁시키지 않는다(위 reportSchemaFor 참조)
+      schema: reportSchemaFor(items.map((h) => h.symbol)),
       logLabel: 'trade_analyst',
     },
     { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
@@ -1911,7 +1965,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
           '`symbol`(티커) · `stance`(BUY|SELL|HOLD) · `confidence`(HIGH|MEDIUM|LOW) · `rationale` · `risk`',
           '판단이 "그대로 보유" 여도 `stance: "HOLD"` 로 **명시**하세요. 빠뜨리지 마세요.',
         ].join('\n'),
-        schema: REPORT_SCHEMA,
+        // 🔴 **보유 전용 자리**를 가진 스키마 — 후보와 경쟁시키지 않는다(위 reportSchemaFor 참조)
+        schema: reportSchemaFor(items.map((h) => h.symbol)),
         logLabel: 'trade_analyst_retry',
       },
       { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
@@ -2028,7 +2083,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
             ...(outliers.length ? [prose.retryNote(outliers, refBySymbol)] : []),
             ...(drift.length ? [prose.driftNote(drift)] : []),
           ].join('\n'),
-          schema: REPORT_SCHEMA,
+          // 🔴 **보유 전용 자리**를 가진 스키마 — 후보와 경쟁시키지 않는다(위 reportSchemaFor 참조)
+          schema: reportSchemaFor(items.map((h) => h.symbol)),
           logLabel: 'trade_analyst_price_fix',
         },
         { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
@@ -2716,7 +2772,10 @@ async function decideOnContext({ contextText, regimeState = null, holdings = [] 
   return { report, proposals: accepted, rejected };
 }
 
-module.exports = { savePrompt, readLastPrompt, LAST_PROMPT_FILE, portfolioWeights,
+module.exports = {
+  // ⚠️ 테스트가 **구조 불변식**을 잴 수 있게 내보낸다 — 숨겨 두면 둘이 갈라져도 모른다
+  _reportSchemaFor: reportSchemaFor, _REPORT_SCHEMA: REPORT_SCHEMA, _shapeReport: shapeReport,
+  savePrompt, readLastPrompt, LAST_PROMPT_FILE, portfolioWeights,
   analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport,
   computeTrade, decideOnContext, inverseGate, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
