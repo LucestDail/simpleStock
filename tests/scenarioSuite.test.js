@@ -181,3 +181,12 @@ test('S8 제안 전체 흐름 — 생성 → 거절이 감사에 남는다 (실�
   assert.ok(rej.ok);
   assert.strictEqual(rej.proposal.status, 'REJECTED');
 });
+
+test('S9 🔭 파이프라인 집계가 **응답에 실린다** (report 에만 두면 조용히 빠진다)', async () => {
+  const { analyst } = fresh({ llmResponses: [{ ...BASE, holdings: holdings3() }] });
+  const r = await analyst.analyze(DASH(), { dryRun: true });
+  assert.ok(r.pipeline, '🔴 analyze() 의 return 이 명시 필드 재조립이라, report.pipeline 만으로는 안 나간다 — 라이브에서 실제로 빠졌다');
+  assert.strictEqual(r.pipeline.judged.positions, 3);
+  assert.strictEqual(r.pipeline.judged.codeFilled, 0);
+  assert.ok('guards' in r.pipeline && 'collected' in r.pipeline);
+});

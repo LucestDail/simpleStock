@@ -2950,6 +2950,12 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
 
   return {
     at: new Date().toISOString(),
+    /**
+     * 🔭 파이프라인 집계 (2026-10-03) — ⚠️ **이 return 은 report 를 통째로 넘기지 않고
+     *    명시 필드만 재조립한다.** 처음에 `report.pipeline = …` 만 하고 여기 안 실어서
+     *    응답에 **조용히 빠졌다**(라이브에서 발견). 새 필드는 여기에도 넣어야 나간다.
+     */
+    pipeline: report.pipeline || null,
     marketView: report.marketView || '',
     momentumRead: report.momentumRead || '',
     dataGaps: gaps,
