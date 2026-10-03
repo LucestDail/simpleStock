@@ -9,12 +9,22 @@ const cron = require('node-cron');
 // 🔴 **가장 먼저** — 다른 모듈이 fetch 를 잡기 전에 keep-alive 를 설치해야 한다
 require('./server/httpKeepAlive').install();
 const { APP_TIMEZONE, getDateInTimezone, getDateTimeInTimezone } = require('./server/time');
-const { AI_DAILY_CRON, isAiConfigured } = require('./server/aiService');
-const { syncScheduledTasks } = require('./server/taskService');
-const { ensureManagerBriefSchedule } = require('./server/managerBriefSchedule');
+/**
+ * 🔴 **v2 "매니저 브리핑" 세대를 2026-10-03 에 걷어냈다** (사용자 지시: *"군더더기랑 사족이
+ *    너무 많은데 불필요한 코드부터 시작해서 쭉 다 정리해"*).
+ *
+ * 걷어낸 근거 — 추측이 아니라 실측이다:
+ * - `memory.json` 의 `managerReports` 최신이 **2026-09-25** — 8일 전에 멈춘 체계다
+ * - 24h 라이브 트래픽에 `/api/briefing/*`·`/api/manager/*`·`/api/ai/run` **0건**
+ * - 그런데 기동마다 **크론 6개**(09·10·18·22·23·06시)가 등록되고, v3 분석(analystService)과
+ *   **같은 LLM 키·같은 시간대**를 두고 경쟁했다 — 두 브리핑 체계가 겹쳐 있던 것이
+ *   "성능이 엉망" 의 구조적 원인 중 하나다.
+ * 제거: managerService·managerBriefSchedule·taskService·payloadService·contextBuilder·
+ *       memoryService·conversationIntent·analystDream + aiService 의 대화그래프/보고서 절반.
+ * ⚠️ `memory.json` **데이터는 안 지웠다** — 코드만 안 읽는다(복구가 필요하면 git 이전 커밋).
+ */
+const { isAiConfigured, getAiSettings } = require('./server/aiService');
 const { logInfo, logWarn, logError } = require('./server/logger');
-const { runManagerReview, getSystemStatus, getLatestManagerReport } = require('./server/managerService');
-const { ORCHESTRATION_NOTES, buildServerStatusPayload } = require('./server/payloadService');
 const { subscribe, unsubscribe, sendToClient, broadcast, getSubscriberCount } = require('./server/realtimeService');
 const {
   refreshMarketData,
@@ -53,7 +63,6 @@ const mcp = require('./server/mcpClient');
 // 🔴 정식 종목명 — `/api/news` 가 맨 티커로 떨어지지 않게 (2026-10-02)
 const stockIdentity = require('./server/stockIdentity');
 const analystChat = require('./server/analystChat');
-const analystDream = require('./server/analystDream');
 const tape = require('./server/tickerTapeService');
 const telegramBot = require('./server/telegramBot');
 const alerts = require('./server/alertService');
@@ -432,23 +441,6 @@ app.post('/api/analyst/chat', async (req, res) => {
     safeEmit('error', { message: error.message || '대화에 실패했습니다.', kind: error.kind || 'unknown' });
   } finally {
     res.end();
-  }
-});
-
-/**
- * dreaming — 유휴 시 이력을 되짚어 장기기억을 남긴다.
- * ⚠️ `force` 는 **수동 실행**이다(기본 꺼짐을 우회). 화면 버튼·점검용.
- */
-app.get('/api/analyst/dream', (req, res) => res.json(analystDream.status()));
-app.post('/api/analyst/dream', async (req, res) => {
-  try {
-    const r = await analystDream.dream({ force: req.body?.force === true });
-    // 🔴 `ran:false` 도 200 이다 — "안 돌았다" 는 오류가 아니라 **정상적인 결과**다.
-    //    다만 why 를 반드시 실어서 화면이 이유를 말할 수 있게 한다
-    return res.json(r);
-  } catch (e) {
-    logError('dream.route_failed', e, { requestId: req.requestId });
-    return res.status(500).json({ error: e.message || 'dreaming 실패' });
   }
 });
 
@@ -928,7 +920,6 @@ app.get('/api/stream', (req, res) => {
   logInfo('realtime.connected', { requestId: req.requestId, clientId, subscribers: getSubscriberCount() });
 
   sendToClient(clientId, 'hello', { clientId, connectedAt: new Date().toISOString() });
-  sendToClient(clientId, 'server.status', buildServerStatusPayload());
   sendToClient(clientId, 'watchlist.updated', { watchlist: getWatchlistState() });
 
   req.on('close', () => {
@@ -1006,36 +997,33 @@ app.delete('/api/watchlist/groups/:id/tickers/:symbol', async (req, res) => {
 });
 
 // ── 범용 시장 브리핑 ──────────────────────────────────────────────
-async function handleBriefingRun(req, res) {
-  try {
-    const report = await runManagerReview('manual');
-    res.json({ report, watchlist: getWatchlistState() });
-  } catch (error) {
-    logError('briefing.run.failed', error, { requestId: req.requestId, trigger: 'manual' });
-    const status = /비활성화/.test(error.message || '')
-      ? 503
-      : /관심종목이 없어/.test(error.message || '')
-        ? 400
-        : 500;
-    res.status(status).json({ error: error.message || '시장 브리핑 생성 실패' });
-  }
+/**
+ * ⚠️ v2 브리핑 라우트 — **410 Gone 으로 이유를 말한다** (2026-10-03).
+ *    조용한 404 는 "주소를 잘못 쳤나" 로 읽힌다. 어디로 갔는지 적어 준다.
+ */
+for (const legacy of ['/api/briefing/run', '/api/manager/run', '/api/ai/run']) {
+  app.post(legacy, (req, res) => res.status(410).json({
+    error: 'v2 브리핑은 제거됐습니다 — POST /api/analyst/run 을 쓰세요.',
+  }));
 }
-app.post('/api/briefing/run', handleBriefingRun);
-app.post('/api/manager/run', handleBriefingRun); // 하위호환 별칭
-app.post('/api/ai/run', handleBriefingRun); // 하위호환 별칭
-
-app.get('/api/briefing/latest', (req, res) => {
-  res.json({ report: getLatestManagerReport() });
-});
+app.get('/api/briefing/latest', (req, res) => res.status(410).json({
+  error: 'v2 브리핑은 제거됐습니다 — GET /api/analyst/last 를 쓰세요.',
+}));
 
 // ── 시스템 상태·설정 ──────────────────────────────────────────────
 app.get('/api/system/status', (req, res) => {
+  /**
+   * ⚠️ v2 의 `getSystemStatus`(managerService)에서 **설정 패널이 실제로 읽는 것만** 이식했다
+   *    (2026-10-03). `latestManagerReport`·`orchestrationNotes`·`dataFiles` 는 소비자가 없었다.
+   */
+  const ai = getAiSettings();
   res.json({
-    ...getSystemStatus(),
+    timezone: ai.timezone,
+    todayLocalDate: getDateInTimezone(new Date(), ai.timezone),
+    serverTimeIso: new Date().toISOString(),
+    aiConfigured: isAiConfigured(),
+    aiModel: ai.model,
     market: getMarketSnapshot(),
-    dataFiles: buildServerStatusPayload().system.dataFiles,
-    orchestrationNotes: ORCHESTRATION_NOTES,
-    latestManagerReport: getLatestManagerReport(),
     aiPresets: AI_PRESETS,
     marketProviderOptions: MARKET_PROVIDER_OPTIONS,
     // 화면 설정 패널이 읽는 곳. **기본값이 적용된 실효값**과 무엇이 기본값인지를 함께 준다.
@@ -1130,12 +1118,8 @@ app.get('*', (req, res, next) => {
 });
 
 async function startAiSchedule() {
-  const usePresetBriefSchedule =
-    String(process.env.MANAGER_BRIEF_PRESET_SCHEDULE ?? 'true').trim().toLowerCase() !== 'false';
-
-  if (usePresetBriefSchedule) {
-    await ensureManagerBriefSchedule();
-  }
+  // ⚠️ v2 매니저 브리핑 크론 6개(ensureManagerBriefSchedule)는 2026-10-03 에 제거 —
+  //    v3 분석(alertService 의 장 세션 트리거)이 유일한 브리핑 체계다. 상단 주석 참조.
 
   // ⚠️ 조용한 우회를 만들지 않는다 — LAN 면제가 켜져 있으면 그 사실을 기동 때 말한다
   logInfo('orders.mode', orderService.status());
@@ -1143,8 +1127,6 @@ async function startAiSchedule() {
   logInfo('telegram.mode', telegram.status());
   // 어느 쪽이 막고 있는지(미설정/꺼짐)까지 기동 로그에 남긴다
   logInfo('mcp.mode', mcp.status());
-  // 무인 반복은 켜졌는지·왜 안 도는지를 기동 때 말한다
-  logInfo('dream.mode', analystDream.status());
   logInfo('telegram.bot', telegramBot.status());
   logInfo('alerts.mode', alerts.status());
   // 🔴 제안 → 텔레그램(승인 버튼). 알림이 꺼져 있으면 onProposal 이 스스로 건너뛴다
@@ -1213,7 +1195,6 @@ async function startAiSchedule() {
       ? '사설 대역 요청은 앱 로그인을 면제합니다(nginx lanonly 전제). 끄려면 SIMPLESTOCK_TRUST_LAN=false'
       : '모든 요청이 앱 로그인을 요구합니다',
   });
-  syncScheduledTasks();
   startMarketDataPolling();
   scheduleMarketRefresh('startup', { force: true, delayMs: 800 });
 
@@ -1222,31 +1203,6 @@ async function startAiSchedule() {
     return;
   }
 
-  const legacyCronEnabled = !usePresetBriefSchedule && AI_DAILY_CRON && cron.validate(AI_DAILY_CRON);
-  if (!legacyCronEnabled) {
-    if (usePresetBriefSchedule) {
-      logInfo('schedule.preset_market_brief', { timezone: APP_TIMEZONE, slots: '22,23,06,09,10,18 weekdays' });
-    }
-    return;
-  }
-
-  cron.schedule(
-    AI_DAILY_CRON,
-    async () => {
-      try {
-        await runManagerReview('schedule');
-        logInfo('schedule.market_brief.success', {
-          targetDate: getDateInTimezone(new Date(), APP_TIMEZONE),
-          timezone: APP_TIMEZONE,
-        });
-      } catch (error) {
-        logError('schedule.market_brief.failed', error, { timezone: APP_TIMEZONE, cronExpression: AI_DAILY_CRON });
-      }
-    },
-    { timezone: APP_TIMEZONE }
-  );
-
-  logInfo('schedule.registered', { timezone: APP_TIMEZONE, cronExpression: AI_DAILY_CRON });
 }
 
 app.listen(PORT, '0.0.0.0', () => {

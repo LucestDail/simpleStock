@@ -246,7 +246,13 @@ test('🔴 generateStructuredOutput 호출부 전수 — fallback 은 반드시 
   const results = scanAllServerFiles();
   // 2026-09-28 시점 실측 15곳(정의부 제외). 새 호출부가 생기면 늘어날 수 있으니 하한만 건다 —
   // 줄어들면(=호출부가 사라지면) 추출기가 뭔가를 놓쳤다는 뜻이라 그대로 잡힌다(④ 와 별개 축).
-  assert.ok(results.length >= 15, `호출부가 15곳보다 적게 잡혔다(${results.length}) — 추출기가 일부를 놓쳤을 수 있다`);
+  /**
+   * ⚠️ 하한 15 → 10 (2026-10-03). v2(매니저 보고·대화 그래프·예약 분석) 제거로 호출부
+   *    5곳이 **정당하게** 사라졌다 — 숫자가 줄어든 것은 추출기 결함이 아니라 현실이다.
+   *    ★ 하한을 갱신할 때는 **왜 줄었는지**를 적는다. 안 적으면 다음 사람이
+   *      "추출기가 깨졌나" 와 "코드가 줄었나" 를 못 가른다.
+   */
+  assert.ok(results.length >= 10, `호출부가 10곳보다 적게 잡혔다(${results.length}) — 추출기가 일부를 놓쳤을 수 있다`);
   const problems = checkCompliance(results);
   assert.equal(problems.length, 0, `fallback 을 속성으로 주는 호출부가 남아 있다:\n${problems.join('\n')}`);
 });

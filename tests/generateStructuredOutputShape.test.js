@@ -14,7 +14,7 @@ const assert = require('node:assert/strict');
  * 수법) — 실 LLM 호출·분석 트리거는 하지 않는다.
  *
  * ⚠️ 이 파일은 `server/aiService.js` 만 건드린다. 같은 날 다른 worker 가
- * `analystChat.js`/`analystDream.js`/`analystService.js`/`stockRating.js` 에서 "fallback
+ * `analystChat.js`/`analystService.js`/`stockRating.js` 에서 "fallback
  * 위치 인자 누락" 이라는 **다른 결함**을 고치고 있다 — 이 파일은 그것과 무관하다
  * (`tests/generateStructuredOutputFallback.test.js` 가 그쪽을 잰다).
  */

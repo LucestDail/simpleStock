@@ -173,45 +173,26 @@ test('🔴 설정이 비었으면 **기본값**이 적용된다 (Number(null)===
 
 test('🔴 설정이 **실제로 쓰인다** (만들어 놓고 안 쓰면 설정이 아니다)', () => {
   /*
-   * 오늘 아침 `upsertHolding` 이 **실행부 없이** 존재했던 것과 같은 축이다.
-   * 설정을 만들고 소비처에 안 꽂으면 화면에서 저장은 되는데 **아무 일도 안 일어난다.**
+   * ⚠️ 2026-10-03 — 검증 대상을 v2(managerService)에서 **v3(analyst 경로)** 로 바꿨다.
+   *    v2 는 걷어냈고, `briefingPrompt` 의 실소비자는 이제 alertService(자동 트리거)와
+   *    server.js(/api/analyst/run·chat)다. **성질은 같다: 저장만 되고 안 쓰이면 설정이 아니다.**
    */
   const fs = require('node:fs');
   const path = require('node:path');
-  const mgr = fs.readFileSync(path.join(__dirname, '..', 'server/managerService.js'), 'utf8');
   const srv = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
 
-  assert.ok(/getDashboardSettings\(\)/.test(mgr), '브리핑이 대시보드 설정을 안 읽는다');
-  assert.ok(/briefingPrompt/.test(mgr), 'briefingPrompt 가 브리핑에 안 쓰인다 — 저장만 되고 끝난다');
+  /**
+   * ⚠️ 자동 트리거(크론)도 server.js 안에 있다 — alertService 는 **조건 판정**만 하고
+   *    분석 호출은 server.js 가 한다(처음에 alertService 를 단언했다가 틀렸다).
+   *    소비가 **둘 다**(자동 `st.briefingPrompt` · 수동 `getDashboardSettings().briefingPrompt`)
+   *    있는지 횟수로 본다.
+   */
+  const uses = (srv.match(/briefingPrompt/g) || []).length;
+  assert.ok(uses >= 2, `briefingPrompt 소비가 ${uses}곳 — 자동·수동 두 경로 다 있어야 한다`);
   assert.ok(/momentumPct/.test(srv), 'momentumPct 가 대시보드 라우트에 안 쓰인다');
   assert.ok(/settings: getDashboardSettings\(\)/.test(srv), '화면이 실효 설정을 못 받는다(갱신 주기가 안 따라온다)');
 });
 
-test('🔴 보유가 있으면 프롬프트가 그것을 **금지하지 않는다**', () => {
-  /*
-   * v3 에서 개인 자산을 걷어냈을 때 *"개인 자산 정보는 없습니다 · 보유/수익률 표현은
-   * 절대 쓰지 마세요"* 라고 적었다. 이제 토스 실계좌가 들어오는데 그 문장이 남아 있으면
-   * 모델이 **자산을 보고도 못 본 척**한다 — 아침의 죽은 지시서와 **거울상**이다.
-   */
-  const fs = require('node:fs');
-  const path = require('node:path');
-  const raw = fs.readFileSync(path.join(__dirname, '..', 'server/managerService.js'), 'utf8');
-  /*
-   * ⚠️ **주석을 먼저 지운다.** 첫 판에서 이 테스트가 실패했는데 제품이 아니라 **내 주석** 때문이었다
-   *    — 위 설명에 같은 문장을 인용해 뒀고 indexOf 가 그걸 먼저 잡았다.
-   *    *"판정은 언급이 아니라 구조로"* 를 이 테스트 자신이 어겼다.
-   */
-  const mgr = raw
-    .split('\n')
-    .filter((l) => !/^\s*(\*|\/\*|\/\/)/.test(l))
-    .join('\n');
-  assert.ok(/hasHoldings/.test(mgr), '보유 유무에 따라 프롬프트가 갈리지 않는다');
-  // 금지 문장은 **보유가 없을 때만** 나가야 한다 — 삼항 안에 들어 있는지 본다
-  const i = mgr.indexOf('절대 쓰지 마세요');
-  assert.ok(i > 0, '금지 문장을 못 찾았다 — 가드가 대상을 잃었다(통과 아님)');
-  const around = mgr.slice(Math.max(0, i - 400), i);
-  assert.ok(/hasHoldings\s*\n?\s*\?/.test(around), '금지 문장이 보유 유무와 무관하게 항상 나간다');
-});
 
 test('🔴 컴포넌트가 **남의 scoped 스타일**에 기대지 않는다', () => {
   /*
