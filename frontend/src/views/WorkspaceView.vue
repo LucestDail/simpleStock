@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import PriceChart from '../components/PriceChart.vue';
 import SettingsPanel from '../components/SettingsPanel.vue';
 import OrderTicket from '../components/OrderTicket.vue';
+import PipelineStrip from '../components/PipelineStrip.vue';
 import { useTheme } from '../composables/useTheme';
 import { useWatchlist } from '../composables/useWatchlist';
 import { useUi } from '../composables/useUi';
@@ -178,6 +179,25 @@ async function onRefreshMarket() {
  * ⚠️ 조각별 성패(`parts`)를 그대로 받아 **"없음" 과 "못 받음" 을 구분해 보여준다.**
  */
 const report = ref(null);
+/**
+ * 🔭 제안 성과 (2026-10-03 — 자율 트레이딩 재개편).
+ *    자율의 전제 = 승인율이 **보이고 올라가는 것**. 생애 제안의 71% 가 거절인 상태에서
+ *    자율은 성립하지 않는다 — 그 수치를 사용자와 에이전트가 **같이 본다.**
+ */
+const orderStats = ref(null);
+/** 거절률 — 분모는 **결정이 난 것**(승인+거절)만. PENDING 을 분모에 넣으면 비율이 왜곡된다 */
+const rejectRate = computed(() => {
+  const st = orderStats.value; if (!st) return 0;
+  const decided = (st.approved || 0) + (st.executed || 0) + (st.rejected || 0);
+  return decided ? Math.round((st.rejected / decided) * 100) : 0;
+});
+async function loadOrderStats() {
+  try {
+    const res = await apiFetch('/api/orders/stats');
+    const b = await res.json();
+    orderStats.value = b?.ok ? b : null;   // ⚠️ 못 읽었으면 null — 0 으로 그리면 "제안이 없었다" 가 된다
+  } catch { orderStats.value = null; }
+}
 const proposals = ref([]);
 
 /**
@@ -1120,6 +1140,7 @@ function openStream() {
 }
 
 onMounted(async () => {
+  loadOrderStats();
   loadChatHistory();
   loadMcpStatus();
   loadTape();
@@ -1256,6 +1277,15 @@ onUnmounted(() => {
           <span class="metric__label">종목</span>
           <span class="metric__value mono-num">{{ totalTickers }}</span>
         </div>
+        <!--
+          🤖 **자율성 단계 배지** (2026-10-03 — 와이어프레임 신설).
+             최종 목표는 자율 트레이딩이지만 **단계 전환은 코드가 스스로 하지 않는다** —
+             지금은 0단계(제안+승인) 고정이고, 조건이 쌓이면 해금을 *제안*만 한다.
+             배지는 그 사실을 상시 보이게 한다("지금 누가 결정하는가").
+        -->
+        <span class="automode" title="모든 주문은 사람 승인을 거칩니다 (HITL). 승인율·가드 안정이 쌓이면 단계 상향을 제안합니다 — 해금도 사람이 합니다.">
+          🤖 제안+승인
+        </span>
         <!-- 🔴 테마 토글 — 와이어프레임 상단 우측 ☀ (종전엔 다크 고정이었다) -->
         <button
           class="btn btn--icon"
@@ -1564,6 +1594,15 @@ onUnmounted(() => {
         </section>
       <!-- 행3·1열 : 차트 -->
       <div class="cell cell--chart">
+        <!-- 🔭 의사결정 파이프라인 (2026-10-03 자율 트레이딩 재개편) — 차트 위 스트립.
+             수집→게이트→판단→가드→제안 을 숫자 다섯으로. 단계 클릭 = 상세(탈락 사유 등) -->
+        <PipelineStrip
+          :pipeline="report?.pipeline || null"
+          :at="report?.at || null"
+          :trigger="report?.trigger?.why || null"
+          :proposal-count="report ? (report.proposals?.length ?? 0) : null"
+          :pending-count="pendingProposals.length"
+        />
         <!-- ── 조각 실패를 숨기지 않는다 ─────────────────────── -->
         <p v-if="dashError" class="banner banner--error">{{ dashError }}</p>
         <p v-else-if="dash && dash.failedCount" class="banner banner--warn">
@@ -1735,6 +1774,16 @@ onUnmounted(() => {
               ⚠️ 비중은 **서버 한 곳**(portfolioWeights)에서 온다. 화면이 따로 계산하면
                  분석 프롬프트의 숫자와 갈라진다.
             -->
+            <!-- 📊 제안 성과 (2026-10-03) — 자율의 전제인 승인율을 상시 노출 -->
+            <div v-if="orderStats" class="perf">
+              <h3 class="panel__h">제안 성과 <small>생애</small></h3>
+              <dl class="risk__grid">
+                <div><dt>제안</dt><dd class="mono-num">{{ orderStats.proposed }}건</dd></div>
+                <div><dt>승인</dt><dd class="mono-num">{{ orderStats.approved + orderStats.executed }}건</dd></div>
+                <div><dt>거절</dt><dd class="mono-num" :class="{ down: rejectRate >= 50 }">{{ orderStats.rejected }}건 · {{ rejectRate }}%</dd></div>
+                <div><dt>실주문</dt><dd class="mono-num">{{ orderStats.executed }}건</dd></div>
+              </dl>
+            </div>
             <div v-if="portfolio?.weights" class="risk">
               <h3 class="panel__h">리스크 체크</h3>
               <dl class="risk__grid">
@@ -2674,6 +2723,16 @@ onUnmounted(() => {
   margin-top: var(--space-xs); font-size: var(--text-xs); }
 .sendq__what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sendq__act { display: flex; gap: var(--space-xs); flex-shrink: 0; }
+
+/* 🤖 자율성 배지 — "지금 누가 결정하는가" 를 상시 (2026-10-03) */
+.automode {
+  font-size: var(--text-xs); font-weight: 600; white-space: nowrap;
+  padding: 3px 10px; border: 1px solid var(--color-ai-line);
+  border-radius: var(--rounded-pill); color: var(--color-ai); background: var(--color-ai-soft);
+}
+/* 📊 제안 성과 — 리스크 체크와 같은 표 문법 */
+.perf { margin: var(--space-xs) var(--space-base) 0; }
+.perf .panel__h { margin: 0 0 2px; }
 
 .chat__title { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; }
 .chat__badge {

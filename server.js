@@ -645,6 +645,16 @@ app.post('/api/telegram/portfolio', async (req, res) => {
 });
 
 // ── 주문 제안 (제안 → 승인 → 실행). 🔴 실행은 현재 no-op ────────
+/**
+ * 🔭 제안 성과 집계 — 자율 트레이딩 대시보드의 "채택률" 패널 (2026-10-03).
+ * ⚠️ null 은 "감사 파일을 못 읽었다" — 화면이 0 과 구분해 그려야 한다.
+ */
+app.get('/api/orders/stats', (req, res) => {
+  const stats = orderService.proposalStats();
+  if (!stats) return res.status(200).json({ ok: false, error: '감사 파일을 읽지 못했습니다.' });
+  res.json({ ok: true, ...stats });
+});
+
 app.get('/api/orders/proposals', (req, res) => {
   res.json({ status: orderService.status(), proposals: orderService.list() });
 });

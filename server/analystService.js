@@ -2343,6 +2343,33 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     }
   }
 
+  /**
+   * 🔭 **의사결정 파이프라인 요약** (2026-10-03 — 자율 트레이딩 대시보드).
+   *
+   * 사용자 최종 목표가 자율 트레이딩이다. 자율을 믿으려면 **이번 회차에 무엇을 보고
+   * 무엇을 걸렀고 왜 그 결론인지**가 화면에 보여야 한다 — 로그는 운영자용이지
+   * 사용자용이 아니다. 각 단계의 수치를 보고서에 싣는다(값이 아니라 **집계**만 —
+   * 프롬프트 원문은 안 싣는다).
+   */
+  const pipeline = {
+    collected: {
+      holdings: items.length,
+      candidates: require('./regimeService').readLastGate()?.measured ?? null,
+      webSearch: web?.ok ? (web.results || []).filter((r) => !r.skipped && !r.error).length : 0,
+    },
+    gate: require('./regimeService').readLastGate(),
+    judged: {
+      positions: report.positions.length,
+      codeFilled: report.positions.filter((p) => p._codeFilled).length,
+    },
+    guards: {
+      priceOutliers: (report.positions || []).filter((p) => p._priceFabricated).length,
+      subjectDrift: (report.positions || []).filter((p) => p._subjectDrift).length,
+      entryFilled: (report.positions || []).filter((p) => p._entryFromPrice).length,
+    },
+  };
+  report.pipeline = pipeline;
+
   // 제안을 orderService 로 넘긴다 — **빈칸이 있으면 거기서 거부된다**
   const created = [];
   const rejected = [];

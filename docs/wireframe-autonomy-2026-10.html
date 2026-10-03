@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>자율 트레이딩 대시보드 와이어프레임</title>
+<style>
+/* 와이어프레임 — 기존 디자인 언어(무채색·실선·IBM Plex) 유지. 색은 AI 파랑·경고 주황 둘뿐 */
+:root { --ink:#1C1C1A; --mut:#5E5E59; --ln:#CFCFCA; --bg:#EEEEEB; --ai:#2B54C8; --warn:#B5560F; }
+body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.5 'IBM Plex Sans KR',system-ui,sans-serif; }
+.wrap { max-width:1680px; margin:0 auto; padding:12px; }
+h1 { font-size:15px; } h2 { font-size:13px; margin:0 0 8px; }
+.card { background:#fff; border:1px solid var(--ln); border-radius:10px; padding:12px; }
+.row { display:grid; gap:12px; margin-bottom:12px; }
+.top { grid-template-columns: 340px 1fr 400px; }
+.mut { color:var(--mut); font-size:11px; }
+.pipe { display:flex; align-items:stretch; gap:0; }
+.stage { flex:1; border:1px solid var(--ln); border-left:none; padding:8px 10px; position:relative; }
+.stage:first-child { border-left:1px solid var(--ln); border-radius:8px 0 0 8px; }
+.stage:last-child { border-radius:0 8px 8px 0; }
+.stage b { display:block; font-size:16px; font-family:'IBM Plex Mono',monospace; }
+.stage small { color:var(--mut); }
+.stage .drop { color:var(--warn); font-size:11px; }
+.badge { display:inline-block; border:1px solid var(--ink); border-radius:999px; padding:2px 10px; font-size:11px; }
+.badge--ai { border-color:var(--ai); color:var(--ai); }
+.badge--warn { border-color:var(--warn); color:var(--warn); }
+.note { border-left:3px solid var(--ai); padding:6px 10px; background:#fff; margin:8px 0; font-size:12px; }
+table { width:100%; border-collapse:collapse; font-size:12px; }
+td,th { border-bottom:1px solid var(--ln); padding:4px 6px; text-align:left; }
+.num { font-family:'IBM Plex Mono',monospace; text-align:right; }
+.ph { border:1px dashed var(--mut); border-radius:6px; display:flex; align-items:center; justify-content:center; color:var(--mut); }
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>자율 트레이딩 대시보드 — 와이어프레임 (2026-10-03)</h1>
+<p class="mut">설계 원칙: <b>자율은 투명성에서 나온다.</b> 사용자가 "왜 이 제안인가" 를 단계별 수치로 추적할 수 있어야
+승인 비율이 올라가고, 그 비율이 올라가야 자율 모드로 갈 수 있다. 색·폰트·레이아웃은 기존 언어 유지 —
+이 개편은 <b>새 패널 2개 + 상단 자율성 배지</b>가 전부다.</p>
+
+<!-- 상단바 -->
+<div class="card" style="display:flex;gap:14px;align-items:center;margin-bottom:12px">
+  <b>종합 주식·ETF 트래커</b>
+  <span class="mut">KR 마감 · US 프리장</span>
+  <span class="mut">국면 US 상승 · KR 상승 · VIX 16</span>
+  <span style="flex:1"></span>
+  <span class="badge badge--ai" title="신설 — 자율성 단계. 지금은 전 제안 사람 승인">🤖 모드: 제안+승인(HITL)</span>
+  <span class="badge">☀</span><span class="badge">⚙</span>
+</div>
+
+<div class="row top">
+  <!-- 좌열: 기존 유지 -->
+  <div>
+    <div class="card" style="margin-bottom:12px"><h2>내 자산 (기존 유지)</h2>
+      <div class="ph" style="height:180px">평가금액 히어로 · 비중 바 · 리스크 칩 · 보유 2줄 행</div>
+    </div>
+    <div class="card"><h2>관심종목 (기존 유지)</h2><div class="ph" style="height:240px">테마 그룹 · 시세</div></div>
+  </div>
+
+  <!-- 중앙: 🔭 파이프라인(신설) + 차트 + 뉴스|랭킹 -->
+  <div>
+    <div class="card" style="margin-bottom:12px">
+      <h2>🔭 의사결정 파이프라인 <span class="mut">— 이번 회차 10-03 11:45 · 트리거: 수동</span></h2>
+      <div class="pipe">
+        <div class="stage"><small>① 수집</small><b>16</b><small>도구상자 ETF</small><br><small>보유 3 · 웹검색 4건</small></div>
+        <div class="stage"><small>② 퀀트 게이트</small><b>6</b><small>20일선 위 · 정배열순</small><br>
+          <span class="drop">탈락 10 — SHY(≤20일선) XLP XLE …</span></div>
+        <div class="stage"><small>③ LLM 판단</small><b>7</b><small>보유 3 + 후보 4 BUY</small><br><small>코드채움 0</small></div>
+        <div class="stage"><small>④ 검증 가드</small><b>0</b><small>발동 없음</small><br>
+          <small class="mut">가격·주제·레벨 3축 통과</small></div>
+        <div class="stage"><small>⑤ 제안</small><b>0</b><small>HITL 대기 0</small><br><small class="mut">현금 $4,755</small></div>
+      </div>
+      <p class="note">각 단계를 클릭하면 상세(탈락 사유 전체 · 가드 발동 원문)가 펼쳐진다.
+      <b>0 이 두 종류다</b> — "통과 0(수치가 말함)" 과 "검사 못 함(데이터 없음)" 을 색으로 가른다.</p>
+    </div>
+    <div class="card" style="margin-bottom:12px"><h2>종목 차트 (기존 유지)</h2><div class="ph" style="height:220px">캔들 · 거래량</div></div>
+    <div class="row" style="grid-template-columns:1fr 1fr;margin:0">
+      <div class="card"><h2>뉴스 (기존 유지)</h2><div class="ph" style="height:140px"></div></div>
+      <div class="card"><h2>랭킹 (기존 유지)</h2><div class="ph" style="height:140px"></div></div>
+    </div>
+  </div>
+
+  <!-- 우열: 애널리스트 + 성과(신설) -->
+  <div>
+    <div class="card">
+      <h2>AI 애널리스트 (기존 통합 패널)</h2>
+      <div style="border:1px solid var(--ln);border-radius:8px;padding:8px;margin-bottom:8px">
+        <b style="font-size:12px">📊 제안 성과 (신설 · 고정 영역)</b>
+        <table>
+          <tr><td>생애 제안</td><td class="num">21건</td></tr>
+          <tr><td>승인(사람)</td><td class="num">4건 · 19%</td></tr>
+          <tr><td>거절</td><td class="num" style="color:var(--warn)">15건 · 71%</td></tr>
+          <tr><td>실주문 체결</td><td class="num">0건</td></tr>
+        </table>
+        <p class="mut" style="margin:6px 0 0">🤖 자율 모드 해금 조건: 승인율 추세가 올라가고 가드 발동이
+        안정되면 단계 상향을 제안한다 — <b>해금도 사람이 승인한다.</b></p>
+      </div>
+      <div class="ph" style="height:120px">리스크 체크 (기존)</div>
+      <div class="ph" style="height:200px;margin-top:8px">분석 보고 + 대화 로그 (기존)</div>
+      <div class="ph" style="height:36px;margin-top:8px">자연어 입력 (기존)</div>
+    </div>
+  </div>
+</div>
+
+<h2 style="margin-top:4px">자율성 단계 설계 (상단 배지의 의미)</h2>
+<table class="card" style="padding:0">
+  <tr><th>단계</th><th>이름</th><th>동작</th><th>전환 조건</th></tr>
+  <tr><td>0 (현재)</td><td>제안 + 승인</td><td>모든 주문에 사람 승인(HITL)</td><td>—</td></tr>
+  <tr><td>1</td><td>조건부 자동</td><td>소액·수치기준 충족 건만 자동, 나머지 HITL</td><td>승인율·가드 안정 + <b>사람이 해금</b></td></tr>
+  <tr><td>2</td><td>안내 후 자율</td><td>전 주문 자동, 사전 안내 + 즉시 취소 창</td><td>1단계 실적 + 사람이 해금</td></tr>
+</table>
+<p class="mut">⚠️ 단계 전환은 어떤 경우에도 코드가 스스로 하지 않는다 — 조건 충족을 <b>알리고</b> 사람이 올린다.</p>
+
+</div></body>
+</html>

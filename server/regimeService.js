@@ -664,6 +664,9 @@ function roundRobinCandidates(scenarios, catalog, held) {
  *    영영 못 가린다.
  */
 const CANDIDATE_PROMPT_MAX = Math.max(1, Number(process.env.CANDIDATE_PROMPT_MAX) || 6);
+/** 마지막 게이트 결과 — 화면 파이프라인 패널이 읽는다(분석 보고서에 실린다) */
+let lastGate = null;
+function readLastGate() { return lastGate; }
 
 function quantGate(rows) {
   const passed = [];
@@ -704,6 +707,17 @@ async function candidateSection(scenarios, { heldSymbols = [], summarize, getCan
   }
   // 🔴 수치 게이트 — 통과한 것만 LLM 에 (상단 quantGate 주석 참조)
   const gate = quantGate(measured);
+  /**
+   * ⚠️ **화면 파이프라인 패널용** (2026-10-03 재개편) — 이번 회차의 게이트 결과를
+   *    보고서에 실을 수 있게 노출한다. 반환형을 바꾸지 않는 이유: 호출부·테스트가
+   *    텍스트를 전제한다. 한 분석 = candidateSection 1회라 레이스가 없다.
+   */
+  lastGate = {
+    at: new Date().toISOString(),
+    pool: wanted.length, measured: measured.length,
+    passed: gate.passed.map((r) => ({ symbol: r.symbol, trendScore: r.trendScore, momentum: Math.round(r.momentum * 10) / 10 })),
+    dropped: gate.dropped, overflow: gate.overflow,
+  };
   logInfo('regime.quant_gate', {
     pool: wanted.length, measured: measured.length,
     passed: gate.passed.map((r) => r.symbol), overflow: gate.overflow,
@@ -789,7 +803,7 @@ function getState() { return current || loadState(); }
 module.exports = { MACRO_MATCH_KEYS, judgeMacro, MACRO_KO,
   compute, judgeMarket, vixBandOf, matchScenarios, diffTransitions, promptSection,
   refresh, getState, setManual, readPlaybook, readCatalog, candidateSection, ladderProposals,
-  quantGate, CANDIDATE_PROMPT_MAX,
+  quantGate, CANDIDATE_PROMPT_MAX, readLastGate,
   scenarioCategories, roundRobinCandidates, CANDIDATE_MAX,
   vixStaleNote, VIX_BAND_LABEL, TREND_KO,
 };

@@ -818,7 +818,35 @@ function reconcile(proposalId, { status, orderId, observedAt, why } = {}) {
   return { ok: true, proposal: p };
 }
 
+/**
+ * 🔭 **제안 성과 집계** (2026-10-03 — 자율 트레이딩 대시보드).
+ *
+ * 자율로 가려면 *"이 에이전트의 제안이 얼마나 받아들여지고 있나"* 가 먼저 보여야 한다 —
+ * 생애 제안의 73.7% 를 사용자가 거절한 상태에서 자율은 성립하지 않는다. 그 수치가
+ * 내려가는 것이 자율의 전제 조건이고, **내려가는지 화면에서 보여야** 한다.
+ *
+ * ⚠️ 감사 파일(JSONL append-only)에서 센다 — 메모리 Map 은 KEEP_MS 로 지워져 **생애 집계가 안 된다.**
+ * ⚠️ 파일을 못 읽으면 null — 0 으로 채우면 "제안이 없었다" 로 읽힌다.
+ */
+function proposalStats() {
+  try {
+    const lines = fs.readFileSync(AUDIT_FILE, 'utf8').split('\n').filter(Boolean);
+    const by = { proposed: 0, approved: 0, rejected: 0, executed: 0, expired: 0, canceled: 0 };
+    const recent = [];
+    for (const line of lines) {
+      let d; try { d = JSON.parse(line); } catch { continue; }
+      if (d.event in by) by[d.event] += 1;
+      // ⚠️ 수량·가격은 싣지 않는다 — 화면 집계에 금액은 불요(민감 축)
+      recent.push({ at: d.at, event: d.event, symbol: d.symbol || null, side: d.side || null });
+    }
+    return { ...by, total: lines.length, recent: recent.slice(-12).reverse() };
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
+  proposalStats,
   propose,
   /** 제안 밖에서 일어난 돈 관련 사건(예: 예약 취소)을 같은 감사 파일에 남긴다 */
   auditExternal: (event, payload) => audit(event, payload),
