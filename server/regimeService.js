@@ -638,6 +638,54 @@ function roundRobinCandidates(scenarios, catalog, held) {
   return wanted;
 }
 
+/**
+ * 🔴 **퀀트 게이트 — 수치를 통과한 후보만 LLM 에 준다** (2026-10-03 재개편).
+ *
+ * 사용자 지시: *"있는 정보의 티커·ETF·종목을 기준으로 **맞는 수치에 해당하는 현재 모멘텀,
+ * 퀀트에 해당하는 대상만** 가져오는건데 어디서부터 이렇게 꼬였는지"*
+ *
+ * ## 종전에 꼬여 있던 자리
+ * `roundRobinCandidates` 는 **카탈로그 라운드로빈**이다 — 시나리오 카테고리에서 순서대로
+ * 집을 뿐, **수치를 보지 않는다.** 그래서 후보 7~24개가 전부 프롬프트에 실렸고:
+ * - 역배열(하락 추세) 후보까지 실려 모델이 **골라내는 일**을 해야 했다(그 일을 자주 틀렸다)
+ * - 숫자 벽이 커져 **이웃 종목 숫자 오염**(RAM 레벨에 80~95)의 토양이 됐다
+ *
+ * ## 규칙 — 산수라서 검증 가능하다
+ * ```
+ * 통과   last > ma20               (20일선 위 — 프롬프트가 이미 "추세가 선 후보로" 라고
+ *                                   요구하던 것을 코드가 미리 거른다)
+ * 점수   추세 정렬(last>ma20>ma60 = 2 · last>ma20 = 1) 우선,
+ *        같은 점수면 모멘텀(last/ma60 − 1) 큰 순
+ * 상한   CANDIDATE_PROMPT_MAX (기본 6)
+ * ```
+ * ⚠️ **전부 탈락해도 숨기지 않는다** — *"수치 기준을 통과한 후보가 없다"* 는 그 자체가
+ *    정보다(리스크오프 국면에서 자주 참이다). 조용히 절을 빼면 "후보 기능이 죽었나" 가 된다.
+ * ⚠️ 탈락 사유를 **로그로** 남긴다(`regime.quant_gate`) — 안 남기면 "왜 이 종목이 없지" 를
+ *    영영 못 가린다.
+ */
+const CANDIDATE_PROMPT_MAX = Math.max(1, Number(process.env.CANDIDATE_PROMPT_MAX) || 6);
+
+function quantGate(rows) {
+  const passed = [];
+  const dropped = [];
+  for (const r of rows) {
+    const { last, ma20, ma60 } = r.tech || {};
+    if (!(Number(last) > 0) || !(Number(ma20) > 0)) {
+      dropped.push({ symbol: r.symbol, why: 'no_data' });
+      continue;
+    }
+    if (last <= ma20) {
+      dropped.push({ symbol: r.symbol, why: `below_ma20 (${last} ≤ ${ma20.toFixed(2)})` });
+      continue;
+    }
+    const aligned = Number(ma60) > 0 && ma20 > ma60;
+    const momentum = Number(ma60) > 0 ? (last / ma60 - 1) * 100 : 0;
+    passed.push({ ...r, trendScore: aligned ? 2 : 1, momentum });
+  }
+  passed.sort((a, b) => b.trendScore - a.trendScore || b.momentum - a.momentum);
+  return { passed: passed.slice(0, CANDIDATE_PROMPT_MAX), dropped, overflow: Math.max(0, passed.length - CANDIDATE_PROMPT_MAX) };
+}
+
 async function candidateSection(scenarios, { heldSymbols = [], summarize, getCandles } = {}) {
   if (!scenarios?.length || typeof summarize !== 'function' || typeof getCandles !== 'function') return '';
   const catalog = readCatalog();
@@ -645,20 +693,40 @@ async function candidateSection(scenarios, { heldSymbols = [], summarize, getCan
   // 🔴 판정은 scenarioCategories 한 곳 — promptSection(도구상자)과 반드시 같은 집합이어야 한다.
   //    어긋나면 "모델에게 보여준 목록" 과 "후보로 시세를 뜬 목록" 이 갈라지는데 아무도 모른다.
   const wanted = roundRobinCandidates(scenarios, catalog, held);
-  const lines = [];
+  const measured = [];
   for (const w of wanted) {
     try {
       const c = await getCandles(w.symbol, { interval: '1d', count: 120 });
       const t = summarize(c.rows || []);
       if (!t) continue;
-      lines.push(`- ${w.symbol}(${w.category} · ${w.name}): 현재 ${t.last} · 20일선 ${t.ma20 ? t.ma20.toFixed(2) : '-'} · 60일선 ${t.ma60 ? t.ma60.toFixed(2) : '-'} · ${t.bars}일 고점대비 ${t.fromHighPct != null ? t.fromHighPct.toFixed(1) : '-'}%`);
+      measured.push({ ...w, tech: t });
     } catch { /* 못 받은 후보는 싣지 않는다 — 지어내기 금지 */ }
   }
-  if (!lines.length) return '';
+  // 🔴 수치 게이트 — 통과한 것만 LLM 에 (상단 quantGate 주석 참조)
+  const gate = quantGate(measured);
+  logInfo('regime.quant_gate', {
+    pool: wanted.length, measured: measured.length,
+    passed: gate.passed.map((r) => r.symbol), overflow: gate.overflow,
+    dropped: gate.dropped,
+  });
+  if (!gate.passed.length) {
+    // ⚠️ 0건을 숨기지 않는다 — "살 것이 없다" 는 그 자체가 판단 재료다
+    return measured.length
+      ? ['## 매수 후보 — 수치 기준 통과 0건',
+         `도구상자 ${measured.length}종 중 20일선 위인 것이 없습니다. 지금은 **매수보다 방어가 수치에 맞는** 구간입니다.`,
+        ].join('\n')
+      : '';
+  }
+  const lines = gate.passed.map((r) => {
+    const t = r.tech;
+    const align = r.trendScore === 2 ? '정배열(종가>20>60)' : '20일선 위';
+    return `- ${r.symbol}(${r.category} · ${r.name}): 현재 ${t.last} · 20일선 ${t.ma20.toFixed(2)} · 60일선 ${t.ma60 ? t.ma60.toFixed(2) : '-'} · ${align} · 60일 모멘텀 ${r.momentum >= 0 ? '+' : ''}${r.momentum.toFixed(1)}%`;
+  });
   return [
-    '## 매수 후보 기술 위치 (도구상자 실데이터 — 미보유·1배)',
+    `## 매수 후보 (수치 통과 ${gate.passed.length}종 — 도구상자 ${measured.length}종 중 20일선 위만, 모멘텀순)`,
     ...lines,
-    '현금이 있고 매뉴얼이 매수를 허용하는 국면이면, 이 중 추세가 선(종가>20>60) 후보로 **구체적 매수 제안을 내라.** 근거는 위 숫자 인용.',
+    '현금이 있고 매뉴얼이 매수를 허용하는 국면이면, 이 중에서 **구체적 매수 제안을 내라.** 근거는 위 숫자 인용.',
+    '⚠️ 이 목록 밖 종목의 매수 제안은 내지 마라 — 수치 기준을 통과하지 못한 것이다.',
   ].join('\n');
 }
 
@@ -721,6 +789,7 @@ function getState() { return current || loadState(); }
 module.exports = { MACRO_MATCH_KEYS, judgeMacro, MACRO_KO,
   compute, judgeMarket, vixBandOf, matchScenarios, diffTransitions, promptSection,
   refresh, getState, setManual, readPlaybook, readCatalog, candidateSection, ladderProposals,
+  quantGate, CANDIDATE_PROMPT_MAX,
   scenarioCategories, roundRobinCandidates, CANDIDATE_MAX,
   vixStaleNote, VIX_BAND_LABEL, TREND_KO,
 };

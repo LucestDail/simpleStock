@@ -202,7 +202,12 @@ test('🔴 프롬프트 도구상자와 매수 후보가 같은 판정을 탄다
   const cand = await regime.candidateSection([fear], {
     heldSymbols: [],
     getCandles: async (symbol) => { asked.push(symbol); return { rows: [{ c: 100 }] }; },
-    summarize: () => ({ last: 100, ma20: 100, ma60: 100, bars: 120, fromHighPct: -5 }),
+    /**
+     * ⚠️ 2026-10-03 — `last > ma20` 로 갱신. 퀀트 게이트가 생기면서 `last = ma20` 픽스처는
+     *    **정당하게 탈락**한다(20일선 위만 통과). 이 테스트의 의도는 *"도구상자와 후보가
+     *    한 벌"* 이고, 그건 **통과한 후보**에 대해 재야 맞다.
+     */
+    summarize: () => ({ last: 110, ma20: 100, ma60: 95, bars: 120, fromHighPct: -5 }),
   });
 
   assert.ok(asked.length > 0, '매수 후보가 0개 — 도구상자는 있는데 후보가 비었다(배선이 갈라졌다)');
