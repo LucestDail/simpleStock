@@ -1,5 +1,15 @@
 <script setup>
-import WorkspaceView from './views/WorkspaceView.vue';
+/**
+ * 🤖 자율형 트레이딩 앱 셸 (2026-10-03 — 와이어프레임 전면 준용)
+ *
+ * 와이어프레임(`자율형 주식 트레이딩 앱 와이어프레임.html` · 10장)의 공통 뼈대:
+ *   좌측 사이드 메뉴(페이지 내비 + 연결 계좌) · 상단 상태 바(운용 상태 · 일일 손실/한도 ·
+ *   일시정지 · 비상정지) · 본문 = 페이지.
+ *
+ * ⚠️ 종전 단일 화면(WorkspaceView)은 **대시보드 페이지**로 들어간다 — 3,343줄을 한 번에
+ *    쪼개면 회귀 폭탄이라, 셸·신규 페이지를 먼저 세우고 대시보드는 다음 수술에서 나눈다.
+ */
+import AppShell from './components/AppShell.vue';
 import { useUi } from './composables/useUi';
 
 const { dialog, toast, confirmDialog, cancelDialog, dismissToast } = useUi();
@@ -7,9 +17,9 @@ const { dialog, toast, confirmDialog, cancelDialog, dismissToast } = useUi();
 
 <template>
   <div class="app-root">
-    <main class="main">
-      <WorkspaceView />
-    </main>
+    <AppShell>
+      <router-view />
+    </AppShell>
 
     <transition name="fade">
       <div v-if="dialog.open" class="dialog-backdrop" @click="cancelDialog">

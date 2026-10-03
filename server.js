@@ -649,6 +649,35 @@ app.post('/api/telegram/portfolio', async (req, res) => {
  * 🔭 제안 성과 집계 — 자율 트레이딩 대시보드의 "채택률" 패널 (2026-10-03).
  * ⚠️ null 은 "감사 파일을 못 읽었다" — 화면이 0 과 구분해 그려야 한다.
  */
+/**
+ * 🛑 에이전트 운용 제어 (2026-10-03 와이어프레임 D-4 · 상단 상태바).
+ * 🔴 정지는 즉시, 재개는 사람만 — resume 에 조건을 달지 않는다.
+ */
+const agentControl = require('./server/agentControl');
+app.get('/api/agent/status', (req, res) => {
+  const st = getDashboardSettings();
+  res.json({
+    control: agentControl.effective(),
+    autonomy: '승인 후 실행',                     // 현재 고정 단계 — 해금은 사람이 한다
+    limits: {
+      // 상단 상태바 "일일 손실 -0.7% / -2.0%" 용. ⚠️ 손실 실측치는 화면이 portfolio 에서 계산 —
+      // 여기는 **한도**만 준다(두 곳에서 계산하면 갈라진다).
+      dailyLossPct: Number(st.riskPerTradePct) || null,
+    },
+  });
+});
+app.post('/api/agent/pause', (req, res) => {
+  const r = agentControl.pause({
+    scope: String(req.body?.scope || 'halt_new'),
+    reason: String(req.body?.reason || ''),
+    resumeNextDay: req.body?.resumeNextDay === true,
+    by: 'web',
+  });
+  if (!r.ok) return res.status(400).json(r);
+  res.json(r);
+});
+app.post('/api/agent/resume', (req, res) => res.json(agentControl.resume({ by: 'web' })));
+
 app.get('/api/orders/stats', (req, res) => {
   const stats = orderService.proposalStats();
   if (!stats) return res.status(200).json({ ok: false, error: '감사 파일을 읽지 못했습니다.' });

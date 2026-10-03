@@ -128,6 +128,24 @@ test('표 헤더 정렬 유틸이 `X th` 규칙에 지지 않는다', () => {
  */
 
 /** 면제 — 각 항목에 **왜** 를 적는다 */
+/**
+ * 🔄 2026-10-04 — 전역의 정의가 바뀌었다: 손으로 적는 면제 목록이 아니라
+ *    **`styles/*.css` 가 실제로 정의한 선택자**를 읽는다. 종전 목록은 ui.css 가 생기기
+ *    전의 것이라 `panel__empty` 같은 `__` 변형을 못 덮었고, **면제가 실재와 어긋났다**
+ *    ("면제는 존재가 아니라 실재를 검사한다" — 이 저장소 규율의 적용).
+ */
+function globalSelectors() {
+  const dir = path.join(ROOT, 'styles');
+  const out = new Set();
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith('.css')) continue;
+    const css = fs.readFileSync(path.join(dir, f), 'utf8');
+    for (const m of css.matchAll(/\.([\w-]+)/g)) out.add(m[1]);
+  }
+  return out;
+}
+const GLOBAL_FROM_FILES = globalSelectors();
+
 const GLOBAL_CLASSES = new Map([
   ['mono-num', '전역 타이포 유틸(styles/)'],
   ['input', '전역 폼 스타일'],
@@ -157,6 +175,7 @@ test('템플릿이 쓰는 클래스에 **규칙이 있다** (맨몸으로 나가
     }
 
     for (const c of used) {
+      if (GLOBAL_FROM_FILES.has(c)) continue;   // styles/*.css 에 실재하는 전역
       if (GLOBAL_CLASSES.has(c)) continue;
       // 수식 클래스(`btn--ai`)는 **뿌리**가 전역이면 함께 면제한다
       const root = c.split('--')[0];

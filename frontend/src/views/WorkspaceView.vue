@@ -2439,8 +2439,6 @@ onUnmounted(() => {
   font-size: var(--text-base);
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
-.input { flex: 1; min-width: 0; }
-.input::placeholder { color: var(--color-faint); }
 .input:focus,
 .select:focus {
   outline: none;
@@ -2452,53 +2450,12 @@ onUnmounted(() => {
 .select { padding-right: var(--space-sm); }
 
 /* ── 버튼 ─────────────────────────────────────────── */
-.btn {
-  display: inline-flex;
-  /* 헤더가 낮아졌다 */
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-  height: 32px;
-  padding: 0 var(--space-base);
-  border: 1px solid var(--color-hairline-strong);
-  border-radius: var(--rounded-md);
-  background: var(--color-surface-raised);
-  color: var(--color-ink);
-  font-size: var(--text-md);
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
-}
-.btn:hover:not(:disabled) { background: var(--color-surface-hover); border-color: var(--color-hairline-strong); }
-.btn:disabled { opacity: 0.42; cursor: not-allowed; }
-.btn--sm { height: 34px; padding: 0 var(--space-base); font-size: var(--text-sm); }
 
 /* 🔴 주 행동 — 직전 판은 여기에 색이 없어서 버튼이 안 보였다 */
-.btn--primary {
-  background: var(--color-primary);
-  border-color: transparent;
-  color: var(--color-on-primary);
-}
-.btn--primary:hover:not(:disabled) { background: var(--color-primary-hover); }
-.btn--primary:active:not(:disabled) { background: var(--color-primary-active); }
 
 /* AI 가 하는 일은 AI 색으로 — 사람이 누르는 다른 버튼과 구분된다 */
-.btn--ai {
-  background: var(--color-ai-soft);
-  border-color: var(--color-ai-line);
-  color: var(--color-ai);
-}
-.btn--ai:hover:not(:disabled) { background: var(--color-ai-line); color: var(--color-ink); }
 
-.btn--soft {
-  background: var(--color-primary-soft);
-  border-color: var(--color-primary-line);
-  color: var(--color-primary);
-}
-.btn--soft:hover:not(:disabled) { background: var(--color-primary); color: var(--color-on-primary); }
 
-.btn--ghost { background: transparent; }
 
 .btn__spin { display: none; }
 .btn__spin--on {
@@ -2512,44 +2469,9 @@ onUnmounted(() => {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.iconbtn {
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: transparent;
-  border-radius: var(--rounded-sm);
-  color: var(--color-muted);
-  font-size: var(--text-lg);
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.iconbtn:hover { background: var(--color-surface-hover); color: var(--color-ink); }
 .iconbtn--danger:hover { background: var(--color-danger-soft); color: var(--color-danger); }
 
 /* ── 안내 ─────────────────────────────────────────── */
-.banner {
-  margin: 0;
-  padding: var(--space-base) var(--space-md);
-  border-radius: var(--rounded-md);
-  background: var(--color-surface);
-  border: 1px solid var(--color-hairline);
-  color: var(--color-body);
-  font-size: var(--text-md);
-}
-.banner--error {
-  background: var(--color-danger-soft);
-  border-color: transparent;
-  color: var(--color-danger);
-}
-.banner--empty {
-  border-style: dashed;
-  text-align: center;
-  color: var(--color-muted);
-}
 
 /* ── 내 자산 ──────────────────────────────────────── */
 /*
@@ -2618,9 +2540,6 @@ onUnmounted(() => {
   font-size: var(--text-xs); font-weight: 600; color: var(--color-body);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.up { color: var(--color-up); }
-.down { color: var(--color-down); }
-.flat { color: var(--color-body); }
 
 /* ── 자산 비중 + 레버리지 노출 (2026-10-02 와이어프레임) ─────────────── */
 .alloc { display: flex; flex-direction: column; gap: var(--space-xs); margin-top: var(--space-sm); }
@@ -2882,7 +2801,6 @@ onUnmounted(() => {
 .wcard__add {
   margin-top: auto; display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 4px; }
 .input--xs { height: 26px; font-size: var(--text-xs); padding: 0 6px; }
-.btn--xs { height: 26px; padding: 0; font-size: var(--text-sm); }
 
 /*
   🔴 사용자: *"랭킹 하단에 공간이 비는데 다 채워."*
@@ -2914,13 +2832,6 @@ onUnmounted(() => {
   padding: var(--space-base);
   display: flex; flex-direction: column; gap: var(--space-sm);
 }
-.panel__h {
-  margin: 0; font-size: var(--text-xs); font-weight: 700;
-  letter-spacing: 0.06em; color: var(--color-muted);
-  display: flex; align-items: baseline; gap: 6px;
-}
-.panel__h small { font-weight: 500; color: var(--color-faint); }
-.panel__empty { margin: 0; font-size: var(--text-sm); color: var(--color-faint); }
 /* 🔴 "없음" 과 "못 받음" 은 다른 색이어야 한다 */
 .panel__err { margin: 0; font-size: var(--text-sm); color: var(--color-down); }
 .panel__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -2937,11 +2848,6 @@ onUnmounted(() => {
 .rank__list li { font-size: var(--text-sm); }
 .rank__err { margin: 0; font-size: var(--text-xs); color: var(--color-down); }
 
-.banner--warn {
-  background: var(--color-warn-soft);
-  border-color: transparent;
-  color: var(--color-warn);
-}
 .ticker__id[role='button'] { cursor: pointer; }
 
 /* ── 보드 ─────────────────────────────────────────── */
@@ -3059,14 +2965,6 @@ onUnmounted(() => {
   width: 38px; height: 38px; padding: 0; font-size: 18px; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.iconbtn {
-  width: 26px; height: 26px; padding: 0; font-size: 13px; line-height: 1;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--color-hairline); border-radius: var(--rounded-sm);
-  background: var(--color-surface-sunken); color: var(--color-body); cursor: pointer;
-}
-.iconbtn:hover:not(:disabled) { background: var(--color-surface-hover); }
-.iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .pager { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
 .pager__at { font-size: var(--text-2xs); color: var(--color-faint); }
@@ -3262,7 +3160,6 @@ a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
   margin: 4px 0; padding: 4px 8px; font-size: var(--text-2xs); font-weight: 700;
   color: var(--color-down); border: 1px solid var(--color-down); border-radius: var(--rounded-xs);
 }
-.btn--danger { background: var(--color-down); color: #fff; border-color: var(--color-down); }
 .prop__note { margin: 0; font-size: var(--text-xs); color: var(--color-warn); }
 .prop__rej { margin: 0; font-size: var(--text-xs); color: var(--color-down); }
 .pos { border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }

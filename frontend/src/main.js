@@ -1,6 +1,10 @@
 import { createApp, h, ref } from 'vue';
+// 🔴 라우터는 **설치해야 라우터다** (2026-10-04) — router/index.js 가 있었지만 use() 가
+//    없어서 RouterLink 의 href 가 전부 빈 문자열이었다(파일 존재 ≠ 배선).
+import router from './router';
 import App from './App.vue';
 import './styles/tokens.css';
+import './styles/ui.css';
 import {
   bootstrapAccessTokenFromUrl,
   getAccessToken,
@@ -93,13 +97,13 @@ async function boot() {
 
   const authed = await fetchAuthStatus();
   if (authed) {
-    installErrorTrap(createApp(App), 'app').mount('#app');
+    installErrorTrap(createApp(App).use(router), 'app').mount('#app');
     return;
   }
   // ⚠️ 인증 실패를 조용히 넘기지 않는다 — 안 그러면 화면이 빈 채로 API 401 만 쌓인다.
   const app = createApp(LoginGate(() => {
     app.unmount();
-    installErrorTrap(createApp(App), 'app').mount('#app');
+    installErrorTrap(createApp(App).use(router), 'app').mount('#app');
   }));
   installErrorTrap(app, 'login').mount('#app');
 }

@@ -390,6 +390,17 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency, exe
 }
 
 function propose(input = {}, { source = 'manual', notify = true } = {}) {
+  /**
+   * 🛑 **비상정지 게이트** (2026-10-03 D-4) — 정지 중에는 어떤 제안도 만들어지지 않는다.
+   *    여기가 길목이다: 분석·채팅·사다리·수동이 전부 이 함수를 지난다.
+   * 🔴 조용히 막지 않는다 — 감사에 `blocked` 로 남는다(차단도 일어난 일이다).
+   */
+  const gate = require('./agentControl').gateProposal();
+  if (!gate.allowed) {
+    logWarn('orders.blocked_by_pause', { symbol: input.symbol, side: input.side, source, why: gate.why });
+    audit('blocked', { symbol: String(input.symbol || '').toUpperCase(), side: String(input.side || '').toUpperCase(), source, reason: gate.why.slice(0, 160) });
+    return { ok: false, error: gate.why, kind: 'agent_paused' };
+  }
   const symbol = String(input.symbol || '').trim().toUpperCase();
   const side = String(input.side || '').trim().toUpperCase();
   const type = String(input.type || 'LIMIT').trim().toUpperCase();

@@ -1,0 +1,110 @@
+/**
+ * 공용 UI 원자 (2026-10-03 — 셸·멀티페이지 전환으로 전역화)
+ *
+ * ⚠️ 종전엔 WorkspaceView 의 scoped 스타일에만 있어 **다른 페이지에서 .btn 이 맨몸**이었다.
+ *    여기 전역으로 올리고, WorkspaceView 의 동일 규칙은 scoped 로 남아 있어도 무해하다
+ *    (동일 값이 겹칠 뿐). 새 페이지는 **이 파일의 클래스만** 쓴다.
+ */
+.btn {
+  display: inline-flex;
+  /* 헤더가 낮아졌다 */
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  height: 32px;
+  padding: 0 var(--space-base);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--rounded-md);
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  font-size: var(--text-md);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+.btn:hover:not(:disabled) { background: var(--color-surface-hover); border-color: var(--color-hairline-strong); }
+.btn:disabled { opacity: 0.42; cursor: not-allowed; }
+.btn--sm { height: 34px; padding: 0 var(--space-base); font-size: var(--text-sm); }
+.btn--xs { height: 26px; padding: 0; font-size: var(--text-sm); }
+.btn--primary {
+  background: var(--color-primary);
+  border-color: transparent;
+  color: var(--color-on-primary);
+}
+.btn--primary:hover:not(:disabled) { background: var(--color-primary-hover); }
+.btn--primary:active:not(:disabled) { background: var(--color-primary-active); }
+.btn--ai {
+  background: var(--color-ai-soft);
+  border-color: var(--color-ai-line);
+  color: var(--color-ai);
+}
+.btn--ai:hover:not(:disabled) { background: var(--color-ai-line); color: var(--color-ink); }
+.btn--soft {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-line);
+  color: var(--color-primary);
+}
+.btn--soft:hover:not(:disabled) { background: var(--color-primary); color: var(--color-on-primary); }
+.btn--ghost { background: transparent; }
+.btn--danger { background: var(--color-down); color: #fff; border-color: var(--color-down); }
+.iconbtn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: var(--rounded-sm);
+  color: var(--color-muted);
+  font-size: var(--text-lg);
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.iconbtn:hover { background: var(--color-surface-hover); color: var(--color-ink); }
+.iconbtn {
+  width: 26px; height: 26px; padding: 0; font-size: 13px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--color-hairline); border-radius: var(--rounded-sm);
+  background: var(--color-surface-sunken); color: var(--color-body); cursor: pointer;
+}
+.iconbtn:hover:not(:disabled) { background: var(--color-surface-hover); }
+.iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.input { flex: 1; min-width: 0; }
+.input::placeholder { color: var(--color-faint); }
+.banner {
+  margin: 0;
+  padding: var(--space-base) var(--space-md);
+  border-radius: var(--rounded-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline);
+  color: var(--color-body);
+  font-size: var(--text-md);
+}
+.banner--error {
+  background: var(--color-danger-soft);
+  border-color: transparent;
+  color: var(--color-danger);
+}
+.banner--warn {
+  background: var(--color-warn-soft);
+  border-color: transparent;
+  color: var(--color-warn);
+}
+.banner--empty {
+  border-style: dashed;
+  text-align: center;
+  color: var(--color-muted);
+}
+.panel__h {
+  margin: 0; font-size: var(--text-xs); font-weight: 700;
+  letter-spacing: 0.06em; color: var(--color-muted);
+  display: flex; align-items: baseline; gap: 6px;
+}
+.panel__h small { font-weight: 500; color: var(--color-faint); }
+.panel__empty { margin: 0; font-size: var(--text-sm); color: var(--color-faint); }
+.up { color: var(--color-up); }
+.down { color: var(--color-down); }
+.flat { color: var(--color-body); }
