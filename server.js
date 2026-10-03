@@ -706,7 +706,13 @@ app.post('/api/orders/proposals/:id/approve', (req, res) => {
 });
 
 app.post('/api/orders/proposals/:id/reject', (req, res) => {
-  const r = orderService.reject(req.params.id, req.body?.reason);
+  /**
+   * ⚠️ **사유가 비면 출처라도 남긴다** (2026-10-03). 감사에 `reason: ""` 로 남으면
+   *    *"누가 왜 거절했나"* 를 영영 모른다 — 텔레그램 거절은 `"telegram"` 을 보내는데
+   *    화면 거절은 아무것도 안 보내서 **같은 사건처럼 보였다.**
+   * ⚠️ 만료는 `EXPIRED` 상태로 **따로** 관리되므로 여기 섞이지 않는다(확인함).
+   */
+  const r = orderService.reject(req.params.id, String(req.body?.reason || '').trim() || 'web');
   return res.status(r.ok ? 200 : 400).json(r);
 });
 

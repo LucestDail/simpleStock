@@ -561,7 +561,25 @@ function dedupeProposals(proposals) {
 /** 어떤 모양으로 오든 리포트로 만든다 */
 function shapeReport(out) {
   const o = out && typeof out === 'object' ? out : {};
-  const arrays = Object.values(o).filter(Array.isArray);
+  /**
+   * 🔴 **`holdings` 를 먼저 읽는다 — 순서가 판정을 바꾸기 때문이다** (2026-10-03 실측).
+   *
+   * `holdings`(보유 전용)를 신설한 뒤 `analyst.duplicate_stance` 가 **회차당 3~4건**
+   * 뜨기 시작했다. 모델이 **같은 종목을 두 배열에 모두** 넣기 때문이다.
+   * 대부분은 같은 판단이라 무해한데, 05:04 회차에서 **`RAM kept=HOLD dropped=SELL`** —
+   * 두 배열에 **다른 판단**을 써서 `dedupePositions` 가 확신도를 `LOW` 로 낮췄다.
+   *
+   * ⚠️ 그런데 **어느 쪽이 남는지가 `Object.values` 의 키 순서에 달려 있었다.**
+   *    JSON 키 순서는 **모델이 정한다** — 즉 *"보유 판단이 남을지 후보 판단이 남을지"* 가
+   *    **매 회차 운에 맡겨져 있었다.**
+   * ⇒ `holdings` 를 **명시적으로 먼저** 넣는다. 보유 판단이 기준이고 후보는 보조다.
+   * ⚠️ 중복 경고는 **그대로 둔다** — 모델이 두 곳에 다르게 쓰는 것 자체가 관측돼야 한다.
+   */
+  const named = Array.isArray(o.holdings) ? [o.holdings] : [];
+  const rest = Object.entries(o)
+    .filter(([k, v]) => k !== 'holdings' && Array.isArray(v))
+    .map(([, v]) => v);
+  const arrays = [...named, ...rest];
 
   const positions = [];
   for (const arr of arrays) for (const it of arr) { const p = asPosition(it); if (p) positions.push(p); }
