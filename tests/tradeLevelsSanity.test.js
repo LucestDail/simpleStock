@@ -135,3 +135,35 @@ test('⚠️ 화면이 **코드가 메운 값**을 구분해 보여준다', () =
   assert.match(vue, /ps\._entryFromPrice/, '화면이 표시를 안 읽는다');
   assert.match(vue, /\.pos__auto \{/, '🔴 클래스에 규칙이 없으면 맨몸으로 나간다');
 });
+
+/**
+ * ⚠️ **평단을 진입으로 쓰는 것** — 관측만 한다 (2026-10-03, 3회 중 1회)
+ *
+ * `QLD entry=71.78` 은 **평단**이다(현재 98.13 · gap -27%). 이미 보유 중인데
+ * *"평단에 다시 산다"* 는 제안이 아니고 차트 근거도 없다 — 모델이 **익숙한 숫자**를 집었다.
+ * ±50% 안이라 `entryFar` 에는 안 걸린다.
+ *
+ * 🔴 **로그만 남기고 판정하지 않는다** — 평단 근처가 **정당한 지지선**일 수도 있어
+ *    판정하면 오탐이 난다. 이 모듈의 다른 처방(문장 교체·rr 제거)과 달리
+ *    **파괴적이지 않은 쪽**으로만 둔다. 관측이 쌓이면 그때 판정을 붙인다.
+ */
+test('⚠️ 평단=진입 관측 — 판별력(평단≈현재가면 구분 불가라 안 본다)', () => {
+  const near = (e, a) => Math.abs(e - a) / a <= 0.01;
+  const far = (a, p) => p > 0 && Math.abs(a - p) / p > 0.10;
+  const hit = (e, a, p) => near(e, a) && far(a, p);
+  assert.ok(hit(71.78, 71.78, 98.13), 'QLD 평단진입을 못 잡는다');
+  assert.ok(hit(19.08, 19.08, 14.31), 'RAM 평단진입을 못 잡는다');
+  assert.ok(!hit(54.03, 54.03, 54.13), '🔴 평단≈현재가는 구분이 안 되므로 걸리면 안 된다');
+  assert.ok(!hit(98.13, 71.78, 98.13), '정상 진입(현재가)이 걸렸다');
+});
+
+test('🔴 배선 — 관측이 실제로 찍히고 **rr 은 안 건드린다**', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+  assert.match(src, /analyst\.entry_equals_avg/, '관측 로그가 없다');
+  assert.match(src, /farFromPx = px > 0 && Math\.abs\(avg - px\) \/ px > 0\.10/, '구분 불가 구간을 안 거른다');
+  // 🔴 이 축은 **판정하지 않는다** — rr/entryFar 를 건드리면 오탐이 제품을 해친다
+  const blk = src.slice(src.indexOf('analyst.entry_equals_avg') - 600, src.indexOf('analyst.entry_equals_avg') + 400);
+  assert.ok(!/entryFar = true|out\.rr = null/.test(blk), '관측 축이 판정으로 번졌다');
+});

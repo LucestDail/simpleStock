@@ -2480,6 +2480,29 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       const krwBudget = accountKrw * (riskPct / 100);
       budget = held?.currency === 'USD' ? (fxRate > 0 ? krwBudget / fxRate : null) : krwBudget;
     }
+    /**
+     * ⚠️ **평단을 진입으로 쓰는 것** (2026-10-03 관측, 3회 중 1회).
+     *    `QLD entry=71.78` 은 **평단**이다(현재 98.13 · gap -27%). 이미 보유 중인데
+     *    *"평단에 다시 산다"* 는 제안이 아니고, 차트 근거도 없다 — 모델이 **익숙한 숫자**를
+     *    집은 것으로 보인다. ±50% 안이라 `entryFar` 에는 안 걸린다.
+     * 🔴 **로그만 남기고 rr 은 건드리지 않는다** — 평단 근처가 **정당한 지지선**일 수도
+     *    있어서 판정하면 오탐이 난다. 이 가드의 다른 처방들과 달리 **파괴적이지 않은 쪽**
+     *    (관측)으로만 둔다. 관측이 쌓이면 그때 판정을 붙인다.
+     * ⚠️ 평단과 현재가가 **가까우면 구분이 안 된다**(O: 평단 54.03 vs 현재 54.13) ⇒
+     *    둘이 10% 넘게 떨어져 있을 때만 본다.
+     */
+    if (held && Number(held.avgPrice) > 0 && Number(ps.entry) > 0) {
+      const avg = Number(held.avgPrice);
+      const px = Number(held.lastPrice);
+      const nearAvg = Math.abs(ps.entry - avg) / avg <= 0.01;
+      const farFromPx = px > 0 && Math.abs(avg - px) / px > 0.10;
+      if (nearAvg && farFromPx) {
+        logWarn('analyst.entry_equals_avg', {
+          symbol: ps.symbol, entry: ps.entry, avgPrice: avg, lastPrice: px,
+          note: '평단을 진입가로 썼다 — 차트 근거가 아닐 수 있다',
+        });
+      }
+    }
     const calc = computeTrade({
       side: ps.stance, entry: ps.entry, stop: ps.stop, target: ps.target, riskBudget: budget,
       /**
