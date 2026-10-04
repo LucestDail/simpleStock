@@ -17,6 +17,9 @@ COPY server.js ./
 COPY server ./server
 # 국면 매뉴얼·ETF 카탈로그 — 없으면 데몬이 판정만 하고 시나리오가 영영 안 발동한다(실측 ENOENT)
 COPY config ./config
+# 백테스트 하니스 — 전략연구소(D-9)가 컨테이너 안에서 spawn 한다.
+# 🔴 첫 라이브 발사가 MODULE_NOT_FOUND 로 즉사했다(2026-10-04) — "저장소에 있다 ≠ 배포됐다"
+COPY verify ./verify
 COPY data ./data
 COPY --from=builder /app/dist ./dist
 ENV NODE_ENV=production
