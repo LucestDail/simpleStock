@@ -65,7 +65,10 @@ const when = (at) => {
 apiFetch('/api/regime').then((r) => r.json()).then((b) => {
   const st = b?.state || b;
   const t = (v) => (v === 'up' ? '상승' : v === 'down' ? '하락' : '횡보');
-  if (st?.us?.trend || st?.kr?.trend) regimeNow.value = `US ${t(st.us?.trend)} · KR ${t(st.kr?.trend)} · VIX ${st.vix ?? '?'}`;
+  if (!st?.us?.trend && !st?.kr?.trend) return;
+  // ⚠️ vix 는 {value, band, stale} 객체다 — 그대로 찍으면 [object Object](실화면에서 확인)
+  const vix = st.vix?.value ?? st.vix;
+  regimeNow.value = `US ${t(st.us?.trend)} · KR ${t(st.kr?.trend)} · VIX ${Number.isFinite(Number(vix)) ? vix : '?'}${st.vix?.stale ? '(낡음)' : ''}`;
 }).catch(() => {});
 
 const fmt = (n) => (Number.isFinite(n) ? Math.round(n).toLocaleString() : '—');

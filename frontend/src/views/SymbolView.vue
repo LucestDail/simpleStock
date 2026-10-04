@@ -26,7 +26,7 @@
         </dl>
       </section>
       <section class="card">
-        <h2>에이전트 견해 <small class="mut" v-if="viewAt">{{ viewAt.slice(0, 16) }} 분석</small></h2>
+        <h2>에이전트 견해 <small class="mut" v-if="viewAt">{{ when(viewAt) }} 분석</small></h2>
         <template v-if="agentView">
           <p><b :class="agentView.stance === 'BUY' ? 'up' : agentView.stance === 'SELL' ? 'down' : ''">{{ agentView.stance }}</b>
             <small class="mut"> · 확신도 {{ agentView.confidence }}</small></p>
