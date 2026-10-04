@@ -300,8 +300,10 @@ async function loadActivity() {
 
 const ACT_ICON = { analysis: '🧭', alert: '📈', proposal: '🟡', approval: '✅', rejection: '✖️', order: '📦' };
 function actTime(at) {
+  // "10. 2. 오전 06:33" 이 좁은 열에서 두 줄로 꺾였다(2026-10-04 실화면) — 압축 24h
   try {
-    return new Date(at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const d = new Date(at); const p = (n) => String(n).padStart(2, '0');
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   } catch { return at; }
 }
 
@@ -2316,7 +2318,7 @@ onUnmounted(() => {
  *    내용 때문에 안 먹는 상황이라 **명시적으로 줄바꿈을 막고 줄어들지 않게** 한다.
  * ⚠️ 대신 **note 쪽이 줄어들고 넘치면 말줄임** — 둘 다 안 줄면 카드가 가로로 터진다.
  */
-.assets__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.assets__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); flex-wrap: wrap; }
 .assets__title { display: flex; align-items: center; gap: var(--space-sm); flex-shrink: 0; }
 .assets__title h2 { margin: 0; font-size: var(--text-base); font-weight: 700; color: var(--color-ink); white-space: nowrap; }
 .assets__badge {
@@ -2389,8 +2391,10 @@ onUnmounted(() => {
 .topbar__pend { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .topbar__pend b { background: rgba(255,255,255,.22); border-radius: 999px; padding: 0 6px; }
 /* ₩|$ 토글 — 와이어프레임 내 자산 우측 */
-.ccy { display: inline-flex; border: 1px solid var(--color-hairline-strong); border-radius: var(--rounded-md); overflow: hidden; }
-.ccy__b { background: none; border: 0; color: var(--color-muted); font-size: var(--text-xs); padding: 2px 8px; cursor: pointer; }
+/* 🔴 flex: none — 헤더가 좁아지면 토글이 **눌려 $ 버튼이 잘렸다**(2026-10-04 실화면).
+   헤더는 wrap 으로 풀고, 토글·동기화 라벨은 제 폭을 지킨다. */
+.ccy { display: inline-flex; flex: none; border: 1px solid var(--color-hairline-strong); border-radius: var(--rounded-md); overflow: hidden; }
+.ccy__b { background: none; border: 0; color: var(--color-muted); font-size: var(--text-xs); padding: 2px 8px; cursor: pointer; line-height: 1.4; white-space: nowrap; }
 .ccy__b--on { background: var(--color-ink); color: var(--color-surface); }
 /* 현금 행 — 보유와 같은 축에 둔다 */
 /* 분석 메타 칩 · 리스크 체크 — 와이어프레임 ③ */
@@ -2493,7 +2497,7 @@ onUnmounted(() => {
 /* 보고서 본문과 대화 메시지 사이에도 경계를 둔다 — 같은 스크롤이지만 다른 종류의 글이다 */
 .chat__log > .tl { padding-top: var(--space-sm); border-top: 1px solid var(--color-hairline-soft); }
 
-.assets__sync { font-size: var(--text-xs); color: var(--color-muted); }
+.assets__sync { font-size: var(--text-xs); color: var(--color-muted); white-space: nowrap; flex: none; }
 .assets__sync--stale { color: #e0ad48; }
 .assets__sync--error { color: #ef7a55; }
 .assets__sync--loading { opacity: .7; }

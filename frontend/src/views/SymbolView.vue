@@ -9,7 +9,7 @@
     <header class="page__head">
       <RouterLink to="/risk" class="mut">포트폴리오</RouterLink><span class="mut">/</span>
       <h1>{{ name || symbol }}</h1>
-      <span class="chip mono-num">{{ symbol }}</span>
+      <span v-if="name && name !== symbol" class="chip mono-num">{{ symbol }}</span>
       <span v-if="held" class="chip">보유 {{ held.quantity }}주</span>
     </header>
 
@@ -20,9 +20,9 @@
         <h2>내 포지션</h2>
         <dl class="grid">
           <div><dt>수량</dt><dd class="mono-num">{{ held.quantity }}주</dd></div>
-          <div><dt>평균 단가</dt><dd class="mono-num">{{ held.avgPrice }}</dd></div>
-          <div><dt>현재가</dt><dd class="mono-num">{{ held.lastPrice }}</dd></div>
-          <div><dt>평가손익</dt><dd class="mono-num" :class="held.profit >= 0 ? 'up' : 'down'">{{ held.profit }} ({{ held.profitRate }}%)</dd></div>
+          <div><dt>평균 단가</dt><dd class="mono-num">{{ money(held.avgPrice) }}</dd></div>
+          <div><dt>현재가</dt><dd class="mono-num">{{ money(held.lastPrice) }}</dd></div>
+          <div><dt>평가손익</dt><dd class="mono-num" :class="held.profit >= 0 ? 'up' : 'down'">{{ money(held.profit, true) }} ({{ Number(held.profitRate).toFixed(2) }}%)</dd></div>
         </dl>
       </section>
       <section class="card">
@@ -43,8 +43,9 @@
       <table v-if="history.length" class="tbl">
         <thead><tr><th>시각</th><th>이벤트</th><th>방향</th></tr></thead>
         <tbody><tr v-for="(h, i) in history" :key="i">
-          <td class="mono-num">{{ new Date(h.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}</td>
-          <td>{{ h.event }}</td><td>{{ h.side || '—' }}</td>
+          <td class="mono-num">{{ when(h.at) }}</td>
+          <td>{{ EVENT_KO[h.event] || h.event }}</td>
+          <td>{{ h.side === 'BUY' ? '매수' : h.side === 'SELL' ? '매도' : '—' }}</td>
         </tr></tbody>
       </table>
       <p v-else class="mut">이 종목으로 만들어진 제안이 아직 없습니다.</p>
@@ -77,6 +78,23 @@ const history = ref([]);
 const news = ref([]);
 const newsNote = ref('');
 
+const EVENT_KO = { proposed: '제안', approved: '승인', rejected: '거절', canceled: '취소', executed: '체결', blocked: '차단(가드·정지)', expired: '만료' };
+/** 활동 로그와 같은 압축 시각 — "10. 4. 오전 12:11" 장황체의 재발 방지 */
+const when = (at) => {
+  if (!at) return '';
+  const d = new Date(at); const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+/** 통화 포맷 — raw float(71.778191)가 그대로 화면에 나왔다 */
+const money = (v, sign = false) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  const cur = held.value?.currency === 'KRW' ? '₩' : '$';
+  const abs = cur === '₩' ? Math.abs(Math.round(n)).toLocaleString('ko-KR')
+    : Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${sign ? (n >= 0 ? '+' : '−') : n < 0 ? '−' : ''}${cur}${abs}`;
+};
+
 onMounted(async () => {
   try {
     const r = await apiFetch('/api/portfolio'); const b = await r.json();
@@ -85,8 +103,10 @@ onMounted(async () => {
   } catch { /* 포지션 없이도 페이지는 선다 */ }
   try {
     const r = await apiFetch('/api/analyst/last'); const b = await r.json();
-    viewAt.value = b?.at || null;
-    agentView.value = (b?.positions || []).find((p) => String(p.symbol).toUpperCase() === symbol.value) || null;
+    // 🔴 응답은 {report:{...}} 로 싸여 있다 — b.positions 로 읽어 견해가 항상 비었다(2026-10-04 실화면)
+    const rep = b?.report || b || {};
+    viewAt.value = rep.at || null;
+    agentView.value = (rep.positions || []).find((p) => String(p.symbol).toUpperCase() === symbol.value) || null;
   } catch { /* 견해 없음으로 */ }
   try {
     const r = await apiFetch('/api/orders/stats'); const b = await r.json();

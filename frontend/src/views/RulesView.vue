@@ -11,7 +11,7 @@
       <h2>자율 수준</h2>
       <div class="levels">
         <div class="level level--on"><b>제안 + 승인</b><small>승인한 주문만 실행 — 현재 단계</small></div>
-        <div class="level level--locked"><b>한도 내 자동</b><small>🔒 해금 조건: 거절률 하락 추세 + 가드 안정. **해금도 사람이 합니다**</small></div>
+        <div class="level level--locked"><b>한도 내 자동</b><small>🔒 해금 조건: 거절률 하락 추세 + 가드 안정. <b>해금도 사람이 합니다</b></small></div>
         <div class="level level--locked"><b>안내 후 자율</b><small>🔒 1단계 실적 후</small></div>
       </div>
     </section>
@@ -23,18 +23,25 @@
         <tr><td>제안 유효시간</td><td class="mono-num">10분</td><td class="mut">응답 없으면 자동 만료 — 옛 시세로 체결되지 않게</td></tr>
         <tr><td>신용·미수</td><td class="mono-num">불가</td><td class="mut">고정 — 설정으로도 못 켠다</td></tr>
       </table>
-      <p class="mut">⚠️ 일일 손실 한도·MDD 자동 정지는 아직 **수동**(상단 비상정지)이다 —
+      <p class="mut">⚠️ 일일 손실 한도·MDD 자동 정지는 아직 <b>수동</b>(상단 비상정지)이다 —
         자동 발동 백엔드가 생기면 여기서 켠다. (없는 안전장치를 있다고 적지 않는다.)</p>
     </section>
     <section class="card">
       <h2>브리핑·분석 설정</h2>
-      <SettingsPanel />
+      <!-- 🔴 SettingsPanel 은 모달(v-if="open")이라 그냥 박으면 **빈 카드**가 된다(2026-10-04 실화면).
+           대시보드의 ⚙ 과 같은 물건을 같은 방식으로 연다 — 설정 화면이 두 벌이 되지 않게. -->
+      <p class="mut">브리핑 프롬프트·리스크 %·표시 통화 등은 운영 설정에서 — 대시보드의 ⚙ 과 같은 창이다.</p>
+      <button class="btn" @click="settingsOpen = true">운영 설정 열기</button>
+      <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" />
     </section>
   </div>
 </template>
 
 <script setup>
+import { ref } from 'vue';
 import SettingsPanel from '../components/SettingsPanel.vue';
+
+const settingsOpen = ref(false);
 </script>
 
 <style scoped>

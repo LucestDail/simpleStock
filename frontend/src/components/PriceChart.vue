@@ -128,7 +128,8 @@ onBeforeUnmount(() => {
     <header class="chart__head">
       <div class="chart__title">
         <span class="chart__name">{{ name || symbol || '종목을 고르세요' }}</span>
-        <span v-if="symbol" class="chart__sym mono-num">{{ symbol }}</span>
+        <!-- 이름==티커면 한 번만 (QLD QLD 로 겹쳐 보였다) -->
+        <span v-if="symbol && symbol !== (name || symbol)" class="chart__sym mono-num">{{ symbol }}</span>
       </div>
       <div class="chart__tabs">
         <button

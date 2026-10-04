@@ -19,7 +19,7 @@
       </div>
       <section class="card">
         <h2>사용자 개입 효과</h2>
-        <p class="mut">자율 모드 해금의 전제 = **거절률이 내려가는 추세**. 지금 {{ rejectRate }}% —
+        <p class="mut">자율 모드 해금의 전제 = 거절률이 내려가는 추세. 지금 {{ rejectRate }}% —
           에이전트 제안의 품질이 올라가면 이 수치가 먼저 움직인다.</p>
       </section>
       <section class="card">
@@ -44,7 +44,7 @@
         </template>
         <p v-else class="mut">
           일일 스냅샷 적재를 {{ perf?.days ? `시작했다 (${perf.days}일째)` : '오늘 시작했다' }} —
-          **2일째부터** 수익률이 계산된다. 한 점으로 수익률을 지어내지 않는다.
+          2일째부터 수익률이 계산된다. 한 점으로 수익률을 지어내지 않는다.
         </p>
       </section>
     </template>

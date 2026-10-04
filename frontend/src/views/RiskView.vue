@@ -15,7 +15,8 @@
           <div class="gauge" v-for="g in gauges" :key="g.label">
             <div class="gauge__head"><span>{{ g.label }}</span>
               <b class="mono-num" :class="{ down: g.over }">{{ g.now }}% <small>/ {{ g.limit }}%</small></b></div>
-            <div class="gauge__bar"><span :style="{ width: Math.min(100, g.pct) + '%' }" :class="{ 'gauge__fill--warn': g.pct >= 80 }" class="gauge__fill"></span></div>
+            <!-- 🔴 경고색은 **위반**일 때만 — 현금(최소 유지)은 바가 가득해도 정상이다(2026-10-04 실화면) -->
+            <div class="gauge__bar"><span :style="{ width: Math.min(100, g.pct) + '%' }" :class="{ 'gauge__fill--warn': g.over }" class="gauge__fill"></span></div>
           </div>
         </div>
       </section>
