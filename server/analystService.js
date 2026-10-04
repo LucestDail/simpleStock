@@ -2394,6 +2394,16 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
         continue;
       }
     }
+    // 🔴 횡보 게이트 — 횡보+평온의 미보유 시장가 매수를 막는다(상세는 sideGate 주석)
+    {
+      const gate = sideGate(p, require('./regimeService').getState(),
+        { heldSymbols: items.map((h) => h.symbol), proposals: report.proposals });
+      if (!gate.ok) {
+        rejected.push({ symbol: p.symbol, side: p.side, error: gate.why });
+        logWarn('analyst.side_blocked', { symbol: p.symbol, why: gate.why });
+        continue;
+      }
+    }
     /**
      * 🔴 **사용자가 "보유 유지" 를 정한 종목의 매도를 코드가 막는다** (2026-10-01).
      *    프롬프트에 적어 뒀는데도 12:19 에 `RAM SELL @14.1` 이 나갔고 사용자가 거절했다.
@@ -2980,6 +2990,56 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
 
 
 
+/**
+ * 🔴 횡보 게이트 (2026-10-04) — **횡보장의 손실은 매매 그 자체**라는 백테스트 실측을 코드로.
+ *
+ * 같은 세계(고정 시드) chop 백테스트 2회가 **-5.34% / 0.00%** 로 갈렸다 — 모델이 어떤 날은
+ * 방어 로테이션(XLP·XLV 매수 후 교체)을 하고 어떤 날은 관망했다. 횡보+평온에서 이기는 쪽은
+ * 항상 관망이었는데(벤치 -0.17% vs 로테이션 -5.34%) 그것이 **판단 변동성에 달려** 있었다.
+ * ⇒ 관망을 게이트로 결정화한다. 프롬프트(side_grind 스텝)에도 적지만 **코드가 정본**이다.
+ *
+ * 작동 조건(전부 참일 때만): 매수 · 미보유 종목 · 그 종목 시장이 횡보(side) · VIX band 0(평온).
+ * 열어 두는 길(막는 쪽만큼 안 막는 쪽이 설계다):
+ *  - SELL 전부 (레버리지 축소·차익실현은 횡보의 정석)
+ *  - 보유 종목 매수 (로테이션이 아니다)
+ *  - **1배 전환**: 같은 보고서에 같은 카테고리의 보유 종목 SELL 이 있으면 통과 (QLD→QQQ)
+ *  - VIX band ≥ 1 (공포 사다리 영역 — 거기선 기계 매수가 존재 이유다)
+ *  - 추세(up/down) 발생 · VIX 모름(null — 평온을 확인 못 하면 작동하지 않는다, fail-open)
+ */
+function sideGate(p, regimeState, { heldSymbols = [], proposals = [] } = {}) {
+  if (String(p.side).toUpperCase() !== 'BUY') return { ok: true };
+  const sym = String(p.symbol).toUpperCase();
+  const held = new Set((heldSymbols || []).map((h) => String(h?.symbol || h).toUpperCase()));
+  if (held.has(sym)) return { ok: true };
+
+  const cat = require('./regimeService').readCatalog();
+  let market = null; let category = null; let catSyms = null;
+  for (const [key, c] of Object.entries(cat?.categories || {})) {
+    const hit = (c.etfs || []).find((e) => e.symbol === sym);
+    if (hit) {
+      market = hit.market === 'KR' ? 'kr' : 'us';
+      category = key;
+      catSyms = new Set((c.etfs || []).map((e) => e.symbol));
+      break;
+    }
+  }
+  const trend = regimeState?.[market || 'us']?.trend ?? null;
+  const band = regimeState?.vix?.band ?? null;
+  if (trend !== 'side' || band !== 0) return { ok: true };
+
+  if (category) {
+    const conversion = (proposals || []).some((q) => q !== p
+      && String(q.side).toUpperCase() === 'SELL'
+      && held.has(String(q.symbol).toUpperCase())
+      && catSyms.has(String(q.symbol).toUpperCase()));
+    if (conversion) return { ok: true };
+  }
+  return {
+    ok: false,
+    why: `횡보·평온(${(market || 'us').toUpperCase()} side · VIX 평온) — 신규 시장가 진입은 왕복비용만 남는다. 박스 하단 예약으로만 (side_grind 규칙)`,
+  };
+}
+
 function inverseGate(p, regimeState) {
   const inv = require('./regimeService').readCatalog().categories?.inverse_hedge?.etfs || [];
   const hit = inv.find((e) => e.symbol === String(p.symbol).toUpperCase());
@@ -3027,8 +3087,11 @@ async function decideOnContext({ contextText, regimeState = null, holdings = [] 
   const rejected = [];
   for (const p of report.proposals || []) {
     const gate = inverseGate(p, regimeState);
-    if (gate.ok) accepted.push(p);
-    else rejected.push({ ...p, error: gate.why });
+    if (!gate.ok) { rejected.push({ ...p, error: gate.why }); continue; }
+    // 횡보 게이트 — 실전(analyze)과 같은 함수(게이트가 두 벌이면 갈라진다)
+    const side = sideGate(p, regimeState, { heldSymbols: holdings, proposals: report.proposals });
+    if (!side.ok) { rejected.push({ ...p, error: side.why }); continue; }
+    accepted.push(p);
   }
   return { report, proposals: accepted, rejected };
 }
@@ -3039,7 +3102,7 @@ module.exports = {
   _reportSchemaFor: reportSchemaFor, _REPORT_SCHEMA: REPORT_SCHEMA, _shapeReport: shapeReport,
   savePrompt, readLastPrompt, LAST_PROMPT_FILE, portfolioWeights,
   analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport,
-  computeTrade, decideOnContext, inverseGate, REPORT_SCHEMA, SYSTEM_PROMPT,
+  computeTrade, decideOnContext, inverseGate, sideGate, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
   assessBuyingCapacity, capacityDetail, capacityBand, describeNoProposal, watchMovesSection,
 };

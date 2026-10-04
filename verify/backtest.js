@@ -149,7 +149,11 @@ const fmt = (v) => (v == null ? '-' : Number(v).toFixed(2));
       '⚠️ price 는 후보 절의 현재가를 그대로 쓰라. quantity 는 현금·보유 안에서. reason 1문장.',
     ].join('\n');
 
-    const { report, proposals, rejected } = await analyst.decideOnContext({ contextText: ctx, regimeState: state });
+    const { report, proposals, rejected } = await analyst.decideOnContext({
+      contextText: ctx, regimeState: state,
+      // sideGate 가 "미보유 신규 매수" 를 가리려면 보유를 알아야 한다 — 실전과 같은 입력
+      holdings: Object.entries(port.pos).filter(([, o]) => o.qty > 0).map(([sym]) => sym),
+    });
 
     // 모의 체결 — 초과분은 자르고 표시
     const fills = [];
