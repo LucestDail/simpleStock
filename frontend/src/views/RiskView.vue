@@ -438,6 +438,7 @@ onMounted(async () => {
 
 /* ── 도넛 ── */
 .row2 { display: grid; grid-template-columns: minmax(380px, 520px) 1fr; gap: var(--space-sm); align-items: stretch; }
+.row2 > .card { display: flex; flex-direction: column; min-width: 0; }
 .donutwrap { display: flex; align-items: center; gap: var(--space-lg); flex-wrap: wrap; }
 .donutbox { position: relative; width: 180px; flex: 0 0 auto; }
 .donut { display: block; width: 100%; height: auto; }
@@ -456,8 +457,9 @@ onMounted(async () => {
 .lev { padding: 0 4px; border: 1px solid var(--color-warn); color: var(--color-warn); border-radius: var(--rounded-xs); font-size: var(--text-2xs); }
 
 /* ── 게이지 ── */
-/* 우열 카드 안에서는 세로 스택이 맞다 — 가로 3등분은 초광폭에서 바가 1m 가 된다 */
-.gauges { display: flex; flex-direction: column; gap: var(--space-base); }
+/* 우열 카드 안에서는 세로 스택 — 카드가 도넛 카드와 같은 높이(stretch)가 되므로
+   게이지 3개를 **세로로 고르게 분배**해 아래가 비지 않게 한다(2026-10-04 "우측이 좀 비거나") */
+.gauges { display: flex; flex-direction: column; justify-content: space-evenly; gap: var(--space-base); flex: 1; min-height: 0; }
 .gauge { min-width: 0; }
 .gauge__head { display: flex; justify-content: space-between; font-size: var(--text-sm); margin-bottom: 4px; }
 .gauge__bar { height: 10px; border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); overflow: hidden; }

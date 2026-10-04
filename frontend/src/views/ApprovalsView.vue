@@ -87,10 +87,12 @@
         <!-- 이력 저장은 2026-10-04 신설 — 그 전 보고서는 남아 있지 않다 -->
         <p v-else-if="histLoaded && !hist.length" class="panel__empty">아직 이력이 없습니다. 다음 분석부터 쌓입니다.</p>
         <div v-else class="hgrid">
-          <article v-for="h in hist" :key="h.id" class="hrow" :class="{ 'hrow--on': h.id === selId }" @click="pick(h.id)">
+          <article v-for="h in hist" :key="h.id || h.at" class="hrow" :class="{ 'hrow--on': (h.id || h.at) === selId }" @click="pick(h)">
             <div class="hrow__top">
               <span class="hrow__when mono-num">{{ when(h.at) }}</span>
-              <span class="hrow__trig">{{ h.trigger || '—' }}</span>
+              <!-- 이력 체계(10-04) 이전 분석은 활동 기록의 한 줄 요약만 남아 있다 — 지어내지 않고 표시 -->
+              <span v-if="h.kind === 'summary'" class="hrow__sum">요약만</span>
+              <span v-else class="hrow__trig">{{ h.trigger || '—' }}</span>
             </div>
             <p class="hrow__mv">{{ h.marketView || '(시황 요약 없음)' }}</p>
             <div v-if="h.proposals?.length" class="hrow__chips">
@@ -107,6 +109,9 @@
         <h2 class="sect__h">보고서 상세</h2>
         <p v-if="detailError" class="panel__err">{{ detailError }}</p>
         <p v-else-if="!sel" class="panel__empty">왼쪽 이력에서 보고서를 선택하세요.</p>
+        <p v-if="sel?.summaryOnly" class="banner banner--empty">
+          이 회차는 이력 체계 신설(10-04) 전이라 <b>한 줄 요약만</b> 보존돼 있습니다 — 전문·제안 연결은 그 이후 분석부터 쌓입니다.
+        </p>
         <template v-else>
           <p class="detail__meta">
             <span class="mono-num">{{ when(sel.at) }}</span>
@@ -293,13 +298,27 @@ async function loadHistory() {
     hist.value = b.ok ? (b.items || []) : [];
     histError.value = b.ok ? '' : (b.error || '이력을 못 읽었습니다');
     // 첫 진입이면 최신 보고서를 자동 선택 — 빈 오른쪽은 "고장" 으로 읽힌다
-    if (!selId.value && hist.value.length) await pick(hist.value[0].id);
+    if (!selId.value && hist.value.length) await pick(hist.value[0]);
   } catch (e) { histError.value = `이력을 못 읽었습니다: ${e.message}`; }
   histLoaded.value = true;
 }
 
-async function pick(id) {
-  selId.value = id;
+async function pick(h) {
+  // 문자열(id)로도, 행 객체로도 부를 수 있게 — 요약 행은 id 가 없다
+  const row = typeof h === 'string' ? (hist.value.find((x) => x.id === h) || { id: h }) : h;
+  selId.value = row.id || row.at;
+  if (row.kind === 'summary') {
+    // 전문이 없는 과거 회차 — 요약을 그대로 보여주고 그 사실을 말한다(빈 화면은 고장으로 읽힌다)
+    sel.value = {
+      ok: true, id: null, at: row.at, trigger: row.trigger,
+      summaryOnly: true,
+      report: { marketView: row.marketView, momentumRead: '', dataGaps: [], positions: [] },
+      proposals: [],
+    };
+    detailError.value = '';
+    return;
+  }
+  const id = row.id;
   try {
     const r = await apiFetch(`/api/analyst/history/${id}`);
     const b = await r.json();
@@ -392,6 +411,7 @@ onUnmounted(() => clearInterval(timer));
 .hrow--on { border-color: var(--color-primary-line); background: var(--color-primary-soft); }
 .hrow__top { display: flex; align-items: baseline; gap: var(--space-sm); }
 .hrow__when { color: var(--color-ink); font-size: var(--text-xs); white-space: nowrap; }
+.hrow__sum { font-size: var(--text-2xs); color: var(--color-faint); border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); padding: 0 6px; }
 .hrow__trig { color: var(--color-faint); font-size: var(--text-2xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hrow__mv {
   margin: 0; color: var(--color-body); font-size: var(--text-xs);

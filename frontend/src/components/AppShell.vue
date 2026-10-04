@@ -28,6 +28,9 @@
         <RouterLink to="/lab" class="side__item" active-class="side__item--on">전략 연구소</RouterLink>
         <!-- 종목 상세는 종목을 클릭해 들어간다 — 메뉴 항목이 아니라 경로다(와이어프레임도 breadcrumb) -->
       </nav>
+      <button class="side__theme" :title="theme === 'light' ? '어두운 테마로' : '밝은 테마로'" @click="toggleTheme">
+        {{ theme === 'light' ? '☾ 다크 모드' : '☀ 라이트 모드' }}
+      </button>
       <div class="side__acct">
         <small>연결 계좌</small>
         <b>토스증권</b>
@@ -46,11 +49,15 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
 import { apiFetch } from '../lib/apiClient';
+// 🔴 테마는 셸이 적용한다 (2026-10-04) — 종전엔 WorkspaceView 청크만 import 해서,
+//    다른 메뉴로 직행하면 data-theme 이 안 걸려 **페이지마다 테마가 달랐다**(사용자 지적).
+import { useTheme } from '../composables/useTheme';
 
 /*
  * 2026-10-04 재편: 상단 상태바(운용 상태·오늘 손익·일시정지·비상정지)는 **운용 규칙 설정**으로
  * 이사했다 — 사용자: "대시보드는 순전히 보는 용도. 조작이 되면 안 돼." 셸은 내비와 배지만 맡는다.
  */
+const { theme, toggle: toggleTheme } = useTheme();
 const pendingCount = ref(0);
 const ordersLive = ref(false);
 
@@ -96,6 +103,12 @@ onUnmounted(() => clearInterval(timer));
   background: var(--color-primary); color: var(--color-on-primary);
   border-radius: var(--rounded-pill); font-size: var(--text-2xs); padding: 1px 6px;
 }
+.side__theme {
+  border: 1px solid var(--color-hairline); border-radius: var(--rounded-md);
+  background: none; color: var(--color-muted); font-size: var(--text-xs);
+  padding: 6px var(--space-sm); cursor: pointer; text-align: left;
+}
+.side__theme:hover { color: var(--color-ink); border-color: var(--color-hairline-strong); }
 .side__acct {
   border: 1px solid var(--color-hairline); border-radius: var(--rounded-md);
   padding: var(--space-sm); display: flex; flex-direction: column; gap: 2px; font-size: var(--text-xs);

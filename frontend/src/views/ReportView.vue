@@ -244,7 +244,7 @@ onMounted(async () => {
 
 /* ── 7단계 띠 — 가로 배치, 좁으면 자기 영역 안에서만 가로 스크롤 ── */
 .stages { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(180px, 1fr); gap: var(--space-sm); overflow-x: auto; padding-bottom: 4px; }
-.stage { border: 1px solid var(--color-hairline); border-radius: var(--rounded-sm); padding: var(--space-sm); display: flex; flex-direction: column; gap: 6px; min-width: 0; background: var(--color-surface-raised); }
+.stage { border: 1px solid var(--color-hairline); border-radius: var(--rounded-sm); padding: var(--space-sm); display: flex; flex-direction: column; gap: 6px; min-width: 0; background: var(--color-surface-raised);; min-height: 190px; display: flex; flex-direction: column; }
 .stage__head { display: flex; align-items: center; gap: 6px; }
 .stage__no { width: 18px; height: 18px; border-radius: var(--rounded-pill); background: var(--color-primary-soft); color: var(--color-primary); font-size: var(--text-2xs); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
 .stage__name { font-size: var(--text-sm); color: var(--color-ink); }

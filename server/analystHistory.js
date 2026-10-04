@@ -57,15 +57,36 @@ function readAll() {
   } catch { return []; }
 }
 
-/** 목록 — 메타만. 최신이 앞. */
+/**
+ * 목록 — 메타만. 최신이 앞.
+ * 🔄 2026-10-04 2차: 이력 체계 신설(오늘) **이전의 분석**은 전문이 없고 활동 기록에
+ *    한 줄 요약만 남아 있다 — 사용자: "과거 이력도 하나도 없고?" ⇒ 그 요약들을
+ *    `kind:'summary'` 행으로 합류시킨다(전문 행은 `kind:'full'`). 비슷한 시각(±2분)에
+ *    전문 행이 있으면 요약 행은 접는다(같은 분석이다).
+ */
 function list({ limit = 100 } = {}) {
-  return readAll().reverse().slice(0, limit).map((r) => ({
+  const full = readAll().reverse().map((r) => ({
+    kind: 'full',
     id: r.id, at: r.at,
     trigger: r.trigger?.why || r.trigger?.kind || (typeof r.trigger === 'string' ? r.trigger : null),
     marketView: String(r.report?.marketView || '').slice(0, 140),
     positions: Array.isArray(r.report?.positions) ? r.report.positions.length : 0,
     proposals: (r.proposals || []).map((p) => ({ id: p.id, symbol: p.symbol, side: p.side })),
   }));
+  let summaries = [];
+  try {
+    summaries = (require('./activityLog').list({ limit: 500 }) || [])
+      .filter((a) => a.kind === 'analysis')
+      .filter((a) => !full.some((f) => Math.abs(Date.parse(f.at) - Date.parse(a.at)) < 2 * 60_000))
+      .map((a) => ({
+        kind: 'summary', id: null, at: a.at, trigger: null,
+        marketView: String(a.title || '').slice(0, 140),
+        positions: a.positions ?? null, proposals: [],
+      }));
+  } catch { /* 활동 기록을 못 읽어도 전문 이력은 나간다 */ }
+  return [...full, ...summaries]
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)))
+    .slice(0, limit);
 }
 
 function get(id) {

@@ -4,7 +4,6 @@ import PriceChart from '../components/PriceChart.vue';
 import PipelineStrip from '../components/PipelineStrip.vue';
 import NewsPanel from '../components/NewsPanel.vue';
 import RankingsPanel from '../components/RankingsPanel.vue';
-import { useTheme } from '../composables/useTheme';
 import { useWatchlist } from '../composables/useWatchlist';
 import { useUi } from '../composables/useUi';
 import { formatMarketClock } from '../lib/marketClock';
@@ -27,7 +26,6 @@ const {
 } = useWatchlist();
 const { notify, confirmAction } = useUi();
 
-const { theme, toggle: toggleTheme } = useTheme();
 const clock = ref(formatMarketClock());
 const newGroupName = ref('');
 const tickerInputs = ref({}); // groupId -> { query, market }
@@ -837,14 +835,7 @@ onUnmounted(() => {
              종전엔 우측 패널을 스크롤해야만 알 수 있었다.
           ⚠️ 0건이면 **버튼 자체를 안 그린다** — `매매 제안 0` 은 매번 뜨는 소음이다.
         -->
-                <!-- 🔴 테마 토글 — 와이어프레임 상단 우측 ☀ (종전엔 다크 고정이었다) -->
-        <button
-          class="btn btn--icon"
-          :aria-label="theme === 'light' ? '어두운 테마로' : '밝은 테마로'"
-          :title="theme === 'light' ? '어두운 테마로' : '밝은 테마로'"
-          @click="toggleTheme"
-        >{{ theme === 'light' ? '☾' : '☀' }}</button>
-      </div>
+              </div>
     </header>
 
     <p v-if="error" class="banner banner--error">{{ error }}</p>
