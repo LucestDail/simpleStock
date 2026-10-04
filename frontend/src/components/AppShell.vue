@@ -60,7 +60,9 @@ async function load() {
     const b = await r.json();
     const rows = Array.isArray(b) ? b : (b.proposals || []);
     pendingCount.value = rows.filter((p) => p.status === 'PENDING').length;
-    ordersLive.value = Boolean(b.mode === 'live' || b.ordersMode === 'live');
+    // 🔴 정본 필드는 status.effective 다 — 종전 b.mode 추정이 실거래를 '모의' 로 보여줬다
+    //    (2026-10-04 CDP 검수에서 발견: 승인 대기의 실거래 배지와 사이드바가 서로 반대말을 했다)
+    ordersLive.value = b?.status?.effective === 'live';
   } catch { /* 배지 없이 간다 */ }
 }
 

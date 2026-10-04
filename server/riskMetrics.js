@@ -41,7 +41,16 @@ function volStats(rets) {
  * @param weights portfolioWeights 결과(있으면 비중 재계산 생략)
  */
 function compute({ items = [], candlesBySymbol = new Map(), cashPct = null, leveragePct = null } = {}) {
-  const total = items.reduce((a, h) => a + (Number(h.marketValue) || 0), 0);
+  const stockTotal = items.reduce((a, h) => a + (Number(h.marketValue) || 0), 0);
+  /**
+   * 🔴 분모는 **현금 포함 평가액**이다 (2026-10-04 첫 라이브에서 잡음) — 주식만 분모로 재면
+   *    QLD 가 60.9% 로 나와 도넛(42.9%)·집중 게이트(현금 포함 equity)와 **다른 숫자**가 된다.
+   *    자와 게이트가 분모를 달리 쓰면 "한도 초과" 판정이 과장된다. cashPct 를 모르면 주식만으로
+   *    재되 그 사실이 weightBasis 로 드러난다.
+   */
+  const total = cashPct != null && cashPct < 100 && stockTotal > 0
+    ? stockTotal / (1 - cashPct / 100)
+    : stockTotal;
   const per = [];
   for (const h of items) {
     const w = total > 0 ? (Number(h.marketValue) || 0) / total : 0;
@@ -105,6 +114,7 @@ function compute({ items = [], candlesBySymbol = new Map(), cashPct = null, leve
     portfolioVar95DayPct: portVar,
     volNote: '상관 1 보수 가정(분산 효과를 지어내지 않는다) · 20일 실현 변동성 연율',
     cashPct, leveragePct,
+    weightBasis: cashPct != null ? '현금 포함 평가액' : '주식 합계(현금 모름)',
     per, issues, limits: LIMITS,
   };
 }
