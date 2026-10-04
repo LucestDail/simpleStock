@@ -93,6 +93,13 @@ function saveLast(report) {
   } catch (e) {
     logWarn('analyst.save_last_failed', { message: e.message });
   }
+  // 📜 이력 — saveLast 가 유일한 길목이라 호출부(수동·자동)가 자동으로 전부 덮인다.
+  //    실패해도 last 저장을 막지 않는다(이력은 부가 축).
+  try {
+    require('./analystHistory').record({
+      at: report?.at, trigger: report?.trigger, report, created: report?.created || [],
+    });
+  } catch (e) { logWarn('analyst.history_failed', { message: e.message }); }
 }
 
 /** ⚠️ 못 읽어도 **null 을 준다** — 화면이 그걸 "아직 없음" 으로 그린다(에러로 죽지 않는다) */
@@ -1385,6 +1392,28 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       lines.push('   추세·상대강도가 더 강하게 말하면 그쪽을 따르되, **왜 기준선을 벗어나는지 rationale 에 적어라.**');
     }
   }
+
+  /**
+   * 📐 리스크 지표 RAG (2026-10-04) — 화면(포트폴리오·리스크)과 **같은 계산**을 모델도 본다.
+   *    지수 델타·변동성·VaR·보완필요 목록 — "무엇으로 밸런스를 맞출지" 의 수치 근거.
+   * ⚠️ 캔들이 이 자리엔 없어 변동성 축은 요약 수준 — 지표 서버 계산은 /api/risk/metrics 가 정본.
+   */
+  try {
+    const rm = require('./riskMetrics').compute({
+      items,
+      candlesBySymbol: new Map(), // 프롬프트 경로는 델타·한도 축만(캔들 재조회로 느려지지 않게)
+      cashPct: weights?.cashPct ?? null,
+      leveragePct: weights?.leveragePct ?? null,
+    });
+    const sec = require('./riskMetrics').promptSection(rm);
+    if (sec) lines.push('', sec);
+  } catch (e) { logWarn('analyst.risk_section_failed', { message: e.message }); }
+
+  /** 🧪 승급 전략 RAG (2026-10-04) — 연구소에서 백테스트로 검증·승급된 조합 */
+  try {
+    const ps = require('./strategyStore').promptSection();
+    if (ps) lines.push('', ps);
+  } catch (e) { logWarn('analyst.promoted_section_failed', { message: e.message }); }
 
   lines.push('', '## 보유 종목');
   for (const h of items) {

@@ -33,14 +33,14 @@ function status() {
   return { running: running ? { ...running } : null, last, scenarios: SCENARIOS };
 }
 
-function run(scenario) {
+function run(scenario, { onlyScenarios = [] } = {}) {
   if (!SCENARIOS.includes(scenario)) return { ok: false, error: `scenario 는 ${SCENARIOS.join('|')} 중 하나` };
   if (running) return { ok: false, error: `이미 실행 중 (${running.scenario} · ${running.startedAt})`, kind: 'busy' };
 
   const startedAt = new Date().toISOString();
   const child = spawn(process.execPath, [path.join(ROOT, 'verify', 'backtest.js'), '--scenario', scenario], {
     cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: { ...process.env, BACKTEST_ONLY_SCENARIOS: (onlyScenarios || []).join(',') },
   });
   running = { scenario, startedAt, pid: child.pid };
   logInfo('backtest.started', { scenario, pid: child.pid });
@@ -56,11 +56,16 @@ function run(scenario) {
     running = null;
     // SUMMARY 줄 파싱 — 스크립트의 마지막 기계 판독 줄
     const m = /SUMMARY (\S+) floor=(\S+) final=([\d.,-]+) bench=([\d.,-]+)/.exec(out);
+    const sm = /SERIES (\[.*\])/.exec(out);
+    let series = null;
+    if (sm) { try { series = JSON.parse(sm[1]); } catch { /* 시계열은 부가 축 — 파싱 실패해도 결과는 남긴다 */ } }
     const result = {
       scenario, startedAt, finishedAt: new Date().toISOString(), exitCode: code,
       ok: code === 0 && Boolean(m),
       final: m ? Number(m[3].replace(/,/g, '')) : null,
       bench: m ? Number(m[4].replace(/,/g, '')) : null,
+      series,
+      onlyScenarios: (onlyScenarios || []).length ? onlyScenarios : null,
       // ⚠️ 원문 꼬리를 남긴다 — 숫자 둘로 요약하면 "무엇을 샀는지" 를 영영 못 본다
       tail: out.split('\n').slice(-40).join('\n').slice(0, 6000),
       error: code !== 0 ? (err.slice(0, 500) || `exit ${code}`) : null,

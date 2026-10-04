@@ -42,6 +42,8 @@ const SCENARIOS = {
   ],
 };
 const argOf = (name, dflt) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : dflt; };
+/** 전략 연구소: 발동 허용 시나리오 id 목록(쉼표) — 비우면 전부 */
+const ONLY_SCENARIOS = new Set(String(process.env.BACKTEST_ONLY_SCENARIOS || '').split(',').map((x) => x.trim()).filter(Boolean));
 const SCENARIO = String(argOf('--scenario', 'vshape'));
 /**
  * 현금 바닥 가드(개선 A/B 대상): 매수 체결이 현금을 초기 자산의 N% 미만으로 떨어뜨리면
@@ -127,7 +129,9 @@ const fmt = (v) => (v == null ? '-' : Number(v).toFixed(2));
     lastPoint = t;
     const closes = idxCloses.slice(0, t + 1).slice(-70);
     const state = regime.compute({ us: { closes }, kr: { closes }, vix: vixs[t] });
-    const scenarios = regime.matchScenarios(state, regime.readPlaybook());
+    let scenarios = regime.matchScenarios(state, regime.readPlaybook());
+    // 전략 연구소 조합 백테스트 — 선택한 시나리오만 발동시킨다(미지정이면 전부)
+    if (ONLY_SCENARIOS.size) scenarios = scenarios.filter((sc) => ONLY_SCENARIOS.has(sc.id));
 
     // 후보 절 — 합성 세계의 가격에서 **산수로** 추세 계산(세계와 정합)
     const candLines = Object.keys(EXPOSURE).map((sym) => {
@@ -215,4 +219,6 @@ const fmt = (v) => (v == null ? '-' : Number(v).toFixed(2));
   console.log(`벤치마크 QQQ 단순보유:  $10,000 → $${fmt(bhQQQ)} (${fmt((bhQQQ / 10000 - 1) * 100)}%)`);
   console.log(`참고 TQQQ 단순보유:     $10,000 → $${fmt(10000 / px.TQQQ[points[0]] * px.TQQQ[T])} (감쇠 실증)`);
   console.log(`SUMMARY ${SCENARIO} floor=${CASH_FLOOR_PCT} final=${fmt(final)} bench=${fmt(bhQQQ)} ladders=${ladderFills.length}`);
+  // 차트화용 시계열 — 판정 지점의 자산/벤치. 한 줄 JSON(러너가 파싱해 저장)
+  console.log(`SERIES ${JSON.stringify(history.map((h) => ({ t: h.t, value: Math.round(h.value * 100) / 100, bench: Math.round((10000 / px.QQQ[points[0]] * px.QQQ[h.t]) * 100) / 100 })))}`);
 })();

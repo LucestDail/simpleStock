@@ -197,6 +197,82 @@ app.get('/api/portfolio', async (req, res) => {
  */
 app.get('/api/analyst/last', (req, res) => res.json({ report: analyst.readLast() }));
 
+/** 📜 분석 보고서 이력 (2026-10-04 재편 — 승인 대기 메뉴가 그리드로 읽는다) */
+app.get('/api/analyst/history', (req, res) => {
+  const limit = Math.min(500, Number(req.query.limit) || 100);
+  res.json({ ok: true, items: require('./server/analystHistory').list({ limit }) });
+});
+app.get('/api/analyst/history/:id', (req, res) => {
+  const row = require('./server/analystHistory').get(req.params.id);
+  if (!row) return res.status(404).json({ ok: false, error: '그 보고서가 없습니다.' });
+  // 제안의 **현재 상태**는 orders 가 정본 — 이력에 박힌 당시 값에 상태를 덧입힌다
+  const props = orderService.list();
+  const rows = Array.isArray(props) ? props : (props?.proposals || []);
+  const withStatus = (row.proposals || []).map((p) => {
+    const live = rows.find((x) => x.id === p.id);
+    return { ...p, status: live?.status || null, decidedAt: live?.decidedAt || null };
+  });
+  return res.json({ ok: true, ...row, proposals: withStatus });
+});
+
+/** 📐 리스크 지표 (2026-10-04) — 캔들 포함 전체 계산. 화면·RAG 의 정본. */
+app.get('/api/risk/metrics', async (req, res) => {
+  try {
+    const port = await tossPortfolio.getHoldings({});
+    const items = port.items || [];
+    const candles = new Map();
+    for (const h of items) {
+      try {
+        const c = await tossClient.getCandles(h.symbol, { interval: '1d', count: 25 });
+        const closes = (c?.rows || c || []).map((r) => Number(r.c ?? r.close)).filter((x) => x > 0);
+        if (closes.length >= 10) candles.set(String(h.symbol).toUpperCase(), closes);
+      } catch { /* 캔들 없는 종목은 변동성 축만 비운다 */ }
+    }
+    const w = require('./server/analystService').portfolioWeights(
+      items, port.summary || null, require('./server/regimeService').readCatalog());
+    const m = require('./server/riskMetrics').compute({
+      items, candlesBySymbol: candles,
+      cashPct: w?.cashPct ?? null, leveragePct: w?.leveragePct ?? null,
+    });
+    return res.json({ ok: true, ...m, weights: w || null });
+  } catch (error) {
+    logError('risk.metrics_failed', error, {});
+    return res.status(502).json({ ok: false, error: error.message });
+  }
+});
+
+/** 📊 성과 7단계 수명주기 (2026-10-04) */
+app.get('/api/report/lifecycle', (req, res) => {
+  try { return res.json({ ok: true, ...require('./server/lifecycleReport').compute() }); }
+  catch (error) { return res.status(500).json({ ok: false, error: error.message }); }
+});
+
+/** 🧪 전략 연구소 (2026-10-04) — 플레이북 열람·수정 · 승급 전략 */
+app.get('/api/strategy/playbook', (req, res) => {
+  try {
+    const pb = require('./server/strategyStore').readPlaybook();
+    return res.json({ ok: true, scenarios: pb.scenarios || [], promoted: require('./server/strategyStore').readPromoted() });
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message }); }
+});
+app.put('/api/strategy/playbook/:id', (req, res) => {
+  try {
+    const r = require('./server/strategyStore').updateScenario(req.params.id, req.body || {});
+    return res.status(r.ok ? 200 : 400).json(r);
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message }); }
+});
+app.post('/api/strategy/promote', (req, res) => {
+  try {
+    const r = require('./server/strategyStore').promote(req.body || {});
+    return res.status(r.ok ? 200 : 400).json(r);
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message }); }
+});
+app.post('/api/strategy/promoted/:id/active', (req, res) => {
+  try {
+    const r = require('./server/strategyStore').setActive(req.params.id, Boolean(req.body?.active));
+    return res.status(r.ok ? 200 : 400).json(r);
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message }); }
+});
+
 /**
  * 🔴 **감시 표시 토글** — 분석 모멘텀 감시를 받을 종목을 사용자가 고른다.
  *    관심종목은 **테마 프리셋으로 대량 추가**된 것이라 그대로 쓰면 기본값이 비용을 정한다.
@@ -682,7 +758,11 @@ app.post('/api/agent/resume', (req, res) => res.json(agentControl.resume({ by: '
 /** 🧪 백테스트 (D-9) — 🔴 LLM 을 실제로 태운다(수 분·토큰). 동시 1개. */
 app.get('/api/backtest/status', (req, res) => res.json(require('./server/backtestRunner').status()));
 app.post('/api/backtest/run', (req, res) => {
-  const r = require('./server/backtestRunner').run(String(req.body?.scenario || ''));
+  // onlyScenarios: 전략 연구소의 조합 백테스트 — 선택한 플레이북 시나리오만 발동
+  const only = Array.isArray(req.body?.onlyScenarios)
+    ? req.body.onlyScenarios.map((x) => String(x)).filter(Boolean).slice(0, 40)
+    : [];
+  const r = require('./server/backtestRunner').run(String(req.body?.scenario || ''), { onlyScenarios: only });
   if (!r.ok) return res.status(r.kind === 'busy' ? 409 : 400).json(r);
   res.json(r);
 });
