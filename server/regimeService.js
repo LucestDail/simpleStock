@@ -47,6 +47,9 @@ function ma(closes, n) {
  * 한 시장의 추세·급락 판정. @param closes 일봉 종가 배열(과거→현재), last 는 현재가(장중이면 실시간)
  * ⚠️ 데이터가 모자라면 **null 추세**다 — "모름" 과 "횡보" 는 다르다(추측해 채우지 않는다).
  */
+/** 추세 분리 마진 — 위 judgeMarket 주석이 근거. env 로 조정 가능(0 이면 종전 엄격 정렬) */
+const TREND_SEP = Number(process.env.REGIME_TREND_SEP ?? 0.01);
+
 function judgeMarket({ closes = [], last = null } = {}) {
   // ⚠️ Number(null)=0 이 isFinite 를 통과한다 — null 을 0 으로 읽으면 모든 추세가 down/side 가 된다
   const hasLive = last != null && Number.isFinite(Number(last));
@@ -55,7 +58,17 @@ function judgeMarket({ closes = [], last = null } = {}) {
   const m60 = ma(closes, 60);
   let trend = null;
   if (price != null && m20 != null && m60 != null) {
-    trend = price > m20 && m20 > m60 ? 'up' : price < m20 && m20 < m60 ? 'down' : 'side';
+    /**
+     * 🔴 분리 마진(데드존) 1% (2026-10-04) — **추세는 이동평균이 벌어져야 추세다.**
+     * 종전 엄격 정렬(> 만)은 횡보 노이즈에서도 순간 정렬이 성립해 가짜 up/down 을 냈고,
+     * 그 라벨이 플레이북 추세 시나리오를 발동시켜 **횡보장 로테이션 손실**을 만들었다
+     * (chop 백테스트 실측: 판정 6지점 중 4지점이 가짜 추세 → -5.3%/-7.4% 왕복비용).
+     * ε 스윕(고정 시드 4세계 결정적 측정): ε=1% 에서 chop 전 지점 side ·
+     * vshape/bull/bear 라벨 변화 0. ⇒ 추세장은 안 건드리고 횡보만 바로잡는 값.
+     */
+    const E = TREND_SEP;
+    trend = price > m20 * (1 + E) && m20 > m60 * (1 + E) ? 'up'
+      : price < m20 * (1 - E) && m20 < m60 * (1 - E) ? 'down' : 'side';
   }
   // 당일 등락: 현재가 vs 마지막 확정 종가(전일)
   const prev = closes.length >= 2 ? closes[closes.length - (hasLive ? 1 : 2)] : null;
@@ -800,7 +813,8 @@ function setManual(tags) {
 
 function getState() { return current || loadState(); }
 
-module.exports = { MACRO_MATCH_KEYS, judgeMacro, MACRO_KO,
+module.exports = {
+  TREND_SEP, MACRO_MATCH_KEYS, judgeMacro, MACRO_KO,
   compute, judgeMarket, vixBandOf, matchScenarios, diffTransitions, promptSection,
   refresh, getState, setManual, readPlaybook, readCatalog, candidateSection, ladderProposals,
   quantGate, CANDIDATE_PROMPT_MAX, readLastGate,

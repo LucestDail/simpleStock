@@ -60,6 +60,15 @@ const ORDERS_ENABLED = String(process.env.ORDERS_ENABLED || '').trim().toLowerCa
  *    되살리려면 `CASH_FLOOR_PCT=15` 환경변수 하나면 된다(지우지 않는 이유).
  */
 const CASH_FLOOR_PCT = Math.max(0, Number(process.env.CASH_FLOOR_PCT ?? 0));
+/**
+ * 🔴 종목당 최대 비중 (2026-10-04) — 운용규칙 화면 한도표가 "20% 초과 시 추가 매수 차단
+ * (계좌 검증)" 이라 **주장**해 왔는데 실제 게이트가 없었다("문서가 주장하는 안전망이
+ * 실재하는가" 의 그 실패 모드). vshape 백테스트에서 모델이 전 재산을 한 종목에 넣어
+ * 사다리 실탄이 0 이 됐고(-23.5%), 회차 간 분산도 이 몰빵이 키웠다 — 집중 상한은
+ * 수익 깎개가 아니라 **분산(변동성) 통제 장치**다. 기존 보유 초과분은 건드리지 않고
+ * **추가 매수만** 막는다.
+ */
+const SINGLE_POSITION_MAX_PCT = Number(process.env.SINGLE_POSITION_MAX_PCT ?? 20);
 /** 🔴 즉시 제안 지정가의 현재가 괴리 상한 % — 넘으면 조건주문으로 안내(2026-09-24) */
 const PRICE_DRIFT_PCT = Math.max(0.5, Number(process.env.PRICE_DRIFT_PCT ?? 2.5));
 
@@ -361,6 +370,33 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency, exe
      * ⚠️ exemptCashFloor(사다리 전용): 사다리 취지가 공포에 실탄 소진이라 버퍼 면제 —
      *    백테스트도 같은 구조였다(floor 는 LLM 매수에만).
      */
+    /**
+     * 종목 집중 상한 — ⚠️ 면제 플래그는 버퍼와 공유한다: exemptCashFloor 는 사실상
+     * "VIX 사다리(코드 기계매수) 면제" 다. 사다리는 설계상 공포에서 한 종목(QQQ)을
+     * 단계 매수하므로 집중 상한도 함께 면제가 맞다(막으면 사다리 존재 이유가 죽는다).
+     */
+    if (!exemptCashFloor && SINGLE_POSITION_MAX_PCT > 0) {
+      try {
+        const h = await require('./tossPortfolio').getHoldings({});
+        const sameCur = (h.items || []).filter((it) => String(it.currency || '').toUpperCase() === cur);
+        const holdingsVal = sameCur.reduce((sum, it) => sum + (Number(it.marketValue) || 0), 0);
+        const equity = cash + holdingsVal;
+        const symVal = sameCur.filter((it) => String(it.symbol).toUpperCase() === sym.toUpperCase())
+          .reduce((sum, it) => sum + (Number(it.marketValue) || 0), 0);
+        const capVal = equity * (SINGLE_POSITION_MAX_PCT / 100);
+        if (symVal + need > capVal) {
+          const maxQty = Math.max(0, Math.floor((capVal - symVal) / px));
+          return {
+            ok: false, kind: 'concentration',
+            error: `매수 후 ${sym} 비중이 종목 한도(${SINGLE_POSITION_MAX_PCT}%)를 넘습니다 — 현재 ${equity > 0 ? ((symVal / equity) * 100).toFixed(1) : '?'}% + 이번 ${need.toFixed(2)} ${cur}. 가능 수량 ${maxQty}주.`,
+            maxQuantity: maxQty, currency: cur,
+          };
+        }
+      } catch (e) {
+        // 집중 계산 실패가 정당한 매수를 막으면 오탐 게이트다 — 기본 현금 검증은 위에서 통과했다
+        logWarn('orders.concentration_check_failed', { message: e.message });
+      }
+    }
     if (!exemptCashFloor && CASH_FLOOR_PCT > 0) {
       try {
         const h = await require('./tossPortfolio').getHoldings({});
@@ -864,6 +900,7 @@ module.exports = {
   cancelLiveOrder,
   reconcile,
   checkAccountLimits,
+  SINGLE_POSITION_MAX_PCT,
   onSettled,
   attachNotice,
   _restoreForTest: restore,

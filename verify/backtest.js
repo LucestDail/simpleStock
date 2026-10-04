@@ -12,6 +12,7 @@
 const path = require('node:path');
 const regime = require(path.join(__dirname, '..', 'server', 'regimeService'));
 const analyst = require(path.join(__dirname, '..', 'server', 'analystService'));
+const { SINGLE_POSITION_MAX_PCT: SINGLE_MAX_PCT } = require(path.join(__dirname, '..', 'server', 'orderService'));
 
 // ── 결정적 의사난수 ──────────────────────────────────────────
 let seed = 42;
@@ -165,8 +166,17 @@ const fmt = (v) => (v == null ? '-' : Number(v).toFixed(2));
       if (qty <= 0) continue;
       if (String(p.side).toUpperCase() === 'BUY') {
         const floorUsd = 10000 * (CASH_FLOOR_PCT / 100);
-        const maxQ = Math.floor(Math.max(0, port.cash - floorUsd) / price);
-        if (qty > maxQ) { fills.push(`⚠️ ${sym} 수량 ${qty}→${maxQ}(현금 한도)`); qty = maxQ; }
+        let maxQ = Math.floor(Math.max(0, port.cash - floorUsd) / price);
+        /**
+         * 🔴 종목 집중 상한 — 라이브 checkAccountLimits 와 같은 상수(orderService 가 정본).
+         * vshape 에서 모델이 전 재산을 SOXX 한 종목에 넣어 사다리 실탄이 0 이 됐다(-23.5%).
+         * 사다리(dailyLadder)는 라이브와 같이 **면제**다.
+         */
+        const equity = value(t);
+        const curVal = (port.pos[sym]?.qty || 0) * price;
+        const capQ = Math.floor(Math.max(0, equity * (SINGLE_MAX_PCT / 100) - curVal) / price);
+        if (capQ < maxQ) maxQ = capQ;
+        if (qty > maxQ) { fills.push(`⚠️ ${sym} 수량 ${qty}→${maxQ}(현금·집중 한도)`); qty = maxQ; }
         if (qty <= 0) continue;
         const o = port.pos[sym] || { qty: 0, avg: 0 };
         o.avg = (o.avg * o.qty + price * qty) / (o.qty + qty); o.qty += qty; port.pos[sym] = o;

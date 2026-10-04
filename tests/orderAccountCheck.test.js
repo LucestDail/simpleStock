@@ -135,7 +135,11 @@ test('🔴 propose() 를 부르는 곳은 계좌 검증도 부른다', () => {
  */
 test('현금 버퍼 기계 — 켜면(15%) 바닥을 깨는 매수는 거부, 사다리는 면제', async () => {
   const savedFloor = process.env.CASH_FLOOR_PCT;
+  const savedConc = process.env.SINGLE_POSITION_MAX_PCT;
   process.env.CASH_FLOOR_PCT = '15';
+  // ⚠️ 집중 상한(2026-10-04 신설)을 끈다 — 이 픽스처의 800 매수는 40% 라 집중 게이트가
+  //    먼저 걸린다. 여기서 재는 축은 **버퍼**다(집중 축은 전용 테스트가 따로 잰다).
+  process.env.SINGLE_POSITION_MAX_PCT = '0';
   // 현금 1000 · 보유(USD) 1000 → 평가 2000 · 버퍼 300. 700 초과 매수는 거부돼야 한다
   for (const k of Object.keys(require.cache)) {
     if (/orderService|tossClient|tossPortfolio/.test(k)) delete require.cache[k];
@@ -155,6 +159,7 @@ test('현금 버퍼 기계 — 켜면(15%) 바닥을 깨는 매수는 거부, �
   const ladder = await o.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 9, price: 100, exemptCashFloor: true });
   assert.equal(ladder.ok, true, ladder.error);
   if (savedFloor === undefined) delete process.env.CASH_FLOOR_PCT; else process.env.CASH_FLOOR_PCT = savedFloor;
+  if (savedConc === undefined) delete process.env.SINGLE_POSITION_MAX_PCT; else process.env.SINGLE_POSITION_MAX_PCT = savedConc;
 });
 
 /**
@@ -164,7 +169,9 @@ test('현금 버퍼 기계 — 켜면(15%) 바닥을 깨는 매수는 거부, �
  */
 test('🔴 기본값은 0 — 버퍼가 매수를 막지 않는다 (사용자 결정 2026-10-02)', async () => {
   const savedFloor = process.env.CASH_FLOOR_PCT;
+  const savedConc2 = process.env.SINGLE_POSITION_MAX_PCT;
   delete process.env.CASH_FLOOR_PCT;
+  process.env.SINGLE_POSITION_MAX_PCT = '0'; // 축 분리 — 전액 매수(50%)는 집중 게이트가 잡는 게 맞다(전용 테스트)
   for (const k of Object.keys(require.cache)) {
     if (/orderService|tossClient|tossPortfolio/.test(k)) delete require.cache[k];
   }
@@ -177,6 +184,37 @@ test('🔴 기본값은 0 — 버퍼가 매수를 막지 않는다 (사용자 �
   const all = await o2.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 10, price: 100 });
   assert.equal(all.ok, true, `현금 전액 매수가 막혔다: ${all.error}`);
   if (savedFloor === undefined) delete process.env.CASH_FLOOR_PCT; else process.env.CASH_FLOOR_PCT = savedFloor;
+  if (savedConc2 === undefined) delete process.env.SINGLE_POSITION_MAX_PCT; else process.env.SINGLE_POSITION_MAX_PCT = savedConc2;
+});
+
+/**
+ * 🔴 종목 집중 상한 (2026-10-04) — 한도표가 "20% 초과 시 추가 매수 차단 (계좌 검증)" 이라
+ * **주장만** 하고 게이트가 없었다. vshape 백테스트 몰빵(-23.5% · 사다리 실탄 0)이 증거.
+ */
+test('종목 집중 상한 — 20% 를 넘기는 매수는 거절, 사다리는 면제', async () => {
+  for (const k of Object.keys(require.cache)) {
+    if (/orderService|tossClient|tossPortfolio/.test(k)) delete require.cache[k];
+  }
+  const tp3 = require.resolve('../server/tossClient');
+  require.cache[tp3] = { id: tp3, filename: tp3, loaded: true, exports: { ...require(tp3), getBuyingPower: CASH('1000'), getPriceLimits: async () => ({}) } };
+  const pp3 = require.resolve('../server/tossPortfolio');
+  require.cache[pp3] = { id: pp3, filename: pp3, loaded: true, exports: { getHoldings: async () => ({ summary: {}, items: [{ symbol: 'QQQ', currency: 'USD', marketValue: 1000 }] }) } };
+  const o3 = require('../server/orderService');
+  // 평가 2000 · 한도 400. SPY 800 매수 → 거절 + 가능 수량 4
+  const over = await o3.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 8, price: 100 });
+  assert.equal(over.ok, false);
+  assert.equal(over.kind, 'concentration');
+  assert.equal(over.maxQuantity, 4);
+  // 한도 안(400)은 통과
+  const under = await o3.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 4, price: 100 });
+  assert.equal(under.ok, true, under.error);
+  // 이미 50% 인 QQQ 는 1주 추가도 거절 (기존 초과분은 안 건드리고 **추가만** 막는다)
+  const held = await o3.checkAccountLimits({ symbol: 'QQQ', side: 'BUY', quantity: 1, price: 100 });
+  assert.equal(held.ok, false);
+  assert.equal(held.kind, 'concentration');
+  // 사다리 면제 — 공포 기계매수는 집중도 함께 면제(막으면 존재 이유가 죽는다)
+  const ladder = await o3.checkAccountLimits({ symbol: 'QQQ', side: 'BUY', quantity: 5, price: 100, exemptCashFloor: true });
+  assert.equal(ladder.ok, true, ladder.error);
 });
 
 test('🔴 가격-현재가 괴리 게이트(±2.5%) — 체결 불가능한 지정가는 조건주문으로 안내', async () => {
