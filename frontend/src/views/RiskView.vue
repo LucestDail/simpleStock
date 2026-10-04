@@ -13,7 +13,8 @@
     <p v-if="error" class="banner banner--error">{{ error }}</p>
 
     <!-- ① 자산 구성 도넛 -->
-    <section v-if="weights" class="card">
+    <div v-if="weights" class="row2">
+    <section class="card">
       <h2>자산 구성</h2>
       <div class="donutwrap">
         <div class="donutbox">
@@ -48,8 +49,8 @@
       </div>
     </section>
 
-    <!-- ② 한도 대비 현재 위치 (유지) -->
-    <section v-if="weights" class="card">
+    <!-- ② 한도 대비 현재 위치 — 자산 구성과 한 행(2026-10-04: 각자 풀폭으로 퍼지던 것을 묶음) -->
+    <section class="card">
       <h2>한도 대비 현재 위치</h2>
       <div class="gauges">
         <div class="gauge" v-for="g in gauges" :key="g.label">
@@ -60,6 +61,7 @@
         </div>
       </div>
     </section>
+    </div>
 
     <!-- ③ 리스크 지표 (2026-10-04 신설 /api/risk/metrics) -->
     <section class="card">
@@ -422,6 +424,11 @@ onMounted(async () => {
 
 <style scoped>
 .page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
+/* 🔴 2026-10-04 사용자: "width 100% 늘이지 말고 배치를 고민" — 초광폭(1700px+)에서
+   카드가 끝까지 퍼져 황량했다. 스크롤 컨테이너(.page)는 전폭을 유지하되(스크롤바가
+   오른쪽 끝에 있게) **콘텐츠만** 읽기 좋은 폭에서 멈춘다. */
+.page > * { width: 100%; max-width: 1280px; }
+
 .page__head { display: flex; align-items: center; gap: var(--space-sm); }
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }
 .chip { border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); padding: 2px 10px; font-size: var(--text-xs); color: var(--color-body); }
@@ -430,6 +437,7 @@ onMounted(async () => {
 .mut { margin: 0; font-size: var(--text-sm); color: var(--color-muted); }
 
 /* ── 도넛 ── */
+.row2 { display: grid; grid-template-columns: minmax(380px, 520px) 1fr; gap: var(--space-sm); align-items: stretch; }
 .donutwrap { display: flex; align-items: center; gap: var(--space-lg); flex-wrap: wrap; }
 .donutbox { position: relative; width: 180px; flex: 0 0 auto; }
 .donut { display: block; width: 100%; height: auto; }
@@ -437,7 +445,7 @@ onMounted(async () => {
 .donut__center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; }
 .donut__center small { font-size: var(--text-2xs); color: var(--color-faint); }
 .donut__center b { font-size: var(--text-sm); color: var(--color-ink); }
-.dlegend { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; min-width: 220px; flex: 1; }
+.dlegend { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; min-width: 200px; flex: 1; max-width: 300px; }
 .dlegend__row { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); }
 .dlegend__dot { width: 10px; height: 10px; border-radius: var(--rounded-pill); flex: 0 0 auto; }
 .dlegend__sym { font-weight: 600; color: var(--color-primary); text-decoration: none; }
@@ -448,7 +456,8 @@ onMounted(async () => {
 .lev { padding: 0 4px; border: 1px solid var(--color-warn); color: var(--color-warn); border-radius: var(--rounded-xs); font-size: var(--text-2xs); }
 
 /* ── 게이지 ── */
-.gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-base); }
+/* 우열 카드 안에서는 세로 스택이 맞다 — 가로 3등분은 초광폭에서 바가 1m 가 된다 */
+.gauges { display: flex; flex-direction: column; gap: var(--space-base); }
 .gauge { min-width: 0; }
 .gauge__head { display: flex; justify-content: space-between; font-size: var(--text-sm); margin-bottom: 4px; }
 .gauge__bar { height: 10px; border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); overflow: hidden; }
@@ -456,7 +465,7 @@ onMounted(async () => {
 .gauge__fill--warn { background: var(--color-warn); }
 
 /* ── 리스크 지표 ── */
-.mstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-sm); margin-bottom: var(--space-sm); }
+.mstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 210px)); gap: var(--space-sm); margin-bottom: var(--space-sm); }
 .mstat { border: 1px solid var(--color-hairline); border-radius: var(--rounded-sm); padding: var(--space-sm); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .mstat small { font-size: var(--text-2xs); color: var(--color-faint); }
 .mstat b { font-size: var(--text-lg); color: var(--color-ink); }
