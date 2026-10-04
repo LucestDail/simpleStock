@@ -45,13 +45,43 @@
 
     <!-- ④ 자율 수준 — 0단 고정, 전환은 사람만(표시 전용) -->
     <section class="card">
-      <h2>자율 수준</h2>
+      <h2>자율 수준 <small class="mut">전환은 이 화면의 사람만 — 코드는 스스로 올리지 않는다</small></h2>
+      <!-- 🔄 2026-10-04: "선택도 안 되는데 이거 뭐야" — 표시 전용이던 3단을 실제 전환 가능하게.
+           1단부터는 에이전트 발 제안이 한도 통과 시 **자동 전송**(실거래 모드면 실제 주문)이라
+           전환 시 "자율" 타이핑 확인을 받는다(비상정지와 같은 격의 조작). -->
       <div class="levels">
-        <div class="level level--on"><b>제안 + 승인</b><small>승인한 주문만 실행 — 현재 단계</small></div>
-        <div class="level level--locked"><b>한도 내 자동</b><small>🔒 해금 조건: 거절률 하락 추세 + 가드 안정. <b>해금도 사람이 합니다</b></small></div>
-        <div class="level level--locked"><b>안내 후 자율</b><small>🔒 1단계 실적 후</small></div>
+        <button
+          v-for="(lv, i) in LEVELS" :key="i"
+          class="level" :class="{ 'level--on': autonomyLevel === i }"
+          @click="askLevel(i)"
+        >
+          <b>{{ i }}단 · {{ lv.name }}</b><small>{{ lv.desc }}</small>
+          <small v-if="autonomyLevel === i" class="level__now">현재 단계</small>
+        </button>
       </div>
-      <p class="mut">자율 수준 전환은 어떤 경우에도 코드가 스스로 하지 않습니다 — 화면에도 전환 버튼이 없습니다.</p>
+      <p class="mut">1단: 에이전트 발 제안 중 <b>계좌 한도·가드 전부 통과한 것만</b> 자동 승인·전송 — 한도에 걸리면 승인 대기로 남습니다.
+        2단: 집행은 1단과 동일하며, 2단 고유 동작(예약 자동 등록)은 아직 코드가 없습니다(있다고 적지 않습니다).</p>
+
+      <!-- 전환 확인 모달 — 실거래 자동 발사가 걸린 조작이라 타이핑 확인 -->
+      <div v-if="levelAsk != null" class="stop__scrim" @click.self="levelAsk = null">
+        <section class="stop" role="dialog" aria-modal="true">
+          <h2>자율 수준 전환 — {{ autonomyLevel }}단 → {{ levelAsk }}단</h2>
+          <p class="stop__sub" v-if="levelAsk >= 1">
+            🔴 {{ levelAsk }}단부터는 에이전트 발 제안이 한도 통과 시 <b>자동으로 전송</b>됩니다.
+            지금 <b>실거래 모드</b>면 실제 주문이 나갑니다. 확인을 위해 "자율"을 입력하세요.
+          </p>
+          <p class="stop__sub" v-else>0단으로 내리면 모든 제안이 다시 승인 대기로 옵니다.</p>
+          <label v-if="levelAsk >= 1" class="stop__confirm">
+            <input v-model="levelWord" class="input" placeholder="자율" />
+          </label>
+          <footer class="stop__foot">
+            <small>전환 기록은 활동 로그에 남습니다</small>
+            <span class="stop__gap"></span>
+            <button class="btn" @click="levelAsk = null">취소</button>
+            <button class="btn btn--danger" :disabled="levelAsk >= 1 && levelWord !== '자율'" @click="setLevel">전환</button>
+          </footer>
+        </section>
+      </div>
     </section>
 
     <!-- ⑤ 한도 -->
@@ -76,61 +106,76 @@
       <p v-if="msg" class="ok">{{ msg }}</p>
 
       <div class="frm">
-        <label class="frm__row">
-          <span class="frm__label">
-            모멘텀 임계값 (%)
-            <em v-if="usingDefault.includes('momentumPct')">기본값</em>
-          </span>
-          <div class="chips">
-            <button v-for="v in [1, 2, 3, 5, 10]" :key="v" class="chip"
-              :class="{ 'chip--on': form.momentumPct === v }" @click.prevent="form.momentumPct = v">{{ v }}%</button>
-          </div>
-          <input v-model.number="form.momentumPct" type="number" step="0.1" min="0.1" max="50" />
-          <small>당일 등락이 이만큼 움직인 종목만 <b>모멘텀</b>에 올라옵니다. 작게 할수록 많이 보입니다.</small>
-        </label>
-
-        <label class="frm__row">
-          <span class="frm__label">
-            자동 갱신 주기 (초)
-            <em v-if="usingDefault.includes('refreshSec')">기본값</em>
-          </span>
-          <div class="chips">
-            <button v-for="v in [30, 60, 180, 600]" :key="v" class="chip"
-              :class="{ 'chip--on': form.refreshSec === v }" @click.prevent="form.refreshSec = v">
-              {{ v < 60 ? v + '초' : v / 60 + '분' }}
-            </button>
-          </div>
-          <input v-model.number="form.refreshSec" type="number" min="15" max="3600" />
-          <small>화면 숫자를 얼마나 자주 새로 받을지. 짧을수록 토스 호출이 늘어납니다.</small>
-        </label>
-
-        <div class="frm__row">
-          <span class="frm__label">
-            랭킹 종류
-            <em v-if="usingDefault.includes('rankingTypes')">기본값</em>
-          </span>
-          <div class="chips">
-            <button
-              v-for="(label, t) in RANKING_LABELS"
-              :key="t"
-              class="chip"
-              :class="{ 'chip--on': form.rankingTypes.includes(t) }"
-              @click="toggleRanking(t)"
-            >{{ label }}</button>
-          </div>
-          <small>대시보드 <b>랭킹</b> 패널에 어떤 순위를 보여줄지 고릅니다.</small>
-        </div>
-
-        <div class="frm__row">
-          <span class="frm__label">랭킹 시장</span>
-          <div class="chips">
-            <button v-for="c in ['US', 'KR']" :key="c" class="chip"
-              :class="{ 'chip--on': form.rankingCountries.includes(c) }" @click="toggleCountry(c)">
-              {{ c === 'US' ? '미국' : '한국' }}
-            </button>
-          </div>
-          <small>미국장을 주로 보시면 <b>미국</b>만 켜 두셔도 됩니다.</small>
-        </div>
+        <!-- 🔄 2026-10-04 사용자: "테이블화 시켜서 구체적으로 확인 및 설정, 규격화" —
+             나열형 폼을 표로: 항목 | 저장된 값(확인) | 변경(입력) | 설명. 저장 전엔 "변경됨" 배지. -->
+        <table class="settbl frm__row--wide">
+          <thead><tr><th class="settbl__k">항목</th><th class="settbl__cur">저장된 값</th><th class="settbl__in">변경</th><th>설명</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="settbl__k">모멘텀 임계값
+                <em v-if="usingDefault.includes('momentumPct')" class="defbadge">기본값</em>
+                <em v-else-if="dirty('momentumPct')" class="dirtybadge">변경됨</em>
+              </td>
+              <td class="settbl__cur mono-num">{{ saved.momentumPct }}%</td>
+              <td class="settbl__in">
+                <div class="chips">
+                  <button v-for="v in [1, 2, 3, 5, 10]" :key="v" class="chip"
+                    :class="{ 'chip--on': form.momentumPct === v }" @click.prevent="form.momentumPct = v">{{ v }}</button>
+                </div>
+                <input v-model.number="form.momentumPct" type="number" step="0.1" min="0.1" max="50" class="xs" />
+              </td>
+              <td class="settbl__d">당일 등락이 이만큼 움직인 종목만 모멘텀에 올라옵니다. 작을수록 많이 보입니다.</td>
+            </tr>
+            <tr>
+              <td class="settbl__k">자동 갱신 주기
+                <em v-if="usingDefault.includes('refreshSec')" class="defbadge">기본값</em>
+                <em v-else-if="dirty('refreshSec')" class="dirtybadge">변경됨</em>
+              </td>
+              <td class="settbl__cur mono-num">{{ saved.refreshSec }}초</td>
+              <td class="settbl__in">
+                <div class="chips">
+                  <button v-for="v in [30, 60, 180, 600]" :key="v" class="chip"
+                    :class="{ 'chip--on': form.refreshSec === v }" @click.prevent="form.refreshSec = v">{{ v < 60 ? v + '초' : v / 60 + '분' }}</button>
+                </div>
+                <input v-model.number="form.refreshSec" type="number" min="15" max="3600" class="xs" />
+              </td>
+              <td class="settbl__d">화면 숫자를 새로 받는 간격. 짧을수록 토스 호출이 늘어납니다.</td>
+            </tr>
+            <tr>
+              <td class="settbl__k">랭킹 종류
+                <em v-if="usingDefault.includes('rankingTypes')" class="defbadge">기본값</em>
+              </td>
+              <td class="settbl__cur">{{ (saved.rankingTypes || []).map((t) => RANKING_LABELS[t] || t).join(' · ') || '—' }}</td>
+              <td class="settbl__in">
+                <div class="chips">
+                  <button v-for="(label, t) in RANKING_LABELS" :key="t" class="chip"
+                    :class="{ 'chip--on': form.rankingTypes.includes(t) }" @click="toggleRanking(t)">{{ label }}</button>
+                </div>
+              </td>
+              <td class="settbl__d">대시보드 랭킹 패널에 보여줄 순위 종류.</td>
+            </tr>
+            <tr>
+              <td class="settbl__k">랭킹 시장</td>
+              <td class="settbl__cur">{{ (saved.rankingCountries || []).map((c) => c === 'US' ? '미국' : '한국').join(' · ') || '—' }}</td>
+              <td class="settbl__in">
+                <div class="chips">
+                  <button v-for="c in ['US', 'KR']" :key="c" class="chip"
+                    :class="{ 'chip--on': form.rankingCountries.includes(c) }" @click="toggleCountry(c)">{{ c === 'US' ? '미국' : '한국' }}</button>
+                </div>
+              </td>
+              <td class="settbl__d">미국장을 주로 보면 미국만 켜 둬도 됩니다.</td>
+            </tr>
+            <tr>
+              <td class="settbl__k">분석 자동 실행 (cron)
+                <em v-if="usingDefault.includes('briefingCron')" class="defbadge">없음</em>
+                <em v-else-if="dirty('briefingCron')" class="dirtybadge">변경됨</em>
+              </td>
+              <td class="settbl__cur mono-num">{{ saved.briefingCron || '—' }}</td>
+              <td class="settbl__in"><input v-model="form.briefingCron" type="text" placeholder="0 9,15 * * 1-5" class="xs" /></td>
+              <td class="settbl__d">비우면 자동 실행 없음 — 장 시점 트리거와 별개의 보조 크론.</td>
+            </tr>
+          </tbody>
+        </table>
 
         <div class="frm__row frm__row--sep frm__row--wide">
           <span class="frm__label">관심 테마</span>
@@ -162,15 +207,6 @@
           <textarea v-model="form.briefingPrompt" class="area" rows="5"
             placeholder="예: 보유 비중과 환율 영향을 먼저 보고, 단기 대응보다 리스크를 우선해서 써 줘." />
           <small>매매 분석 AI 가 <b>이 문장을 그대로</b> 따릅니다. 비워도 됩니다.</small>
-        </label>
-
-        <label class="frm__row">
-          <span class="frm__label">
-            분석 자동 실행 주기 (cron)
-            <em v-if="usingDefault.includes('briefingCron')">없음</em>
-          </span>
-          <input v-model="form.briefingCron" type="text" placeholder="예: 0 9,15 * * 1-5" />
-          <small>비워 두면 자동 실행하지 않습니다(아래 수동 실행 버튼으로 직접).</small>
         </label>
 
         <div class="frm__row frm__row--sep frm__row--wide">
@@ -260,6 +296,30 @@ import { apiFetch } from '../lib/apiClient';
 /* ── ①②③ 운용 상태 · 일시정지/재개 · 비상정지 (구 AppShell HEAD 에서 이식) ── */
 const control = ref(null);
 const autonomy = ref('승인 후 실행');
+const autonomyLevel = ref(0);
+const LEVELS = [
+  { name: '제안 + 승인', desc: '모든 제안이 승인 대기(HITL) — 기본' },
+  { name: '한도 내 자동', desc: '한도·가드 통과한 에이전트 제안만 자동 전송' },
+  { name: '안내 후 자율', desc: '집행은 1단과 동일 (고유 동작은 추후)' },
+];
+const levelAsk = ref(null);
+const levelWord = ref('');
+function askLevel(i) {
+  if (i === autonomyLevel.value) return;
+  levelAsk.value = i; levelWord.value = '';
+}
+async function setLevel() {
+  try {
+    const r = await apiFetch('/api/agent/autonomy', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level: levelAsk.value }),
+    });
+    const b = await r.json();
+    if (!r.ok || !b.ok) throw new Error(b.error || `전환 실패 (${r.status})`);
+    levelAsk.value = null; levelWord.value = '';
+    await loadStatus();
+  } catch (e) { statusError.value = e.message; }
+}
 const dailyPct = ref(null);
 const dailyLossPct = ref(null);
 const statusError = ref('');
@@ -291,6 +351,7 @@ async function loadStatus() {
     const b = await r.json();
     control.value = b.control || null;
     autonomy.value = b.autonomy || '승인 후 실행';
+    autonomyLevel.value = Number(b.autonomyLevel) || 0;
     const lim = Number(b?.limits?.dailyLossPct);
     dailyLossPct.value = Number.isFinite(lim) ? lim : null;
     statusError.value = '';
@@ -355,6 +416,9 @@ const presetMsg = ref('');
 const newGroup = ref('');
 const groupBusy = ref(false);
 const usingDefault = ref([]);
+const saved = ref({ momentumPct: null, refreshSec: null, rankingTypes: [], rankingCountries: [], briefingPrompt: '', briefingCron: '' });
+/** 입력이 저장값과 다른가 — "변경됨" 배지(저장을 잊는 사고 방지) */
+const dirty = (k) => JSON.stringify(form.value?.[k]) !== JSON.stringify(saved.value?.[k]);
 const busy = ref(false);
 const msg = ref('');
 const err = ref('');
@@ -412,6 +476,8 @@ async function loadSettings() {
         })),
       };
       usingDefault.value = s.usingDefault || [];
+      // 테이블의 "저장된 값" 열 — 입력(form)과 분리해 확인/변경을 가른다(규격화)
+      saved.value = JSON.parse(JSON.stringify(form.value));
     }
     const w = await apiFetch('/api/watchlist');
     if (w.ok) groups.value = (await w.json())?.groups || [];
@@ -572,11 +638,34 @@ onUnmounted(() => clearInterval(timer));
 
 /* ④ 자율 수준 */
 .levels { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-sm); margin-bottom: 6px; }
-.level { border: 1px solid var(--color-hairline); border-radius: var(--rounded-md); padding: var(--space-sm) var(--space-base); display: flex; flex-direction: column; gap: 2px; }
+.level {
+  border: 1px solid var(--color-hairline); border-radius: var(--rounded-md);
+  padding: var(--space-sm) var(--space-base); display: flex; flex-direction: column; gap: 2px;
+  background: none; text-align: left; cursor: pointer; font: inherit;
+}
+.level:hover { border-color: var(--color-primary-line); }
+.level__now { color: var(--color-primary); font-weight: 700; }
 .level b { color: var(--color-ink); font-size: var(--text-sm); }
 .level small { color: var(--color-muted); font-size: var(--text-xs); }
 .level--on { border-color: var(--color-ai-line); background: var(--color-ai-soft); }
 .level--locked { opacity: .75; }
+
+/* ⑥-표준화: 설정 테이블 (2026-10-04 — 항목·저장값·변경·설명 4열 규격) */
+.settbl { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.settbl th { text-align: left; font-size: var(--text-2xs); color: var(--color-faint); padding: 6px var(--space-sm); border-bottom: 1px solid var(--color-hairline); }
+.settbl td { padding: 8px var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); vertical-align: top; }
+.settbl__k { width: 190px; font-weight: 600; color: var(--color-ink); }
+.settbl__cur { width: 170px; color: var(--color-body); }
+.settbl__in { width: 330px; }
+.settbl__in .chips { margin-bottom: 4px; }
+.settbl__in .xs { max-width: 140px; }
+.settbl__d { color: var(--color-muted); font-size: var(--text-xs); }
+.defbadge, .dirtybadge {
+  display: inline-block; margin-left: 4px; font-style: normal; font-size: var(--text-2xs);
+  padding: 0 6px; border-radius: var(--rounded-pill);
+}
+.defbadge { color: var(--color-faint); background: var(--color-flat-soft); }
+.dirtybadge { color: var(--color-warn); border: 1px solid var(--color-warn); }
 
 /* ⑤ 한도 표 */
 .tbl { width: 100%; border-collapse: collapse; font-size: var(--text-sm); margin-bottom: 6px; }

@@ -730,11 +730,22 @@ app.post('/api/telegram/portfolio', async (req, res) => {
  * 🔴 정지는 즉시, 재개는 사람만 — resume 에 조건을 달지 않는다.
  */
 const agentControl = require('./server/agentControl');
+/**
+ * 🤖 자율 수준 전환 (2026-10-04) — 사람의 명시 조작. 1단부터는 에이전트 발 제안이
+ * 한도 통과 시 **자동 전송**되므로(실거래 모드면 실제 주문), 화면이 타이핑 확인을 받는다.
+ */
+app.post('/api/agent/autonomy', (req, res) => {
+  const r = agentControl.setAutonomy({ level: req.body?.level, by: 'web' });
+  return res.status(r.ok ? 200 : 400).json(r);
+});
+
 app.get('/api/agent/status', (req, res) => {
   const st = getDashboardSettings();
   res.json({
     control: agentControl.effective(),
-    autonomy: '승인 후 실행',                     // 현재 고정 단계 — 해금은 사람이 한다
+    // 자율 수준 — 사람이 운용 규칙 화면에서 전환한다(2026-10-04 선택 가능해짐)
+    autonomyLevel: agentControl.autonomyLevel(),
+    autonomy: ['승인 후 실행', '한도 내 자동', '안내 후 자율'][agentControl.autonomyLevel()] || '승인 후 실행',
     limits: {
       // 상단 상태바 "일일 손실 -0.7% / -2.0%" 용. ⚠️ 손실 실측치는 화면이 portfolio 에서 계산 —
       // 여기는 **한도**만 준다(두 곳에서 계산하면 갈라진다).

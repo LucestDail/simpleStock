@@ -35,9 +35,9 @@ let state = load();
 function load() {
   try {
     const d = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    if (d && typeof d === 'object') return d;
+    if (d && typeof d === 'object') return { autonomy: 0, ...d };
   } catch { /* 첫 기동 또는 파손 — 기본값(운용 중) */ }
-  return { paused: false, scope: null, reason: null, at: null, resumeAt: null, by: null };
+  return { paused: false, scope: null, reason: null, at: null, resumeAt: null, by: null, autonomy: 0 };
 }
 
 function persist() {
@@ -92,10 +92,39 @@ function resume({ by = 'web' } = {}) {
  * ⚠️ 매도 제안도 막는다(halt_new 포함) — "신규" 는 **에이전트발 모든 신규 제안**이다.
  *    보유 정리는 사람이 화면·토스 앱에서 직접 한다(정지 중 에이전트는 손을 뗀다).
  */
+/**
+ * 🤖 자율 수준 (2026-10-04 — 사용자: "자율 수준도 선택이 안 되는데 이거 뭐야").
+ *
+ * ```
+ * 0  제안 + 승인      모든 제안이 HITL 대기 (기본)
+ * 1  한도 내 자동      에이전트 발 제안 중 **계좌 한도·가드 전부 통과한 것만** 자동 승인+전송.
+ *                     한도에 걸리면 자동이 아니라 **HITL 대기로 남는다** (한도 밖 자동은 없다)
+ * 2  안내 후 자율      집행은 1단과 동일 — 2단 고유 동작(예약 자동 등록)은 아직 코드가 없다.
+ *                     ⚠️ 그 사실을 화면에도 적는다 (없는 기능을 있다고 하지 않는다)
+ * ```
+ * 🔴 전환은 **사람의 명시 조작**(화면 타이핑 확인)으로만 — 코드가 조건으로 올리지 않는다.
+ *    "해금을 제안" 까지가 코드의 몫이다. 정지(paused) 중에는 수준과 무관하게 아무것도 안 나간다.
+ */
+function setAutonomy({ level, by = 'web' } = {}) {
+  const n = Number(level);
+  if (![0, 1, 2].includes(n)) return { ok: false, error: 'level 은 0·1·2 중 하나여야 합니다.' };
+  const was = state.autonomy ?? 0;
+  state = { ...state, autonomy: n };
+  persist();
+  // 🔴 수준 전환은 실거래 동작이 바뀌는 사건이다 — warn 레벨로, 전후를 함께 남긴다
+  logWarn('agent.autonomy_changed', { from: was, to: n, by });
+  try {
+    require('./activityLog').record('approval', `자율 수준 전환 ${was}단 → ${n}단 (${by})`, { from: was, to: n });
+  } catch { /* 기록 실패가 전환을 막지 않는다 */ }
+  return { ok: true, autonomy: n, was };
+}
+
+function autonomyLevel() { return Number(state.autonomy ?? 0); }
+
 function gateProposal() {
   const s = effective();
   if (!s.paused) return { allowed: true };
   return { allowed: false, why: `에이전트 정지 중 (${s.scope} · ${s.at?.slice(0, 16)})${s.reason ? ` — ${s.reason}` : ''}` };
 }
 
-module.exports = { effective, pause, resume, gateProposal, SCOPES, _STATE_FILE: STATE_FILE };
+module.exports = { effective, pause, resume, gateProposal, setAutonomy, autonomyLevel, SCOPES, _STATE_FILE: STATE_FILE };

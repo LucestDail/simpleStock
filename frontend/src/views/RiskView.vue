@@ -505,12 +505,19 @@ onMounted(async () => {
 
 /* ── 관심 종목 관리 ── */
 .waddgroup { display: flex; gap: 6px; margin-bottom: var(--space-sm); max-width: 360px; }
-.wgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-sm); margin-bottom: var(--space-sm); }
-.wcard { border: 1px solid var(--color-hairline); border-radius: var(--rounded-sm); padding: var(--space-sm); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* 🔄 2026-10-04 사용자: "좌우로 스크롤 주고 계속 밑으로 길어지게 하지마" —
+   테마 18개가 세로로 무한히 쌓이던 그리드를 **가로 스트립**으로. 카드 폭·높이 고정,
+   카드 안 종목 목록만 자체 세로 스크롤. */
+.wgrid {
+  display: flex; gap: var(--space-sm); overflow-x: auto; padding-bottom: 6px;
+  margin-bottom: var(--space-sm);
+}
+.wgrid > * { flex: 0 0 280px; }
+.wcard { border: 1px solid var(--color-hairline); border-radius: var(--rounded-sm); padding: var(--space-sm); display: flex; flex-direction: column; gap: 6px; min-width: 0;; height: 300px; display: flex; flex-direction: column; }
 .wcard__head { display: flex; align-items: center; gap: 6px; }
 .wcard__name { font-weight: 700; font-size: var(--text-sm); color: var(--color-ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wcard__count { font-size: var(--text-2xs); color: var(--color-faint); }
-.wlist { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.wlist { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;; overflow-y: auto; flex: 1; min-height: 0; }
 .wrow { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: var(--text-sm); border-bottom: 1px solid var(--color-hairline-soft); }
 .wrow--watch { background: var(--color-primary-soft); }
 .wrow--empty { color: var(--color-faint); border-bottom: 0; }

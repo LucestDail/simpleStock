@@ -528,6 +528,46 @@ function propose(input = {}, { source = 'manual', notify = true } = {}) {
       logWarn('orders.notify_failed', { message: e.message });
     }
   }
+  /**
+   * 🤖 자율 집행 (2026-10-04 — 자율 수준 1단+). 조건 전부 참일 때만:
+   *  - 수준 ≥ 1 (사람이 화면에서 타이핑 확인으로 올린 값 — agentControl 이 영속)
+   *  - **에이전트 발 제안만**(analyst·vix-ladder) — 수동·채팅 제안을 자동으로 쏘면
+   *    "내가 입력한 게 바로 나갔다" 가 된다(그건 자율이 아니라 사고다)
+   *  - checkAccountLimits **통과** — 한도에 걸리면 자동이 아니라 HITL 대기로 남는다
+   * ⚠️ 비동기 — 제안 등록을 집행 실패가 막지 않는다. 결과는 감사(auto_executed/auto_skipped)에.
+   */
+  const AUTO_SOURCES = new Set(['analyst', 'vix-ladder']);
+  if (require('./agentControl').autonomyLevel() >= 1 && AUTO_SOURCES.has(source)) {
+    (async () => {
+      try {
+        // module.exports 경유 — 내부 참조로 부르면 테스트가 한도 축을 스텁할 수 없다(09-30 구조분해 함정의 변형)
+        const chk = await module.exports.checkAccountLimits({
+          symbol: proposal.symbol, side: proposal.side,
+          quantity: proposal.quantity, price: proposal.price,
+        });
+        if (!chk.ok) {
+          audit('auto_skipped', { id: proposal.id, symbol, reason: (chk.error || chk.kind || '').slice(0, 160) });
+          logInfo('orders.auto_skipped', { id: proposal.id, symbol, kind: chk.kind });
+          return; // HITL 대기로 남는다 — 한도 밖 자동은 없다
+        }
+        const ap = approve(proposal.id);
+        if (!ap.ok) { audit('auto_skipped', { id: proposal.id, symbol, reason: 'approve_failed' }); return; }
+        const ex = await execute(proposal.id);
+        audit('auto_executed', {
+          id: proposal.id, symbol, side: proposal.side, quantity: proposal.quantity,
+          level: require('./agentControl').autonomyLevel(), ok: ex.ok, dryRun: Boolean(ex.dryRun),
+        });
+        try {
+          require('./activityLog').record('execution',
+            `자율 집행(${require('./agentControl').autonomyLevel()}단) — ${proposal.side === 'BUY' ? '매수' : '매도'} ${symbol} ${proposal.quantity}주${ex.dryRun ? ' (모의)' : ''}`,
+            { proposalId: proposal.id, symbol });
+        } catch { /* 기록 실패가 집행 결과를 바꾸지 않는다 */ }
+      } catch (e) {
+        logWarn('orders.auto_exec_failed', { id: proposal.id, message: e.message });
+        audit('auto_skipped', { id: proposal.id, symbol, reason: `error: ${e.message}`.slice(0, 160) });
+      }
+    })();
+  }
   return { ok: true, proposal };
 }
 
