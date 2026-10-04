@@ -157,8 +157,11 @@ test('🔴 화면 진입이 분석을 실행하지 않는다 (마지막 것을 �
   const mount = /onMounted\(([\s\S]*?)\n\}\);/.exec(src)?.[1] || src;
   assert.ok(/loadLastReport\(\)/.test(src), '🔴 마지막 분석을 안 불러온다 — 빈 화면이 된다');
   assert.ok(!/setTimeout\([^)]*runAnalyst\(\)/.test(src), '🔴 진입 자동 실행이 되살아났다 — 비용이 원복된다');
-  // 판별력: 수동 버튼은 **남아 있어야** 한다
-  assert.ok(/@click="runAnalyst"/.test(src), '🔴 수동 실행 버튼까지 사라졌다');
+  // 판별력: 수동 버튼은 **어딘가에 남아 있어야** 한다 — 2026-10-04 재편으로 대시보드(보기
+  // 전용)에서 **운용 규칙 설정**으로 이사했다. 둘 다 없으면 "수동으로 돌릴 길" 이 사라진 것.
+  const rules = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'views', 'RulesView.vue'), 'utf8');
+  assert.ok(/api\/analyst\/run/.test(rules), '🔴 수동 실행 입구가 사라졌다 (운용 규칙 설정에 있어야 한다)');
+  assert.ok(!/@click="runAnalyst"/.test(src), '🔴 대시보드에 실행 버튼이 되살아났다 — 보기 전용 계약 위반(2026-10-04)');
 });
 
 /**

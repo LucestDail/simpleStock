@@ -15,7 +15,12 @@ const path = require('node:path');
  *   "없는 데이터" 목록에 있는 데이터를 적었다 · 이것). 이번 건은 **돈이 나간다.**
  */
 
-const VIEW = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'views', 'WorkspaceView.vue'), 'utf8');
+/*
+ * 🔄 2026-10-04 재편 — 승인·전송 UI 는 대시보드(보기 전용)에서 **승인 대기 메뉴**로 이사했다.
+ *    이 가드가 지키는 계약("실행 버튼 이름은 모드에서 유도" · "실거래는 한 번 더 묻는다")은
+ *    그대로이고, **보는 파일만** 옮긴다. 파일이 없으면 통과가 아니라 실패다(계약이 사라진 것).
+ */
+const VIEW = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'views', 'ApprovalsView.vue'), 'utf8');
 const tpl = /<template>([\s\S]*)<\/template>/.exec(VIEW)?.[1] || '';
 const script = VIEW.slice(VIEW.indexOf('<script'), VIEW.indexOf('</script>'));
 

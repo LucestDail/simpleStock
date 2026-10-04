@@ -1,8 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import PriceChart from '../components/PriceChart.vue';
-import SettingsPanel from '../components/SettingsPanel.vue';
-import OrderTicket from '../components/OrderTicket.vue';
 import PipelineStrip from '../components/PipelineStrip.vue';
 import NewsPanel from '../components/NewsPanel.vue';
 import RankingsPanel from '../components/RankingsPanel.vue';
@@ -12,7 +10,6 @@ import { useUi } from '../composables/useUi';
 import { formatMarketClock } from '../lib/marketClock';
 import { heatmapStyleFromChangePct, formatChangePct } from '../lib/heatmapColor';
 import { readSse } from '../lib/sse';
-import { renderMarkdown } from '../lib/markdown';
 import { apiFetch, apiStreamUrl, readApiError } from '../lib/apiClient';
 
 const {
@@ -25,7 +22,6 @@ const {
   createGroup,
   renameGroup,
   deleteGroup,
-  addTicker,
   removeTicker,
   applyState,
 } = useWatchlist();
@@ -36,7 +32,6 @@ const clock = ref(formatMarketClock());
 const newGroupName = ref('');
 const tickerInputs = ref({}); // groupId -> { query, market }
 const busy = ref(false);
-const refreshing = ref(false);
 
 
 let clockTimer = null;
@@ -44,11 +39,9 @@ let clockTimer = null;
 let freshTimer = null;
 let regimeTimer = null;
 let pollTimer = null;
+let reportTimer = null;
 let es = null;
 
-const totalTickers = computed(() =>
-  groups.value.reduce((sum, g) => sum + (g.tickers?.length || 0), 0)
-);
 
 function sessionLabel(state) {
   if (state === 'open' || state === 'active' || state === 'regular') return '개장';
@@ -79,25 +72,7 @@ function marketBadge(ticker) {
   return '🇰🇷 KR';
 }
 
-function ensureInput(groupId) {
-  if (!tickerInputs.value[groupId]) tickerInputs.value[groupId] = { query: '', market: '' };
-  return tickerInputs.value[groupId];
-}
 
-async function onAddGroup() {
-  const name = newGroupName.value.trim();
-  if (!name) return;
-  busy.value = true;
-  try {
-    await createGroup(name);
-    newGroupName.value = '';
-    notify({ message: `'${name}' 그룹을 추가했습니다.`, tone: 'success' });
-  } catch (e) {
-    notify({ message: e.message || '그룹 추가 실패', tone: 'error' });
-  } finally {
-    busy.value = false;
-  }
-}
 
 async function onRenameGroup(group) {
   const next = window.prompt('그룹 이름 변경', group.name);
@@ -128,52 +103,8 @@ async function onDeleteGroup(group) {
   }
 }
 
-async function onAddTicker(group) {
-  const input = ensureInput(group.id);
-  const query = String(input.query || '').trim();
-  if (!query) return;
-  busy.value = true;
-  try {
-    // 심볼처럼 보이면 symbol, 아니면 종목명(query)로 전송.
-    const looksLikeSymbol = /^[A-Za-z0-9.\-]{1,12}$/.test(query);
-    const payload = looksLikeSymbol
-      ? { symbol: query, market: input.market || undefined }
-      : { query, market: input.market || undefined };
-    const r = await addTicker(group.id, payload);
-    input.query = '';
-    if (r && r.added === false) {
-      notify({ message: '이미 그룹에 있는 종목입니다.', tone: 'info' });
-    } else {
-      const sym = r?.ticker?.symbol || query;
-      notify({ message: `${sym} 추가됨. 시세를 불러오는 중…`, tone: 'success' });
-    }
-  } catch (e) {
-    notify({ message: e.message || '종목 추가 실패', tone: 'error' });
-  } finally {
-    busy.value = false;
-  }
-}
 
-async function onRemoveTicker(group, ticker) {
-  try {
-    await removeTicker(group.id, ticker.symbol);
-  } catch (e) {
-    notify({ message: e.message || '종목 삭제 실패', tone: 'error' });
-  }
-}
 
-async function onRefreshMarket() {
-  refreshing.value = true;
-  try {
-    await apiFetch('/api/market/refresh', { method: 'POST' });
-    await load();
-    notify({ message: '시세를 갱신했습니다.', tone: 'success' });
-  } catch (e) {
-    notify({ message: e.message || '시세 갱신 실패', tone: 'error' });
-  } finally {
-    refreshing.value = false;
-  }
-}
 
 /**
  * 대시보드 (2026-09-21) — 화면이 필요한 것을 `/api/dashboard` 한 번으로 받는다.
@@ -202,74 +133,14 @@ async function loadOrderStats() {
 }
 const proposals = ref([]);
 
-/**
- * 🔴 **주문 티켓** (2026-10-02 — 와이어프레임 ⑨). 종전에는 제안 카드에 수량·지정가만 있고
- *    **무엇을 근거로 승인하는지**가 화면에 없었다 — 잔고·장 운영시간·미체결·체결 후 비중이
- *    전부 보이지 않았다.
- * ⚠️ 새 집행 경로를 만들지 않는다 — 모달의 주 버튼은 기존과 **같은 `approve`** 다.
- */
-const ticketFor = ref(null);
-async function fetchPrecheck(id) {
-  const res = await apiFetch(`/api/orders/proposals/${encodeURIComponent(id)}/precheck`);
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `사전 점검 실패 (${res.status})`);
-  return body;
-}
-function ticketClose() {
-  // ⚠️ 닫은 사실을 기억한다 — 기록 안 하면 watch 가 **즉시 다시 연다**
-  if (ticketFor.value?.id) dismissedTickets.value.add(ticketFor.value.id);
-  ticketFor.value = null;
-}
-async function ticketApprove(p) { ticketFor.value = null; await decide(p, 'approve'); }
-async function ticketReject(p) { ticketFor.value = null; await decide(p, 'reject'); }
-/** 수량을 깎아 **새 제안으로** 만든다 — 기존 제안을 말없이 고치지 않는다(감사가 끊긴다) */
-async function ticketTrim({ proposal, quantity }) {
-  ticketFor.value = null;
-  try {
-    const res = await apiFetch('/api/orders/proposals', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        symbol: proposal.symbol, side: proposal.side, type: 'LIMIT',
-        quantity, price: proposal.price,
-        reason: `${proposal.reason || ''} (사전 점검에서 ${proposal.quantity}→${quantity}주로 축소)`.trim(),
-        source: 'manual', notify: false,
-      }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || '축소 제안을 만들지 못했습니다.');
-    notify({ message: `${quantity}주로 줄인 제안을 만들었습니다.`, tone: 'success' });
-    await loadProposals();
-  } catch (e) {
-    notify({ message: e.message || '축소 제안 실패', tone: 'error' });
-  }
-}
 /** 'live' | 'dry-run' — 서버가 말하는 **실제** 모드. 화면이 지어내지 않는다 */
 const ordersMode = ref('dry-run');
-const analystLoading = ref(false);
 /**
  * 🔴 사용자: *"내부 분석시 **분석 상태 표시**"*
  *    분석은 20~30초 걸린다(도구·LLM). 버튼만 "분석 중…" 이면 멈춘 것처럼 보인다.
  *    ⚠️ 서버가 단계를 스트리밍하지 않으므로 **여기서 예상 단계를 돌린다** —
  *       그래서 진짜 진행률이 아니라 **무엇을 하는 중인지**만 알린다(척하지 않는다).
  */
-const analystStage = ref('');
-let stageTimer = null;
-const ANALYST_STAGES = ['보유·시세 수집', '일봉 분석', '웹 검색', '모델 판단', '제안 정리'];
-
-function startStages() {
-  let i = 0;
-  analystStage.value = ANALYST_STAGES[0];
-  stageTimer = setInterval(() => {
-    i = Math.min(i + 1, ANALYST_STAGES.length - 1);
-    analystStage.value = ANALYST_STAGES[i];
-  }, 6000);
-}
-function stopStages() {
-  if (stageTimer) clearInterval(stageTimer);
-  stageTimer = null;
-  analystStage.value = '';
-}
 
 /**
  * 활동 타임라인 (2026-09-21 사용자: *"자동 텔레그램 알림과 애널리스트의 모든 분석 기록들이
@@ -344,126 +215,6 @@ const mcpState = ref(null);
  * 🔴 `thinking_delta`·`tool_call`·`tool_result` 를 **따로** 보여준다 —
  *    사고 과정과 답이 섞이면 무엇이 근거인지 알 수 없다.
  */
-const chatInput = ref('');
-const chatBusy = ref(false);
-const chatError = ref('');
-const messages = ref([]);
-const chatBox = ref(null);
-
-/**
- * 바닥으로 따라간다. ⚠️ 다만 **사용자가 위를 읽고 있으면 끌어내리지 않는다** —
- * 조각이 올 때마다 강제로 내리면 지난 말을 읽을 수가 없다(반대 방향의 같은 불편).
- * ⇒ 이미 바닥 근처일 때만 따라간다. 아니면 "새 답" 표시만 띄운다.
- */
-const NEAR_BOTTOM_PX = 80;
-const stuckToBottom = ref(true);
-const hasUnseen = ref(false);
-
-function onChatScroll() {
-  const el = chatBox.value;
-  if (!el) return;
-  stuckToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
-  if (stuckToBottom.value) hasUnseen.value = false;
-}
-
-function scrollChat({ force = false } = {}) {
-  requestAnimationFrame(() => {
-    const el = chatBox.value;
-    if (!el) return;
-    if (force || stuckToBottom.value) {
-      el.scrollTop = el.scrollHeight;
-      hasUnseen.value = false;
-    } else {
-      hasUnseen.value = true;
-    }
-  });
-}
-
-/** 🔴 사용자: *"대화 초기화는 가능한건가?"* — 서버 이력까지 지운다(화면만 비우면 되살아난다) */
-const clearing = ref(false);
-async function clearChat() {
-  if (clearing.value) return;
-  clearing.value = true;
-  try {
-    const res = await apiFetch('/api/analyst/chat/history', { method: 'DELETE' });
-    if (!res.ok) throw new Error(`초기화 실패 (${res.status})`);
-    messages.value = [];
-    chatError.value = '';
-    hasUnseen.value = false;
-    stuckToBottom.value = true;
-  } catch (e) {
-    chatError.value = e.message || '초기화 실패';
-  } finally {
-    clearing.value = false;
-  }
-}
-
-async function loadChatHistory() {
-  try {
-    const res = await apiFetch('/api/analyst/chat/history?limit=40');
-    if (!res.ok) return;
-    const b = await res.json();
-    messages.value = (b.items || []).map((m) => ({
-      role: m.role, text: m.text, at: m.at, thinking: '', tools: [], done: true,
-    }));
-    scrollChat();
-  } catch { /* 이력이 없어도 대화는 시작할 수 있다 */ }
-}
-
-async function sendChat() {
-  const text = chatInput.value.trim();
-  if (!text || chatBusy.value) return;
-  chatInput.value = '';
-  chatError.value = '';
-  chatBusy.value = true;
-
-  messages.value.push({ role: 'user', text, at: new Date().toISOString(), done: true });
-  // 답이 들어올 빈 말풍선을 **먼저** 만든다 — 조각이 이어붙을 자리다
-  const reply = { role: 'assistant', text: '', thinking: '', tools: [], recall: 0, done: false, at: null };
-  messages.value.push(reply);
-  // 내가 방금 보냈으면 바닥으로 간다(읽던 중이었어도 이건 내 행동이다)
-  stuckToBottom.value = true;
-  scrollChat({ force: true });
-
-  try {
-    // 화면이 지금 무엇을 보고 있는지 한 줄로 — 모델이 "그 종목" 을 알아들을 수 있게
-    const contextNote = selected.value.symbol
-      ? `사용자가 보고 있는 종목: ${selected.value.name || ''}(${selected.value.symbol})`
-      : '';
-    const res = await apiFetch('/api/analyst/chat', {
-      method: 'POST',
-      body: JSON.stringify({ message: text, contextNote }),
-    });
-    if (!res.ok) {
-      const b = await res.json().catch(() => ({}));
-      throw new Error(b.error || `대화에 실패했습니다 (${res.status})`);
-    }
-    await readSse(res, (event, data) => {
-      if (event === 'text_delta') reply.text += data.text || '';
-      else if (event === 'thinking_delta') reply.thinking += data.text || '';
-      else if (event === 'tool_call') reply.tools.push({ id: data.id, name: data.name, args: data.args, state: 'running' });
-      else if (event === 'tool_result') {
-        // 🔴 채팅이 제안을 등록하면 **상단 HITL 목록**에 바로 뜨게 한다
-        //    (사용자 지시: "상단 HITL 에 토픽으로 등록"). 새로고침을 사람이 하게 두지 않는다.
-        if (data.name === 'propose_order' && data.ok) loadProposals();
-        if (data.name === 'propose_conditional_order' && data.ok) loadProposals();
-        const t = reply.tools.find((x) => x.id === data.id);
-        // ⚠️ 실패를 조용히 성공으로 만들지 않는다 — 화면에 그대로 남긴다
-        if (t) { t.state = data.ok ? 'ok' : 'fail'; t.detail = data.ok ? data.preview : data.error; }
-      } else if (event === 'recall') reply.recall = data.count || 0;
-      else if (event === 'notice') reply.notice = data.text;
-      else if (event === 'error') chatError.value = data.message || '대화 오류';
-      else if (event === 'done') { reply.done = true; reply.at = new Date().toISOString(); }
-      scrollChat();
-    });
-  } catch (e) {
-    chatError.value = e.message || '대화 오류';
-  } finally {
-    reply.done = true;
-    chatBusy.value = false;
-    scrollChat();
-  }
-}
 
 /**
  * 선택한 종목 뉴스(레이아웃 지시: 본문 좌열 상단).
@@ -485,19 +236,6 @@ async function loadMcpStatus() {
  * 🔴 감시 표시 토글 — **이것만** 모멘텀 분석을 부른다.
  * ⚠️ 실패를 조용히 넘기지 않는다 — 별이 켜진 줄 알았는데 안 켜졌으면 알림이 안 온다.
  */
-async function onToggleWatch(group, t) {
-  try {
-    const res = await apiFetch(
-      `/api/watchlist/groups/${encodeURIComponent(group.id)}/tickers/${encodeURIComponent(t.symbol)}/watch`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: !t.watch }) }
-    );
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || '감시 설정 실패');
-    t.watch = !t.watch;
-  } catch (e) {
-    // ⚠️ 형제 핸들러와 같은 통보 경로를 쓴다 — 새 상태를 만들면 표시되는 자리가 갈린다
-    notify({ message: e.message || '감시 설정 실패', tone: 'error' });
-  }
-}
 
 async function loadLastReport() {
   try {
@@ -510,27 +248,6 @@ async function loadLastReport() {
   }
 }
 
-async function runAnalyst() {
-  analystLoading.value = true;
-  analystError.value = '';
-  startStages();
-  try {
-    const res = await apiFetch('/api/analyst/run', { method: 'POST' });
-    if (!res.ok) {
-      const b = await res.json().catch(() => ({}));
-      throw new Error(b.error || `분석 실패 (${res.status})`);
-    }
-    report.value = await res.json();
-    await loadProposals();
-    await loadConditionals();
-    await loadActivity();
-  } catch (e) {
-    analystError.value = e.message || '분석 실패';
-  } finally {
-    analystLoading.value = false;
-    stopStages();
-  }
-}
 
 /** 시장 국면(코드 판정) — 데몬이 5분마다 갱신한다. 화면은 읽기만 */
 const regime = ref(null);
@@ -579,21 +296,6 @@ async function loadConditionals() {
   }
 }
 
-async function cancelConditional(o) {
-  const id = o.conditionalOrderId || o.id;
-  if (!id) return;
-  if (!window.confirm(`${o.symbol || ''} 예약을 취소할까요? (취소 후 다시 걸 수 있습니다)`)) return;
-  try {
-    const res = await apiFetch(`/api/orders/conditional/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      // 🔴 타임아웃이면 "재시도 금지·목록으로 확정" — 서버가 준 note 를 그대로 보인다
-      window.alert(body.note || body.error || '취소에 실패했습니다.');
-    }
-  } finally {
-    await loadConditionals();
-  }
-}
 
 async function loadProposals() {
   try {
@@ -623,47 +325,10 @@ function statusLabel(p) {
   return p.expired && p.status === 'PENDING' ? '만료' : STATUS_LABEL[p.status] || p.status;
 }
 
-async function decide(p, action) {
-  /**
-   * 🔴 **실거래 실행은 한 번 더 묻는다** (2026-09-22).
-   *    지금은 클릭 한 번이면 주문이 나간다. 되돌릴 수 없는 행위에 확인이 없으면
-   *    오터치가 곧 체결이다. ⚠️ 승인·거절은 되돌릴 수 있으니 안 묻는다 — **실행만** 묻는다.
-   */
-  const live = ordersMode.value === 'live';
-  if (action === 'execute' && live) {
-    const amount = (Number(p.quantity) * Number(p.price)).toLocaleString('ko-KR');
-    const ok = window.confirm(
-      `🔴 실제 주문을 냅니다 (모의 아님)\n\n`
-      + `${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주 · 지정가 ${p.price}\n`
-      + `평가금액 약 ${amount}\n\n진행할까요?`
-    );
-    if (!ok) return;
-  }
-
-  try {
-    const res = await apiFetch(`/api/orders/proposals/${encodeURIComponent(p.id)}/${action}`, { method: 'POST' });
-    const b = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      notify({ message: b.error || '처리 실패', tone: 'error' });
-      return;
-    }
-    if (action === 'execute') {
-      // ⚠️ 서버가 말한 것을 **그대로** 옮긴다 — 화면이 모드를 추측해 문구를 지어내지 않는다
-      notify({
-        message: b.proposal?.result?.note || (live ? '전송했습니다.' : '모의 실행했습니다(실제 주문 아님).'),
-        tone: live ? 'warn' : 'info',
-      });
-    }
-    await loadProposals();
-  } catch (e) {
-    notify({ message: e.message || '처리 실패', tone: 'error' });
-  }
-}
 
 const dash = ref(null);
 const dashError = ref('');
 const selected = ref({ symbol: '', name: '' });
-const settingsOpen = ref(false);
 let dashTimer = null;
 
 async function loadDashboard() {
@@ -831,28 +496,27 @@ const pendingCount = computed(() => proposals.value.filter((p) => p.status === '
  * ⇒ **결정을 요구하는 것은 흐름을 막아야 하고, 지난 것은 보일 이유가 없다.**
  */
 const pendingProposals = computed(() => proposals.value.filter((p) => p.status === 'PENDING'));
+/**
+ * 🔔 매수/매도 **푸시** (2026-10-04 재편 — 대시보드는 보기 전용, 제안이 오면 알리기만 한다).
+ *    승인·거절·전송은 "승인 대기" 메뉴가 전담한다 — 모달·버튼은 전부 그쪽으로 걷어냈다.
+ */
+watch(() => pendingProposals.value.map((p) => p.id).join(','), (now, before) => {
+  const fresh = now.split(',').filter(Boolean).filter((id) => !String(before || '').includes(id));
+  if (fresh.length) {
+    notify({ message: `새 매매 제안 ${fresh.length}건 — 승인 대기 메뉴에서 확인하세요`, tone: 'info' });
+  }
+});
 
 /**
  * ⚠️ **사용자가 닫은 것은 다시 안 띄운다** — 안 그러면 닫아도 계속 떠서
  *    *"꺼지지 않는 창"* 이 된다. 같은 제안 id 를 기억한다.
  * ⚠️ 그래도 **사라지지는 않는다** — 상단 `매매 제안 N` 배지가 남아 언제든 다시 열 수 있다.
  */
-const dismissedTickets = ref(new Set());
 
-/**
- * 🔴 **승인됐지만 아직 안 나간 주문** (2026-10-02 — 내가 지웠다가 자가 잡아 되살렸다).
- *
- * `OrderTicket` 주석이 *"승인 ≠ 전송. 실제 주문 전송은 **목록에서** 한 번 더 누른다"* 고
- * 명시하는데, 제안 카드를 모달로 옮기면서 **그 목록을 통째로 지웠다.**
- * 로직(`decide(p,'execute')`)은 남았는데 **부를 방법이 0개**였다 — 승인해도 주문을 못 낸다.
- * ⚠️ `tests/liveModeUi.test.js` 가 잡았다. 안 잡혔으면 *"승인은 되는데 체결이 안 된다"* 를
- *    사용자가 발견했을 것이다.
- *
- * ⇒ 모달은 **승인까지만**(되돌리기 어려운 문을 하나 더 만들지 않는다),
- *   전송은 **항상 보이는 자리**에서 한 번 더. 승인 대기와 달리 이건 **지나가면 안 되는 것**이라
- *   스크롤 밖 고정 영역에 둔다.
+/*
+ * 승인됨·전송 대기 큐는 2026-10-04 재편으로 **승인 대기 메뉴**로 이사했다 — 대시보드는
+ * 조작하지 않는다. "승인 ≠ 전송, 전송은 목록에서 한 번 더" 계약과 liveModeUi 가드도 그쪽이 잠근다.
  */
-const approvedProposals = computed(() => proposals.value.filter((p) => p.status === 'APPROVED'));
 /**
  * 종목의 **현재가** — 보유면 포트폴리오, 아니면 관심종목 시세에서 찾는다.
  * ⚠️ 못 찾으면 `null` 을 돌려 **아무것도 안 그린다** — 0 을 그리면 "가격이 0" 으로 읽힌다.
@@ -870,26 +534,10 @@ function priceOf(symbol) {
   return null;
 }
 
-function focusProposals() {
-  const next = pendingProposals.value[0];
-  if (next) { dismissedTickets.value.delete(next.id); ticketFor.value = next; }
-}
 /**
  * 🔴 **새 제안이 생기면 자동으로 연다** — HITL 은 사람이 **봐야** 성립한다.
  *    폰 알림은 가지만 화면을 보고 있는 사람에겐 아무 일도 안 일어나던 자리다.
  */
-watch(pendingProposals, (list) => {
-  if (ticketFor.value) return;                       // 이미 뭔가 열려 있으면 가로채지 않는다
-  const next = list.find((p) => !dismissedTickets.value.has(p.id));
-  if (next) ticketFor.value = next;
-}, { deep: false });
-
-const leveragePct = computed(() => Number(portfolio.value?.weights?.leveragePct));
-const leverageWord = computed(() => {
-  const p = leveragePct.value;
-  if (!Number.isFinite(p)) return '';
-  return p >= 50 ? '높음' : p >= 25 ? '보통' : '낮음';
-});
 const leverageTone = computed(() => {
   const p = leveragePct.value;
   if (!Number.isFinite(p)) return '';
@@ -1050,7 +698,6 @@ function openStream() {
 
 onMounted(async () => {
   loadOrderStats();
-  loadChatHistory();
   loadMcpStatus();
   loadTape();
   tapeTimer = setInterval(loadTape, 60000);
@@ -1089,6 +736,14 @@ onMounted(async () => {
     load();
     loadPortfolio();
   }, 20000); // 시세 신선도 유지
+  // 🔔 2026-10-04 재편: 보고서·제안·예약도 자동 갱신 — 수동 새로고침 버튼은 걷어냈다.
+  //    분석 트리거(장 시점·모멘텀·이벤트)는 서버가 돌리고, 화면은 결과를 따라간다.
+  reportTimer = setInterval(() => {
+    loadLastReport();
+    loadProposals();
+    loadConditionals();
+    loadOrderStats();
+  }, 60000);
   openStream();
 });
 
@@ -1099,6 +754,7 @@ onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer);
   if (freshTimer) clearInterval(freshTimer);
   if (pollTimer) clearInterval(pollTimer);
+  if (reportTimer) clearInterval(reportTimer);
   if (dashTimer) clearInterval(dashTimer);
   if (es) es.close();
 });
@@ -1179,35 +835,13 @@ onUnmounted(() => {
              종전엔 우측 패널을 스크롤해야만 알 수 있었다.
           ⚠️ 0건이면 **버튼 자체를 안 그린다** — `매매 제안 0` 은 매번 뜨는 소음이다.
         -->
-        <button v-if="pendingCount" class="btn btn--sm btn--primary topbar__pend" @click="focusProposals">
-          매매 제안 <b class="mono-num">{{ pendingCount }}</b>
-        </button>
-        <div class="metric">
-          <span class="metric__label">종목</span>
-          <span class="metric__value mono-num">{{ totalTickers }}</span>
-        </div>
-        <!--
-          🤖 **자율성 단계 배지** (2026-10-03 — 와이어프레임 신설).
-             최종 목표는 자율 트레이딩이지만 **단계 전환은 코드가 스스로 하지 않는다** —
-             지금은 0단계(제안+승인) 고정이고, 조건이 쌓이면 해금을 *제안*만 한다.
-             배지는 그 사실을 상시 보이게 한다("지금 누가 결정하는가").
-        -->
-        <span class="automode" title="모든 주문은 사람 승인을 거칩니다 (HITL). 승인율·가드 안정이 쌓이면 단계 상향을 제안합니다 — 해금도 사람이 합니다.">
-          🤖 제안+승인
-        </span>
-        <!-- 🔴 테마 토글 — 와이어프레임 상단 우측 ☀ (종전엔 다크 고정이었다) -->
+                <!-- 🔴 테마 토글 — 와이어프레임 상단 우측 ☀ (종전엔 다크 고정이었다) -->
         <button
           class="btn btn--icon"
           :aria-label="theme === 'light' ? '어두운 테마로' : '밝은 테마로'"
           :title="theme === 'light' ? '어두운 테마로' : '밝은 테마로'"
           @click="toggleTheme"
         >{{ theme === 'light' ? '☾' : '☀' }}</button>
-        <!-- 🔴 사용자: *"헤더의 설정 버튼 너무 작은데 좀 크기 키워줘"* -->
-        <button class="btn btn--icon" aria-label="운영 설정" title="운영 설정" @click="settingsOpen = true">⚙</button>
-        <button class="btn btn--icon" :disabled="refreshing" aria-label="시세 갱신" title="시세 갱신" @click="onRefreshMarket">
-          <span v-if="refreshing" class="btn__spin btn__spin--on" aria-hidden="true"></span>
-          <template v-else>⟳</template>
-        </button>
       </div>
     </header>
 
@@ -1415,7 +1049,7 @@ onUnmounted(() => {
       </section>
     <section class="strip">
       <div v-if="!groups.length" class="strip__empty">
-        관심 테마가 없습니다. ⚙ 설정에서 추가하세요.
+        관심 테마가 없습니다 — 편집은 포트폴리오·리스크에서.
       </div>
       <!--
         🔴 사용자: *"페이징 처리해서 … 스크롤 처리하지말고 페이징 처리해서 보여줘"*
@@ -1457,25 +1091,11 @@ onUnmounted(() => {
               **전부 감시하면 내 기본값이 분석 빈도와 비용을 정한다** ⇒ **기본 꺼짐**.
               ⚠️ 행 전체 클릭은 **차트 선택**이라 그대로 두고, 표시는 전용 버튼으로 받는다.
             -->
-            <button
-              class="wrow__w"
-              :class="{ 'wrow__w--on': t.watch }"
-              :title="t.watch ? '감시 중 — 끄려면 클릭' : '감시 켜기'"
-              @click.stop="onToggleWatch(group, t)"
-            >{{ t.watch ? '감시중' : '감시' }}</button>
-            <button class="wrow__rm" title="삭제" @click.stop="onRemoveTicker(group, t)">×</button>
+            <!-- 감시중 표시 — 보기 전용(편집은 포트폴리오·리스크에서. 2026-10-04 재편: 대시보드는 조작하지 않는다) -->
+            <span v-if="t.watch" class="wrow__w wrow__w--on">감시중</span>
           </li>
           <li v-if="!group.tickers.length" class="wrow wrow--empty">비어 있음</li>
         </ul>
-        <div class="wcard__add">
-          <input
-            v-model="ensureInput(group.id).query"
-            class="input input--xs"
-            placeholder="티커/종목명"
-            @keyup.enter="onAddTicker(group)"
-          />
-          <button class="btn btn--xs btn--soft" :disabled="busy" @click="onAddTicker(group)">+</button>
-        </div>
       </article>
     </section>
 
@@ -1529,18 +1149,9 @@ onUnmounted(() => {
               <span class="chat__badge">AI</span>
               <h3 class="panel__h">애널리스트</h3>
             </div>
-            <div class="chat__headacts">
-              <button class="btn btn--ai btn--sm" :disabled="analystLoading" @click="runAnalyst">
-                {{ analystLoading ? '분석 중…' : '분석 실행' }}
-              </button>
-              <button
-                class="iconbtn"
-                :disabled="clearing || !messages.length"
-                aria-label="대화 초기화"
-                title="대화 이력을 지웁니다(서버 기록도 함께)"
-                @click="clearChat"
-              >{{ clearing ? '…' : '🗑' }}</button>
-            </div>
+            <!-- 🔴 2026-10-04 재편: 분석 실행 버튼 제거 — 분석은 장 시점·모멘텀·이벤트·퀀트
+                 트리거(서버 크론·국면 데몬)가 돌린다. 화면은 결과를 자동으로 받아 그릴 뿐이다. -->
+            <span class="chat__auto">자동 갱신 · 분석은 장 시점·모멘텀 트리거로 실행</span>
           </header>
 
           <!--
@@ -1556,9 +1167,6 @@ onUnmounted(() => {
           </p>
 
           <!-- 🔴 무엇을 하는 중인지 알린다 — 20~30초 동안 아무 표시가 없으면 멈춘 줄 안다 -->
-          <p v-if="analystLoading && analystStage" class="analyst__stage">
-            <span class="analyst__dot" aria-hidden="true"></span>{{ analystStage }}…
-          </p>
           <p v-if="analystError" class="banner banner--error">{{ analystError }}</p>
           <p v-else-if="!report" class="banner banner--empty">
             아직 분석 기록이 없습니다. <b>장 마감</b>과 <b>모멘텀 발생</b> 시 자동으로 돌고,
@@ -1614,31 +1222,7 @@ onUnmounted(() => {
             <!-- 🔴 **언제·왜 돌았는지** 보여준다 — 자동 실행으로 바뀌었으니 안 그러면 언제 것인지 모른다 -->
           </template>
 
-          <!--
-            🔴 **승인됐지만 아직 안 나간 주문** — 스크롤에 묻히면 안 되는 것이다.
-               승인은 되돌릴 수 있지만 **전송은 되돌릴 수 없다** ⇒ 모달이 아니라
-               항상 보이는 자리에서 한 번 더 누른다(`OrderTicket` 주석의 "목록" 이 여기다).
-          -->
-          <div v-if="approvedProposals.length" class="sendq">
-            <h3 class="panel__h">승인됨 · 전송 대기 <small>{{ approvedProposals.length }}</small></h3>
-            <article v-for="p in approvedProposals" :key="p.id" class="sendq__row">
-              <span class="sendq__what">
-                <b :class="p.side === 'BUY' ? 'up' : 'down'">{{ p.side === 'BUY' ? '매수' : '매도' }}</b>
-                {{ p.symbol }} <span class="mono-num">{{ p.quantity }}</span>주
-                <span class="mono-num">{{ p.price }}</span>
-              </span>
-              <span class="sendq__act">
-                <button class="btn btn--xs" @click="decide(p, 'reject')">취소</button>
-                <!-- 🔴 버튼 이름은 **모드에서 유도**한다 — 박아 두면 모의/실거래가 같은 말을 한다 -->
-                <button
-                  class="btn btn--xs"
-                  :class="ordersMode === 'live' ? 'btn--danger' : 'btn--soft'"
-                  @click="decide(p, 'execute')"
-                >{{ ordersMode === 'live' ? '🔴 실주문 전송' : '실행(모의)' }}</button>
-              </span>
-            </article>
-          </div>
-          <div ref="chatBox" class="chat__log" @scroll="onChatScroll">
+          <div class="chat__log">
             <!--
               🔴 **분석 결과는 대화의 첫 발언이다** — 따로 뜯어 둔 카드가 아니다.
                  아래 메시지들과 **같은 스크롤 안**에 있어서, 분석을 보고 바로 되묻고
@@ -1835,62 +1419,6 @@ onUnmounted(() => {
               </li>
             </ol>
           </div>
-            <p v-if="!messages.length" class="panel__empty">
-              보유 종목·시황을 물어보세요. 필요하면 시세·차트·뉴스를 <b>직접 찾아서</b> 답합니다.
-            </p>
-            <article v-for="(m, i) in messages" :key="i" class="msg" :class="`msg--${m.role}`">
-              <!-- 사고 과정: 접어 둔다. 🔴 답과 섞으면 무엇이 근거인지 알 수 없다 -->
-              <details v-if="m.thinking" class="msg__think">
-                <summary>생각 ({{ m.thinking.length }}자)</summary>
-                <pre>{{ m.thinking }}</pre>
-              </details>
-
-              <!-- 도구 호출: 무엇을 부르고 무엇을 받았는지 그대로 -->
-              <ul v-if="m.tools && m.tools.length" class="msg__tools">
-                <li v-for="t in m.tools" :key="t.id" class="tool" :class="`tool--${t.state}`">
-                  <span class="tool__name">{{ t.name }}</span>
-                  <span class="tool__args mono-num">{{ JSON.stringify(t.args) }}</span>
-                  <span class="tool__state">{{ t.state === 'running' ? '…' : t.state === 'ok' ? '✓' : '✕' }}</span>
-                  <span v-if="t.detail" class="tool__detail">{{ t.detail }}</span>
-                </li>
-              </ul>
-
-              <p v-if="m.recall" class="msg__recall">과거 대화 {{ m.recall }}건을 참고했습니다.</p>
-              <!--
-                🔴 **모델 답만** 마크다운으로 렌더한다. 사용자 발화는 평문 그대로 —
-                   내가 쓴 글을 HTML 로 바꿀 이유가 없고, 표면만 넓힌다.
-                ⚠️ `v-html` 을 쓰므로 `renderMarkdown` 안에서 **반드시 소독**한다
-                   (웹 검색 결과가 답에 섞여 들어온다 = 외부 입력이다).
-              -->
-              <div
-                v-if="m.text && m.role === 'assistant'"
-                class="msg__text md"
-                v-html="renderMarkdown(m.text)"
-              ></div>
-              <div v-else-if="m.text" class="msg__text">{{ m.text }}</div>
-              <!-- 아직 아무것도 안 온 상태를 빈칸으로 두지 않는다 -->
-              <span v-else-if="!m.done" class="msg__wait">생각 중…</span>
-              <p v-if="m.notice" class="msg__notice">{{ m.notice }}</p>
-            </article>
-            <!--
-              🔴 **HITL 은 대화의 끝에 있어야 한다** (2026-10-02 — 위 analyst 절 참조).
-                 자연어로 부탁한 매수/매도가 **같은 흐름 안에서** 제안으로 나타나고 거기서 승인한다.
-              ⚠️ 대화 로그 **안**에 둔다 — 로그가 스크롤되므로 새 제안이 생기면 자연스럽게 눈에 든다.
-            -->
-            <!--
-              🔴 **매매 제안은 채팅이 아니라 모달로** (2026-10-02 사용자 지시).
-                 *"매도 제안, 매수 제안은 채팅이 아니라 모달로 제시하라고"*
-
-                 오늘 낮에 HITL 을 대화 로그 안으로 옮겼는데, 그러자 **거절된 제안까지
-                 계속 쌓여** 사용자가 *"뭐냐 이건?"* 이라고 했다. 실제로 화면의 3건이
-                 전부 `REJECTED` 였고 그중 하나는 **내가 아침에 만든 검증용 제안**이었다.
-
-              ⇒ 제안은 **승인 대기(PENDING)인 것만**, **모달**(`OrderTicket`)로 띄운다.
-                 결정을 요구하는 것은 흐름을 막아야 하고, 지난 것은 보일 이유가 없다.
-              ⚠️ 예약 주문은 **제안이 아니라 현황**이라 여기 남긴다(다른 층이다).
-            -->
-
-
             <!-- 거래소에 걸려 감시 중인 예약(조건부) 주문 — 제안과 다른 층이다 -->
             <div v-if="conditionalOrders.length || conditionalError" class="props">
               <h3 class="panel__h">예약 주문 <small>거래소가 감시가 도달을 지켜보는 중</small></h3>
@@ -1907,47 +1435,16 @@ onUnmounted(() => {
                   <div><dt>수량</dt><dd class="mono-num">{{ o.quantity }}</dd></div>
                   <div><dt>만료</dt><dd class="mono-num">{{ o.expireDate ?? '—' }}</dd></div>
                 </dl>
-                <div class="prop__act">
-                  <button class="btn btn--sm" @click="cancelConditional(o)">예약 취소</button>
-                </div>
+                <!-- 취소는 승인 대기 메뉴에서 — 대시보드는 조작하지 않는다(2026-10-04 재편) -->
               </article>
             </div>
           </div>
-
-          <!-- 위를 읽는 중에 새 답이 오면 **끌어내리지 않고** 알려만 준다 -->
-          <button v-if="hasUnseen" class="chat__jump" @click="scrollChat({ force: true })">
-            ↓ 새 답이 있습니다
-          </button>
-
-          <p v-if="chatError" class="banner banner--error">{{ chatError }}</p>
-
-          <form class="chat__form" @submit.prevent="sendChat">
-            <input
-              v-model="chatInput"
-              class="input"
-              :disabled="chatBusy"
-              placeholder="예: QLD 지금 더 사도 될까?"
-            />
-            <button class="btn btn--ai" type="submit" :disabled="chatBusy || !chatInput.trim()">
-              {{ chatBusy ? '…' : '보내기' }}
-            </button>
-          </form>
         </section>
     </div>
 
-    <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" @saved="loadDashboard(); restartDashTimer()" />
   </div>
 
     <!-- 🔴 주문 티켓 · 사전 점검 (와이어프레임 ⑨) -->
-    <OrderTicket
-      v-if="ticketFor"
-      :proposal="ticketFor"
-      :fetch-precheck="fetchPrecheck"
-      @close="ticketClose"
-      @approve="ticketApprove"
-      @reject="ticketReject"
-      @trim="ticketTrim"
-    />
 </template>
 
 <style scoped>
@@ -2481,6 +1978,7 @@ onUnmounted(() => {
   padding: 2px 6px; border-radius: var(--rounded-xs);
   background: var(--color-ai-soft); color: var(--color-ai);
 }
+.chat__auto { font-size: var(--text-2xs); color: var(--color-faint); white-space: nowrap; }
 .chat__headacts { display: flex; align-items: center; gap: var(--space-xs); flex-shrink: 0; }
 /**
  * 🔴 **고정 영역과 스크롤 영역 사이에 선을 긋는다** (2026-10-02 실측).
