@@ -132,7 +132,7 @@
           <small>미국장을 주로 보시면 <b>미국</b>만 켜 두셔도 됩니다.</small>
         </div>
 
-        <div class="frm__row frm__row--sep">
+        <div class="frm__row frm__row--sep frm__row--wide">
           <span class="frm__label">관심 테마</span>
           <ul class="groups">
             <li v-for="g in groups" :key="g.id">
@@ -154,7 +154,7 @@
           <p v-if="presetMsg" class="hint">{{ presetMsg }}</p>
         </div>
 
-        <label class="frm__row frm__row--sep">
+        <label class="frm__row frm__row--sep frm__row--wide">
           <span class="frm__label">
             매매 분석 추가 지시 (프롬프트)
             <em v-if="usingDefault.includes('briefingPrompt')">없음</em>
@@ -173,7 +173,7 @@
           <small>비워 두면 자동 실행하지 않습니다(아래 수동 실행 버튼으로 직접).</small>
         </label>
 
-        <div class="frm__row frm__row--sep">
+        <div class="frm__row frm__row--sep frm__row--wide">
           <span class="frm__label">목표가 · 손절선 <small class="inlh">종목별 기준선을 넘으면 텔레그램으로 알립니다</small></span>
           <!--
             🔴 사람이 정한 기준이라 오경보가 없다 — 급변(%)은 시장이 정하지만 이건 내가 정한다.
@@ -578,7 +578,11 @@ onUnmounted(() => clearInterval(timer));
 .tbl td { padding: 5px var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); }
 
 /* ⑥ 설정 폼 — 구 SettingsPanel 의 .sp__* 규칙을 이 페이지 이름으로 가져왔다 */
-.frm { display: flex; flex-direction: column; gap: var(--space-base); }
+/* 🔴 2026-10-04 사용자: "width 무턱대고 100% 넣지 말고 정리" — 1440px 화면에서 입력이
+   풀폭으로 퍼져 난잡했다. 폼은 2열 그리드, 입력은 읽기 좋은 폭(≤420px)으로 멈춘다.
+   긴 것(프롬프트·crontab)만 전폭 행(span 2)을 쓴다. */
+.frm { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-base) var(--space-lg, 24px); align-items: start; }
+.frm__row--wide { grid-column: 1 / -1; }
 .frm__row { display: flex; flex-direction: column; gap: 6px; }
 .frm__row--sep { border-top: 1px solid var(--color-hairline); padding-top: var(--space-base); }
 .frm__label { font-size: var(--text-md); font-weight: 600; color: var(--color-ink); display: flex; gap: 8px; align-items: center; }
@@ -593,9 +597,9 @@ onUnmounted(() => clearInterval(timer));
 /* 입력 — 전역 .input 은 레이아웃만 준다. 색·테두리는 여기서(브라우저 기본으로 안 남긴다) */
 .frm select,
 .frm input[type='text'],
-.frm input[type='number'],
-.frm .area {
+.frm input[type='number'] {
   width: 100%;
+  max-width: 420px;
   background: var(--color-surface-sunken);
   border: 1px solid var(--color-hairline-strong);
   border-radius: var(--rounded-md);
@@ -607,7 +611,12 @@ onUnmounted(() => clearInterval(timer));
 .frm .area::placeholder { color: var(--color-faint); }
 .frm input:focus,
 .frm .area:focus { outline: none; border-color: var(--color-primary-line); box-shadow: var(--ring); }
-.frm .area { resize: vertical; line-height: 1.6; }
+.frm .area {
+  width: 100%; max-width: 760px; resize: vertical; line-height: 1.6;
+  background: var(--color-surface-sunken); border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--rounded-md); color: var(--color-ink); font-size: var(--text-base);
+  padding: 10px var(--space-base);
+}
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {

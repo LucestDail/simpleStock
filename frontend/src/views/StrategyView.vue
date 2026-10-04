@@ -299,7 +299,7 @@ onUnmounted(() => clearInterval(timer));
 .cols { display: grid; grid-template-columns: 360px 1fr; gap: var(--space-sm); align-items: start; }
 .card--list { max-height: 520px; overflow-y: auto; }
 .card--detail { min-width: 0; }
-.card--detail > .input { width: 100%; }
+.card--detail > .input { width: 100%; max-width: 480px; }
 .sl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .sl__row { display: flex; gap: var(--space-sm); align-items: flex-start; padding: 6px var(--space-sm); border-radius: var(--rounded-md); cursor: pointer; }
 .sl__row:hover { background: var(--color-surface-hover); }

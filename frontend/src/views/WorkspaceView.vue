@@ -539,7 +539,9 @@ function priceOf(symbol) {
  *    폰 알림은 가지만 화면을 보고 있는 사람에겐 아무 일도 안 일어나던 자리다.
  */
 const leverageTone = computed(() => {
-  const p = leveragePct.value;
+  // 🔴 2026-10-04 흰 화면의 범인 — 재편 수술 때 leveragePct computed 가 지워진 걸 모르고
+  //    참조가 남았다. 렌더 예외 한 줄이 서브트리를 지운다(9-21 사고 가족) — 원천에서 직접 읽는다.
+  const p = Number(portfolio.value?.weights?.leveragePct);
   if (!Number.isFinite(p)) return '';
   return p >= 50 ? 'alloc__flag--danger' : p >= 25 ? 'alloc__flag--warn' : 'alloc__flag--ok';
 });
@@ -1169,58 +1171,10 @@ onUnmounted(() => {
           <!-- 🔴 무엇을 하는 중인지 알린다 — 20~30초 동안 아무 표시가 없으면 멈춘 줄 안다 -->
           <p v-if="analystError" class="banner banner--error">{{ analystError }}</p>
           <p v-else-if="!report" class="banner banner--empty">
-            아직 분석 기록이 없습니다. <b>장 마감</b>과 <b>모멘텀 발생</b> 시 자동으로 돌고,
-            지금 보려면 <b>분석 실행</b>을 누르세요.
+            아직 분석 기록이 없습니다 — <b>장 시점·모멘텀 트리거</b>가 돌면 여기 나타납니다.
+            (수동 실행은 운용 규칙 설정에서)
           </p>
 
-          <template v-else>
-            <!--
-              🔴 **메타를 칩으로 묶는다** (와이어프레임 `10.2 09:06 · KRX 개장` `웹 검색 4건`
-                 `잔고 스냅샷 12:24`). 종전엔 산문 두 줄로 흩어져 있어, 이 분석이
-                 **언제·무엇을 보고** 나온 것인지 한눈에 안 들어왔다.
-              ★ 특히 **잔고 스냅샷 시각**이 없으면, 분석이 인용한 수량과 화면 수량이
-                어긋나도 어느 쪽이 낡은 것인지 판정할 수 없다(10-02 실사고의 축).
-            -->
-            <div class="meta">
-              <span v-if="report.at" class="meta__chip">
-                {{ new Date(report.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}
-                <template v-if="report.trigger?.why"> · {{ report.trigger.why }}</template>
-              </span>
-              <span v-if="report.web" class="meta__chip" :class="{ 'meta__chip--warn': !report.web.ok }">
-                <template v-if="report.web.ok">웹 검색 {{ report.web.hits }}건</template>
-                <template v-else>웹 검색 미반영</template>
-              </span>
-              <span v-if="portfolio?.asOf" class="meta__chip">잔고 스냅샷 {{ new Date(portfolio.asOf).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) }}</span>
-            </div>
-            <p v-if="report.web && !report.web.ok" class="analyst__src">웹 검색 미반영 — {{ report.web.error }}</p>
-
-            <!--
-              🔴 **리스크 체크** (와이어프레임 ③ 의 표). 시황 글만 읽으면 *"내 포지션이
-                 지금 어떤 위험에 놓였나"* 가 안 보인다 — 숫자로 못박는다.
-              ⚠️ 비중은 **서버 한 곳**(portfolioWeights)에서 온다. 화면이 따로 계산하면
-                 분석 프롬프트의 숫자와 갈라진다.
-            -->
-            <!-- 📊 제안 성과 (2026-10-03) — 자율의 전제인 승인율을 상시 노출 -->
-            <div v-if="orderStats" class="perf">
-              <h3 class="panel__h">제안 성과 <small>생애</small></h3>
-              <dl class="risk__grid">
-                <div><dt>제안</dt><dd class="mono-num">{{ orderStats.proposed }}건</dd></div>
-                <div><dt>승인</dt><dd class="mono-num">{{ orderStats.approved + orderStats.executed }}건</dd></div>
-                <div><dt>거절</dt><dd class="mono-num" :class="{ down: rejectRate >= 50 }">{{ orderStats.rejected }}건 · {{ rejectRate }}%</dd></div>
-                <div><dt>실주문</dt><dd class="mono-num">{{ orderStats.executed }}건</dd></div>
-              </dl>
-            </div>
-            <div v-if="portfolio?.weights" class="risk">
-              <h3 class="panel__h">리스크 체크</h3>
-              <dl class="risk__grid">
-                <div><dt>레버리지 노출</dt><dd class="mono-num" :class="leverageTone">{{ portfolio.weights.leveragePct }}%</dd></div>
-                <div v-if="topWeight"><dt>단일 종목 최대 비중</dt><dd class="mono-num" :class="topWeightTone">{{ topWeight.pct }}% {{ topWeight.symbol }}</dd></div>
-                <div v-for="h in lossHoldings" :key="h.symbol"><dt>{{ h.symbol }} 평단 대비</dt><dd class="mono-num down">{{ pct(h.profitRate) }}</dd></div>
-                <div><dt>현금 비중</dt><dd class="mono-num">{{ portfolio.weights.cashPct }}%</dd></div>
-              </dl>
-            </div>
-            <!-- 🔴 **언제·왜 돌았는지** 보여준다 — 자동 실행으로 바뀌었으니 안 그러면 언제 것인지 모른다 -->
-          </template>
 
           <div class="chat__log">
             <!--
@@ -1235,12 +1189,43 @@ onUnmounted(() => {
               안 보이면 "검색이 안 돈 것" 과 "검색했는데 별 게 없던 것" 이 똑같아진다.
           -->
             <template v-if="report">
-            <p v-if="report.at || report.trigger?.why" class="analyst__when">
-              <template v-if="report.at">{{ new Date(report.at).toLocaleString('ko-KR') }}</template>
-              <template v-if="report.trigger?.why"> · {{ report.trigger.why }}</template>
-            </p>
+            <!-- 🔄 2026-10-04 2차: 사용자 "제안 성과·리스크 체크를 한 화면으로 합치라" —
+                 고정부/스크롤부 분리를 없애고 보고서가 **한 흐름**이 됐다. 메타 → 시황 →
+                 성과·리스크(한 표) → 종목 판단 → 못 본 것 → 예약 순서. -->
+            <div class="meta">
+              <span v-if="report.at" class="meta__chip">
+                {{ new Date(report.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}
+                <template v-if="report.trigger?.why"> · {{ report.trigger.why }}</template>
+              </span>
+              <span v-if="report.web" class="meta__chip" :class="{ 'meta__chip--warn': !report.web.ok }">
+                <template v-if="report.web.ok">웹 검색 {{ report.web.hits }}건</template>
+                <template v-else>웹 검색 미반영</template>
+              </span>
+              <span v-if="portfolio?.asOf" class="meta__chip">잔고 {{ new Date(portfolio.asOf).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) }}</span>
+            </div>
+            <p v-if="report.web && !report.web.ok" class="analyst__src">웹 검색 미반영 — {{ report.web.error }}</p>
+
             <p class="analyst__view">{{ report.marketView }}</p>
             <p class="analyst__mom">{{ report.momentumRead }}</p>
+
+            <!-- 📊 성과 + 리스크 — 따로 두 카드였던 것을 한 표로(2026-10-04 사용자 지시) -->
+            <div v-if="orderStats || portfolio?.weights" class="risk">
+              <h3 class="panel__h">성과·리스크 <small>생애 감사 · 서버 계산</small></h3>
+              <dl class="risk__grid">
+                <template v-if="orderStats">
+                  <div><dt>제안</dt><dd class="mono-num">{{ orderStats.proposed }}건</dd></div>
+                  <div><dt>승인</dt><dd class="mono-num">{{ orderStats.approved + orderStats.executed }}건</dd></div>
+                  <div><dt>거절</dt><dd class="mono-num" :class="{ down: rejectRate >= 50 }">{{ orderStats.rejected }}건 · {{ rejectRate }}%</dd></div>
+                  <div><dt>실주문</dt><dd class="mono-num">{{ orderStats.executed }}건</dd></div>
+                </template>
+                <template v-if="portfolio?.weights">
+                  <div><dt>레버리지 노출</dt><dd class="mono-num" :class="leverageTone">{{ portfolio.weights.leveragePct }}%</dd></div>
+                  <div v-if="topWeight"><dt>단일 최대</dt><dd class="mono-num" :class="topWeightTone">{{ topWeight.pct }}% {{ topWeight.symbol }}</dd></div>
+                  <div><dt>현금 비중</dt><dd class="mono-num">{{ portfolio.weights.cashPct }}%</dd></div>
+                  <div v-for="h in lossHoldings" :key="h.symbol"><dt>{{ h.symbol }} 평단비</dt><dd class="mono-num down">{{ pct(h.profitRate) }}</dd></div>
+                </template>
+              </dl>
+            </div>
 
             <!-- 🔴 제안 — 승인해야만 진행된다. 실행은 아직 no-op 이다 -->
             <!--
@@ -1407,18 +1392,7 @@ onUnmounted(() => {
             </div>
           </template>
 
-          <!-- 🔴 분석·알림·제안·승인을 **한 시간축**으로 (사용자 지시) -->
-          <div class="tl">
-            <h3 class="panel__h">활동 기록 <small>{{ activity.length }}</small></h3>
-            <p v-if="!activity.length" class="panel__empty">아직 기록이 없습니다.</p>
-            <ol v-else class="tl__list">
-              <li v-for="(a, i) in activity" :key="i" class="tl__row">
-                <span class="tl__icon" aria-hidden="true">{{ ACT_ICON[a.kind] || '·' }}</span>
-                <time class="tl__at mono-num">{{ actTime(a.at) }}</time>
-                <span class="tl__text">{{ a.title }}</span>
-              </li>
-            </ol>
-          </div>
+          <!-- 활동 기록은 활동 로그 메뉴가 전담(2026-10-04 — 패널 중복이 난잡의 축이었다) -->
             <!-- 거래소에 걸려 감시 중인 예약(조건부) 주문 — 제안과 다른 층이다 -->
             <div v-if="conditionalOrders.length || conditionalError" class="props">
               <h3 class="panel__h">예약 주문 <small>거래소가 감시가 도달을 지켜보는 중</small></h3>
