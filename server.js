@@ -886,10 +886,16 @@ app.get('/api/dashboard', async (req, res) => {
         if (t.symbol === '^IXIC') bench.qqq = Number(t.price) || null;   // 나스닥 종합 — QQQ 대용(테이프에 있는 것만 쓴다)
       }
       const totalKrw = Number(data?.portfolio?.summary?.value?.krw);
+      // ⚠️ dashboard 의 portfolio 에는 weights 가 없다(/api/portfolio 모양과 다르다) —
+      //    첫 라이브에서 cashPct/leveragePct 가 null 로 적혔다. 같은 한 벌(portfolioWeights)로 계산한다.
+      const w = require('./server/analystService').portfolioWeights(
+        data?.portfolio?.items || [], data?.portfolio?.summary || null,
+        require('./server/regimeService').readCatalog()
+      );
       require('./server/snapshotService').recordDaily({
         totalKrw,
-        cashPct: data?.portfolio?.weights?.cashPct ?? null,
-        leveragePct: data?.portfolio?.weights?.leveragePct ?? null,
+        cashPct: w?.cashPct ?? null,
+        leveragePct: w?.leveragePct ?? null,
         benchmarks: bench,
       });
     } catch (e) { logWarn('snapshot.wire_failed', { message: e.message }); }
