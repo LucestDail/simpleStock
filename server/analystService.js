@@ -3004,12 +3004,23 @@ function inverseGate(p, regimeState) {
   * ⚠️ `holdings` 는 **선택**이다 — 안 주면 보유 방침을 **판정하지 않고 그 사실을 로그로 남긴다**
   *    (모르면 막지 않는다. 다만 조용히 통과시키지도 않는다).
   */
+const CTX_CALL_TIMEOUT_MS = 180_000;
+
 async function decideOnContext({ contextText, regimeState = null, holdings = [] }) {
   const raw = await generateStructuredOutput({
     systemPrompt: SYSTEM_PROMPT,
     userPrompt: String(contextText || ''),
     schema: REPORT_SCHEMA,
     logLabel: 'trade_analyst_ctx',
+    /**
+     * 🔴 180초 — 기본 120초의 출력 캡(시간예산 × 24tok/s × 0.9 = 2,592)이 bear 백테스트
+     *    마지막 회차에서 **정확히 그 값에 잘렸다**(2026-10-04 라이브 2회 재현 — 짙은 하락
+     *    국면은 보유 5종 + 후보 전체를 서술하느라 출력이 길어진다). 잘림은 재시도 불가라
+     *    회차가 통째로 죽는다. 토큰값을 박지 않고 **예산을 넓혀 캡이 따라 커지게**(→3,888).
+     * ⚠️ backtestRunner 의 SIGKILL 20분과의 관계: 회차 최대 6콜 × 180초 = 18분 < 20분.
+     *    여기를 더 키우면 **바깥 안전망이 안쪽보다 촘촘해진다** — 관계는 backtestRunner.test 가 잠근다.
+     */
+    timeoutOverrideMs: CTX_CALL_TIMEOUT_MS,
   }, { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] });
   const report = shapeReport(raw);
   const accepted = [];
@@ -3024,6 +3035,7 @@ async function decideOnContext({ contextText, regimeState = null, holdings = [] 
 
 module.exports = {
   // ⚠️ 테스트가 **구조 불변식**을 잴 수 있게 내보낸다 — 숨겨 두면 둘이 갈라져도 모른다
+  _CTX_CALL_TIMEOUT_MS: CTX_CALL_TIMEOUT_MS,
   _reportSchemaFor: reportSchemaFor, _REPORT_SCHEMA: REPORT_SCHEMA, _shapeReport: shapeReport,
   savePrompt, readLastPrompt, LAST_PROMPT_FILE, portfolioWeights,
   analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport,

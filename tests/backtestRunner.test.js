@@ -34,3 +34,20 @@ test('🔴 verify/backtest.js 의 require 가 상대 경로다 — 절대경로�
   assert.ok(!src.includes("require('/app/"), '도커 전용 절대경로가 남아 있다');
   assert.match(src, /path\.join\(__dirname/, '상대 경로 require 가 없다');
 });
+
+test('🔴 타임아웃 순서 — 러너 SIGKILL 이 안쪽 LLM 예산 합보다 넉넉하다', () => {
+  /*
+   * 2026-10-04 bear 백테스트: 기본 120초 예산의 출력 캡(2,592토큰)에 마지막 회차가
+   * 정확히 잘려 2회 연속 exit 1. 예산을 180초로 넓혔는데(캡 3,888), 그 순간
+   * **바깥 러너 상한(20분)과의 역전**이 새 위험이 된다 — 회차 최대 6콜 × 180초 = 18분.
+   * 안쪽을 또 키우는 사람이 바깥을 같이 보도록 관계를 여기서 잠근다.
+   * (한 곳에서 유도하지 못하는 이유: 러너는 자식 프로세스 경계 너머라 상수를 공유할 수 없다)
+   */
+  const { _KILL_MS } = require('../server/backtestRunner');
+  const { _CTX_CALL_TIMEOUT_MS } = require('../server/analystService');
+  const MAX_LLM_CALLS = 6; // verify/backtest.js 헤더 주석의 상한(국면 3 × 리밸런스 2)
+  assert.ok(
+    _KILL_MS > MAX_LLM_CALLS * _CTX_CALL_TIMEOUT_MS,
+    `역전: 러너 ${_KILL_MS / 60000}분 ≤ 안쪽 최악 ${(MAX_LLM_CALLS * _CTX_CALL_TIMEOUT_MS) / 60000}분 — 바깥 안전망이 안쪽보다 촘촘하다`
+  );
+});

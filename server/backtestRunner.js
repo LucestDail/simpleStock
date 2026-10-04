@@ -16,6 +16,12 @@ const { logInfo, logWarn } = require('./logger');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
+/**
+ * SIGKILL 상한 — ⚠️ 안쪽(LLM 콜 180초 × 최대 6콜 = 18분)보다 **넉넉해야** 한다.
+ * 역전되면 안쪽이 실패를 곱게 감싸는 경로를 건너뛰고 통째로 죽는다(타임아웃 역전 가족).
+ * 관계는 tests/backtestRunner.test.js 가 잠근다.
+ */
+const KILL_MS = 20 * 60_000;
 const LAST_FILE = path.join(DATA_DIR, 'backtest-last.json');
 const SCENARIOS = ['vshape', 'bull', 'bear', 'chop'];
 
@@ -43,7 +49,7 @@ function run(scenario) {
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { err += d; });
   // 🔴 상한 — LLM 이 멈추면 러너가 영원히 "실행 중" 이 된다(무응답이 제일 위험하다)
-  const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* 이미 죽음 */ } }, 20 * 60_000);
+  const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* 이미 죽음 */ } }, KILL_MS);
 
   child.on('close', (code) => {
     clearTimeout(killer);
@@ -68,4 +74,5 @@ function run(scenario) {
   return { ok: true, startedAt };
 }
 
-module.exports = { run, status, SCENARIOS };
+module.exports = {
+  _KILL_MS: KILL_MS, run, status, SCENARIOS };
