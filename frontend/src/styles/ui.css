@@ -98,6 +98,17 @@
   text-align: center;
   color: var(--color-muted);
 }
+/* 패널 몸체 — WorkspaceView scoped 에 있던 것을 전역 승격(2026-10-04 분해).
+   NewsPanel·RankingsPanel·PipelineStrip 이 같은 틀을 쓴다. */
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-base);
+  display: flex; flex-direction: column; gap: var(--space-sm);
+}
+/* 🔴 "없음" 과 "못 받음" 은 다른 색이어야 한다 */
+.panel__err { margin: 0; font-size: var(--text-sm); color: var(--color-down); }
 .panel__h {
   margin: 0; font-size: var(--text-xs); font-weight: 700;
   letter-spacing: 0.06em; color: var(--color-muted);

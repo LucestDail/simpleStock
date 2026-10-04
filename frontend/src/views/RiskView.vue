@@ -1,7 +1,7 @@
 <!--
   D-8 포트폴리오·리스크 (2026-10-03 와이어프레임 준용)
   한도 대비 현재 위치(게이지) + 비중 도넛 대신 바(기존 언어 유지) + 보유 테이블.
-  ⚠️ 스트레스 테스트(지수 -5% 시나리오)는 **백엔드 계산이 없어** 이번엔 안 그린다 — 명시한다.
+  스트레스 테스트 = `/api/risk/stress`(10-04 신설) — 지수 쇼크 × 레버리지 근사(베타 1 가정 명시).
 -->
 <template>
   <div class="page">
@@ -23,7 +23,7 @@
         <h2>자산 구성</h2>
         <div class="mix">
           <div v-for="w in weights.holdings" :key="w.symbol" class="mix__row">
-            <span class="mix__sym">{{ w.symbol }}<small v-if="w.leverage >= 2" class="lev">{{ w.leverage }}x</small></span>
+            <RouterLink class="mix__sym mix__sym--link" :to="`/symbol/${w.symbol}`">{{ w.symbol }}<small v-if="w.leverage >= 2" class="lev">{{ w.leverage }}x</small></RouterLink>
             <div class="mix__bar"><span :style="{ width: w.pct + '%' }"></span></div>
             <b class="mono-num">{{ w.pct }}%</b>
           </div>
@@ -35,9 +35,20 @@
         </div>
       </section>
       <section class="card">
-        <h2>이 화면이 아직 못 보여주는 것</h2>
-        <p class="mut">스트레스 테스트(지수 -5%/-10% 시나리오별 예상 손실) — 계산 백엔드가 없다.
-          업종 분류 — 토스 API 가 업종을 주지 않아 지어낼 수 없다. (없는 숫자를 그리지 않는다.)</p>
+        <h2>스트레스 테스트 <small class="mut">지수 쇼크 시 예상 손실</small></h2>
+        <template v-if="stress?.ok">
+          <table class="tbl">
+            <thead><tr><th>시나리오</th><th>예상 손실</th><th>가장 큰 자리</th></tr></thead>
+            <tbody><tr v-for="sc in stress.scenarios" :key="sc.shockPct">
+              <td>지수 {{ sc.shockPct }}%</td>
+              <td class="mono-num down">{{ fmtKrw(sc.lossKrw) }}</td>
+              <td class="mono-num">{{ worst(sc) }}</td>
+            </tr></tbody>
+          </table>
+          <p class="mut">⚠️ {{ stress.assumption }}</p>
+        </template>
+        <p v-else class="mut">{{ stress?.error || '스트레스 테스트를 읽는 중…' }}</p>
+        <p class="mut">업종 분류는 토스 API 가 업종을 주지 않아 지어낼 수 없다.</p>
       </section>
     </template>
   </div>
@@ -64,7 +75,15 @@ const gauges = computed(() => {
   ];
 });
 
+const stress = ref(null);
+const fmtKrw = (n) => (Number.isFinite(n) ? `₩${Math.abs(Math.round(n)).toLocaleString()}` : '—');
+const worst = (sc) => {
+  const w = (sc.perHolding || []).reduce((a, b) => (Math.abs(b.lossKrw) > Math.abs(a?.lossKrw || 0) ? b : a), null);
+  return w ? `${w.symbol} ${fmtKrw(w.lossKrw)}` : '—';
+};
 onMounted(async () => {
+  try { const r = await apiFetch('/api/risk/stress'); stress.value = await r.json(); }
+  catch (e) { stress.value = { ok: false, error: e.message }; }
   try {
     const r = await apiFetch('/api/portfolio');
     const b = await r.json();
@@ -95,6 +114,11 @@ onMounted(async () => {
 .mix__bar { height: 12px; border: 1px solid var(--color-hairline); border-radius: var(--rounded-xs); overflow: hidden; }
 .mix__bar span { display: block; height: 100%; background: var(--color-ink); }
 .mix__bar--cash span { background: repeating-linear-gradient(45deg, var(--color-surface) 0 4px, var(--color-hairline) 4px 6px); }
+.mix__sym--link { color: var(--color-primary); text-decoration: none; }
+.mix__sym--link:hover { text-decoration: underline; }
 .mix__row b { text-align: right; }
+.tbl { width: 100%; border-collapse: collapse; font-size: var(--text-sm); margin-bottom: 6px; }
+.tbl th { text-align: left; font-size: var(--text-2xs); color: var(--color-faint); padding: 4px var(--space-sm); border-bottom: 1px solid var(--color-hairline); }
+.tbl td { padding: 4px var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); }
 .lev { margin-left: 4px; padding: 0 4px; border: 1px solid var(--color-warn); color: var(--color-warn); border-radius: var(--rounded-xs); font-size: var(--text-2xs); }
 </style>

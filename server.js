@@ -678,6 +678,44 @@ app.post('/api/agent/pause', (req, res) => {
 });
 app.post('/api/agent/resume', (req, res) => res.json(agentControl.resume({ by: 'web' })));
 
+/** 📈 성과 시계열 (D-10) — 스냅샷 이력 기반. 2건 미만이면 수익률 null(지어내지 않는다) */
+/** 🧪 백테스트 (D-9) — 🔴 LLM 을 실제로 태운다(수 분·토큰). 동시 1개. */
+app.get('/api/backtest/status', (req, res) => res.json(require('./server/backtestRunner').status()));
+app.post('/api/backtest/run', (req, res) => {
+  const r = require('./server/backtestRunner').run(String(req.body?.scenario || ''));
+  if (!r.ok) return res.status(r.kind === 'busy' ? 409 : 400).json(r);
+  res.json(r);
+});
+
+app.get('/api/performance', (req, res) => {
+  res.json(require('./server/snapshotService').performance());
+});
+
+/**
+ * 🌪️ 스트레스 테스트 (D-8) — **산수다.**
+ * 예상 손실 = Σ(보유 평가액 × 레버리지 배수 × 지수 쇼크). ⚠️ **베타 1 가정**을 명시한다 —
+ * 종목별 베타가 없어 지수 민감도를 1 로 둔다(레버리지 ETF 는 배수로 반영되므로
+ * 포트폴리오의 주된 왜곡 축은 덮는다). 현금은 쇼크를 안 받는다.
+ */
+app.get('/api/risk/stress', async (req, res) => {
+  try {
+    const h = await tossPortfolio.getHoldings({ fx: null });
+    const rate = Number(getMarketSnapshot()?.fx?.USDKRW?.rate) || 1350;
+    const rows = (h.items || []).map((it) => ({
+      symbol: it.symbol,
+      valueKrw: (Number(it.marketValue) || 0) * (it.currency === 'USD' ? rate : 1),
+      leverage: Number(it.leverageFactor) || 1,
+    }));
+    const scenarios = [-5, -10, -15].map((shock) => {
+      const lossKrw = Math.round(rows.reduce((a, r) => a + r.valueKrw * r.leverage * (shock / 100), 0));
+      return { shockPct: shock, lossKrw, perHolding: rows.map((r) => ({ symbol: r.symbol, lossKrw: Math.round(r.valueKrw * r.leverage * (shock / 100)) })) };
+    });
+    res.json({ ok: true, assumption: '베타 1 가정 — 종목별 베타 데이터가 없어 지수 민감도를 1로 둔다(레버리지 배수는 반영)', scenarios });
+  } catch (e) {
+    res.status(200).json({ ok: false, error: e.message });
+  }
+});
+
 app.get('/api/orders/stats', (req, res) => {
   const stats = orderService.proposalStats();
   if (!stats) return res.status(200).json({ ok: false, error: '감사 파일을 읽지 못했습니다.' });
@@ -835,6 +873,26 @@ app.get('/api/dashboard', async (req, res) => {
     });
     // ⚠️ 조각이 하나라도 실패하면 **200 이지만 그 사실을 몸통에 담아** 보낸다.
     //    실패를 502 로 바꾸면 나머지 멀쩡한 조각까지 화면에서 사라진다.
+    /**
+     * 📈 일일 자산 스냅샷 (2026-10-04 · D-10) — 멱등(하루 1건). 대시보드가 하루에
+     *    한 번은 열리므로 여기가 가장 싼 적재 지점이다. 벤치마크는 tape 에서.
+     * ⚠️ 적재 실패가 대시보드를 죽이면 안 된다 — 곁가지다.
+     */
+    try {
+      const tape = await require('./server/tickerTapeService').getTape();
+      const bench = {};
+      for (const t of [...(tape?.items || []), ...(tape?.fixed || [])]) {
+        if (t.symbol === '^KS11') bench.kospi = Number(t.price) || null;
+        if (t.symbol === '^IXIC') bench.qqq = Number(t.price) || null;   // 나스닥 종합 — QQQ 대용(테이프에 있는 것만 쓴다)
+      }
+      const totalKrw = Number(data?.portfolio?.summary?.value?.krw);
+      require('./server/snapshotService').recordDaily({
+        totalKrw,
+        cashPct: data?.portfolio?.weights?.cashPct ?? null,
+        leveragePct: data?.portfolio?.weights?.leveragePct ?? null,
+        benchmarks: bench,
+      });
+    } catch (e) { logWarn('snapshot.wire_failed', { message: e.message }); }
     return res.json({ ...data, market: mkt, watchlist: watch, settings: getDashboardSettings() });
   } catch (error) {
     logError('dashboard.failed', error, { requestId: req.requestId, kind: error.kind });

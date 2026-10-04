@@ -25,9 +25,8 @@
         <RouterLink to="/risk" class="side__item" active-class="side__item--on">포트폴리오·리스크</RouterLink>
         <RouterLink to="/report" class="side__item" active-class="side__item--on">성과 리포트</RouterLink>
         <RouterLink to="/rules" class="side__item" active-class="side__item--on">운용 규칙 설정</RouterLink>
-        <!-- ⚠️ 백엔드가 없는 둘은 **정직하게 준비 중** — 빈 화면을 파는 것보다 낫다 -->
-        <span class="side__item side__item--off" title="백테스트·전략 배분 백엔드가 아직 없습니다">전략 연구소 <small>준비 중</small></span>
-        <span class="side__item side__item--off" title="종목별 거래 이력 화면은 다음 단계입니다">종목 상세 <small>준비 중</small></span>
+        <RouterLink to="/lab" class="side__item" active-class="side__item--on">전략 연구소</RouterLink>
+        <!-- 종목 상세는 종목을 클릭해 들어간다 — 메뉴 항목이 아니라 경로다(와이어프레임도 breadcrumb) -->
       </nav>
       <div class="side__acct">
         <small>연결 계좌</small>

@@ -4,6 +4,8 @@ import PriceChart from '../components/PriceChart.vue';
 import SettingsPanel from '../components/SettingsPanel.vue';
 import OrderTicket from '../components/OrderTicket.vue';
 import PipelineStrip from '../components/PipelineStrip.vue';
+import NewsPanel from '../components/NewsPanel.vue';
+import RankingsPanel from '../components/RankingsPanel.vue';
 import { useTheme } from '../composables/useTheme';
 import { useWatchlist } from '../composables/useWatchlist';
 import { useUi } from '../composables/useUi';
@@ -465,32 +467,6 @@ async function sendChat() {
  * 선택한 종목 뉴스(레이아웃 지시: 본문 좌열 상단).
  * ⚠️ 종목을 바꿀 때마다 부른다 — **자동 새로고침 타이머에는 안 붙인다**(밖으로 나가는 호출이다).
  */
-const news = ref({ loading: false, ok: false, items: [], error: '', when: null });
-let newsSeq = 0;
-
-async function loadNews() {
-  const sym = selected.value.symbol;
-  if (!sym) { news.value = { loading: false, ok: false, items: [], error: '', when: null }; return; }
-  const seq = ++newsSeq;
-  news.value = { ...news.value, loading: true, error: '' };
-  try {
-    const q = new URLSearchParams({ symbol: sym, name: selected.value.name || '' });
-    const res = await apiFetch(`/api/news?${q}`);
-    const b = await res.json().catch(() => ({}));
-    // 🔴 늦게 온 응답이 새 선택을 덮어쓰지 않게 한다(종목을 빨리 바꾸면 실제로 일어난다)
-    if (seq !== newsSeq) return;
-    news.value = {
-      loading: false,
-      ok: Boolean(b.ok),
-      items: b.items || [],
-      error: b.ok ? '' : (b.error || `뉴스를 불러오지 못했습니다 (${res.status})`),
-      when: new Date().toISOString(),
-    };
-  } catch (e) {
-    if (seq !== newsSeq) return;
-    news.value = { loading: false, ok: false, items: [], error: e.message || '뉴스 오류', when: null };
-  }
-}
 
 async function loadMcpStatus() {
   try {
@@ -712,20 +688,9 @@ async function loadDashboard() {
 
 function pickSymbol(symbol, name) {
   selected.value = { symbol, name: name || symbol };
-  // 종목을 고르면 좌열 뉴스도 따라간다(차트와 같은 대상을 본다)
-  loadNews();
+  // 종목을 고르면 뉴스 패널의 watch 가 따라간다 (NewsPanel 로 분해 — 2026-10-04)
 }
 
-/** 조각이 실패했으면 그 사실을 화면에 남긴다 */
-const RANK_LABEL = {
-  TOP_GAINERS: '급등', TOP_LOSERS: '급락',
-  MARKET_TRADING_AMOUNT: '거래대금', MARKET_TRADING_VOLUME: '거래량',
-  TOSS_SECURITIES_TRADING_AMOUNT: '토스 거래대금', TOSS_SECURITIES_TRADING_VOLUME: '토스 거래량',
-};
-function rankLabel(key) {
-  const [country, type] = String(key).split(':');
-  return `${country === 'US' ? '미국' : '한국'} ${RANK_LABEL[type] || type}`;
-}
 
 /**
  * 랭킹 탭. 🔴 **키가 사라져도 빈 화면이 되지 않게** 현재 탭을 항상 유효한 값으로 맞춘다
@@ -745,68 +710,10 @@ const pagedGroups = computed(() =>
 // 🔴 테마를 지우면 현재 쪽이 범위를 벗어난다 — 그러면 **빈 화면**이 된다
 watch(groupPages, (n) => { if (groupPage.value >= n) groupPage.value = Math.max(0, n - 1); });
 
-const rankQuery = ref('');
 
-/**
- * 랭킹 검색. **두 가지를 겸한다**:
- *  ① 목록 안에 있으면 그 줄을 골라 차트를 띄운다
- *  ② 없으면 입력값을 **종목 코드로 보고** 그대로 차트를 띄운다
- * ⚠️ ②가 없으면 "랭킹에 없는 종목은 못 본다" 가 되어 검색창의 뜻이 사라진다.
- */
-const findBusy = ref(false);
-const findError = ref('');
 
-/**
- * 종목 검색. 🔴 사용자: *"삼성전자 검색하면 안뜨는데 **이름으로도** 검색할수 있게"*
- *
- * ⚠️ 앞판은 입력값을 **그대로 종목 코드로** 썼다 — `005930` 은 되고 `삼성전자` 는 안 됐다
- *    (한글을 티커로 보내니 당연히 없다). 그게 "안 뜬다" 의 정체다.
- * ⇒ ①목록 안에서 먼저 찾고 ②없으면 서버 `/api/lookup`(코드 → 이름 순) 에 맡긴다.
- */
-async function findSymbol() {
-  const q = rankQuery.value.trim();
-  if (!q || findBusy.value) return;
-  findError.value = '';
 
-  const hit = (activeRank.value?.rows || []).find(
-    (r) => r.symbol?.toLowerCase() === q.toLowerCase() || (r.name || '').includes(q)
-  );
-  if (hit) { pickSymbol(hit.symbol, hit.name || hit.symbol); rankQuery.value = ''; return; }
 
-  findBusy.value = true;
-  try {
-    const res = await apiFetch(`/api/lookup?q=${encodeURIComponent(q)}`);
-    const b = await res.json().catch(() => ({}));
-    if (!res.ok || !b.ok) throw new Error(b.error || `'${q}' 를 찾지 못했습니다.`);
-    pickSymbol(b.symbol, b.name || b.symbol);
-    rankQuery.value = '';
-  } catch (e) {
-    // 🔴 조용히 실패하지 않는다 — 앞판은 엉뚱한 코드로 차트를 열어 "빈 차트" 로 보였다
-    findError.value = e.message;
-  } finally {
-    findBusy.value = false;
-  }
-}
-
-const rankTab = ref('');
-const rankKeys = computed(() => Object.keys(dash.value?.rankings || {}));
-const activeRank = computed(() => {
-  const keys = rankKeys.value;
-  if (!keys.length) return null;
-  const key = keys.includes(rankTab.value) ? rankTab.value : keys[0];
-  return dash.value.rankings[key];
-});
-
-/** 검색어가 있으면 목록도 같이 좁힌다(찾는 중에 눈이 편하게) */
-const visibleRankRows = computed(() => {
-  const rows = activeRank.value?.rows || [];
-  const q = rankQuery.value.trim().toLowerCase();
-  // 🔴 공간이 생겼으니 더 보여준다(사용자: "하단 공간이 비는데 다 채워")
-  if (!q) return rows.slice(0, 30);
-  return rows
-    .filter((r) => r.symbol?.toLowerCase().includes(q) || (r.name || '').toLowerCase().includes(q))
-    .slice(0, 30);
-});
 
 function partError(name) {
   const p = dash.value?.parts?.[name];
@@ -1482,6 +1389,8 @@ onUnmounted(() => {
               <span class="hold__meta" :title="h.officialName || ''">
                 {{ h.market }} · {{ h.symbol }} · <span class="mono-num">{{ h.quantity }}</span>주 ·
                 평단 <span class="mono-num">{{ money(h.avgPrice, h.currency) }}</span>
+                <!-- D-7 종목 상세 — 행 클릭(차트 선택)과 겹치지 않게 .stop -->
+                <RouterLink class="hold__detail" :to="`/symbol/${h.symbol}`" @click.stop>상세 →</RouterLink>
               </span>
               <span class="hold__pl mono-num" :class="signClass(h.profit)">
                 {{ money(h.profit, h.currency) }} <small>{{ pct(h.profitRate) }}</small>
@@ -1568,30 +1477,7 @@ onUnmounted(() => {
       </article>
     </section>
 
-        <section class="news">
-          <header class="news__head">
-            <h3 class="panel__h">
-              뉴스
-              <small v-if="selected.symbol">{{ selected.name || selected.symbol }}</small>
-            </h3>
-            <button class="iconbtn" :disabled="!selected.symbol || news.loading" aria-label="뉴스 새로고침" title="뉴스 새로고침" @click="loadNews">
-              {{ news.loading ? '…' : '⟳' }}
-            </button>
-          </header>
-          <p v-if="!selected.symbol" class="panel__empty">종목을 고르면 뉴스를 찾습니다.</p>
-          <p v-else-if="news.loading" class="panel__empty">검색 중…</p>
-          <!-- 🔴 "없다" 와 "못 받았다" 를 구분해 보여준다 -->
-          <p v-else-if="news.error" class="panel__err">{{ news.error }}</p>
-          <p v-else-if="!news.items.length" class="panel__empty">검색 결과가 없습니다.</p>
-          <ul v-else class="news__list">
-            <li v-for="n in news.items" :key="n.rank">
-              <a v-if="n.url" :href="n.url" target="_blank" rel="noopener" class="news__title">{{ n.title }}</a>
-              <span v-else class="news__title">{{ n.title }}</span>
-              <!-- ⚠️ 날짜를 반드시 보여준다 — 실측에서 **6개월 지난 기사**가 섞여 왔다 -->
-              <time v-if="n.when" class="news__when">{{ n.when }}</time>
-            </li>
-          </ul>
-        </section>
+        <NewsPanel :symbol="selected.symbol" :name="selected.name" />
       <!-- 행3·1열 : 차트 -->
       <div class="cell cell--chart">
         <!-- 🔭 의사결정 파이프라인 (2026-10-03 자율 트레이딩 재개편) — 차트 위 스트립.
@@ -1617,77 +1503,7 @@ onUnmounted(() => {
 
       <!-- 행2~3·2열 : 🔴 **랭킹만**(가이드: "랭킹 정보만 표출") -->
       <aside class="layout__signals">
-          <div class="signals">
-
-
-            <!--
-              🔴 2026-09-21 사용자: *"타이틀이랑 하단 정보가 안 맞는데. 차라리 그냥 정형화된
-                 테이블로 라도 하지"* ⇒ 목록을 **표**로 바꿨다.
-              ★ 목록형은 **어느 제목에 속한 줄인지**가 들여쓰기로만 표현돼서, 그룹이 4개로
-                늘어나자 제목과 내용이 어긋나 보였다. 표는 **열이 뜻을 고정**한다.
-              ⚠️ 그룹을 한 번에 다 펼치지 않고 **탭으로 하나씩** 본다 — 네 덩어리를 세로로
-                 쌓으면 어느 것이 어느 제목 밑인지 다시 헷갈린다.
-            -->
-            <div class="panel">
-              <h3 class="panel__h">랭킹</h3>
-              <p v-if="partError('rankings')" class="panel__err">{{ partError('rankings').error }}</p>
-              <template v-else>
-                <div v-if="rankKeys.length" class="rank__tabs">
-                  <button
-                    v-for="k in rankKeys" :key="k"
-                    class="rank__tab" :class="{ 'rank__tab--on': k === rankTab }"
-                    @click="rankTab = k"
-                  >{{ rankLabel(k) }}</button>
-                </div>
-                <p v-if="!rankKeys.length" class="panel__empty">랭킹을 불러오지 못했습니다.</p>
-                <template v-else-if="activeRank">
-                  <!-- 🔴 이 종류만 실패했으면 그렇게 말한다("없음" 과 다르다) -->
-                  <p v-if="activeRank.error" class="rank__err">{{ activeRank.error }}</p>
-                  <p v-else-if="!activeRank.rows?.length" class="panel__empty">해당 종목 없음</p>
-                  <div v-else class="rtable__scroll">
-                  <table class="rtable">
-                    <thead>
-                      <tr><th class="rtable__n">#</th><th>종목</th><th class="rtable__r">등락률</th></tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="row in visibleRankRows" :key="row.symbol">
-                        <td class="rtable__n mono-num">{{ row.rank }}</td>
-                        <td>
-                          <!-- ⚠️ 이름이 없으면 코드를 보여준다(빈칸보다 낫다) -->
-                          <button class="linkish" :title="row.symbol" @click="pickSymbol(row.symbol, row.name || row.symbol)">
-                            {{ row.name || row.symbol }}
-                          </button>
-                          <!-- 🔴 이름이 붙었을 때만 코드를 따로 보여준다(같은 값을 두 번 쓰지 않는다) -->
-                          <small v-if="row.name" class="rtable__sym mono-num">{{ row.symbol }}</small>
-                        </td>
-                        <td class="rtable__r mono-num" :class="signClass(row.changePct)">{{ pct(row.changePct) }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  </div>
-                </template>
-              </template>
-
-              <!--
-                🔴 사용자: *"검색은 최하단에 붙여줘."*
-                ★ 검색은 **결과를 본 뒤에** 쓰는 것이라 목록 아래가 맞다 —
-                  위에 있으면 매번 랭킹을 한 칸 밀어낸다.
-              -->
-
-              <!--
-                🔴 사용자: *"티커/한국 주식 검색창 제공 · 클릭시 좌측 차트 반응"*
-                ⚠️ 이건 **거르는 칸이 아니라 찾는 칸**이다 — 랭킹에 없는 종목도
-                   코드를 넣으면 차트를 띄울 수 있어야 검색창의 뜻이 산다.
-              -->
-              <form class="rank__find" @submit.prevent="findSymbol">
-                <input v-model="rankQuery" class="input input--xs" placeholder="종목명·티커 (예: 삼성전자)" />
-                <button class="iconbtn" type="submit" :disabled="!rankQuery.trim() || findBusy" aria-label="조회" title="조회">
-                  {{ findBusy ? '…' : '🔍' }}
-                </button>
-              </form>
-              <p v-if="findError" class="panel__err">{{ findError }}</p>
-            </div>
-          </div>
+        <RankingsPanel :rankings="dash?.rankings || {}" :error="partError('rankings')?.error || ''" @pick="pickSymbol" />
       </aside>
         <!-- ── 애널리스트와 채팅 (레이아웃 지시: 우열) ─────────── -->
         <section class="chat">
@@ -2621,6 +2437,8 @@ onUnmounted(() => {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .hold__val { text-align: right; font-weight: 600; color: var(--color-ink); }
+.hold__detail { margin-left: 6px; font-size: var(--text-2xs); color: var(--color-primary); text-decoration: none; }
+.hold__detail:hover { text-decoration: underline; }
 .hold__meta {
   font-size: var(--text-xs); color: var(--color-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -2816,24 +2634,11 @@ onUnmounted(() => {
      `aside > .panel` 은 **아무것도 안 잡는다**(래퍼가 하나 끼어 있다).
      선택자가 빗나가도 **CSS 는 조용하다** — 화면이 안 변하는 것으로만 알 수 있다.
 */
-.layout__signals > .signals { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.signals > .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.rtable__scroll { flex: 1; min-height: 0; overflow-y: auto; }
-.signals { display: flex; flex-direction: column; gap: var(--space-sm); }
 
 /* ── HTS: 차트 + 사이드 패널 ──────────────────────── */
 /* 신호 패널은 가운데 열로 옮겼다 — 차트는 자기 폭을 다 쓴다 */
 .hts { display: block; }
 .side { display: flex; flex-direction: column; gap: var(--space-sm); min-width: 0; }
-.panel {
-  background: var(--color-surface);
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--rounded-lg);
-  padding: var(--space-base);
-  display: flex; flex-direction: column; gap: var(--space-sm);
-}
-/* 🔴 "없음" 과 "못 받음" 은 다른 색이어야 한다 */
-.panel__err { margin: 0; font-size: var(--text-sm); color: var(--color-down); }
 .panel__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .panel__list li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); font-size: var(--text-md); }
 .linkish {
@@ -2843,10 +2648,6 @@ onUnmounted(() => {
 .linkish:hover { color: var(--color-primary); }
 .warnish { color: var(--color-warn); font-size: var(--text-sm); }
 .rank { display: flex; flex-direction: column; gap: 4px; }
-.rank__type { font-size: var(--text-2xs); color: var(--color-faint); letter-spacing: 0.06em; }
-.rank__list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
-.rank__list li { font-size: var(--text-sm); }
-.rank__err { margin: 0; font-size: var(--text-xs); color: var(--color-down); }
 
 .ticker__id[role='button'] { cursor: pointer; }
 
@@ -3058,46 +2859,8 @@ onUnmounted(() => {
 .chat__form { display: flex; gap: var(--space-xs); flex: none; }
 .chat__form .input { flex: 1; }
 
-/* ── 선택 종목 뉴스 ──────────────────────────────── */
-.news {
-  /* 행2 칸을 그대로 채운다(가이드에서 뉴스는 독립 행이다) */
-  min-height: 0;
-  background: var(--color-surface); border: 1px solid var(--color-hairline);
-  border-radius: var(--rounded-lg); padding: var(--space-sm) var(--space-base);
-  display: flex; flex-direction: column; gap: var(--space-xs);
-  /* 뉴스가 길어도 차트를 밀어내지 않는다 — 차트가 주인공이다 */
-  overflow-y: auto;
-}
-.news__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
-.news__head .panel__h { margin: 0; }
-.news__head small { margin-left: 6px; color: var(--color-faint); font-weight: 500; }
-.news__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.news__title { display: block; font-size: var(--text-xs); color: var(--color-body); text-decoration: none; }
-a.news__title:hover { color: var(--color-primary); text-decoration: underline; }
-.news__when { display: block; font-size: var(--text-2xs); color: var(--color-faint); }
+/* 뉴스 패널 스타일은 NewsPanel.vue 로 이사(2026-10-04) — `.deck > .news` 배치만 여기 남는다 */
 
-/* ── 랭킹 표 ──────────────────────────────────────── */
-.rank__find { display: flex; gap: 4px; margin-bottom: var(--space-xs); }
-.rank__find .input { flex: 1; min-width: 0; }
-.rank__tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: var(--space-xs); }
-.rank__tab {
-  border: 0; background: var(--color-surface-sunken); color: var(--color-muted);
-  font-size: var(--text-2xs); font-weight: 600; padding: 3px 8px;
-  border-radius: var(--rounded-sm); cursor: pointer;
-}
-.rank__tab--on { background: var(--color-primary-soft); color: var(--color-primary); }
-.rtable { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
-.rtable th {
-  text-align: left; font-weight: 600; color: var(--color-faint);
-  font-size: var(--text-2xs); padding: 2px 4px; border-bottom: 1px solid var(--color-hairline);
-}
-.rtable td { padding: 3px 4px; border-bottom: 1px solid var(--color-hairline-soft); }
-.rtable tr:last-child td { border-bottom: 0; }
-/* ⚠️ 위와 **같은 함정**을 내가 이 표에도 넣었다(`.rtable th` 가 유틸 클래스를 이긴다).
-      한 곳 고칠 때 저장소를 훑으라는 규칙의 CSS 판본 — 아래는 th·td 를 함께 짚는다. */
-.rtable th.rtable__n, .rtable td.rtable__n { width: 1.6rem; color: var(--color-faint); text-align: right; }
-.rtable th.rtable__r, .rtable td.rtable__r { text-align: right; white-space: nowrap; }
-.rtable__sym { display: block; color: var(--color-faint); font-size: var(--text-2xs); }
 
 /* ── 매매 분석 ────────────────────────────────────── */
 .websearch {

@@ -23,10 +23,29 @@
           에이전트 제안의 품질이 올라가면 이 수치가 먼저 움직인다.</p>
       </section>
       <section class="card">
-        <h2>이 리포트가 아직 못 보여주는 것</h2>
-        <p class="mut">수익률 vs KOSPI · 월별 성과 표 · "승인 없이 운용했다면" 가정 수익 —
-          **일별 자산 스냅샷 이력이 없어** 계산할 수 없다. 스냅샷 적재를 시작하면 여기 채워진다.
-          (없는 숫자를 그리지 않는다.)</p>
+        <h2>수익률 <small class="mut" v-if="perf?.days">{{ perf.firstDay }} ~ {{ perf.lastDay }} · {{ perf.days }}일</small></h2>
+        <template v-if="perf?.returns">
+          <dl class="rets">
+            <div><dt>내 계좌</dt><dd class="mono-num" :class="tone(perf.returns.totalPct)">{{ sign(perf.returns.totalPct) }}%</dd></div>
+            <div><dt>KOSPI</dt><dd class="mono-num">{{ sign(perf.returns.kospiPct) }}%</dd></div>
+            <div><dt>나스닥</dt><dd class="mono-num">{{ sign(perf.returns.qqqPct) }}%</dd></div>
+            <div v-if="perf.returns.kospiPct != null"><dt>KOSPI 대비</dt>
+              <dd class="mono-num" :class="tone(perf.returns.totalPct - perf.returns.kospiPct)">{{ sign(round2(perf.returns.totalPct - perf.returns.kospiPct)) }}%p</dd></div>
+          </dl>
+          <table class="tbl" v-if="perf.monthly.length">
+            <thead><tr><th>월</th><th>관측일</th><th>내 계좌</th><th>KOSPI</th><th>나스닥</th></tr></thead>
+            <tbody><tr v-for="m in perf.monthly" :key="m.month">
+              <td class="mono-num">{{ m.month }}</td><td class="mono-num">{{ m.days }}</td>
+              <td class="mono-num" :class="tone(m.returnPct)">{{ sign(m.returnPct) }}%</td>
+              <td class="mono-num">{{ sign(m.kospiPct) }}%</td>
+              <td class="mono-num">{{ sign(m.qqqPct) }}%</td>
+            </tr></tbody>
+          </table>
+        </template>
+        <p v-else class="mut">
+          일일 스냅샷 적재를 {{ perf?.days ? `시작했다 (${perf.days}일째)` : '오늘 시작했다' }} —
+          **2일째부터** 수익률이 계산된다. 한 점으로 수익률을 지어내지 않는다.
+        </p>
       </section>
     </template>
   </div>
@@ -41,9 +60,15 @@ const rejectRate = computed(() => {
   const d = (s.approved || 0) + (s.executed || 0) + (s.rejected || 0);
   return d ? Math.round((s.rejected / d) * 100) : 0;
 });
+const perf = ref(null);
+const sign = (v) => (v == null ? '—' : (v > 0 ? '+' : '') + v);
+const tone = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : '');
+const round2 = (v) => Math.round(v * 100) / 100;
 onMounted(async () => {
   try { const r = await apiFetch('/api/orders/stats'); const b = await r.json(); stats.value = b?.ok ? b : null; }
   catch { stats.value = null; }
+  try { const r = await apiFetch('/api/performance'); perf.value = await r.json(); }
+  catch { perf.value = null; }
 });
 </script>
 
@@ -59,4 +84,10 @@ onMounted(async () => {
 .card { background: var(--color-surface); border: 1px solid var(--color-hairline); border-radius: var(--rounded-md); padding: var(--space-base); }
 .card h2 { margin: 0 0 4px; font-size: var(--text-md); color: var(--color-ink); }
 .mut { margin: 0; font-size: var(--text-sm); color: var(--color-muted); }
+.rets { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: var(--space-sm); margin: 0 0 8px; }
+.rets dt { font-size: var(--text-2xs); color: var(--color-faint); }
+.rets dd { margin: 0; font-size: var(--text-lg); font-weight: 700; color: var(--color-ink); }
+.tbl { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.tbl th { text-align: left; font-size: var(--text-2xs); color: var(--color-faint); padding: 4px var(--space-sm); border-bottom: 1px solid var(--color-hairline); }
+.tbl td { padding: 4px var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); }
 </style>

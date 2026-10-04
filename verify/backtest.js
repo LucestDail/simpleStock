@@ -7,8 +7,11 @@
  * 🔴 레버리지 감쇠는 **일일 수익률 × 배수 누적**으로 자연 재현된다(모형이 아니라 산수).
  * 부작용 0: 제안 등록·발송 없음. LLM 6콜(국면 3 × 리밸런스 2).
  */
-const regime = require('/app/server/regimeService');
-const analyst = require('/app/server/analystService');
+// ⚠️ 상대 경로 (2026-10-04) — 종전 '/app/server/…' 절대경로는 도커 안에서만 돌았다.
+//    로컬 실행이 **조용히 0줄로 죽어** "빠르다" 로 오판하게 만든다(실측 0.03초 = 즉사였다).
+const path = require('node:path');
+const regime = require(path.join(__dirname, '..', 'server', 'regimeService'));
+const analyst = require(path.join(__dirname, '..', 'server', 'analystService'));
 
 // ── 결정적 의사난수 ──────────────────────────────────────────
 let seed = 42;

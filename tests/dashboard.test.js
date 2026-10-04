@@ -209,6 +209,19 @@ test('🔴 컴포넌트가 **남의 scoped 스타일**에 기대지 않는다', 
   const defined = new Set([...wvStyle.matchAll(/\.([a-z][a-z0-9_-]*)/g)].map((m) => m[1]));
   assert.ok(defined.size > 20, 'WorkspaceView 스타일을 못 읽었다 — 가드가 대상을 잃었다(통과 아님)');
 
+  /**
+   * 🔄 2026-10-04 — `styles/*.css` 전역이 생겼다(ui.css). 전역에 **기본 규칙**이 있는
+   * 클래스는 컴포넌트가 그냥 써도 스타일이 먹는다 — WorkspaceView 에 `.perf .panel__h`
+   * 같은 **문맥 수식**이 남아 있다고 "남의 scoped" 로 읽으면 오탐이다.
+   * ⚠️ 기본 규칙(클래스로 끝나는 선택자)이 있을 때만 — `[disabled]`·`:hover` 변형만으로는
+   *    전역 소유로 안 센다(OrderTicket 흰 버튼 사고와 같은 판정 기준).
+   */
+  const stylesDir = path.join(root, 'styles');
+  for (const sf of fs.readdirSync(stylesDir).filter((f) => f.endsWith('.css'))) {
+    const css = fs.readFileSync(path.join(stylesDir, sf), 'utf8');
+    for (const m of css.matchAll(/\.([a-z][a-z0-9_-]*)\s*(?=[,{])/g)) defined.delete(m[1]);
+  }
+
   const dir = path.join(root, 'components');
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.vue'));
   assert.ok(files.length >= 2, `컴포넌트가 ${files.length}개뿐 — 경로가 틀렸을 수 있다`);
