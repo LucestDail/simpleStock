@@ -26,6 +26,13 @@
               <dt>{{ m.label }}</dt><dd class="mono-num">{{ mval(m.value) }}</dd>
             </div>
           </dl>
+          <!-- 📜 숫자 아래 최근 이력 2줄 (2026-10-05 — "이력은 안 보이고 숫자만") -->
+          <ul v-if="st.recent && st.recent.length" class="stage__recent">
+            <li v-for="(r, j) in st.recent.slice(0, 2)" :key="st.key + j" :title="r.text">
+              <span class="stage__rat mono-num">{{ fmtAt(r.at) }}</span>
+              <span class="stage__rtx">{{ r.text }}</span>
+            </li>
+          </ul>
           <!-- 🔴 note 는 "실주문 0 — 데이터 없음" 류의 정직 표기 — 숨기지 않는다 -->
           <p v-if="st.note" class="stage__note">⚠️ {{ st.note }}</p>
         </article>
@@ -37,20 +44,22 @@
     <section class="card">
       <h2>자산·벤치 추이 <small class="mut" v-if="bench && bench.lines.length">첫 관측일 = 100 · {{ bench.firstDay }} ~ {{ bench.lastDay }}</small></h2>
       <template v-if="bench && bench.lines.length">
+        <!-- 🔄 2026-10-05 라벨 겹침 해소: ① y 눈금을 플롯 밖 왼쪽으로(값 위에 안 얹는다)
+             ② 선 끝 라벨은 세로 충돌 회피(12px 최소 간격) + 밀린 라벨은 리더선으로 점과 잇는다
+             ③ 하단 날짜 눈금 MM-DD 2~3개 — 데이터 2점뿐이어도 축이 상태를 말해 준다 -->
         <svg class="linechart" :viewBox="`0 0 ${CW} ${CH}`" role="img" aria-label="자산과 벤치마크 정규화 추이">
-          <line class="linechart__grid" :x1="PAD_L" :y1="bench.yMax" :x2="CW - PAD_R" :y2="bench.yMax" />
-          <line class="linechart__grid" :x1="PAD_L" :y1="bench.yBase" :x2="CW - PAD_R" :y2="bench.yBase" />
-          <line class="linechart__grid" :x1="PAD_L" :y1="bench.yMin" :x2="CW - PAD_R" :y2="bench.yMin" />
-          <text class="linechart__lbl" :x="PAD_L" :y="bench.yMax - 3">{{ bench.max }}</text>
-          <text class="linechart__lbl" :x="PAD_L" :y="bench.yBase - 3">100</text>
-          <text class="linechart__lbl" :x="PAD_L" :y="bench.yMin + 11">{{ bench.min }}</text>
+          <g v-for="t in bench.yTicks" :key="'y' + t.label">
+            <line class="linechart__grid" :x1="PAD_L" :y1="t.y" :x2="CW - PAD_R" :y2="t.y" />
+            <text class="linechart__lbl linechart__lbl--y" :x="PAD_L - 6" :y="t.y + 3">{{ t.label }}</text>
+          </g>
           <g v-for="l in bench.lines" :key="l.name">
             <polyline class="linechart__line" :points="l.points" fill="none" :stroke="l.color" />
             <circle :cx="l.lastX" :cy="l.lastY" r="3" :fill="l.color" />
-            <text class="linechart__lbl linechart__lbl--series" :x="l.lastX + 6" :y="l.lastY + 3" :fill="l.color">{{ l.name }} {{ l.lastV }}</text>
+            <!-- 라벨이 점에서 밀려났으면 가는 리더선으로 어느 점의 라벨인지 잇는다 -->
+            <line v-if="l.leader" class="linechart__leader" :x1="l.lastX + 4" :y1="l.lastY" :x2="l.lastX + 10" :y2="l.labelY" :stroke="l.color" />
+            <text class="linechart__lbl linechart__lbl--series" :x="l.lastX + 12" :y="l.labelY + 3" :fill="l.color">{{ l.name }} {{ l.lastV }}</text>
           </g>
-          <text class="linechart__lbl" :x="PAD_L" :y="CH - 6">{{ bench.firstDay }}</text>
-          <text class="linechart__lbl linechart__lbl--end" :x="CW - PAD_R" :y="CH - 6">{{ bench.lastDay }}</text>
+          <text v-for="t in bench.xTicks" :key="'x' + t.label + t.x" class="linechart__lbl" :class="{ 'linechart__lbl--end': t.end, 'linechart__lbl--mid': t.mid }" :x="t.x" :y="CH - 6">{{ t.label }}</text>
         </svg>
         <ul class="clegend">
           <li v-for="l in bench.lines" :key="l.name" class="clegend__item">
@@ -153,7 +162,9 @@ const lifeErr = ref('');
 
 /* ── ② 자산·벤치 정규화 추이 (SVG 직접) ────── */
 const CW = 640; const CH = 190;
-const PAD_L = 10; const PAD_R = 118; const PAD_T = 16; const PAD_B = 24;
+/* PAD_L 44: y 눈금 라벨이 플롯 밖 왼쪽에 산다(10 이던 때는 라벨이 선·그리드 위에 얹혔다) */
+const PAD_L = 44; const PAD_R = 118; const PAD_T = 16; const PAD_B = 24;
+const LBL_GAP = 12; /* 선 끝 라벨 최소 세로 간격(px) — 10px 글자 + 숨구멍 */
 const SERIES_DEF = [
   { key: 'totalKrw', name: '내 계좌', color: 'var(--color-primary)' },
   { key: 'kospi', name: 'KOSPI', color: 'var(--color-warn)' },
@@ -182,18 +193,51 @@ const bench = computed(() => {
   const x = (i) => PAD_L + (i * (CW - PAD_L - PAD_R)) / (rows.length - 1);
   const y = (v) => PAD_T + (1 - (v - min) / span) * (CH - PAD_T - PAD_B);
   const r1 = (v) => Math.round(v * 10) / 10;
+
+  /* y 눈금 — min·100·max. 서로 너무 붙으면(라벨 높이 미만) 하나로 접는다 */
+  const yTicks = [];
+  for (const v of [...new Set([r1(max), 100, r1(min)])].sort((a, b) => b - a)) {
+    const yy = y(v);
+    if (yTicks.some((t) => Math.abs(t.y - yy) < LBL_GAP)) continue;
+    yTicks.push({ y: yy, label: String(v) });
+  }
+
+  /* x 눈금 — 첫날·마지막날(+5일 이상이면 가운데 하루). MM-DD 로 짧게 */
+  const md = (day) => String(day || '').slice(5);
+  const xTicks = [{ x: PAD_L, label: md(rows[0].day) }];
+  if (rows.length >= 5) {
+    const mi = Math.floor((rows.length - 1) / 2);
+    xTicks.push({ x: x(mi), label: md(rows[mi].day), mid: true });
+  }
+  xTicks.push({ x: CW - PAD_R, label: md(rows[rows.length - 1].day), end: true });
+
+  /* 선 끝 라벨 세로 충돌 회피 — 값이 비슷한 날(실측: 2일차) 라벨이 포개지던 자리.
+     y 로 정렬해 위에서부터 최소 LBL_GAP 을 보장하고, 바닥을 넘치면 전체를 위로 민다 */
+  const built = lines.map((l) => {
+    const last = l.pts[l.pts.length - 1];
+    return {
+      name: l.name, color: l.color,
+      points: l.pts.map((p) => `${x(p.i)},${y(p.v)}`).join(' '),
+      lastX: x(last.i), lastY: y(last.v), lastV: r1(last.v),
+      labelY: y(last.v), leader: false,
+    };
+  });
+  const order = [...built].sort((a, b) => a.lastY - b.lastY);
+  let prevY = PAD_T - LBL_GAP;
+  for (const l of order) { l.labelY = Math.max(l.lastY, prevY + LBL_GAP); prevY = l.labelY; }
+  /* 아래로 밀다 바닥을 넘쳤으면, 바닥에서 위로 한 번 더 조여 플롯 안에 가둔다 */
+  let floor = CH - PAD_B;
+  for (let i = order.length - 1; i >= 0; i -= 1) {
+    order[i].labelY = Math.min(order[i].labelY, floor);
+    floor = order[i].labelY - LBL_GAP;
+  }
+  for (const l of built) l.leader = Math.abs(l.labelY - l.lastY) > 4;
+
   return {
     firstDay: rows[0].day,
     lastDay: rows[rows.length - 1].day,
-    min: r1(min), max: r1(max), yMin: y(min), yMax: y(max), yBase: y(100),
-    lines: lines.map((l) => {
-      const last = l.pts[l.pts.length - 1];
-      return {
-        name: l.name, color: l.color,
-        points: l.pts.map((p) => `${x(p.i)},${y(p.v)}`).join(' '),
-        lastX: x(last.i), lastY: y(last.v), lastV: r1(last.v),
-      };
-    }),
+    yTicks, xTicks,
+    lines: built,
   };
 });
 
@@ -233,7 +277,9 @@ onMounted(async () => {
 /* 🔴 2026-10-04 사용자: "width 100% 늘이지 말고 배치를 고민" — 초광폭(1700px+)에서
    카드가 끝까지 퍼져 황량했다. 스크롤 컨테이너(.page)는 전폭을 유지하되(스크롤바가
    오른쪽 끝에 있게) **콘텐츠만** 읽기 좋은 폭에서 멈춘다. */
-.page > * { width: 100%; max-width: 1280px; }
+/* 🔄 10-05: 좌측 고정 1280 은 초광폭에서 오른쪽만 비어 보였다("오른쪽 여백 너무 많이 남고")
+   ⇒ 1440 으로 넓히고 **중앙 정렬** — 남는 공간이 양쪽으로 갈라져 여백이 디자인으로 읽힌다. */
+.page > * { width: 100%; max-width: 1440px; margin-inline: auto; }
 
 .page__head { display: flex; align-items: center; gap: var(--space-sm); }
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }
@@ -253,7 +299,14 @@ onMounted(async () => {
 .stage__metric { display: flex; justify-content: space-between; gap: 6px; font-size: var(--text-xs); }
 .stage__metric dt { color: var(--color-faint); min-width: 0; }
 .stage__metric dd { margin: 0; color: var(--color-ink); font-weight: 600; white-space: nowrap; }
-.stage__note { margin: auto 0 0; font-size: var(--text-2xs); color: var(--color-warn); }
+/* 숫자 아래 최근 이력 2줄 — 한 줄 = 시각 + 한 줄 요약(넘치면 말줄임, 전문은 title) */
+.stage__recent { margin: auto 0 0; padding: 4px 0 0; list-style: none; border-top: 1px dashed var(--color-hairline-soft); display: flex; flex-direction: column; gap: 2px; }
+.stage__recent li { display: flex; gap: 6px; align-items: baseline; font-size: var(--text-2xs); min-width: 0; }
+.stage__rat { color: var(--color-faint); flex: 0 0 auto; }
+.stage__rtx { color: var(--color-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.stage__note { margin: 4px 0 0; font-size: var(--text-2xs); color: var(--color-warn); }
+/* recent 가 없는 카드(이력 0건)는 note 가 바닥 정렬을 이어받는다 — desc·metrics 바로 뒤의 note */
+.stage__metrics + .stage__note { margin-top: auto; }
 
 /* ── 꺾은선 ── */
 .linechart { display: block; width: 100%; height: auto; }
@@ -261,7 +314,10 @@ onMounted(async () => {
 .linechart__line { stroke-width: 2; }
 .linechart__lbl { font-size: 10px; fill: var(--color-faint); }
 .linechart__lbl--end { text-anchor: end; }
+.linechart__lbl--mid { text-anchor: middle; }
+.linechart__lbl--y { text-anchor: end; }
 .linechart__lbl--series { font-weight: 700; }
+.linechart__leader { stroke-width: 1; opacity: .5; }
 .clegend { margin: 4px 0 0; padding: 0; list-style: none; display: flex; gap: var(--space-base); flex-wrap: wrap; }
 .clegend__item { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--color-body); }
 .clegend__swatch { width: 10px; height: 10px; border-radius: var(--rounded-xs); }

@@ -3097,8 +3097,8 @@ function inverseGate(p, regimeState) {
   if (!hit || String(p.side).toUpperCase() !== 'BUY') return { ok: true };
   const mkt = hit.market === 'KR' ? 'kr' : 'us';
   const trend = regimeState?.[mkt]?.trend ?? null;
-  if (Math.abs(hit.leverage) !== 1) return { ok: false, why: `${hit.leverage}x 인버스는 명시 요청으로만 (사용자 규칙)` };
-  if (trend !== 'down') return { ok: false, why: `${mkt.toUpperCase()} 가 확정 하락추세가 아니다(현재 ${trend ?? '판정불가'}) — 인버스는 확정 하락에서만 (사용자 규칙)` };
+  if (Math.abs(hit.leverage) !== 1) return { ok: false, why: `${hit.leverage}x 인버스는 명시 요청으로만 (운용 방침)` };
+  if (trend !== 'down') return { ok: false, why: `${mkt.toUpperCase()} 가 확정 하락추세가 아니다(현재 ${trend ?? '판정불가'}) — 인버스는 확정 하락에서만 (운용 방침)` };
   return { ok: true };
 }
 

@@ -15,7 +15,8 @@
   <div class="page">
     <header class="page__head"><h1>운용 규칙 설정</h1></header>
 
-    <!-- ① 운용 상태 + ② 일시정지/재개 + ③ 비상정지 진입 -->
+    <!-- ①+④ 운용 상태 · 자율 수준 · AI 예산 — 한 카드 2열 (2026-10-05 글자 다이어트:
+         산문은 한 줄 이하, 긴 설명은 ⓘ 툴팁(title)으로. 기능·API 는 전부 그대로다) -->
     <section class="card">
       <h2>운용 상태</h2>
       <div class="st">
@@ -40,51 +41,50 @@
         <button v-else class="btn btn--sm btn--primary" @click="resume">▶ 재개</button>
       </div>
       <p v-if="statusError" class="err">{{ statusError }}</p>
-      <p class="mut">정지·재개 기록은 활동 로그에 남습니다. 재개는 사람만 합니다 — 코드가 재량으로 재개하지 않습니다.</p>
-    </section>
+      <p class="mut">재개는 사람만 — 정지·재개 기록은 활동 로그에 남습니다.</p>
 
-    <!-- ④ 자율 수준 — 0단 고정, 전환은 사람만(표시 전용) -->
-    <section class="card">
-      <h2>자율 수준 <small class="mut">전환은 이 화면의 사람만 — 코드는 스스로 올리지 않는다</small></h2>
-      <!-- 🔄 2026-10-04: "선택도 안 되는데 이거 뭐야" — 표시 전용이던 3단을 실제 전환 가능하게.
-           1단부터는 에이전트 발 제안이 한도 통과 시 **자동 전송**(실거래 모드면 실제 주문)이라
-           전환 시 "자율" 타이핑 확인을 받는다(비상정지와 같은 격의 조작). -->
-      <div class="levels">
-        <button
-          v-for="(lv, i) in LEVELS" :key="i"
-          class="level" :class="{ 'level--on': autonomyLevel === i }"
-          @click="askLevel(i)"
-        >
-          <b>{{ i }}단 · {{ lv.name }}</b><small>{{ lv.desc }}</small>
-          <small v-if="autonomyLevel === i" class="level__now">현재 단계</small>
-        </button>
-      </div>
-      <p class="mut">1단: 에이전트 발 제안 중 <b>계좌 한도·가드 전부 통과한 것만</b> 자동 승인·전송 — 한도에 걸리면 승인 대기로 남습니다.
-        2단: 집행은 1단과 동일하며, 2단 고유 동작(예약 자동 등록)은 아직 코드가 없습니다(있다고 적지 않습니다).</p>
-
-      <!-- 📒 AI 운용 예산 (2026-10-05 — "비율 일임") -->
-      <div class="ledger">
-        <h3 class="panel__h">AI 운용 예산 <small class="mut">자동 매수는 이 예산 안에서만 · 자동 매도는 AI 가 산 것만(기존 보유는 영원히 승인 대기)</small></h3>
-        <p v-if="ledger && ledger.budgetUsd == null" class="mut">
-          🔒 <b>예산 미설정 = 자동 매수 0</b> — 1단을 켜도 돈을 명시적으로 맡기기 전엔 아무것도 사지 않습니다.
-        </p>
-        <div class="ledger__row">
-          <label>예산(USD)
-            <input v-model.number="budgetInput" type="number" min="0" step="50" class="xs" placeholder="예: 150" />
-          </label>
-          <button class="btn btn--sm btn--primary" :disabled="budgetBusy" @click="saveBudget">저장</button>
-          <button class="btn btn--sm" :disabled="budgetBusy || ledger?.budgetUsd == null" @click="clearBudget">예산 해제(자동 매수 정지)</button>
-          <span v-if="budgetMsg" class="mut">{{ budgetMsg }}</span>
+      <div class="ops">
+        <div class="ops__col">
+          <h3 class="subh">자율 수준
+            <span class="info" title="1단: 에이전트 발 제안 중 계좌 한도·가드 전부 통과한 것만 자동 승인·전송 — 한도에 걸리면 승인 대기로 남습니다. 2단: 집행은 1단과 동일, 2단 고유 동작(예약 자동 등록)은 아직 코드가 없습니다. 전환은 이 화면의 사람만 — 코드는 스스로 올리지 않습니다.">ⓘ</span>
+          </h3>
+          <div class="levels">
+            <button
+              v-for="(lv, i) in LEVELS" :key="i"
+              class="level" :class="{ 'level--on': autonomyLevel === i }"
+              @click="askLevel(i)"
+            >
+              <b>{{ i }}단 · {{ lv.name }}</b><small>{{ lv.desc }}</small>
+              <small v-if="autonomyLevel === i" class="level__now">현재 단계</small>
+            </button>
+          </div>
+          <p class="mut">전환은 사람만 · 1단부터 한도 통과 제안은 자동 전송 — 상세는 ⓘ.</p>
         </div>
-        <dl v-if="ledger" class="ledger__stats">
-          <div><dt>예산</dt><dd class="mono-num">{{ ledger.budgetUsd == null ? '미설정' : '$' + ledger.budgetUsd }}</dd></div>
-          <div><dt>투입 중</dt><dd class="mono-num">${{ ledger.openCostUsd }}</dd></div>
-          <div><dt>잔액</dt><dd class="mono-num">${{ ledger.availableUsd }}</dd></div>
-          <div><dt>실현손익</dt><dd class="mono-num" :class="ledger.realizedUsd >= 0 ? 'up' : 'down'">{{ ledger.realizedUsd >= 0 ? '+' : '' }}${{ ledger.realizedUsd }}</dd></div>
-        </dl>
-        <p v-if="ledger && Object.keys(ledger.positions || {}).length" class="mut">
-          AI 보유: <span v-for="(p, s2) in ledger.positions" :key="s2" class="mono-num">{{ s2 }} {{ p.qty }}주(평단 ${{ p.avgUsd }}) </span>
-        </p>
+
+        <!-- 📒 AI 운용 예산 (2026-10-05 — "비율 일임") -->
+        <div class="ops__col">
+          <h3 class="subh">AI 운용 예산
+            <span class="info" title="자동 매수는 이 예산 안에서만 나갑니다. 자동 매도는 AI 가 산 것만 — 기존 보유는 항상 승인 대기입니다. 예산을 비우면(미설정) 1단을 켜도 자동 매수가 0 입니다.">ⓘ</span>
+          </h3>
+          <p v-if="ledger && ledger.budgetUsd == null" class="mut">🔒 예산 미설정 = 자동 매수 0 — 맡기기 전엔 사지 않습니다.</p>
+          <div class="ledger__row">
+            <label>예산(USD)
+              <input v-model.number="budgetInput" type="number" min="0" step="50" class="xs" placeholder="예: 150" />
+            </label>
+            <button class="btn btn--sm btn--primary" :disabled="budgetBusy" @click="saveBudget">저장</button>
+            <button class="btn btn--sm" :disabled="budgetBusy || ledger?.budgetUsd == null" @click="clearBudget">예산 해제</button>
+            <span v-if="budgetMsg" class="mut">{{ budgetMsg }}</span>
+          </div>
+          <dl v-if="ledger" class="ledger__stats">
+            <div><dt>예산</dt><dd class="mono-num">{{ ledger.budgetUsd == null ? '미설정' : '$' + ledger.budgetUsd }}</dd></div>
+            <div><dt>투입 중</dt><dd class="mono-num">${{ ledger.openCostUsd }}</dd></div>
+            <div><dt>잔액</dt><dd class="mono-num">${{ ledger.availableUsd }}</dd></div>
+            <div><dt>실현손익</dt><dd class="mono-num" :class="ledger.realizedUsd >= 0 ? 'up' : 'down'">{{ ledger.realizedUsd >= 0 ? '+' : '' }}${{ ledger.realizedUsd }}</dd></div>
+          </dl>
+          <p v-if="ledger && Object.keys(ledger.positions || {}).length" class="mut">
+            AI 보유: <span v-for="(p, s2) in ledger.positions" :key="s2" class="mono-num">{{ s2 }} {{ p.qty }}주(평단 ${{ p.avgUsd }}) </span>
+          </p>
+        </div>
       </div>
 
       <!-- 전환 확인 모달 — 실거래 자동 발사가 걸린 조작이라 타이핑 확인 -->
@@ -109,19 +109,37 @@
       </div>
     </section>
 
-    <!-- ⑤ 한도 -->
-    <section class="card">
-      <h2>한도</h2>
-      <table class="tbl">
-        <tr><td>종목당 최대 비중</td><td class="mono-num">20%</td><td class="mut">초과 시 추가 매수 차단 (계좌 검증)</td></tr>
-        <tr><td>현금 최소 비중</td><td class="mono-num">10%</td><td class="mut">하회하는 매수 제안 경고</td></tr>
-        <tr><td>제안 유효시간</td><td class="mono-num">10분</td><td class="mut">응답 없으면 자동 만료 — 옛 시세로 체결되지 않게</td></tr>
-        <tr><td>신용·미수</td><td class="mono-num">불가</td><td class="mut">고정 — 설정으로도 못 켠다</td></tr>
-        <tr v-if="dailyLossPct != null"><td>일일 손실 기준</td><td class="mono-num">-{{ dailyLossPct }}%</td><td class="mut">표시 기준 — 자동 정지가 아니다(정지는 위의 비상정지로)</td></tr>
-      </table>
-      <p class="mut">⚠️ 일일 손실 한도·MDD 자동 정지는 아직 <b>수동</b>(위 비상정지)이다 —
-        자동 발동 백엔드가 생기면 여기서 켠다. (없는 안전장치를 있다고 적지 않는다.)</p>
-    </section>
+    <!-- ⑤+⑦ 한도 · 수동 분석 — 둘 다 짧은 카드라 한 줄 2열로 묶어 세로를 줄인다 -->
+    <div class="row2">
+      <section class="card">
+        <h2>한도 <span class="info" title="일일 손실·MDD 자동 정지는 아직 수동(위 비상정지)입니다 — 자동 발동 백엔드가 생기면 여기서 켭니다. 없는 안전장치를 있다고 적지 않습니다.">ⓘ</span></h2>
+        <table class="tbl">
+          <tr><td>종목당 최대 비중</td><td class="mono-num">20%</td><td class="mut">초과 시 추가 매수 차단</td></tr>
+          <tr><td>현금 최소 비중</td><td class="mono-num">10%</td><td class="mut">하회하는 매수 제안 경고</td></tr>
+          <tr><td>제안 유효시간</td><td class="mono-num">10분</td><td class="mut">무응답 시 자동 만료</td></tr>
+          <tr><td>신용·미수</td><td class="mono-num">불가</td><td class="mut">고정 — 설정으로도 못 켠다</td></tr>
+          <tr v-if="dailyLossPct != null"><td>일일 손실 기준</td><td class="mono-num">-{{ dailyLossPct }}%</td><td class="mut">표시 기준 — 자동 정지 아님</td></tr>
+        </table>
+        <p class="mut">⚠️ 손실·MDD 자동 정지는 아직 수동(위 비상정지) — 상세는 ⓘ.</p>
+      </section>
+
+      <!-- 수동 분석 실행 — 관리 작업이라 여기가 맞다 -->
+      <section class="card">
+        <h2>수동 분석 실행</h2>
+        <p class="mut">지금 한 번 실행 — 보고서는 대시보드 분석 패널에 저장됩니다.</p>
+        <div class="run">
+          <label class="run__opt">
+            <input v-model="runDry" type="checkbox" />
+            점검 실행 (dryRun) — 발송·제안 없이 돌려만 본다
+          </label>
+          <button class="btn btn--primary" :disabled="runBusy" @click="runAnalysis">
+            {{ runBusy ? '분석 중… (수십 초 걸릴 수 있습니다)' : '분석 실행' }}
+          </button>
+        </div>
+        <p v-if="runErr" class="banner banner--error">{{ runErr }}</p>
+        <p v-if="runMsg" class="ok">{{ runMsg }}</p>
+      </section>
+    </div>
 
     <!-- ⑥ 브리핑·분석 설정 — 구 SettingsPanel 의 폼을 인라인으로.
          GET /api/system/status → dashboardSettings · 저장 PUT /api/system/settings -->
@@ -216,7 +234,7 @@
             <input v-model="newGroup" type="text" placeholder="예: 반도체, 미국 ETF, 배당주" @keyup.enter="addGroup" />
             <button class="btn btn--primary" :disabled="groupBusy || !newGroup.trim()" @click="addGroup">추가</button>
           </div>
-          <small>테마를 만들면 대시보드 상단 스트립에 카드로 나타납니다. 종목은 거기서 넣습니다.</small>
+          <small>테마는 대시보드 상단 스트립에 카드로 뜹니다 — 종목은 거기서 넣습니다.</small>
           <!-- 멱등이다 — 이미 있는 이름은 건너뛴다. 두 번 눌러도 안 늘어난다 -->
           <button class="btn add" :disabled="presetBusy" @click="addPresets">
             {{ presetBusy ? '추가 중…' : '+ 대표 테마 8종 추가' }}
@@ -268,23 +286,6 @@
           <button class="btn btn--primary" :disabled="busy" @click="save">{{ busy ? '저장 중…' : '설정 저장' }}</button>
         </footer>
       </div>
-    </section>
-
-    <!-- ⑦ 수동 분석 실행 — 관리 작업이라 여기가 맞다 -->
-    <section class="card">
-      <h2>수동 분석 실행</h2>
-      <p class="mut">매매 분석을 지금 한 번 돌립니다. 결과 보고서는 대시보드의 분석 패널에 저장됩니다.</p>
-      <div class="run">
-        <label class="run__opt">
-          <input v-model="runDry" type="checkbox" />
-          점검 실행 (dryRun) — 텔레그램 발송·제안 생성 없이 돌려만 본다
-        </label>
-        <button class="btn btn--primary" :disabled="runBusy" @click="runAnalysis">
-          {{ runBusy ? '분석 중… (수십 초 걸릴 수 있습니다)' : '분석 실행' }}
-        </button>
-      </div>
-      <p v-if="runErr" class="banner banner--error">{{ runErr }}</p>
-      <p v-if="runMsg" class="ok">{{ runMsg }}</p>
     </section>
 
     <!-- 🛑 비상정지 모달 (D-4) — 구 AppShell(HEAD) 구현 이식: 범위 3단 + "정지" 타이핑 확인 -->
@@ -672,7 +673,12 @@ onUnmounted(() => clearInterval(timer));
 /* 🔴 2026-10-04 사용자: "width 100% 늘이지 말고 배치를 고민" — 초광폭(1700px+)에서
    카드가 끝까지 퍼져 황량했다. 스크롤 컨테이너(.page)는 전폭을 유지하되(스크롤바가
    오른쪽 끝에 있게) **콘텐츠만** 읽기 좋은 폭에서 멈춘다. */
-.page > * { width: 100%; max-width: 1280px; }
+/* 🔄 10-05: 좌측 고정 1280 은 초광폭에서 오른쪽만 비어 보였다("오른쪽 여백 너무 많이 남고")
+   ⇒ 1440 으로 넓히고 **중앙 정렬** — 남는 공간이 양쪽으로 갈라져 여백이 디자인으로 읽힌다. */
+.page > * { width: 100%; max-width: 1440px; margin-inline: auto; }
+/* 🔴 비상정지 스크림은 직계 자식이라 위 상한에 걸린다 — 전폭으로 되돌린다
+   (안 하면 초광폭에서 화면 일부만 어두워지는 실사고 전력) */
+.page > .stop__scrim { width: 100vw; max-width: none; margin: 0; }
 
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }
 .card { background: var(--color-surface); border: 1px solid var(--color-hairline); border-radius: var(--rounded-md); padding: var(--space-base); }
@@ -685,6 +691,21 @@ onUnmounted(() => clearInterval(timer));
 .st__state--paused { color: var(--color-danger); }
 .st__chip { border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); padding: 2px 10px; color: var(--color-body); white-space: nowrap; }
 .st__spacer { flex: 1; }
+
+/* ①+④ 한 카드 2열 — 자율 수준 | AI 예산 (2026-10-05 세로 다이어트) */
+.ops {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-base) var(--space-lg, 24px);
+  margin-top: var(--space-sm); border-top: 1px solid var(--color-hairline-soft);
+  padding-top: var(--space-sm); align-items: start;
+}
+.ops__col { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.subh { margin: 0; font-size: var(--text-sm); color: var(--color-ink); display: flex; align-items: center; gap: 6px; }
+/* ⓘ 긴 설명은 title 툴팁으로 옮겼다 — 본문은 한 줄 이하 */
+.info { cursor: help; color: var(--color-faint); font-size: var(--text-xs); font-weight: 400; }
+
+/* ⑤+⑦ 짧은 카드 2열 묶음 */
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm); align-items: stretch; }
+@media (max-width: 960px) { .ops, .row2 { grid-template-columns: 1fr; } }
 
 /* ④ 자율 수준 */
 .levels { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-sm); margin-bottom: 6px; }
@@ -717,7 +738,6 @@ onUnmounted(() => clearInterval(timer));
 .defbadge { color: var(--color-faint); background: var(--color-flat-soft); }
 .dirtybadge { color: var(--color-warn); border: 1px solid var(--color-warn); }
 
-.ledger { margin-top: var(--space-sm); border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }
 .ledger__row { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; margin: 6px 0; }
 .ledger__row label { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--color-body); }
 .ledger__stats { display: flex; gap: var(--space-lg, 24px); margin: 4px 0 0; flex-wrap: wrap; }

@@ -878,8 +878,12 @@ app.get('/api/orders/proposals/:id/precheck', async (req, res) => {
   try {
     const r = await require('./server/orderPrecheck').precheck(p, {
       // ⚠️ 미체결 조회는 **있으면** 쓴다 — 없으면 precheck 가 `unknown` 으로 정직하게 적는다
-      getOpenOrders: typeof tossClient?.getOpenOrders === 'function'
-        ? (sym) => tossClient.getOpenOrders(sym) : null,
+      // 🔗 2026-10-05 연결 — listOrders 는 **{status:'OPEN'} 필수**였다(400 프로브로 확정).
+      //    사전점검의 '조회 수단 미연결' 이 이걸로 실데이터가 된다(중복 주문 방지 축).
+      getOpenOrders: async (sym) => {
+        const r = await tossClient.listOrders({ status: 'OPEN' });
+        return (r?.orders || []).filter((o) => String(o.symbol).toUpperCase() === String(sym).toUpperCase());
+      },
     });
     return res.json({ ok: true, ...r });
   } catch (e) {
@@ -942,6 +946,17 @@ app.post('/api/regime/manual', (req, res) => {
 });
 
 // ── 예약(조건부) 주문 (2026-09-23) ─────────────────────────────
+/** 📋 미체결(일반 지정가) 주문 — listOrders({status:OPEN}) (2026-10-05 연결) */
+app.get('/api/orders/open', async (req, res) => {
+  try {
+    const r = await tossClient.listOrders({ status: 'OPEN' });
+    return res.json({ ok: true, orders: (r?.orders || []).map((o) => ({
+      orderId: o.orderId, symbol: o.symbol, side: o.side, price: o.price, quantity: o.quantity,
+      status: o.status, orderedAt: o.orderedAt, filledQuantity: o.execution?.filledQuantity ?? '0',
+    })) });
+  } catch (error) { return res.status(502).json({ ok: false, error: error.message }); }
+});
+
 app.get('/api/orders/conditional', async (req, res) => {
   try {
     const status = String(req.query.status || 'OPEN').toUpperCase() === 'CLOSED' ? 'CLOSED' : 'OPEN';

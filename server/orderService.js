@@ -428,7 +428,7 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency, exe
           const maxQty = Math.max(0, Math.floor((cash - floor) / px));
           return {
             ok: false, kind: 'cash-floor',
-            error: `매수 후 현금이 버퍼(평가액의 ${CASH_FLOOR_PCT}% = ${floor.toFixed(0)} ${cur}) 밑으로 떨어집니다 — VIX 사다리 실탄 보전(사용자 규칙). 가능 수량 ${maxQty}주.`,
+            error: `매수 후 현금이 버퍼(평가액의 ${CASH_FLOOR_PCT}% = ${floor.toFixed(0)} ${cur}) 밑으로 떨어집니다 — VIX 사다리 실탄 보전(운용 방침). 가능 수량 ${maxQty}주.`,
             maxQuantity: maxQty, currency: cur,
           };
         }

@@ -110,7 +110,9 @@ onMounted(async () => {
 /* 🔴 2026-10-04 사용자: "width 100% 늘이지 말고 배치를 고민" — 초광폭(1700px+)에서
    카드가 끝까지 퍼져 황량했다. 스크롤 컨테이너(.page)는 전폭을 유지하되(스크롤바가
    오른쪽 끝에 있게) **콘텐츠만** 읽기 좋은 폭에서 멈춘다. */
-.page > * { width: 100%; max-width: 1280px; }
+/* 🔄 10-05: 좌측 고정 1280 은 초광폭에서 오른쪽만 비어 보였다("오른쪽 여백 너무 많이 남고")
+   ⇒ 1440 으로 넓히고 **중앙 정렬** — 남는 공간이 양쪽으로 갈라져 여백이 디자인으로 읽힌다. */
+.page > * { width: 100%; max-width: 1440px; margin-inline: auto; }
 
 .page__head { display: flex; align-items: center; gap: var(--space-sm); }
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }
