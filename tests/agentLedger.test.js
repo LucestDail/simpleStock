@@ -34,6 +34,46 @@ test('③ 회계 — 매수 잠김·매도 회수·실현손익·재기동 생�
   assert.equal(l2.status().availableUsd, 700, '재기동이 원장을 지웠다');
 });
 
+/**
+ * 🔴 손실 이월 쌍 (2026-10-05 사용자: "손해가 나면 다시 500 으로 돌아가지는 않는지" — 돌아갔다).
+ * 손실=차감 / 이익=미합산 을 **쌍으로** 잠근다 — 한쪽만 보면 반대쪽이 조용히 무너진다.
+ */
+test('③-손실 이월 — 손절 후 잔액이 예산으로 복원되지 않는다', () => {
+  const l = freshLedger();
+  l.setBudget(500, { by: 'test' });
+  l.recordBuy({ symbol: 'QLD', quantity: 5, price: 100 });        // 500 전액 투입
+  l.recordSell({ symbol: 'QLD', quantity: 5, price: 80 });        // 실현 −100
+  const st = l.status();
+  assert.equal(st.realizedUsd, -100);
+  assert.equal(st.effectiveBudgetUsd, 400, '손실이 유효 예산에 반영되지 않았다');
+  assert.equal(st.availableUsd, 400, '손절 후 잔액이 500 으로 돌아갔다');
+  assert.equal(l.canBuy(450).ok, false, '잃은 돈으로 또 샀다');
+  assert.match(l.canBuy(450).why, /실현 손실/);
+  assert.equal(l.canBuy(400).ok, true);
+});
+
+test('③-이익 미합산 — 번 돈이 예산을 자동으로 키우지 않는다', () => {
+  const l = freshLedger();
+  l.setBudget(500, { by: 'test' });
+  l.recordBuy({ symbol: 'QLD', quantity: 5, price: 100 });
+  l.recordSell({ symbol: 'QLD', quantity: 5, price: 120 });       // 실현 +100
+  const st = l.status();
+  assert.equal(st.realizedUsd, 100);
+  assert.equal(st.effectiveBudgetUsd, 500, '이익이 운용 범위를 몰래 키웠다');
+  assert.equal(st.availableUsd, 500);
+  assert.equal(l.canBuy(501).ok, false, '예산 밖 매수가 통과했다');
+});
+
+test('③-손실 과대 — 예산보다 큰 누적 손실이면 유효 예산 0 (음수 금지)', () => {
+  const l = freshLedger();
+  l.setBudget(100, { by: 'test' });
+  l.recordBuy({ symbol: 'X', quantity: 1, price: 100 });
+  l.recordSell({ symbol: 'X', quantity: 1, price: 0 });           // 실현 −100
+  l.recordBuy({ symbol: 'Y', quantity: 1, price: 0 });            // 잔액 0 상태 대비
+  assert.equal(l.status().effectiveBudgetUsd, 0);
+  assert.equal(l.canBuy(1).ok, false);
+});
+
 test('① 예산 미설정 — canBuy 는 무조건 거부(null ≠ 무제한)', () => {
   const l = freshLedger();
   assert.equal(l.canBuy(1).ok, false);

@@ -76,7 +76,9 @@
             <span v-if="budgetMsg" class="mut">{{ budgetMsg }}</span>
           </div>
           <dl v-if="ledger" class="ledger__stats">
-            <div><dt>예산</dt><dd class="mono-num">{{ ledger.budgetUsd == null ? '미설정' : '$' + ledger.budgetUsd }}</dd></div>
+<!-- 🔴 손실 이월(10-05): 유효 예산 = 예산 + min(0, 실현손익). 잃은 돈은 잔액으로 돌아오지
+                 않는다 — 예산과 달라졌을 때만 보여 "왜 잔액이 안 맞지" 를 화면이 먼저 답한다 -->
+            <div><dt>예산</dt><dd class="mono-num">{{ ledger.budgetUsd == null ? '미설정' : '$' + ledger.budgetUsd }}<template v-if="ledger.effectiveBudgetUsd != null && ledger.effectiveBudgetUsd !== ledger.budgetUsd"> <span class="mut">(손실 반영 ${{ ledger.effectiveBudgetUsd }})</span></template></dd></div>
             <div><dt>투입 중</dt><dd class="mono-num">${{ ledger.openCostUsd }}</dd></div>
             <div><dt>잔액</dt><dd class="mono-num">${{ ledger.availableUsd }}</dd></div>
             <div><dt>실현손익</dt><dd class="mono-num" :class="ledger.realizedUsd >= 0 ? 'up' : 'down'">{{ ledger.realizedUsd >= 0 ? '+' : '' }}${{ ledger.realizedUsd }}</dd></div>

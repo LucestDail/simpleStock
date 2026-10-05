@@ -5,8 +5,10 @@
  * 사용자 우려 그대로: *"그냥 줘버리면 가지고 있는 종목도 주무를 것 같고, 비율 산정이 애매"*.
  *
  * ## 세 가지 계약
- * ① 자동 **매수**는 예산 잔액(budget − 보유 원가) 안에서만. 🔴 **예산 미설정(null) = 자동 매수 0**
+ * ① 자동 **매수**는 예산 잔액(유효 예산 − 보유 원가) 안에서만. 🔴 **예산 미설정(null) = 자동 매수 0**
  *    — 명시적으로 줘야 움직인다(기본값이 "전 재산" 인 구조를 만들지 않는다).
+ *    🔴 유효 예산 = 예산 + min(0, 실현손익) — **잃은 돈은 다음 매수 때 돌아오지 않고**,
+ *    번 돈은 자동으로 합쳐지지 않는다(범위 확대는 사람이 예산을 다시 정해서).
  * ② 자동 **매도**는 이 원장에 기록된(=AI 가 산) 수량까지만 — **기존 보유는 영원히 HITL**.
  * ③ 모든 기록이 파일로 영속 + 실현손익 분리 — "맡긴 돈이 뭘 했나" 가 숫자로 남는다.
  *
@@ -44,11 +46,26 @@ function openCostUsd() {
   return Object.values(state.positions).reduce((a, p) => a + (Number(p.costUsd) || 0), 0);
 }
 
+/**
+ * 🔴 유효 예산 — **실현 손실은 차감**된다 (2026-10-05 사용자: *"손해가 나타나면 다음
+ * 매수/매도 시에 다시 500 으로 돌아가지는 않는지"* — 종전 코드는 정확히 돌아갔다:
+ * 매도가 원가를 전액 풀어 주고 손익은 realizedUsd 에만 적혀, 500 투입 → 400 손절 →
+ * 잔액이 다시 500. 순간 노출은 ≤예산이지만 **누적 손실엔 상한이 없었다**).
+ * ⚠️ 실현 **이익은 더하지 않는다** — 운용 범위가 사람 모르게 커지면 안 된다.
+ *    늘리는 건 예산 재설정(사람의 행위)으로만.
+ */
+function effectiveBudgetUsd() {
+  if (state.budgetUsd == null) return null;
+  return Math.max(0, state.budgetUsd + Math.min(0, Number(state.realizedUsd) || 0));
+}
+
 function status() {
+  const eff = effectiveBudgetUsd();
   return {
     budgetUsd: state.budgetUsd,
+    effectiveBudgetUsd: eff == null ? null : Math.round(eff * 100) / 100,
     openCostUsd: Math.round(openCostUsd() * 100) / 100,
-    availableUsd: state.budgetUsd == null ? 0 : Math.max(0, Math.round((state.budgetUsd - openCostUsd()) * 100) / 100),
+    availableUsd: eff == null ? 0 : Math.max(0, Math.round((eff - openCostUsd()) * 100) / 100),
     realizedUsd: Math.round(state.realizedUsd * 100) / 100,
     positions: Object.fromEntries(Object.entries(state.positions)
       .filter(([, p]) => p.qty > 0)
@@ -73,9 +90,13 @@ function setBudget(usd, { by = 'web' } = {}) {
 
 /** 자동 매수 가능액 판정 — ⚠️ null(미설정)은 0 이다. "모름" 이 "무제한" 이 되면 안 된다 */
 function canBuy(needUsd) {
-  if (state.budgetUsd == null) return { ok: false, why: 'AI 예산 미설정 — 운용 규칙에서 예산을 정해야 자동 매수가 됩니다.' };
-  const avail = state.budgetUsd - openCostUsd();
-  if (needUsd > avail) return { ok: false, why: `AI 예산 잔액 부족 (필요 ${needUsd.toFixed(2)} > 잔액 ${avail.toFixed(2)} USD)` };
+  const eff = effectiveBudgetUsd();
+  if (eff == null) return { ok: false, why: 'AI 예산 미설정 — 운용 규칙에서 예산을 정해야 자동 매수가 됩니다.' };
+  const avail = eff - openCostUsd();
+  if (needUsd > avail) {
+    const lost = Math.min(0, Number(state.realizedUsd) || 0);
+    return { ok: false, why: `AI 예산 잔액 부족 (필요 ${needUsd.toFixed(2)} > 잔액 ${avail.toFixed(2)} USD${lost < 0 ? ` · 실현 손실 ${lost.toFixed(2)} 반영` : ''})` };
+  }
   return { ok: true };
 }
 
@@ -110,4 +131,4 @@ function recordSell({ symbol, quantity, price, proposalId = null, dryRun = false
   logInfo('ledger.sell', { symbol: sym, quantity: qty, price, realized: Math.round((price - avg) * qty * 100) / 100, dryRun });
 }
 
-module.exports = { status, setBudget, canBuy, sellableQty, recordBuy, recordSell, _FILE: FILE };
+module.exports = { status, setBudget, canBuy, sellableQty, recordBuy, recordSell, effectiveBudgetUsd, _FILE: FILE };

@@ -1248,13 +1248,17 @@ app.get('/api/briefing/latest', (req, res) => res.status(410).json({
 }));
 
 // ── 시스템 상태·설정 ──────────────────────────────────────────────
-app.get('/api/system/status', (req, res) => {
-  /**
-   * ⚠️ v2 의 `getSystemStatus`(managerService)에서 **설정 패널이 실제로 읽는 것만** 이식했다
-   *    (2026-10-03). `latestManagerReport`·`orchestrationNotes`·`dataFiles` 는 소비자가 없었다.
-   */
+/**
+ * ⚠️ v2 의 `getSystemStatus`(managerService)에서 **설정 패널이 실제로 읽는 것만** 이식했다
+ *    (2026-10-03). `latestManagerReport`·`orchestrationNotes`·`dataFiles` 는 소비자가 없었다.
+ * 🔴 2026-10-05: PUT 응답부가 v2 에서 지워진 `getSystemStatus()` 를 그대로 참조해
+ *    **모든 설정 저장이 "저장은 되고 응답은 400"** 이었다(updateSettings 가 먼저 돌아
+ *    디스크엔 쓰이고 응답 조립에서 터진다 — 화면은 실패로 읽는데 값은 바뀌어 있다).
+ *    GET 과 같은 페이로드를 한 함수로 묶어 참조가 끊길 수 없게 했다.
+ */
+function systemStatusPayload() {
   const ai = getAiSettings();
-  res.json({
+  return {
     timezone: ai.timezone,
     todayLocalDate: getDateInTimezone(new Date(), ai.timezone),
     serverTimeIso: new Date().toISOString(),
@@ -1265,13 +1269,14 @@ app.get('/api/system/status', (req, res) => {
     marketProviderOptions: MARKET_PROVIDER_OPTIONS,
     // 화면 설정 패널이 읽는 곳. **기본값이 적용된 실효값**과 무엇이 기본값인지를 함께 준다.
     dashboardSettings: getDashboardSettings(),
-  });
-});
+  };
+}
+app.get('/api/system/status', (req, res) => res.json(systemStatusPayload()));
 
 app.put('/api/system/settings', async (req, res) => {
   try {
     const saved = await updateSettings(req.body || {});
-    res.json({ settings: saved, system: getSystemStatus() });
+    res.json({ settings: saved, system: systemStatusPayload() });
   } catch (error) {
     res.status(400).json({ error: error.message || '설정 저장 실패' });
   }
