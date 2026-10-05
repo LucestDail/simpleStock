@@ -382,6 +382,25 @@ function getWatchThresholds(state = getWatchlistState()) {
   return out;
 }
 
+/** 종목 모멘텀 하한 설정 — 혼재 그룹(개별주 그룹 속 ETF)의 override. null=그룹/전역 따름 */
+async function setTickerMomentumMin(groupId, symbol, pct) {
+  const v = pct == null ? null : Number(pct);
+  if (v != null && (!Number.isFinite(v) || v < 0 || v > 50)) {
+    throw new Error('momentumMinPct 는 0~50(%) 또는 null 이어야 합니다.');
+  }
+  const target = normalizeSymbol(symbol);
+  let found = false;
+  await mutateStore((store) => {
+    const group = (store.watchlist?.groups || []).find((g) => g.id === groupId);
+    const t = (group?.tickers || []).find((x) => normalizeSymbol(x.symbol) === target);
+    if (!t) return;
+    found = true;
+    if (v == null) delete t.momentumMinPct; else t.momentumMinPct = v;
+  });
+  if (!found) throw new Error('종목을 찾을 수 없습니다.');
+  return getWatchlistState();
+}
+
 /** 그룹 모멘텀 하한 설정 — null 로 지우면 전역 기본으로 돌아간다 */
 async function setGroupMomentumMin(groupId, pct) {
   const v = pct == null ? null : Number(pct);
@@ -427,6 +446,7 @@ module.exports = {
   getWatchedSymbols,
   getWatchThresholds,
   setGroupMomentumMin,
+  setTickerMomentumMin,
   inferMarket,
   // 테스트용 — 낡은 시세 판정을 밖에서 직접 재게 한다(가드가 가드를 못 보면 안 된다)
   isSelfDeclaredStale,

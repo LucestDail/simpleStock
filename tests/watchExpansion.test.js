@@ -54,3 +54,26 @@ test('⑤ 배선 — alertService 가 감시 임계 맵을 rows 에 싣는다', 
   assert.match(src, /getWatchThresholds\(\)/, '임계 맵을 안 읽는다');
   assert.match(src, /r\.minMovePct = m/, 'rows 에 안 싣는다');
 });
+
+test('⑥ 임계 우선순위 — 종목 override > 그룹 > null(전역)', async () => {
+  const fs = require('node:fs'); const path = require('node:path'); const os = require('node:os');
+  for (const k of Object.keys(require.cache)) if (/watchlistService/.test(k)) delete require.cache[k];
+  process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'wl-'));
+  const w = require('../server/watchlistService');
+  const st = {
+    groups: [{
+      id: 'g1', momentumMinPct: 7,
+      tickers: [
+        { symbol: 'OKLO', watch: true },                       // 그룹 7 따름
+        { symbol: 'SOXX', watch: true, momentumMinPct: 1.5 },  // 종목 override
+        { symbol: 'ZZZ', watch: false },                       // 감시 꺼짐 — 맵에 없다
+      ],
+    }, { id: 'g2', tickers: [{ symbol: 'SPY', watch: true }] } // 설정 없음 — null(전역)
+    ],
+  };
+  const m = w.getWatchThresholds(st);
+  assert.equal(m.get('OKLO'), 7);
+  assert.equal(m.get('SOXX'), 1.5);
+  assert.equal(m.get('SPY'), null);
+  assert.ok(!m.has('ZZZ'));
+});

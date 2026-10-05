@@ -277,6 +277,16 @@ app.post('/api/strategy/promoted/:id/active', (req, res) => {
  * 🔴 **감시 표시 토글** — 분석 모멘텀 감시를 받을 종목을 사용자가 고른다.
  *    관심종목은 **테마 프리셋으로 대량 추가**된 것이라 그대로 쓰면 기본값이 비용을 정한다.
  */
+/** 🎚️ 종목 모멘텀 하한(%) — 혼재 그룹 속 ETF 가 그룹 임계에 묶이지 않게(2026-10-05) */
+app.put('/api/watchlist/groups/:id/tickers/:symbol/momentum-min', async (req, res) => {
+  try {
+    const state = await require('./server/watchlistService').setTickerMomentumMin(req.params.id, req.params.symbol, req.body?.pct ?? null);
+    return res.json(state);
+  } catch (error) {
+    return res.status(/찾을 수 없습니다/.test(error.message) ? 404 : 400).json({ error: error.message });
+  }
+});
+
 /** 🎚️ 그룹 모멘텀 하한(%) — 개별주 그룹을 넓게 감시하되 싸게(2026-10-05). null=전역 기본 */
 app.put('/api/watchlist/groups/:id/momentum-min', async (req, res) => {
   try {
