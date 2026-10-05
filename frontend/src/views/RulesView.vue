@@ -62,6 +62,31 @@
       <p class="mut">1단: 에이전트 발 제안 중 <b>계좌 한도·가드 전부 통과한 것만</b> 자동 승인·전송 — 한도에 걸리면 승인 대기로 남습니다.
         2단: 집행은 1단과 동일하며, 2단 고유 동작(예약 자동 등록)은 아직 코드가 없습니다(있다고 적지 않습니다).</p>
 
+      <!-- 📒 AI 운용 예산 (2026-10-05 — "비율 일임") -->
+      <div class="ledger">
+        <h3 class="panel__h">AI 운용 예산 <small class="mut">자동 매수는 이 예산 안에서만 · 자동 매도는 AI 가 산 것만(기존 보유는 영원히 승인 대기)</small></h3>
+        <p v-if="ledger && ledger.budgetUsd == null" class="mut">
+          🔒 <b>예산 미설정 = 자동 매수 0</b> — 1단을 켜도 돈을 명시적으로 맡기기 전엔 아무것도 사지 않습니다.
+        </p>
+        <div class="ledger__row">
+          <label>예산(USD)
+            <input v-model.number="budgetInput" type="number" min="0" step="50" class="xs" placeholder="예: 150" />
+          </label>
+          <button class="btn btn--sm btn--primary" :disabled="budgetBusy" @click="saveBudget">저장</button>
+          <button class="btn btn--sm" :disabled="budgetBusy || ledger?.budgetUsd == null" @click="clearBudget">예산 해제(자동 매수 정지)</button>
+          <span v-if="budgetMsg" class="mut">{{ budgetMsg }}</span>
+        </div>
+        <dl v-if="ledger" class="ledger__stats">
+          <div><dt>예산</dt><dd class="mono-num">{{ ledger.budgetUsd == null ? '미설정' : '$' + ledger.budgetUsd }}</dd></div>
+          <div><dt>투입 중</dt><dd class="mono-num">${{ ledger.openCostUsd }}</dd></div>
+          <div><dt>잔액</dt><dd class="mono-num">${{ ledger.availableUsd }}</dd></div>
+          <div><dt>실현손익</dt><dd class="mono-num" :class="ledger.realizedUsd >= 0 ? 'up' : 'down'">{{ ledger.realizedUsd >= 0 ? '+' : '' }}${{ ledger.realizedUsd }}</dd></div>
+        </dl>
+        <p v-if="ledger && Object.keys(ledger.positions || {}).length" class="mut">
+          AI 보유: <span v-for="(p, s2) in ledger.positions" :key="s2" class="mono-num">{{ s2 }} {{ p.qty }}주(평단 ${{ p.avgUsd }}) </span>
+        </p>
+      </div>
+
       <!-- 전환 확인 모달 — 실거래 자동 발사가 걸린 조작이라 타이핑 확인 -->
       <div v-if="levelAsk != null" class="stop__scrim" @click.self="levelAsk = null">
         <section class="stop" role="dialog" aria-modal="true">
@@ -302,6 +327,29 @@ const LEVELS = [
   { name: '한도 내 자동', desc: '한도·가드 통과한 에이전트 제안만 자동 전송' },
   { name: '안내 후 자율', desc: '집행은 1단과 동일 (고유 동작은 추후)' },
 ];
+const ledger = ref(null);
+const budgetInput = ref(null);
+const budgetBusy = ref(false);
+const budgetMsg = ref('');
+async function saveBudget() {
+  budgetBusy.value = true; budgetMsg.value = '';
+  try {
+    const r = await apiFetch('/api/agent/budget', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usd: budgetInput.value }) });
+    const b = await r.json();
+    if (!r.ok || !b.ok) throw new Error(b.error || `저장 실패 (${r.status})`);
+    budgetMsg.value = '저장됨';
+    await loadStatus();
+  } catch (e) { budgetMsg.value = `실패: ${e.message}`; }
+  finally { budgetBusy.value = false; }
+}
+async function clearBudget() {
+  budgetBusy.value = true;
+  try {
+    await apiFetch('/api/agent/budget', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usd: null }) });
+    budgetInput.value = null;
+    await loadStatus();
+  } finally { budgetBusy.value = false; }
+}
 const levelAsk = ref(null);
 const levelWord = ref('');
 function askLevel(i) {
@@ -352,6 +400,8 @@ async function loadStatus() {
     control.value = b.control || null;
     autonomy.value = b.autonomy || '승인 후 실행';
     autonomyLevel.value = Number(b.autonomyLevel) || 0;
+    ledger.value = b.ledger || null;
+    if (budgetInput.value == null && b.ledger?.budgetUsd != null) budgetInput.value = b.ledger.budgetUsd;
     const lim = Number(b?.limits?.dailyLossPct);
     dailyLossPct.value = Number.isFinite(lim) ? lim : null;
     statusError.value = '';
@@ -666,6 +716,13 @@ onUnmounted(() => clearInterval(timer));
 }
 .defbadge { color: var(--color-faint); background: var(--color-flat-soft); }
 .dirtybadge { color: var(--color-warn); border: 1px solid var(--color-warn); }
+
+.ledger { margin-top: var(--space-sm); border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }
+.ledger__row { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; margin: 6px 0; }
+.ledger__row label { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--color-body); }
+.ledger__stats { display: flex; gap: var(--space-lg, 24px); margin: 4px 0 0; flex-wrap: wrap; }
+.ledger__stats dt { font-size: var(--text-2xs); color: var(--color-faint); }
+.ledger__stats dd { margin: 0; font-weight: 600; color: var(--color-ink); }
 
 /* ⑤ 한도 표 */
 .tbl { width: 100%; border-collapse: collapse; font-size: var(--text-sm); margin-bottom: 6px; }

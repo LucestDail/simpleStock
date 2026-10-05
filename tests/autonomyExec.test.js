@@ -23,6 +23,9 @@ function fresh({ level, limitsOk }) {
   const origChk = o.checkAccountLimits;
   const ctl = require('../server/agentControl');
   ctl.setAutonomy({ level, by: 'test' });
+  // 📒 2026-10-05 원장 도입 후: 자동 매수는 AI 예산 안에서만 — 이 파일의 관심 축(수준·소스·
+  //    한도)을 재려면 예산을 넉넉히 깔아 둔다(예산 축 자체는 agentLedger.test 가 잰다)
+  require('../server/agentLedger').setBudget(100000, { by: 'test' });
   return { o, ctl, origChk };
 }
 

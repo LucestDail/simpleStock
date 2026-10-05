@@ -560,6 +560,27 @@ function propose(input = {}, { source = 'manual', notify = true } = {}) {
   if (require('./agentControl').autonomyLevel() >= 1 && AUTO_SOURCES.has(source)) {
     (async () => {
       try {
+        /**
+         * 📒 AI 원장 게이트 (2026-10-05 — "비율 일임"). 자동 집행의 돈 범위를 계좌 전체에서
+         *    **맡긴 예산**으로 좁힌다: 매수 = 예산 잔액 안(미설정이면 0 — 기본이 전 재산이면
+         *    안 된다) · 매도 = **AI 가 산 수량까지만**(기존 보유는 영원히 HITL 로 남는다).
+         */
+        const ledger = require('./agentLedger');
+        if (proposal.side === 'BUY') {
+          const can = ledger.canBuy(Number(proposal.quantity) * Number(proposal.price));
+          if (!can.ok) {
+            audit('auto_skipped', { id: proposal.id, symbol, reason: can.why.slice(0, 160) });
+            logInfo('orders.auto_skipped', { id: proposal.id, symbol, kind: 'ledger_budget' });
+            return; // HITL 대기 — 사람은 여전히 승인해서 살 수 있다
+          }
+        } else {
+          const own = ledger.sellableQty(symbol);
+          if (own < Number(proposal.quantity)) {
+            audit('auto_skipped', { id: proposal.id, symbol, reason: `AI 원장 보유 ${own} < 제안 ${proposal.quantity} — 기존 보유 매도는 HITL` });
+            logInfo('orders.auto_skipped', { id: proposal.id, symbol, kind: 'ledger_not_owned' });
+            return;
+          }
+        }
         // module.exports 경유 — 내부 참조로 부르면 테스트가 한도 축을 스텁할 수 없다(09-30 구조분해 함정의 변형)
         const chk = await module.exports.checkAccountLimits({
           symbol: proposal.symbol, side: proposal.side,
@@ -573,6 +594,12 @@ function propose(input = {}, { source = 'manual', notify = true } = {}) {
         const ap = approve(proposal.id);
         if (!ap.ok) { audit('auto_skipped', { id: proposal.id, symbol, reason: 'approve_failed' }); return; }
         const ex = await execute(proposal.id);
+        if (ex.ok) {
+          // 전송 성공 = 원장 투입/회수 기록(미체결 보정은 reconcile 영역 — 보수적으로 잠근다)
+          const rec = { symbol, quantity: Number(proposal.quantity), price: Number(proposal.price), proposalId: proposal.id, dryRun: Boolean(ex.dryRun) };
+          if (proposal.side === 'BUY') require('./agentLedger').recordBuy(rec);
+          else require('./agentLedger').recordSell(rec);
+        }
         audit('auto_executed', {
           id: proposal.id, symbol, side: proposal.side, quantity: proposal.quantity,
           level: require('./agentControl').autonomyLevel(), ok: ex.ok, dryRun: Boolean(ex.dryRun),
