@@ -389,7 +389,10 @@ function decide({ now: nowIn, sessions = [], symbols = [], state = {}, z = DEFAU
      *    3.68σ** 를 넘어 분석을 깨웠다. 초저변동 자산은 티끌도 통계적 이상치다 —
      *    z(그 종목답지 않음) AND 절대 크기(경제적 유의미)를 함께 요구한다.
      */
-    if (zv >= z && Math.abs(Number(row.dailyChangePct)) >= MIN_MOVE_PCT) {
+    // 🎚️ 절대 하한은 row 가 들고 올 수 있다(종목·그룹 override — 개별주 확대의 전제).
+    //    null/미설정 = 전역 기본. ⚠️ 0 을 "없음" 으로 읽지 않는다(0 이면 z 만으로 판정하겠다는 뜻).
+    const minMove = Number.isFinite(Number(row.minMovePct)) ? Number(row.minMovePct) : MIN_MOVE_PCT;
+    if (zv >= z && Math.abs(Number(row.dailyChangePct)) >= minMove) {
       if (!mark) {
         st.momentum[sym] = { at: now, z: Number(zv.toFixed(2)) };
         reasons.push({

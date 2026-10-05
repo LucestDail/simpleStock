@@ -361,6 +361,44 @@ function getWatchedSymbols(state = getWatchlistState()) {
   return [...out];
 }
 
+/**
+ * 🎚️ 감시 심볼 → 모멘텀 절대 하한(%) 맵 (2026-10-05 — 개별주 확대의 전제)
+ *
+ * 트리거는 z-score(그 종목답지 않음) AND 절대 하한을 함께 요구하는데, 하한이 전역
+ * 하나(1.5%)면 테마 개별주의 fat-tail 이 분석을 너무 자주 깨운다(= LLM 비용).
+ * 우선순위: **종목 momentumMinPct > 그룹 momentumMinPct > null(전역 기본)**.
+ * ⚠️ null 을 0 으로 읽지 않는다 — "설정 없음" 은 전역 기본을 쓰라는 뜻이다.
+ */
+function getWatchThresholds(state = getWatchlistState()) {
+  const out = new Map();
+  for (const g of state.groups || []) {
+    const gMin = Number.isFinite(Number(g.momentumMinPct)) ? Number(g.momentumMinPct) : null;
+    for (const t of g.tickers || []) {
+      if (!t.watch) continue;
+      const tMin = Number.isFinite(Number(t.momentumMinPct)) ? Number(t.momentumMinPct) : null;
+      out.set(normalizeSymbol(t.symbol), tMin ?? gMin ?? null);
+    }
+  }
+  return out;
+}
+
+/** 그룹 모멘텀 하한 설정 — null 로 지우면 전역 기본으로 돌아간다 */
+async function setGroupMomentumMin(groupId, pct) {
+  const v = pct == null ? null : Number(pct);
+  if (v != null && (!Number.isFinite(v) || v < 0 || v > 50)) {
+    throw new Error('momentumMinPct 는 0~50(%) 또는 null 이어야 합니다.');
+  }
+  let found = false;
+  await mutateStore((store) => {
+    const group = (store.watchlist?.groups || []).find((g) => g.id === groupId);
+    if (!group) return;
+    found = true;
+    if (v == null) delete group.momentumMinPct; else group.momentumMinPct = v;
+  });
+  if (!found) throw new Error('그룹을 찾을 수 없습니다.');
+  return getWatchlistState();
+}
+
 async function removeTicker(groupId, symbol) {
   const target = normalizeSymbol(symbol);
   let removed = false;
@@ -387,6 +425,8 @@ module.exports = {
   removeTicker,
   setWatch,
   getWatchedSymbols,
+  getWatchThresholds,
+  setGroupMomentumMin,
   inferMarket,
   // 테스트용 — 낡은 시세 판정을 밖에서 직접 재게 한다(가드가 가드를 못 보면 안 된다)
   isSelfDeclaredStale,

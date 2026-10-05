@@ -699,8 +699,37 @@ function quantGate(rows) {
     passed.push({ ...r, trendScore: aligned ? 2 : 1, momentum });
   }
   passed.sort((a, b) => b.trendScore - a.trendScore || b.momentum - a.momentum);
-  return { passed: passed.slice(0, CANDIDATE_PROMPT_MAX), dropped, overflow: Math.max(0, passed.length - CANDIDATE_PROMPT_MAX) };
+  /**
+   * 🎚️ 개별주 슬롯 상한 (2026-10-05 — 개별주 감시·후보 확대의 전제)
+   *
+   * 개별주는 변동성이 커서 모멘텀 정렬 상위를 독점하기 쉽다 — 상한 없이 확대하면
+   * 후보 6자리가 테마 개별주로 채워져 포트 핵심(지수·섹터 ETF)이 판단에서 밀린다.
+   * ⇒ 개별주(isEtf === false)는 최대 STOCK_SLOT_MAX 개 — 나머지는 ETF·판별불가가 채운다.
+   * ⚠️ isEtf 를 **모르면 제한하지 않는다**(null = 판별 실패를 벌주지 않는다 — fail-open).
+   */
+  const picked = [];
+  let stockCount = 0;
+  const spill = [];
+  for (const r of passed) {
+    if (picked.length >= CANDIDATE_PROMPT_MAX) break;
+    if (r.isEtf === false) {
+      if (stockCount >= STOCK_SLOT_MAX) { spill.push(r); continue; }
+      stockCount += 1;
+    }
+    picked.push(r);
+  }
+  for (const r of spill) { // 개별주를 깎아 자리가 남으면 ETF 가 아니라도 못 채운 칸은 비워두지 않는다
+    if (picked.length >= CANDIDATE_PROMPT_MAX) break;
+    picked.push(r);
+  }
+  for (const r of passed.filter((x) => x.isEtf === false && !picked.includes(x) && !spill.includes(x))) {
+    if (picked.length >= CANDIDATE_PROMPT_MAX) break;
+    picked.push(r);
+  }
+  return { passed: picked, dropped, overflow: Math.max(0, passed.length - picked.length) };
 }
+/** 후보 6자리 중 개별주 최대 수 — 지수·섹터 ETF 중심 전략(플레이북)의 구조적 보장 */
+const STOCK_SLOT_MAX = Math.max(0, Number(process.env.CANDIDATE_STOCK_SLOT_MAX ?? 2));
 
 async function candidateSection(scenarios, { heldSymbols = [], summarize, getCandles } = {}) {
   if (!scenarios?.length || typeof summarize !== 'function' || typeof getCandles !== 'function') return '';
@@ -718,6 +747,15 @@ async function candidateSection(scenarios, { heldSymbols = [], summarize, getCan
       measured.push({ ...w, tech: t });
     } catch { /* 못 받은 후보는 싣지 않는다 — 지어내기 금지 */ }
   }
+  // 🏷️ ETF/개별주 판별 — 토스 stockInfo 배치 1콜. 🔴 실패하면 isEtf=null(모름) 로 두고
+  //    게이트는 모름을 벌주지 않는다(판별 실패가 후보를 깎으면 조회 장애가 판단을 바꾼다).
+  try {
+    const info = Object.fromEntries(await require('./tossClient').getStockInfo(measured.map((m) => m.symbol)));
+    for (const m of measured) {
+      const st = String(info[m.symbol]?.securityType || '').toUpperCase();
+      m.isEtf = st ? (st.includes('ETF') || st.includes('ETN')) : null;
+    }
+  } catch { for (const m of measured) m.isEtf = null; }
   // 🔴 수치 게이트 — 통과한 것만 LLM 에 (상단 quantGate 주석 참조)
   const gate = quantGate(measured);
   /**

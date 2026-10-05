@@ -945,8 +945,10 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
        *    **내가 고른 41종목이 분석 빈도를 정한다.** 표시는 기본 꺼짐이다.
        */
       let watched = [];
+      let watchMins = new Map();
       try {
         watched = require('./watchlistService').getWatchedSymbols();
+        watchMins = require('./watchlistService').getWatchThresholds();
       } catch (e) {
         /**
          * 🔴 **조용히 삼키지 않는다** — 종전엔 빈 catch 라, 이게 던지면 감시 표시가
@@ -957,6 +959,11 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
       }
       st.universe = trigger.trackUniverse(st.universe, items.map((i) => i.symbol), targeted, now, watched);
       const rows = await collectMomentumRows(st, st.universe, items, now);
+      // 🎚️ 종목·그룹별 모멘텀 하한(2026-10-05) — 판정은 trigger.decide 가 row 단위로 쓴다
+      for (const r of rows) {
+        const m = watchMins.get(String(r.symbol || '').toUpperCase());
+        if (m != null) r.minMovePct = m;
+      }
       const d = trigger.decide({ now, sessions: await sessionsFor(st.universe, now), symbols: rows, state: st.analyst || {} });
       st.analyst = d.state;
       /**
