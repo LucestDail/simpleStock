@@ -1416,6 +1416,11 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     if (ps) lines.push('', ps);
   } catch (e) { logWarn('analyst.promoted_section_failed', { message: e.message }); }
 
+  try {
+    const sec = ledgerSection(require('./agentLedger').status(), require('./agentControl').autonomyLevel());
+    if (sec) lines.push('', ...sec);
+  } catch (e) { logWarn('analyst.ledger_section_failed', { message: e.message }); }
+
   lines.push('', '## 보유 종목');
   for (const h of items) {
     const t = tech[h.symbol];
@@ -3057,6 +3062,38 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
  *  - VIX band ≥ 1 (공포 사다리 영역 — 거기선 기계 매수가 존재 이유다)
  *  - 추세(up/down) 발생 · VIX 모름(null — 평온을 확인 못 하면 작동하지 않는다, fail-open)
  */
+/**
+ * 📒 AI 운용 예산 절 (2026-10-06 — 사용자: *"AI 자동매매 하나도 없는데? 내가 예산을 투입하면
+ *    그거로 불리라는데"*). 첫 실운용 밤의 실측: 예산 $500 이 **집행 게이트에만** 배선되고
+ *    판단(프롬프트)에는 안 실려서, 모델이 전용 예산의 존재 자체를 모른 채 조언자 역할만 했다 —
+ *    퀀트 게이트가 후보를 매 회차 줬는데 BUY 제안 0. "수집해 놓고 안 쓰는" 가족.
+ * ⚠️ 예산 미설정(null)이면 null — 절을 통째로 생략한다(종전 조언자 동작 그대로).
+ * 순수 함수(입력 = 원장 status + 자율 단계) — LLM·네트워크 없이 테스트하기 위해서다.
+ */
+function ledgerSection(led, autonomyLevel = 0) {
+  if (!led || led.budgetUsd == null) return null;
+  const pos = Object.entries(led.positions || {});
+  const out = [];
+  out.push(`## AI 운용 예산 — 너의 전용 자금 (자율 ${autonomyLevel}단)`);
+  const rz = Number(led.realizedUsd) || 0;
+  out.push(`- 예산 $${led.budgetUsd} · 가용 $${led.availableUsd} · 투입 중 $${led.openCostUsd} · 실현손익 ${rz >= 0 ? '+$' + rz : '-$' + Math.abs(rz)}`);
+  if (led.effectiveBudgetUsd != null && led.effectiveBudgetUsd !== led.budgetUsd) {
+    out.push(`  ⚠️ 실현 손실이 반영돼 유효 예산은 $${led.effectiveBudgetUsd} 다 — 잃은 돈은 돌아오지 않는다.`);
+  }
+  out.push(pos.length
+    ? `- AI 보유: ${pos.map(([s, p]) => `${s} ${p.qty}주 @${p.avgUsd}`).join(' · ')} — 이 포지션의 출구(목표·손절)는 네가 관리한다. AI 보유 수량 안의 SELL 은 자동 집행된다.`
+    : '- AI 보유: 없음 — 아직 한 번도 진입하지 않았다.');
+  out.push('🔴 이 예산은 **네가 능동적으로 굴리라고 맡긴 돈**이다. 가용액이 있으면 퀀트 게이트 통과');
+  out.push('   후보(보유 종목 추가 진입 포함) 중 진입 기회를 **매 회차 검토**하고, 근거가 서면 가용액');
+  out.push(`   안에서 수량·지정가를 계산해 BUY 를 제안하라${autonomyLevel >= 1 ? ' — 자율 1단+ 라 그 제안은 자동 집행된다' : ''}.`);
+  out.push('   확신이 약하면 관망이 아니라 **작게**(가용의 1/3 이하) 들어가는 것까지 검토하고,');
+  out.push('   그래도 안 서면 이 예산에 대해 "왜 진입하지 않는지" 를 반드시 적어라.');
+  out.push('⚠️ 집중 상한(종목당 20%)·불리가격 게이트는 그대로다 — 비중이 이미 큰 종목(예: QLD)의');
+  out.push('   추가 매수는 자동으로 못 나가고 승인 대기로 남는다. 사용자 기존 보유의 매도 제안도');
+  out.push('   지금처럼 승인 대기로 간다 — **판단 자체는 계속 하라.**');
+  return out;
+}
+
 function sideGate(p, regimeState, { heldSymbols = [], proposals = [] } = {}) {
   if (String(p.side).toUpperCase() !== 'BUY') return { ok: true };
   const sym = String(p.symbol).toUpperCase();
@@ -3156,4 +3193,5 @@ module.exports = {
   computeTrade, decideOnContext, inverseGate, sideGate, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
   assessBuyingCapacity, capacityDetail, capacityBand, describeNoProposal, watchMovesSection,
+  ledgerSection,
 };

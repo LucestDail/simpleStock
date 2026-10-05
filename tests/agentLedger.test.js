@@ -143,3 +143,39 @@ test('② AI 가 산 것은 자동 매도 가능 — 원장 회수까지', async
     assert.equal(ledger.status().realizedUsd, 30);
   } finally { delete o.checkAccountLimits; }
 });
+
+/**
+ * 📒 프롬프트 배선 (2026-10-06 — "예산을 투입하면 그거로 불리라는데"). 예산이 집행 게이트에만
+ * 있고 판단(프롬프트)에 없어서 첫 밤 BUY 0 이었다. 절 생성(순수)과 배선(호출 존재)을 잠근다.
+ * ⚠️ 호출 존재는 이름 grep 이라 약하다(10-01 함정) — 최종 판정은 배포 후 다음 회차의
+ *    analyst-last-prompt.txt 에 'AI 운용 예산' 절이 실리는 **라이브 실증**이다.
+ */
+test('프롬프트 — 예산 미설정이면 절 없음, 설정이면 임무·수치·게이트 안내', () => {
+  const a = require('../server/analystService');
+  assert.equal(a.ledgerSection({ budgetUsd: null }), null);
+  assert.equal(a.ledgerSection(null), null);
+  const sec = a.ledgerSection({ budgetUsd: 500, availableUsd: 500, openCostUsd: 0, realizedUsd: 0, positions: {} }, 1).join('\n');
+  assert.match(sec, /AI 운용 예산/);
+  assert.match(sec, /예산 \$500 · 가용 \$500/);
+  assert.match(sec, /BUY 를 제안하라 — 자율 1단\+ 라 그 제안은 자동 집행된다/);
+  assert.match(sec, /집중 상한/, '게이트 안내가 빠지면 모델이 자동 거부를 결함으로 서술한다');
+  const sec0 = a.ledgerSection({ budgetUsd: 500, availableUsd: 500, openCostUsd: 0, realizedUsd: 0, positions: {} }, 0).join('\n');
+  assert.doesNotMatch(sec0, /자동 집행된다 —|1단\+ 라/, '0단에서 자동 집행을 약속하면 거짓말');
+});
+
+test('프롬프트 — 손실 이월·AI 보유가 수치로 실린다', () => {
+  const a = require('../server/analystService');
+  const sec = a.ledgerSection({
+    budgetUsd: 500, effectiveBudgetUsd: 400, availableUsd: 280, openCostUsd: 120,
+    realizedUsd: -100, positions: { SOXX: { qty: 2, costUsd: 120, avgUsd: 60 } },
+  }, 1).join('\n');
+  assert.match(sec, /유효 예산은 \$400/);
+  assert.match(sec, /SOXX 2주 @60/);
+  assert.match(sec, /실현손익 -\$100/);
+});
+
+test('프롬프트 — analyze 경로가 ledgerSection 을 실제로 부른다(선언 외 호출 ≥1)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
+  const calls = (src.match(/ledgerSection\(/g) || []).length;
+  assert.ok(calls >= 2, `선언 포함 ${calls}회 — 호출부가 사라졌다(배선 제거)`);
+});
