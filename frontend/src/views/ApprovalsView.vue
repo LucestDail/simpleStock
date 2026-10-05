@@ -376,6 +376,10 @@ onUnmounted(() => clearInterval(timer));
    카드가 끝까지 퍼져 황량했다. 스크롤 컨테이너(.page)는 전폭을 유지하되(스크롤바가
    오른쪽 끝에 있게) **콘텐츠만** 읽기 좋은 폭에서 멈춘다. */
 .page > * { width: 100%; max-width: 1280px; }
+/* 🔴 오버레이 예외 — 위 상한이 fixed 스크림까지 좁혀 화면 좌측 2/3 만 어두웠다(2026-10-05
+   실화면). OrderTicket 자체의 max-width:none 은 **동특이성 + 라우트 청크가 나중 로드**라
+   져서(computed 1280px 실측), 상한을 건 쪽이 예외도 선언한다 — 같은 파일 안 뒤 선언이 이긴다. */
+.page > .ticket__scrim { width: 100vw; max-width: none; }
 
 .page__head { display: flex; align-items: center; gap: var(--space-sm); }
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }
