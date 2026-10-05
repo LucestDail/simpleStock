@@ -165,67 +165,67 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/**
+ * 🔴 2026-10-05 전면 재도색 — "글자가 아무것도 안 보이는데?" (라이트 테마 실화면)
+ *
+ * 이 모달은 다크 고정 시절(10-02)에 **존재하지 않는 토큰**(--color-text·--color-border·
+ * --color-surface-2)과 다크용 고정 폴백(#e8ebf2 등)으로 칠해졌다. 다크에선 폴백 덕에
+ * 우연히 보였고, 테마가 라이트로 바뀌자 **흰 바탕(실재 토큰 --color-surface)에
+ * 흰 글자(가짜 토큰의 다크 폴백)** 가 됐다. ⇒ 실재 토큰(tokens.css)만 쓴다. 폴백 금지 —
+ * 가짜 토큰 + 폴백 조합이 바로 이 사고다("토큰이 없으면 빌드가 아니라 화면이 깨진다").
+ *
+ * 🔴 스크림 max-width:none — .page > * 의 콘텐츠 폭 상한(1280px)이 fixed 스크림까지
+ *    좁혀 **화면 좌측 2/3 만 어두워졌다**(사용자: "백그라운드 쉐도우 처리는 대체 뭐야").
+ */
 .ticket__scrim {
   position: fixed; inset: 0; z-index: 90;
+  width: 100vw; max-width: none;
   background: rgba(0, 0, 0, .55);
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
 .ticket {
   width: min(560px, 100%); max-height: 88vh; overflow: auto;
-  background: var(--color-surface, #14161c); color: var(--color-text, #e8ebf2);
-  border: 1px solid var(--color-border, rgba(255,255,255,.12)); border-radius: 14px;
+  background: var(--color-surface); color: var(--color-body);
+  border: 1px solid var(--color-hairline-strong); border-radius: var(--rounded-lg);
   padding: 18px 20px; display: flex; flex-direction: column; gap: 10px;
+  box-shadow: var(--shadow-pop, 0 18px 48px rgba(0,0,0,.28));
 }
 .ticket__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.ticket__eyebrow { font-size: 11px; color: var(--color-muted, #8b93a7); margin: 0 0 2px; }
-.ticket__title { margin: 0; font-size: 17px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.ticket__title small { font-size: 12px; color: var(--color-muted, #8b93a7); font-weight: 400; }
-.ticket__side { padding: 1px 7px; border-radius: 6px; font-size: 12px; }
-.ticket__side--buy { background: rgba(70,180,120,.18); color: #5fc48f; }
-.ticket__side--sell { background: rgba(224,96,58,.18); color: #ef7a55; }
-.ticket__x { background: none; border: 0; color: var(--color-muted, #8b93a7); cursor: pointer; font-size: 15px; }
-.ticket__h { margin: 6px 0 0; font-size: 12px; color: var(--color-muted, #8b93a7); font-weight: 600; }
-.ticket__skel { color: var(--color-muted, #8b93a7); font-size: 13px; margin: 0; }
-.ticket__fail { color: #ef7a55; font-size: 13px; margin: 0; }
-.ticket__warn { color: #e0ad48; font-size: 13px; margin: 0; }
-.ticket__why { font-size: 13px; line-height: 1.55; margin: 0; }
-.ticket__note { font-size: 11px; color: var(--color-muted, #8b93a7); margin: 0; }
+.ticket__eyebrow { font-size: var(--text-2xs); color: var(--color-faint); margin: 0 0 2px; }
+.ticket__title { margin: 0; font-size: var(--text-lg); color: var(--color-ink); display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ticket__title small { font-size: var(--text-xs); color: var(--color-muted); font-weight: 400; }
+.ticket__side { padding: 1px 7px; border-radius: var(--rounded-xs); font-size: var(--text-xs); }
+.ticket__side--buy { background: var(--color-up-soft); color: var(--color-up); }
+.ticket__side--sell { background: var(--color-down-soft, rgba(224,96,58,.14)); color: var(--color-down); }
+.ticket__x { background: none; border: 0; color: var(--color-muted); cursor: pointer; font-size: 15px; }
+.ticket__h { margin: 6px 0 0; font-size: var(--text-xs); color: var(--color-faint); font-weight: 600; }
+.ticket__skel { color: var(--color-muted); font-size: var(--text-sm); margin: 0; }
+.ticket__fail { color: var(--color-down); font-size: var(--text-sm); margin: 0; }
+.ticket__warn { color: var(--color-warn); font-size: var(--text-sm); margin: 0; }
+.ticket__why { font-size: var(--text-sm); line-height: 1.55; margin: 0; color: var(--color-body); }
+.ticket__note { font-size: var(--text-2xs); color: var(--color-faint); margin: 0; }
 
 .checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.checks__row { display: grid; grid-template-columns: 18px 1fr auto auto; align-items: center; gap: 8px; font-size: 13px; }
+.checks__row { display: grid; grid-template-columns: 18px 1fr auto auto; align-items: center; gap: 8px; font-size: var(--text-sm); }
 .checks__icon { font-size: 12px; line-height: 1; }
-.checks__label { color: var(--color-text, #e8ebf2); }
-.checks__detail { color: var(--color-muted, #8b93a7); font-size: 12px; }
-.checks__row--fail .checks__detail { color: #ef7a55; }
-.checks__row--warn .checks__detail { color: #e0ad48; }
+.checks__label { color: var(--color-ink); }
+.checks__detail { color: var(--color-muted); font-size: var(--text-xs); }
+.checks__row--fail .checks__detail { color: var(--color-down); }
+.checks__row--warn .checks__detail { color: var(--color-warn); }
 
-.impact { width: 100%; border-collapse: collapse; font-size: 13px; }
-.impact th, .impact td { padding: 5px 6px; border-bottom: 1px solid var(--color-border, rgba(255,255,255,.08)); }
-.impact th { font-size: 11px; color: var(--color-muted, #8b93a7); font-weight: 500; text-align: left; }
+.impact { width: 100%; border-collapse: collapse; font-size: var(--text-sm); color: var(--color-body); }
+.impact th, .impact td { padding: 5px 6px; border-bottom: 1px solid var(--color-hairline-soft); }
+.impact th { font-size: var(--text-2xs); color: var(--color-faint); font-weight: 500; text-align: left; }
 /* ⚠️ `.impact th` 가 `.ta-r` 를 이긴다 — 헤더만 반대쪽에 붙으므로 **명시**한다 */
 .impact th.ta-r { text-align: right; }
 .ta-r { text-align: right; }
-.up { color: #5fc48f; }
-.down { color: #ef7a55; }
+.up { color: var(--color-up); }
+.down { color: var(--color-down); }
 
 .ticket__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
-.ticket__ack { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.ticket__ack { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--color-body); }
 .ticket__btns { display: flex; gap: 6px; }
-/**
- * 🔴 **버튼을 여기서 직접 칠한다** (2026-10-02 실물 확인).
- *    `.btn` 은 WorkspaceView 의 **scoped** 스타일이라 이 컴포넌트에는 안 먹는다 —
- *    실제로 **흰 박스에 흰 글자**로 나와 거의 안 보였다.
- *    기존 CSS 가드는 `btn--xs`(정의가 아예 없는 것)만 잡았고, `.btn` 처럼
- *    **다른 파일에 scoped 로 존재하는 것**은 못 봤다. 스크린샷이 잡았다.
- * ⚠️ 토큰을 쓰되 **폴백 색을 반드시** 준다 — 토큰이 없으면 또 맨몸이 된다.
- */
-.btn {
-  padding: 6px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
-  background: var(--color-surface-2, #1e212a); color: var(--color-text, #e8ebf2);
-  border: 1px solid var(--color-border, rgba(255,255,255,.16));
-}
-.btn:hover:not([disabled]) { border-color: rgba(255,255,255,.32); }
-.btn--primary { background: #2f6df6; border-color: #2f6df6; color: #fff; font-weight: 600; }
-.ticket__trim { font-size: 11px; padding: 2px 8px; }
-.btn[disabled] { opacity: .4; cursor: not-allowed; }
+/* 버튼은 전역 ui.css 의 .btn 을 쓴다 — 10-04 전역 승격 후에도 로컬 다크색 복제가 남아
+   라이트에서 어두운 버튼이 떠 있었다(이중 정의는 로컬이 이긴다). 복제 삭제. */
+.ticket__trim { font-size: var(--text-2xs); padding: 2px 8px; }
 </style>

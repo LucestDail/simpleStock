@@ -68,6 +68,8 @@ const CASH_FLOOR_PCT = Math.max(0, Number(process.env.CASH_FLOOR_PCT ?? 0));
  * 수익 깎개가 아니라 **분산(변동성) 통제 장치**다. 기존 보유 초과분은 건드리지 않고
  * **추가 매수만** 막는다.
  */
+/** 불리 방향(매도↓·매수↑) 지정가 허용 괴리 — 슬리피지 하한을 모델이 못 정하게(2026-10-05) */
+const ADVERSE_PRICE_PCT = Number(process.env.ADVERSE_PRICE_PCT ?? 0.3);
 const SINGLE_POSITION_MAX_PCT = Number(process.env.SINGLE_POSITION_MAX_PCT ?? 20);
 /** 🔴 즉시 제안 지정가의 현재가 괴리 상한 % — 넘으면 조건주문으로 안내(2026-09-24) */
 const PRICE_DRIFT_PCT = Math.max(0.5, Number(process.env.PRICE_DRIFT_PCT ?? 2.5));
@@ -332,6 +334,24 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency, exe
               ok: false, kind: 'price-drift',
               error: `지정가 ${px} 가 현재가 ${now} 에서 ${driftPct.toFixed(1)}% 떨어져 있습니다 — 10분 안에 체결될 수 없는 가격입니다. 이 가격을 원하면 **조건주문(예약)** 으로 내세요.`,
               currentPrice: now,
+            };
+          }
+          /**
+           * 🔴 **불리 방향 지정가 상한** (2026-10-05 사용자: "현재가 98 근접인데 왜 97.5 에 파냐").
+           *
+           * 매도 지정가 < 현재가(또는 매수 > 현재가)는 marketable limit 이라 보통은
+           * 현재 호가에서 체결되지만, **그 지정가가 슬리피지 하한이 된다** — 주간거래처럼
+           * 호가가 얕은 세션에선 최악의 경우 그 가격까지 밀려 체결된다. 모델이 그 하한을
+           * 마음대로 정하게 두지 않는다: 불리 방향 괴리는 ADVERSE_PRICE_PCT(0.3%)까지만.
+           * ⚠️ 유리 방향(매도를 비싸게·매수를 싸게 걸기)은 ±2.5% 밴드가 이미 상한이다 —
+           *    여기서 더 조이면 정당한 레벨 지정을 죽인다(양방향을 같이 보고 이쪽만 조인다).
+           */
+          const adverse = up === 'SELL' ? -driftPct : driftPct; // 양수 = 불리 방향 괴리(%)
+          if (adverse > ADVERSE_PRICE_PCT) {
+            return {
+              ok: false, kind: 'adverse-price',
+              error: `${up === 'SELL' ? '매도' : '매수'} 지정가 ${px} 가 현재가 ${now} 보다 ${adverse.toFixed(2)}% ${up === 'SELL' ? '낮습니다' : '높습니다'} — 체결 불리 방향은 ${ADVERSE_PRICE_PCT}% 까지만. 현재가 기준으로 다시 내세요.`,
+              currentPrice: now, maxAdversePct: ADVERSE_PRICE_PCT,
             };
           }
         }

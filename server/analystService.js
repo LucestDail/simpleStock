@@ -314,6 +314,7 @@ const SYSTEM_PROMPT = [
   '- symbol·side·quantity·price 를 **전부 숫자로** 채웁니다. 하나라도 비면 그 제안은 버려집니다.',
   '- quantity 는 **보유 수량과 현금 여력을 넘지 않게** 합니다. 매도는 보유 수량 이내입니다.',
   '- price 는 지정가입니다. 🔴 **현재가 ±2.5% 안**이어야 합니다(코드가 거부합니다 — 09-23 실물:',
+  '🔴 체결 **불리 방향 금지**: 매도 지정가는 현재가 **이상**, 매수는 현재가 **이하**로 — 반대로 내면 코드가 현재가로 보정합니다(2026-10-05).',
   '  당일 고가 옆 지정가 3건이 전부 10분 TTL 안에 체결 불가였다). 그 밖의 가격을 원하면 제안 대신',
   '  **조건주문**을 서술하세요(사람이 예약으로 겁니다).',
   '- 🔴 이 제안은 **사람이 승인해야만** 실행됩니다. 당신은 실행하지 않습니다.',
@@ -2455,6 +2456,25 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
      * ⚠️ 깎았다는 사실을 **제안 사유에 적는다** — 사용자가 승인 화면에서 원래 의도를 알아야 한다.
      */
     if (!chk.ok) {
+      /**
+       * 🔴 불리 방향 지정가는 **현재가로 보정**해 다시 점검한다 (2026-10-05 — "왜 97.5 에 파냐").
+       *    판단(팔자)은 맞는데 가격 한 끗 때문에 제안이 0건이 되면 수량 부족 때와 같은 손실이다.
+       *    보정 사실은 사유에 적고 감사에 남긴다 — 승인하는 사람이 원제안가를 알아야 한다.
+       */
+      if (chk.kind === 'adverse-price' && Number(chk.currentPrice) > 0) {
+        const fixedPrice = Number(chk.currentPrice);
+        logInfo('analyst.price_clamped', { symbol: p.symbol, side: p.side, asked: p.price, to: fixedPrice });
+        const re = await orderService.checkAccountLimits({
+          symbol: p.symbol, side: p.side, quantity: p.quantity, price: fixedPrice,
+        });
+        if (re.ok) {
+          clamped = { price: fixedPrice,
+            reason: `${p.reason || ''} (지정가 ${p.price}→현재가 ${fixedPrice} 보정 — 불리 방향 한도)`.trim() };
+        } else {
+          rejected.push({ symbol: p.symbol, side: p.side, error: re.error, kind: re.kind });
+          continue;
+        }
+      } else {
       const canClamp = chk.kind === 'insufficient' && Number(chk.maxQuantity) >= 1
         && Number(chk.maxQuantity) < Number(p.quantity);
       if (!canClamp) {
@@ -2467,11 +2487,13 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       });
       clamped = { quantity: Number(chk.maxQuantity),
         reason: `${p.reason || ''} (현금 한도로 ${p.quantity}→${chk.maxQuantity}주 축소)`.trim() };
+      }
     }
     const r = orderService.propose(
       {
-        symbol: p.symbol, side: p.side, type: 'LIMIT', price: p.price,
-        quantity: clamped ? clamped.quantity : p.quantity,
+        symbol: p.symbol, side: p.side, type: 'LIMIT',
+        price: clamped?.price ?? p.price,
+        quantity: clamped?.quantity ?? p.quantity,
         reason: clamped ? clamped.reason : p.reason,
       },
       { source: 'analyst' }

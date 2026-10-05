@@ -189,7 +189,9 @@ const error = ref('');
 const picked = ref(null);
 const ordersMode = ref('dry-run');
 
-const pending = computed(() => rows.value.filter((p) => p.status === 'PENDING'));
+// 🔴 만료된 PENDING 은 결정 대상이 아니다 — "00:00 · 검토" 로 남아 사용자를 헷갈리게 했다
+//    (2026-10-05 실화면). 서버 list() 가 expired 를 동봉한다 — 그걸 믿는다.
+const pending = computed(() => rows.value.filter((p) => p.status === 'PENDING' && !p.expired));
 const approved = computed(() => rows.value.filter((p) => p.status === 'APPROVED'));
 
 async function loadProposals() {
@@ -250,11 +252,13 @@ async function rejectAll() {
   await loadProposals();
 }
 
+const nowTick = ref(Date.now());
+setInterval(() => { nowTick.value = Date.now(); }, 1000);
 function ttl(p) {
   const exp = Date.parse(p.expiresAt || 0);
   if (!exp) return '';
-  const s = Math.max(0, Math.round((exp - Date.now()) / 1000));
-  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const s = Math.max(0, Math.round((exp - nowTick.value) / 1000));
+  return `만료 ${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
 // ── 예약(조건부) 주문 — 이미 거래소에 등록돼 감시 중인 것들(제안과 다른 층) ──
@@ -395,7 +399,8 @@ onUnmounted(() => clearInterval(timer));
 .rowcard:hover { background: var(--color-surface-hover); }
 .rowcard__sym { font-weight: 700; color: var(--color-ink); }
 .rowcard__why { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); font-size: var(--text-xs); }
-.rowcard__ttl { color: var(--color-warn); font-size: var(--text-xs); }
+.rowcard__ttl { color: var(--color-warn); font-size: var(--text-xs); white-space: nowrap; margin-left: auto; }
+.rowcard > .btn { flex: none; white-space: nowrap; }
 .rowcard__info { color: var(--color-body); font-size: var(--text-xs); white-space: nowrap; }
 
 /* ② 좌우 분할 — 좌 이력 그리드 / 우 상세 */
