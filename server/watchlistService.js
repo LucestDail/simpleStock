@@ -155,6 +155,10 @@ function getWatchlistState(store = loadStore()) {
       id: group.id,
       name: group.name,
       order: group.order,
+      // 🎚️ 그룹 임계 — 🔴 이 화이트리스트가 떨어뜨리면 getWatchThresholds(기본 인자가
+      //    이 직렬화 결과다!)가 그룹 임계를 영영 못 본다 — 설정 200 이 거짓 성공이 된다
+      //    (2026-10-05 라이브 적용 직후 임계 지도가 비어서 잡았다. "저장됐다 ≠ 반영됐다")
+      momentumMinPct: group.momentumMinPct != null && Number.isFinite(Number(group.momentumMinPct)) ? Number(group.momentumMinPct) : null,
       tickers: (group.tickers || []).map((ticker) => joinQuote(ticker, quoteIndex)),
     }));
   const market = getMarketSnapshot();
@@ -372,10 +376,10 @@ function getWatchedSymbols(state = getWatchlistState()) {
 function getWatchThresholds(state = getWatchlistState()) {
   const out = new Map();
   for (const g of state.groups || []) {
-    const gMin = Number.isFinite(Number(g.momentumMinPct)) ? Number(g.momentumMinPct) : null;
+    const gMin = g.momentumMinPct != null && Number.isFinite(Number(g.momentumMinPct)) ? Number(g.momentumMinPct) : null;
     for (const t of g.tickers || []) {
       if (!t.watch) continue;
-      const tMin = Number.isFinite(Number(t.momentumMinPct)) ? Number(t.momentumMinPct) : null;
+      const tMin = t.momentumMinPct != null && Number.isFinite(Number(t.momentumMinPct)) ? Number(t.momentumMinPct) : null;
       out.set(normalizeSymbol(t.symbol), tMin ?? gMin ?? null);
     }
   }

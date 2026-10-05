@@ -110,6 +110,14 @@ function normalizeWatchlistTicker(item) {
      * ★ 새 필드를 추가할 때 **쓰는 쪽만 고치면 안 된다** — 정규화(=저장 계약)가 정본이다.
      */
     watch: item.watch === true,
+    /**
+     * 🎚️ 종목 모멘텀 하한 override (2026-10-05) — 위 watch 와 **똑같은 함정을 똑같이 밟았다**:
+     * 쓰는 쪽(setTickerMomentumMin)만 만들고 이 정규화에 안 올려 **200 을 주면서 저장은 안 됐다.**
+     * 심지어 바로 위 주석이 그 함정을 2026-09-22 에 적어 뒀는데 안 읽었다.
+     * ⚠️ null 가드 선행 — Number(null)=0 이라 null 을 숫자 판정에 먼저 넣으면 '0%' 가 된다.
+     */
+    ...(item.momentumMinPct != null && Number.isFinite(Number(item.momentumMinPct))
+      ? { momentumMinPct: Number(item.momentumMinPct) } : {}),
   };
 }
 
@@ -138,6 +146,9 @@ function normalizeWatchlist(data) {
         id,
         name: String(g.name || '관심그룹').slice(0, 80),
         order: Number.isFinite(Number(g.order)) ? Number(g.order) : idx,
+        // 🎚️ 그룹 모멘텀 하한 — 정규화(저장 계약)에 없으면 조용히 사라진다(위 ticker 주석 참조)
+        ...(g.momentumMinPct != null && Number.isFinite(Number(g.momentumMinPct))
+          ? { momentumMinPct: Number(g.momentumMinPct) } : {}),
         tickers,
       };
     });

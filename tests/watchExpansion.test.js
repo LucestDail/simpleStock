@@ -77,3 +77,26 @@ test('⑥ 임계 우선순위 — 종목 override > 그룹 > null(전역)', asyn
   assert.equal(m.get('SPY'), null);
   assert.ok(!m.has('ZZZ'));
 });
+
+test('⑦ 왕복 — 저장한 그룹 임계가 직렬화(getWatchlistState)를 지나 임계 맵에 닿는다', async () => {
+  /*
+   * 🔴 2026-10-05 실사고: 그룹 직렬화가 필드 화이트리스트라 momentumMinPct 를 떨어뜨렸고,
+   * getWatchThresholds 의 기본 인자가 그 직렬화 결과라 **설정 200 이 거짓 성공**이었다.
+   * ⑥은 state 를 손으로 만들어 직렬화를 안 탔다 — 이 왕복이 그 맹점을 잠근다.
+   */
+  const fs = require('node:fs'); const path = require('node:path'); const os = require('node:os');
+  for (const k of Object.keys(require.cache)) if (/watchlistService|marketService|tossClient/.test(k)) delete require.cache[k];
+  process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'wl2-'));
+  const w = require('../server/watchlistService');
+  const st0 = await w.createGroup('임계검증');
+  const gidv = st0.groups.find((g) => g.name === '임계검증').id;
+  await w.addTicker(gidv, { symbol: 'QQQ', market: 'US' });
+  await w.setWatch(gidv, 'QQQ', true);
+  await w.setGroupMomentumMin(gidv, 7);
+  await w.setTickerMomentumMin(gidv, 'QQQ', 1.5);
+  // 기본 인자(직렬화 경로) 그대로 — 여기서 떨어지면 라이브가 떨어지는 것
+  const m = w.getWatchThresholds();
+  assert.equal(m.get('QQQ'), 1.5, '종목 override 가 직렬화에서 떨어졌다');
+  await w.setTickerMomentumMin(gidv, 'QQQ', null);
+  assert.equal(w.getWatchThresholds().get('QQQ'), 7, '그룹 임계가 직렬화에서 떨어졌다');
+});
