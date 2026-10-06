@@ -86,3 +86,18 @@ test('후보 풀 = 목표 배분 — 신호용(TLT·UUP·VIXY·SPY·HYG)은 후�
   // 🔴 QQQ 는 목표 밖 — 팔아도 후보로 돌아오지 않는다(사용자가 "털어야 해" 라고 한 종목)
   assert.ok(!pool.includes('QQQ'), 'QQQ 가 후보 풀에 있다 — 털어도 다시 추천된다');
 });
+
+/** 🎚️ CANDIDATE_POOL 스위치 — 사용자가 감시를 직접 켜고 "이 기준으로" 를 요구할 때 */
+test('CANDIDATE_POOL=watchlist 면 감시 목록이 후보 풀이 된다', () => {
+  const fs2 = require('node:fs');
+  const path2 = require('node:path');
+  const src = fs2.readFileSync(path2.join(__dirname, '..', 'server', 'regimeService.js'), 'utf8');
+  assert.match(src, /CANDIDATE_POOL \|\| 'target'/, '기본값이 target 이 아니다 — 조용히 넓어진다');
+  assert.match(src, /'watchlist'/, 'watchlist 모드가 없다');
+  assert.match(src, /candidates_watchlist_empty/, '감시 0종을 조용히 넘긴다 — 후보가 통째로 사라진 것을 모른다');
+  // 기본값(미설정)은 목표 배분 — 신호용이 섞이지 않는다
+  delete process.env.CANDIDATE_POOL;
+  for (const k of Object.keys(require.cache)) if (/regimeService|targetAllocation/.test(k)) delete require.cache[k];
+  const pool = require('../server/regimeService').candidateUniverse();
+  assert.ok(!pool.includes('TLT'), '기본 모드인데 신호용이 후보에 있다');
+});

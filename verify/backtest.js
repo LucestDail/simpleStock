@@ -63,8 +63,22 @@ function buildWorld() {
 }
 
 /** ETF 별 일일 수익률 = 기초 r 의 선형 노출(베타×배수) + 자체 드리프트. 카탈로그 대표만 */
-const EXPOSURE = {
-  QQQ: { beta: 1, lev: 1 }, SPY: { beta: 0.85, lev: 1 }, XLK: { beta: 1.05, lev: 1 },
+/**
+ * 🔴 **백테스트 우주는 합성이다** — 감시 목록으로 자동 확장되지 않는다 (2026-10-06).
+ *    사용자가 감시 32종을 켜고 *"이거 기준으로 백테스트"* 를 요구했는데, 그중 **11종만**
+ *    이 우주에 있었다. 나머지의 베타를 **지어내면 결과가 내 추측이 된다** — 그래서
+ *    확실히 유도되는 셋만 더했다:
+ *      QQQM = QQQ 와 **같은 지수**(나스닥100) → beta/lev 동일
+ *      SPXL = UPRO 와 같은 구조(3배 S&P)     → beta/lev 동일
+ *      SPXS = SPXU 와 같은 구조(3배 인버스 S&P) → beta/lev 동일
+ *    ⚠️ 그 밖(XLB·XLE·UUP·GLDM·HYG·O·KR 개별주·섹터 3배 8종)은 **넣지 않았다** —
+ *      베타가 추측이라 넣는 순간 백테스트가 거짓말을 한다. 실제 성과는 모의 모드
+ *      라이브로만 잴 수 있다.
+ * 🎚️ `BACKTEST_UNIVERSE=SYM,SYM` 으로 우주를 좁힐 수 있다(미지정이면 전부).
+ */
+const EXPOSURE_ALL = {
+  QQQ: { beta: 1, lev: 1 }, QQQM: { beta: 1, lev: 1 }, SPY: { beta: 0.85, lev: 1 }, XLK: { beta: 1.05, lev: 1 },
+  SPXL: { beta: 0.85, lev: 3 }, SPXS: { beta: -0.85, lev: 3 },
   QLD: { beta: 1, lev: 2 }, TQQQ: { beta: 1, lev: 3 }, SSO: { beta: 0.85, lev: 2 }, UPRO: { beta: 0.85, lev: 3 },
   SOXX: { beta: 1.3, lev: 1 }, SMH: { beta: 1.3, lev: 1 }, SOXL: { beta: 1.3, lev: 3 },
   SCHD: { beta: 0.35, lev: 1, drift: 0.015 }, JEPI: { beta: 0.3, lev: 1, drift: 0.015 },
@@ -72,6 +86,16 @@ const EXPOSURE = {
   TLT: { beta: -0.25, lev: 1 }, SHY: { beta: 0, lev: 1, drift: 0.008 }, GLD: { beta: -0.12, lev: 1, drift: 0.02 },
   PSQ: { beta: -1, lev: 1 }, SH: { beta: -0.85, lev: 1 }, QID: { beta: -1, lev: 2 }, SQQQ: { beta: -1, lev: 3 }, SPXU: { beta: -0.85, lev: 3 }, SOXS: { beta: -1.3, lev: 3 },
 };
+const UNIV = String(process.env.BACKTEST_UNIVERSE || '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
+const EXPOSURE = UNIV.length
+  ? Object.fromEntries(Object.entries(EXPOSURE_ALL).filter(([k]) => UNIV.includes(k)))
+  : EXPOSURE_ALL;
+if (UNIV.length) {
+  const missing = UNIV.filter((k) => !EXPOSURE_ALL[k]);
+  // 🔴 빠진 것을 **조용히 넘기지 않는다** — 그러면 "감시 기준으로 돌렸다" 가 거짓이 된다
+  if (missing.length) console.log(`[universe] 가격 모델 없어 제외 ${missing.length}종: ${missing.join(' ')}`);
+  console.log(`[universe] ${Object.keys(EXPOSURE).length}종으로 제한: ${Object.keys(EXPOSURE).join(' ')}`);
+}
 
 function buildPrices(rets) {
   const px = {}; // sym → [prices]

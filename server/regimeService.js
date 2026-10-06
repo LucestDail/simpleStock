@@ -625,6 +625,23 @@ const CANDIDATE_MAX = Math.max(1, Number(process.env.CANDIDATE_MAX) || 24);
  *    사고가 재발하고, 조용히 0이 되면 제안이 통째로 멈춘다. 어느 쪽이든 알아야 한다.
  */
 function candidateUniverse() {
+  /**
+   * 🎚️ `CANDIDATE_POOL` — 후보 풀의 정본을 고른다 (2026-10-06 사용자가 감시를 직접 켜고
+   *    *"이거 기준으로 백테스트 한번 돌려"* 라고 지시).
+   *    `target`(기본) = 목표 배분 심볼만 · `watchlist` = 사용자가 감시 켠 것 전부.
+   *    ⚠️ `watchlist` 는 **신호용(TLT·HYG·UUP·VIXY)도 매수 후보가 된다** — 사용자가
+   *       의도적으로 켰다면 그것이 판단이고, 백테스트가 그 결과를 숫자로 보여준다.
+   */
+  if (String(process.env.CANDIDATE_POOL || 'target').toLowerCase() === 'watchlist') {
+    try {
+      const ws = require('./watchlistService').getWatchlistState();
+      const on = (ws?.groups || []).flatMap((g) => (g.tickers || []).filter((t) => t.watch).map((t) => t.symbol));
+      if (on.length) return on;
+      logWarn('regime.candidates_watchlist_empty', { why: '감시가 0종 — 목표 배분으로 폴백' });
+    } catch (e) {
+      logWarn('regime.watch_unreadable_for_candidates', { message: e.message });
+    }
+  }
   try {
     const ta = require('./targetAllocation').load();
     if (ta?.buckets?.length) {
