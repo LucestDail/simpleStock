@@ -259,3 +259,39 @@ test('이력 왕복 — 판단 없는 회차는 null (빈 껍데기 금지)', ()
   const row = hist.list({ limit: 5 }).find((r) => r.kind === 'full');
   assert.equal(row.budgetDecision, null);
 });
+
+/**
+ * 🔴 레버리지 한도 40 + 예산 분리 (2026-10-06 사용자 결정).
+ * 한도는 **경고 축**이고 "1배 분리" 는 **판단 축**이다 — 쌍으로 잠근다.
+ * ⚠️ 40 을 고른 근거가 숫자에 있다(48.5% 초과 / 36.0% 통과) — 그 두 점을 자가 지킨다.
+ */
+test('레버리지 한도 — 48.5% 는 경고, 36.0% 는 통과(40 을 고른 두 근거점)', () => {
+  delete process.env.LEVERAGE_MAX_PCT;
+  for (const k of Object.keys(require.cache)) if (/riskMetrics/.test(k)) delete require.cache[k];
+  const rm = require('../server/riskMetrics');
+  const items = [{ symbol: 'QLD', marketValue: 4997, quantity: 50, lastPrice: 99.94, currency: 'USD' }];
+  const over = rm.compute({ items, candlesBySymbol: new Map(), cashPct: 50.2, leveragePct: 48.5 });
+  const okk = rm.compute({ items, candlesBySymbol: new Map(), cashPct: 50.2, leveragePct: 36.0 });
+  assert.equal(over.limits.leverage, 40, '한도 기본값이 40 이 아니다');
+  assert.ok(over.issues.some((i) => i.axis === 'leverage'), '48.5% 가 경고되지 않는다 — 한도가 너무 느슨하다');
+  assert.ok(!okk.issues.some((i) => i.axis === 'leverage'), '36.0% 가 경고된다 — 걸어 둔 조치가 끝나도 안 풀린다');
+});
+
+test('레버리지 한도 — env 로 덮을 수 있다(상수 하드코딩 금지)', () => {
+  process.env.LEVERAGE_MAX_PCT = '25';
+  for (const k of Object.keys(require.cache)) if (/riskMetrics/.test(k)) delete require.cache[k];
+  const rm = require('../server/riskMetrics');
+  const r = rm.compute({ items: [], candlesBySymbol: new Map(), cashPct: 50, leveragePct: 30 });
+  assert.equal(r.limits.leverage, 25);
+  assert.ok(r.issues.some((i) => i.axis === 'leverage'), 'env 한도가 판정에 안 쓰인다');
+  delete process.env.LEVERAGE_MAX_PCT;
+});
+
+test('예산 분리 — 1배는 풀고 레버리지 신규 금지는 살린다(쌍)', () => {
+  const svc = require('../server/analystService');
+  const sec = svc.ledgerSection({ budgetUsd: 500, availableUsd: 500, openCostUsd: 0, realizedUsd: 0, positions: {} }, 1).join('\n');
+  assert.match(sec, /1배.*상품을 사면/s, '1배 분리 안내가 없다 — 모델이 레버리지 과다로 1배 진입을 계속 미룬다');
+  assert.match(sec, /바뀌지 않는다/, '불변이라는 사실(분리의 근거)이 빠졌다');
+  assert.match(sec, /2x·3x\) 신규는 매뉴얼의 금지가 그대로/, '레버리지 신규 금지가 함께 풀려 버렸다');
+  assert.match(sec, /WAIT 이 여전히 옳다/, '"줄이는 자리" 판단을 WAIT 로 둘 여지가 사라졌다');
+});

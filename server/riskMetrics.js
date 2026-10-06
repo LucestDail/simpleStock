@@ -85,7 +85,21 @@ function compute({ items = [], candlesBySymbol = new Map(), cashPct = null, leve
 
   // 밸런스 판정 — 게이트와 같은 상수
   const { SINGLE_POSITION_MAX_PCT } = require('./orderService');
-  const LIMITS = { leverage: 30, single: SINGLE_POSITION_MAX_PCT, cashMin: 10 };
+  /**
+   * 🔴 레버리지 한도 30 → **40** (2026-10-06 사용자 결정).
+   *
+   * 왜 40 인가 — 실측에서 **의미 있는 값이 하나뿐이었다**: 그날 레버리지 48.5%,
+   * 사용자가 걸어 둔 QLD 20주 매도가 체결되면 **36.0%**. 35 는 둘 다 초과해 무의미하고
+   * 50 은 48.5% 를 통과시켜 **사실상 한도 해제**다. 40 만이 "걸어 둔 조치가 끝나면
+   * 경고가 풀리고, 더 늘리면 다시 짖는다" 를 만든다.
+   * ⚠️ 한도를 올린 것은 48.5% 가 **안전해졌다는 뜻이 아니다** — 레버리지 2배 상품
+   *    40% 는 지수 −10% 에 계좌 −8% 다(단일 상품 감쇠는 별도). 공격적 기조
+   *    (2026-10-02 사용자 결정)에서 **감수하기로 한 값**이고, 그 이상은 여전히 경고한다.
+   * ⚠️ 이 한도는 **경고 축**이다 — 플레이북 시나리오의 "레버리지 신규 금지" 문장은
+   *    별개로 살아 있다(그쪽이 실제로 모델의 신규 진입을 막는 쪽이다).
+   */
+  const LEVERAGE_MAX_PCT = Math.max(0, Number(process.env.LEVERAGE_MAX_PCT ?? 40));
+  const LIMITS = { leverage: LEVERAGE_MAX_PCT, single: SINGLE_POSITION_MAX_PCT, cashMin: 10 };
   const issues = [];
   if (leveragePct != null && leveragePct > LIMITS.leverage) {
     issues.push({ axis: 'leverage', level: 'over', msg: `레버리지 노출 ${leveragePct}% — 기준 ${LIMITS.leverage}% 초과. 1배 전환(QLD→QQQ 류)·축소가 보완책.` });
