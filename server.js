@@ -351,9 +351,14 @@ app.post('/api/analyst/run', async (req, res) => {
      * 🔴 **실전 실행이면 저장한다** (2026-09-22). 이 경로는 saveLast 를 안 해서,
      *    화면 버튼으로 돌린 분석이 **새로고침하면 사라지고 옛 분석(15:34)이 되살아났다.**
      *    17:23 SELL 판단이 화면 어디에도 안 남았던 이유의 절반이 이것이다.
-     * ⚠️ dryRun 은 저장하지 않는다 — 점검이 화면의 정본을 덮으면 안 된다.
+     * ⚠️ dryRun 은 last 파일을 **덮지 않는다** — 점검이 화면의 정본을 덮으면 안 된다(09-21 규율).
+     *    다만 **이력에는 남긴다**(2026-10-06) — 종전엔 통째로 스킵해 dryRun 회차가 화면 이력에
+     *    활동 로그 summary 로만 남았다. `dryRun: true` 표식으로 화면이 실전과 구분한다.
      */
-    if (!dryRun) analyst.saveLast({ ...report, trigger: { why: 'manual' }, at: new Date().toISOString() });
+    analyst.saveLast(
+      { ...report, trigger: { why: 'manual' }, at: new Date().toISOString(), ...(dryRun ? { dryRun: true } : {}) },
+      { historyOnly: dryRun }
+    );
     return res.json({ ...report, dryRun, dashFailed: dash.failedCount, parts: dash.parts });
   } catch (error) {
     logError('analyst.failed', error, { requestId: req.requestId, kind: error.kind });

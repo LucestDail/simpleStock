@@ -273,7 +273,7 @@ function status() {
     indexPct: INDEX_PCT,
     quiet: `${QUIET_FROM}:00~${QUIET_TO}:00`,
     // 🔴 무엇을 못 보내는지도 함께 — 사용자가 "왜 어닝콜은 안 오지" 를 겪지 않게
-    rules: ['개장/폐장(+마감 요약)', '지수 급변', '보유 급변', '목표가·손절선', '종목 경고', '매매 제안', '예약(조건부) 주문 발동/만료'],
+    rules: ['개장/폐장(+마감 요약)', '지수 급변', '보유 급변', '가격 기준선(상향·하향)', '종목 경고', '매매 제안', '예약(조건부) 주문 발동/만료'],
     unsupported: ['어닝콜 — 일정 데이터 출처가 없다(토스·야후 모두 미제공)'],
     marks: Object.keys(st).length,
   };
@@ -330,19 +330,84 @@ async function ruleIndices(st, now, out, sup) {
 
 /** 📊 보유 종목 급변 + ⚠️ 종목 경고 신규 */
 /**
- * 🎯 목표가·손절가 통과 (2026-09-21 사용자 지시).
+ * 👀 감시중(watch=on) 심볼 → 표시 이름 (2026-10-06).
+ *
+ * 기준선(targets)은 보유 전용이 아니다 — 사용자가 "QLD $90 떨어지면 **진입 검토**" 처럼
+ * **미보유 종목의 진입 기준**으로도 쓴다(실사용 확인). 그래서 두 곳이 이걸 쓴다:
+ *   ① pruning — 보유·감시 **모두 아닌** 종목만 정리한다(전량 매도해도 감시중이면 보존)
+ *   ② ruleTargets — 감시중 미보유 종목도 시세를 받아 **같은 자**로 판정한다
+ * ⚠️ **못 읽으면 null** — "감시 없음(빈 Map)" 과 "못 봤다(null)" 를 가른다.
+ *    null 이면 pruning 은 **지우지 않는다**(보유 조회 실패와 같은 보수 규칙 —
+ *    못 본 것을 "감시 아님" 으로 읽으면 사용자 설정이 날아간다).
+ */
+function watchedNames() {
+  try {
+    const ws = require('./watchlistService').getWatchlistState();
+    const m = new Map();
+    for (const g of ws?.groups || []) {
+      for (const t of g.tickers || []) {
+        if (t.watch) m.set(String(t.symbol).toUpperCase(), t.name || String(t.symbol).toUpperCase());
+      }
+    }
+    return m;
+  } catch (e) {
+    logWarn('alerts.watchlist_read_failed', { message: e.message });
+    return null;
+  }
+}
+
+/**
+ * 📈📉 가격 기준선 통과 (2026-09-21 사용자 지시 · 2026-10-06 중립화).
  *
  * ★ **사람이 정한 기준이라 오경보가 없다** — 그래서 알림 축으로 값이 크다.
  *   급변(5%)은 시장이 정하지만 이건 사용자가 정한다.
  *
+ * 🔴 **문구에 용도를 쓰지 않는다** (2026-10-06) — 종전 "목표가 도달"·"손절선 이탈" 은
+ *    서버가 용도를 **지어낸** 것이다. 사용자의 `stop: 90` 은 손절이 아니라
+ *    "$90 오면 진입 검토" 였다(실사용). 용도는 사용자만 안다 ⇒ 방향만 말한다
+ *    ("상향/하향 기준선 통과"). 평가손익 꼬리도 **보유 중일 때만** 붙는다.
+ *
  * 🔴 **통과할 때 한 번만** 알린다. 하루 한 번이 아니라 **상태 전이**다 —
- *    목표가를 넘은 뒤 계속 위에 있으면 매 틱 알릴 이유가 없고,
+ *    기준선을 넘은 뒤 계속 위에 있으면 매 틱 알릴 이유가 없고,
  *    아래로 내려갔다 다시 넘으면 그건 **새 사건**이다.
  * ⚠️ 통화를 환산하지 않는다 — 사용자가 그 종목 화면에서 보는 단위로 적는다.
+ *
+ * 🔴 **감시중 미보유 종목도 판정한다** (2026-10-06) — 종전엔 보유만 순회해
+ *    미보유 종목의 진입 기준선이 **영영 안 울렸다.** 시세는 모멘텀 감시와 같은
+ *    경로(`toss.getPrices` 1콜 배치)를 쓴다.
+ * ⚠️ **시세를 못 읽은 종목은 판정하지 않는다** — 0/null 로 비교하면
+ *    하향 기준선이 거짓 발화한다. 못 읽은 사실은 warn 으로 남긴다(debug 아님).
  */
-function ruleTargets(items, st, out, sup) {
+async function ruleTargets(items, st, out, sup) {
   const targets = getDashboardSettings().targets || {};
-  for (const h of items) {
+  const held = new Set(items.map((h) => String(h.symbol).toUpperCase()));
+  const rows = [...items];
+
+  // 미보유 + 감시중 + 기준선 있음 → 시세를 배치로 받아 보유와 같은 자로 판정
+  const watched = watchedNames();
+  const unheld = Object.keys(targets)
+    .map((s) => String(s).toUpperCase())
+    .filter((sym) => !held.has(sym) && watched?.has(sym));
+  if (unheld.length) {
+    let prices = new Map();
+    try {
+      prices = await toss.getPrices(unheld);
+    } catch (e) {
+      logWarn('alerts.targets_watch_prices_failed', { symbols: unheld, kind: e?.kind, message: e?.message });
+    }
+    for (const sym of unheld) {
+      const px = prices.get(sym)?.price;
+      if (!(px > 0)) {
+        // 🔴 못 읽었다는 사실은 조용하지 않다 — "안 울렸다" 가 "기준 미달" 인지 "못 봤다" 인지 갈라야 한다
+        logWarn('alerts.targets_watch_price_missing', { symbol: sym });
+        continue;
+      }
+      // 미보유 행 — profitRate 없음(null) → 아래에서 평가손익 꼬리가 생략된다
+      rows.push({ symbol: sym, name: watched.get(sym) || sym, lastPrice: px, profitRate: null });
+    }
+  }
+
+  for (const h of rows) {
     const t = targets[String(h.symbol).toUpperCase()];
     if (!t || h.lastPrice == null) continue;
     const px = Number(h.lastPrice);
@@ -355,15 +420,19 @@ function ruleTargets(items, st, out, sup) {
       const mark = `line:${h.symbol}:${kind}`;
       if (hit && !st[mark]) {
         st[mark] = 1;
-        const icon = kind === 'target' ? '🎯' : '🛑';
-        const word = kind === 'target' ? '목표가 도달' : '손절선 이탈';
+        const icon = kind === 'target' ? '📈' : '📉';
+        const word = kind === 'target' ? '상향 기준선 통과' : '하향 기준선 통과';
+        // ⚠️ 평가손익은 **보유 중일 때만** — 미보유 행은 profitRate 가 없다(붙이면 NaN% 가 나간다)
+        const pr = Number(h.profitRate);
+        const tail = h.profitRate != null && Number.isFinite(pr)
+          ? ` (평가손익 ${pr >= 0 ? '+' : ''}${pr.toFixed(2)}%)`
+          : '';
         out.push({
-          text: `${icon} ${h.name} ${word} — 기준 ${Number(line).toLocaleString('ko-KR')} · 현재 ${px.toLocaleString('ko-KR')}`
-            + ` (평가손익 ${h.profitRate >= 0 ? '+' : ''}${Number(h.profitRate).toFixed(2)}%)`,
+          text: `${icon} ${h.name} ${word} — 기준 ${Number(line).toLocaleString('ko-KR')} · 현재 ${px.toLocaleString('ko-KR')}${tail}`,
           kind: `line-${kind}`,
         });
       } else if (hit && st[mark]) {
-        sup.push(`${h.name} ${kind === 'target' ? '목표가' : '손절선'} (이미 통과 상태)`);
+        sup.push(`${h.name} ${kind === 'target' ? '상향' : '하향'} 기준선 (이미 통과 상태)`);
       } else if (!hit && st[mark]) {
         // 🔴 되돌아왔으면 표시를 **지운다** — 안 지우면 다음 통과를 영영 못 알린다
         delete st[mark];
@@ -883,30 +952,42 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
   }
 
   /**
-   * 🔴 **안 가진 종목의 목표선은 지운다** (2026-09-21 사용자 지시).
+   * 🔴 **보유·감시 모두 아닌 종목의 기준선만 지운다** (2026-09-21 신설 · 2026-10-06 수정).
+   *
+   * 🔴 종전엔 보유만 봐서 **전량 매도하면 기준선이 자동 삭제**됐다 — 그런데 기준선은
+   *    "$90 오면 진입 검토" 같은 **진입 용도**일 수 있다(실사용). 감시중(watch=on)
+   *    종목의 기준선은 보존한다.
    *
    * ⚠️⚠️ **보유를 못 읽었으면 절대 지우지 않는다.** `items` 가 비었다고 지우면
    *    토스가 잠깐 죽은 날 사용자가 설정한 기준선이 **통째로 사라진다.**
-   *    ★ 오늘 내내 쓴 *"0 은 '없다' 가 아니라 '못 봤다' 일 수 있다"* 가 **가장 비싸게** 걸리는 자리다.
+   *    ★ *"0 은 '없다' 가 아니라 '못 봤다' 일 수 있다"* 가 **가장 비싸게** 걸리는 자리다.
    *    ⇒ 보유 조회가 **성공했고 종목이 하나 이상**일 때만 정리한다.
+   * ⚠️ **감시 목록도 같은 규칙** — 못 읽었으면(null) 이번 틱은 정리를 건너뛴다.
    */
   if (!failed.includes('holdings') && items.length) {
     try {
       const cur = getDashboardSettings().targets || {};
       const held = new Set(items.map((h) => String(h.symbol).toUpperCase()));
-      const stale = Object.keys(cur).filter((sym) => !held.has(sym));
-      if (stale.length) {
-        const kept = Object.fromEntries(Object.entries(cur).filter(([sym]) => held.has(sym)));
-        // ⚠️ 비동기다 — 기다리지 않으면 다음 틱이 옛 값을 읽어 **같은 것을 또 지운다**
-        await updateSettings({ dashboard: { targets: Object.keys(kept).length ? kept : null } });
-        // 조용히 지우지 않는다 — 사용자가 설정한 값이다
-        logWarn('alerts.targets_pruned', { removed: stale });
-        /**
-         * 🔴 **보통 알림과 같은 길로 보낸다** — 직접 `activity.record` 만 하면
-         *    타임라인에는 남는데 **텔레그램으로는 안 간다**(사용자 설정이 바뀐 일인데).
-         *    같은 길로 보내면 조용한 시간·발송 스위치도 **자동으로 같이 지켜진다.**
-         */
-        out.push({ text: `🧹 보유하지 않는 종목의 기준선을 정리했습니다: ${stale.join(', ')}`, kind: 'prune' });
+      const watched = watchedNames();
+      if (watched) {
+        const keep = (sym) => held.has(String(sym).toUpperCase()) || watched.has(String(sym).toUpperCase());
+        const stale = Object.keys(cur).filter((sym) => !keep(sym));
+        if (stale.length) {
+          const kept = Object.fromEntries(Object.entries(cur).filter(([sym]) => keep(sym)));
+          // ⚠️ 비동기다 — 기다리지 않으면 다음 틱이 옛 값을 읽어 **같은 것을 또 지운다**
+          await updateSettings({ dashboard: { targets: Object.keys(kept).length ? kept : null } });
+          // 조용히 지우지 않는다 — 사용자가 설정한 값이다
+          logWarn('alerts.targets_pruned', { removed: stale });
+          /**
+           * 🔴 **보통 알림과 같은 길로 보낸다** — 직접 `activity.record` 만 하면
+           *    타임라인에는 남는데 **텔레그램으로는 안 간다**(사용자 설정이 바뀐 일인데).
+           *    같은 길로 보내면 조용한 시간·발송 스위치도 **자동으로 같이 지켜진다.**
+           */
+          out.push({ text: `🧹 보유·감시 모두 아닌 종목의 기준선을 정리했습니다: ${stale.join(', ')}`, kind: 'prune' });
+        }
+      } else {
+        // 감시 목록을 못 읽었다 — 이번 틱은 지우지 않는다(watchedNames 가 이미 warn 을 남겼다)
+        logWarn('alerts.prune_skipped_watchlist_unreadable', {});
       }
     } catch (e) {
       logWarn('alerts.prune_failed', { message: e.message });

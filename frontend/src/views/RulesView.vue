@@ -255,7 +255,7 @@
         </label>
 
         <div class="frm__row frm__row--sep frm__row--wide">
-          <span class="frm__label">목표가 · 손절선 <small class="inlh">종목별 기준선을 넘으면 텔레그램으로 알립니다</small></span>
+          <span class="frm__label">가격 기준선 <small class="inlh">기준선을 넘으면 텔레그램으로 알립니다 — 하향선은 용도(진입·청산 등)를 정하지 않습니다(방향만 알림)</small></span>
           <!--
             🔴 사람이 정한 기준이라 오경보가 없다 — 급변(%)은 시장이 정하지만 이건 내가 정한다.
             ⚠️ 통화를 환산하지 않는다 — 그 종목 화면에서 보는 단위 그대로 적는다.
@@ -271,8 +271,10 @@
                 {{ h.name }} ({{ h.symbol }})
               </option>
             </select>
-            <input v-model="row.target" class="xs" type="number" placeholder="목표가" />
-            <input v-model="row.stop" class="xs" type="number" placeholder="손절가" />
+<!-- 🔴 10-06 의미 중립화 — 사용자는 하향선을 "진입가" 로도 쓴다(QLD $90 하향 진입).
+                 필드는 서버 호환상 target/stop 그대로, 화면은 방향(상향/하향)만 말한다 -->
+            <input v-model="row.target" class="xs" type="number" placeholder="상향 알림가 (이상이면 알림)" title="상향 알림가 — 이 값 이상이면 알림" />
+            <input v-model="row.stop" class="xs" type="number" placeholder="하향 알림가 (이하면 알림)" title="하향 알림가 — 이 값 이하면 알림" />
             <button class="icon" aria-label="삭제" title="삭제" @click="form.targetRows.splice(i, 1)">×</button>
             <!-- 현재가를 옆에 적는다 — 없으면 기준선을 감으로 넣게 된다 -->
             <small v-if="priceOf(row.symbol) != null" class="now mono-num">
@@ -416,7 +418,7 @@ async function loadStatus() {
     const b = await r.json();
     const v = Number(b?.summary?.dailyRate);
     dailyPct.value = Number.isFinite(v) ? v : null;
-    // 보유 종목은 목표가·손절선 선택지로도 쓴다(같은 응답 재사용)
+    // 보유 종목은 가격 기준선 선택지로도 쓴다(같은 응답 재사용)
     if (Array.isArray(b?.items)) { holdings.value = b.items; holdingsError.value = ''; }
   } catch { dailyPct.value = null; }
 }
@@ -672,15 +674,9 @@ onUnmounted(() => clearInterval(timer));
  *    전부 이 파일이 정의한다. 다른 뷰의 scoped 에 기대지 않는다(2026-09-21 설정 패널 사고의 규율).
  */
 .page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
-/* 🔴 2026-10-04 사용자: "width 100% 늘이지 말고 배치를 고민" — 초광폭(1700px+)에서
-   카드가 끝까지 퍼져 황량했다. 스크롤 컨테이너(.page)는 전폭을 유지하되(스크롤바가
-   오른쪽 끝에 있게) **콘텐츠만** 읽기 좋은 폭에서 멈춘다. */
-/* 🔄 10-05: 좌측 고정 1280 은 초광폭에서 오른쪽만 비어 보였다("오른쪽 여백 너무 많이 남고")
-   ⇒ 1440 으로 넓히고 **중앙 정렬** — 남는 공간이 양쪽으로 갈라져 여백이 디자인으로 읽힌다. */
-.page > * { width: 100%; max-width: 1440px; margin-inline: auto; }
-/* 🔴 비상정지 스크림은 직계 자식이라 위 상한에 걸린다 — 전폭으로 되돌린다
-   (안 하면 초광폭에서 화면 일부만 어두워지는 실사고 전력) */
-.page > .stop__scrim { width: 100vw; max-width: none; margin: 0; }
+/* 🔄 10-06 사용자: "max-width 금지, 전폭 사용" — 1440px 중앙 정렬 상한(10-04~05 결정)을 걷어냈다.
+   폭은 .ops/.row2/.frm 2열 그리드가 채우고, 길어지는 절은 자기 높이(50vh)만 제한한다.
+   비상정지 스크림 전폭 보정도 상한이 사라져 함께 불필요해졌다(position: fixed 라 영향 없음). */
 
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }
 .card { background: var(--color-surface); border: 1px solid var(--color-hairline); border-radius: var(--rounded-md); padding: var(--space-base); }
@@ -799,7 +795,8 @@ onUnmounted(() => clearInterval(timer));
 }
 .chip--on { background: var(--color-primary-soft); border-color: var(--color-primary-line); color: var(--color-primary); }
 
-.groups { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+/* 테마가 쌓여 절이 길어지면 자기 안에서만 스크롤 — 페이지를 못 늘인다 */
+.groups { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; }
 .groups li { display: flex; align-items: center; gap: 8px; font-size: var(--text-md); color: var(--color-ink); }
 .gcount { margin-left: auto; font-size: var(--text-xs); color: var(--color-faint); }
 .gdel { border: 0; background: none; color: var(--color-muted); cursor: pointer; font-size: var(--text-lg); }

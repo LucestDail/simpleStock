@@ -62,10 +62,12 @@ function freshAlerts(env = {}, before = null) {
 }
 
 /** 보유·목표선을 흉내 낸다 — 실제 토스·설정 파일을 안 건드린다 */
-function stubs({ items = [], summary = null, targets = {} } = {}) {
+function stubs({ items = [], summary = null, targets = {}, watchGroups = [] } = {}) {
   return () => {
     require('../server/tossPortfolio').getHoldings = async () => ({ items, summary });
     require('../server/settingsService').getDashboardSettings = () => ({ targets });
+    // ⚠️ 감시 목록도 흉내 — 안 하면 실제 data/ 의 watchlist 를 읽어 결과가 기계 상태에 묶인다
+    require('../server/watchlistService').getWatchlistState = () => ({ groups: watchGroups });
   };
 }
 
@@ -295,21 +297,21 @@ const QUIET_OFF = {
   ALERTS_QUIET_TO: '3',
 };
 
-test('🎯 목표가는 **통과할 때 한 번만** 알린다', async () => {
+test('📈 상향 기준선은 **통과할 때 한 번만** 알린다', async () => {
   const a = freshAlerts(QUIET_OFF, stubs({
     items: [{ symbol: 'QLD', name: 'QLD', lastPrice: 95, profitRate: 10, dailyRate: 0 }],
     targets: { QLD: { target: 90, stop: 70 } },
   }));
 
   const r1 = await a.tick();
-  assert.ok(r1.found >= 1, '목표가를 넘었는데 안 알렸다');
-  assert.ok(sent.some((x) => /목표가 도달/.test(x.body.text || '')));
+  assert.ok(r1.found >= 1, '상향 기준선을 넘었는데 안 알렸다');
+  assert.ok(sent.some((x) => /상향 기준선 통과/.test(x.body.text || '')));
 
   // 🔴 계속 위에 있다고 매 틱 알리면 소음이다
   sent = [];
   const r2 = await a.tick();
-  assert.ok(!sent.some((x) => /목표가 도달/.test(x.body.text || '')), '같은 상태인데 또 알렸다');
-  assert.ok(r2.suppressedWhy.some((w) => /목표가/.test(w)), '왜 안 알렸는지 말하지 않았다');
+  assert.ok(!sent.some((x) => /상향 기준선 통과/.test(x.body.text || '')), '같은 상태인데 또 알렸다');
+  assert.ok(r2.suppressedWhy.some((w) => /기준선/.test(w)), '왜 안 알렸는지 말하지 않았다');
   delete process.env.ALERTS_ENABLED;
 });
 
@@ -328,17 +330,17 @@ test('🔴 되돌아왔다가 다시 넘으면 **새 사건**이다', async () =
   sent = [];
   tp.getHoldings = async () => ({ items: [{ symbol: 'QLD', name: 'QLD', lastPrice: 96, profitRate: 1, dailyRate: 0 }], summary: null });
   await a.tick();
-  assert.ok(sent.some((x) => /목표가 도달/.test(x.body.text || '')), '되돌아온 뒤 다시 넘었는데 안 알렸다 — 표시를 안 지웠다');
+  assert.ok(sent.some((x) => /상향 기준선 통과/.test(x.body.text || '')), '되돌아온 뒤 다시 넘었는데 안 알렸다 — 표시를 안 지웠다');
   delete process.env.ALERTS_ENABLED;
 });
 
-test('🛑 손절선은 아래로 통과할 때 알린다', async () => {
+test('📉 하향 기준선은 아래로 통과할 때 알린다', async () => {
   const a = freshAlerts(QUIET_OFF, stubs({
     items: [{ symbol: 'RAM', name: 'RAM', lastPrice: 14, profitRate: -25, dailyRate: 0 }],
     targets: { RAM: { target: null, stop: 15 } },
   }));
   await a.tick();
-  assert.ok(sent.some((x) => /손절선 이탈/.test(x.body.text || '')));
+  assert.ok(sent.some((x) => /하향 기준선 통과/.test(x.body.text || '')));
   delete process.env.ALERTS_ENABLED;
 });
 
@@ -347,7 +349,7 @@ test('목표선이 설정 안 된 종목은 건드리지 않는다', async () =>
     items: [{ symbol: 'QLD', name: 'QLD', lastPrice: 9999, profitRate: 1, dailyRate: 0 }],
   }));
   await a.tick();
-  assert.ok(!sent.some((x) => /목표가|손절선/.test(x.body.text || '')), '설정도 안 했는데 알렸다');
+  assert.ok(!sent.some((x) => /기준선 통과/.test(x.body.text || '')), '설정도 안 했는데 알렸다');
   delete process.env.ALERTS_ENABLED;
 });
 

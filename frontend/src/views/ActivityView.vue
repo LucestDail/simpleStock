@@ -56,11 +56,13 @@ const filter = ref('');
 const GROUP = {
   proposal: 'propose', proposed: 'propose',
   approval: 'decide', approved: 'decide', rejection: 'decide', rejected: 'decide', canceled: 'decide',
-  execution: 'execute', executed: 'execute',
-  blocked: 'guard', expired: 'guard',
+  execution: 'execute', executed: 'execute', auto_executed: 'execute',
+  blocked: 'guard', expired: 'guard', auto_skipped: 'guard',
   analysis: 'analysis', alert: 'analysis',
 };
-const AUDIT_LABEL = { proposed: '제안', approved: '승인', rejected: '거절', canceled: '취소', executed: '체결', blocked: '차단', expired: '만료' };
+/* ⚠️ auto_* 두 종은 자율 운용(10-04)이 새로 적는 이벤트 — 매핑이 없어 영문 원문이
+   화면에 그대로 노출됐다(2026-10-06 스샷 실측) */
+const AUDIT_LABEL = { proposed: '제안', approved: '승인', rejected: '거절', canceled: '취소', executed: '체결', blocked: '차단', expired: '만료', auto_skipped: '자동 보류', auto_executed: '자동 집행' };
 const ACT_LABEL = { proposal: '제안', approval: '승인', rejection: '거절', execution: '전송', analysis: '분석', alert: '알림' };
 
 const merged = computed(() => {
@@ -71,7 +73,9 @@ const merged = computed(() => {
   const b = audit.value.map((x) => {
     const side = x.side === 'BUY' ? '매수' : x.side === 'SELL' ? '매도' : '';
     // ② "매도 제안 제안" 금지 — 동사 하나만: "매도 제안" · "매도 거절" · "매도 제안 차단"
+    //    자동 보류는 **왜 보류됐는지**(reason)가 본문이다 — 있으면 그것을 보여준다
     const text = x.event === 'blocked' ? `${side} 제안 차단 (가드·정지)`.trim()
+      : x.event === 'auto_skipped' && x.reason ? String(x.reason)
       : `${side} ${AUDIT_LABEL[x.event] || x.event}`.trim();
     return {
       at: x.at, src: 'audit', group: GROUP[x.event] || 'guard',
@@ -107,12 +111,9 @@ onMounted(async () => {
 
 <style scoped>
 .page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
-/* 🔴 2026-10-04 사용자: "width 100% 늘이지 말고 배치를 고민" — 초광폭(1700px+)에서
-   카드가 끝까지 퍼져 황량했다. 스크롤 컨테이너(.page)는 전폭을 유지하되(스크롤바가
-   오른쪽 끝에 있게) **콘텐츠만** 읽기 좋은 폭에서 멈춘다. */
-/* 🔄 10-05: 좌측 고정 1280 은 초광폭에서 오른쪽만 비어 보였다("오른쪽 여백 너무 많이 남고")
-   ⇒ 1440 으로 넓히고 **중앙 정렬** — 남는 공간이 양쪽으로 갈라져 여백이 디자인으로 읽힌다. */
-.page > * { width: 100%; max-width: 1440px; margin-inline: auto; }
+/* 🔴 2026-10-06 사용자(세 번째 지적): "max-width 주지 말라고" — 콘텐츠 폭 상한(1440px)
+   제거, 표가 화면 전폭을 쓴다. 표는 페이지의 유일한 패널이라 내부 스크롤로 자르지 않는다
+   (.page 자체가 스크롤 컨테이너 — 아래로 끌어올릴 다른 패널이 없다). */
 
 .page__head { display: flex; align-items: center; gap: var(--space-sm); }
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }

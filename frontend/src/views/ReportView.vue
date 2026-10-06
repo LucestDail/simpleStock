@@ -44,9 +44,10 @@
     <section class="card">
       <h2>자산·벤치 추이 <small class="mut" v-if="bench && bench.lines.length">첫 관측일 = 100 · {{ bench.firstDay }} ~ {{ bench.lastDay }}</small></h2>
       <template v-if="bench && bench.lines.length">
-        <!-- 🔄 2026-10-05 라벨 겹침 해소: ① y 눈금을 플롯 밖 왼쪽으로(값 위에 안 얹는다)
-             ② 선 끝 라벨은 세로 충돌 회피(12px 최소 간격) + 밀린 라벨은 리더선으로 점과 잇는다
-             ③ 하단 날짜 눈금 MM-DD 2~3개 — 데이터 2점뿐이어도 축이 상태를 말해 준다 -->
+        <!-- 🔄 2026-10-06 라벨 겹침 재수정(스샷 실측 2건: 내 계좌 값 라벨이 선 위에 · 벤치 라벨이
+             점에 밀착): ① 선 끝 값 라벨은 기울기의 반대쪽(상승 중이면 아래, 하락 중이면 위) +
+             배경색 halo(paint-order) ② 라벨 x 는 점 +14px, 리더선은 항상 점→라벨을 잇는다
+             ③ 라벨끼리 세로 최소 14px 충돌 회피. (y 눈금 플롯 밖 왼쪽 · 날짜 MM-DD 는 10-05 유지) -->
         <svg class="linechart" :viewBox="`0 0 ${CW} ${CH}`" role="img" aria-label="자산과 벤치마크 정규화 추이">
           <g v-for="t in bench.yTicks" :key="'y' + t.label">
             <line class="linechart__grid" :x1="PAD_L" :y1="t.y" :x2="CW - PAD_R" :y2="t.y" />
@@ -55,9 +56,9 @@
           <g v-for="l in bench.lines" :key="l.name">
             <polyline class="linechart__line" :points="l.points" fill="none" :stroke="l.color" />
             <circle :cx="l.lastX" :cy="l.lastY" r="3" :fill="l.color" />
-            <!-- 라벨이 점에서 밀려났으면 가는 리더선으로 어느 점의 라벨인지 잇는다 -->
-            <line v-if="l.leader" class="linechart__leader" :x1="l.lastX + 4" :y1="l.lastY" :x2="l.lastX + 10" :y2="l.labelY" :stroke="l.color" />
-            <text class="linechart__lbl linechart__lbl--series" :x="l.lastX + 12" :y="l.labelY + 3" :fill="l.color">{{ l.name }} {{ l.lastV }}</text>
+            <!-- 리더선은 항상 그린다 — 라벨이 점에서 떨어져 있어도 누구 것인지 잇는다 -->
+            <line class="linechart__leader" :x1="l.lastX + 4" :y1="l.lastY" :x2="l.lastX + 12" :y2="l.labelY" :stroke="l.color" />
+            <text class="linechart__lbl linechart__lbl--series" :x="l.lastX + 14" :y="l.labelY + 3" :fill="l.color">{{ l.name }} {{ l.lastV }}</text>
           </g>
           <text v-for="t in bench.xTicks" :key="'x' + t.label + t.x" class="linechart__lbl" :class="{ 'linechart__lbl--end': t.end, 'linechart__lbl--mid': t.mid }" :x="t.x" :y="CH - 6">{{ t.label }}</text>
         </svg>
@@ -164,7 +165,7 @@ const lifeErr = ref('');
 const CW = 640; const CH = 190;
 /* PAD_L 44: y 눈금 라벨이 플롯 밖 왼쪽에 산다(10 이던 때는 라벨이 선·그리드 위에 얹혔다) */
 const PAD_L = 44; const PAD_R = 118; const PAD_T = 16; const PAD_B = 24;
-const LBL_GAP = 12; /* 선 끝 라벨 최소 세로 간격(px) — 10px 글자 + 숨구멍 */
+const LBL_GAP = 14; /* 선 끝 라벨 최소 세로 간격(px) — 10px 글자 + 숨구멍 (10-06: 12→14, 스샷에서 모자랐다) */
 const SERIES_DEF = [
   { key: 'totalKrw', name: '내 계좌', color: 'var(--color-primary)' },
   { key: 'kospi', name: 'KOSPI', color: 'var(--color-warn)' },
@@ -211,27 +212,32 @@ const bench = computed(() => {
   }
   xTicks.push({ x: CW - PAD_R, label: md(rows[rows.length - 1].day), end: true });
 
-  /* 선 끝 라벨 세로 충돌 회피 — 값이 비슷한 날(실측: 2일차) 라벨이 포개지던 자리.
-     y 로 정렬해 위에서부터 최소 LBL_GAP 을 보장하고, 바닥을 넘치면 전체를 위로 민다 */
+  /* 선 끝 라벨 배치(10-06 스샷 실측 재수정) —
+     ① 시작 위치 = 선 기울기의 반대쪽: 상승 중이면 점 아래(+LBL_GAP), 하락 중이면 점 위(-LBL_GAP),
+        평행이면 점 높이. 선이 다가오는 쪽을 피하므로 값 라벨이 선 위에 얹히지 않는다.
+     ② 그 뒤 세로 충돌 회피: labelY 정렬 → 위에서부터 LBL_GAP 보장 → 바닥 넘치면 위로 조임 */
   const built = lines.map((l) => {
     const last = l.pts[l.pts.length - 1];
+    const prev = l.pts[l.pts.length - 2]; /* pts.length >= 2 는 위에서 보장된다 */
+    const lastY = y(last.v);
+    const prevY2 = prev == null ? lastY : y(prev.v);
+    const slopeOff = prevY2 > lastY ? LBL_GAP : prevY2 < lastY ? -LBL_GAP : 0;
     return {
       name: l.name, color: l.color,
       points: l.pts.map((p) => `${x(p.i)},${y(p.v)}`).join(' '),
-      lastX: x(last.i), lastY: y(last.v), lastV: r1(last.v),
-      labelY: y(last.v), leader: false,
+      lastX: x(last.i), lastY, lastV: r1(last.v),
+      labelY: lastY + slopeOff,
     };
   });
-  const order = [...built].sort((a, b) => a.lastY - b.lastY);
+  const order = [...built].sort((a, b) => a.labelY - b.labelY);
   let prevY = PAD_T - LBL_GAP;
-  for (const l of order) { l.labelY = Math.max(l.lastY, prevY + LBL_GAP); prevY = l.labelY; }
+  for (const l of order) { l.labelY = Math.max(l.labelY, prevY + LBL_GAP); prevY = l.labelY; }
   /* 아래로 밀다 바닥을 넘쳤으면, 바닥에서 위로 한 번 더 조여 플롯 안에 가둔다 */
   let floor = CH - PAD_B;
   for (let i = order.length - 1; i >= 0; i -= 1) {
     order[i].labelY = Math.min(order[i].labelY, floor);
     floor = order[i].labelY - LBL_GAP;
   }
-  for (const l of built) l.leader = Math.abs(l.labelY - l.lastY) > 4;
 
   return {
     firstDay: rows[0].day,
@@ -274,12 +280,8 @@ onMounted(async () => {
 
 <style scoped>
 .page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
-/* 🔴 2026-10-04 사용자: "width 100% 늘이지 말고 배치를 고민" — 초광폭(1700px+)에서
-   카드가 끝까지 퍼져 황량했다. 스크롤 컨테이너(.page)는 전폭을 유지하되(스크롤바가
-   오른쪽 끝에 있게) **콘텐츠만** 읽기 좋은 폭에서 멈춘다. */
-/* 🔄 10-05: 좌측 고정 1280 은 초광폭에서 오른쪽만 비어 보였다("오른쪽 여백 너무 많이 남고")
-   ⇒ 1440 으로 넓히고 **중앙 정렬** — 남는 공간이 양쪽으로 갈라져 여백이 디자인으로 읽힌다. */
-.page > * { width: 100%; max-width: 1440px; margin-inline: auto; }
+/* 🔄 10-06 사용자: "max-width 금지, 전폭 사용" — 1440px 중앙 정렬 상한(10-04~05 결정)을 걷어냈다.
+   .page 는 flex column 이라 자식이 기본으로 전폭을 채운다. */
 
 .page__head { display: flex; align-items: center; gap: var(--space-sm); }
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }
@@ -316,7 +318,15 @@ onMounted(async () => {
 .linechart__lbl--end { text-anchor: end; }
 .linechart__lbl--mid { text-anchor: middle; }
 .linechart__lbl--y { text-anchor: end; }
-.linechart__lbl--series { font-weight: 700; }
+/* halo — 라벨이 선·그리드를 지나도 읽힌다: stroke 를 fill 뒤에 칠해(paint-order) 배경색 테두리.
+   색은 카드 배경 토큰(--color-surface)이라 라이트/다크 양쪽에서 맞는다 */
+.linechart__lbl--series {
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--color-surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
 .linechart__leader { stroke-width: 1; opacity: .5; }
 .clegend { margin: 4px 0 0; padding: 0; list-style: none; display: flex; gap: var(--space-base); flex-wrap: wrap; }
 .clegend__item { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--color-body); }

@@ -63,7 +63,8 @@
     </section>
     </div>
 
-    <!-- ③ 리스크 지표 (2026-10-04 신설 /api/risk/metrics) -->
+    <!-- ③·④ 리스크 지표 + 밸런스 판정 — 한 행(2026-10-06: 세로 한 열로 흐르던 것을 다단으로) -->
+    <div class="rowflow">
     <section class="card">
       <h2>리스크 지표 <small class="mut">현물 환산 그릭스 · 20일 실현 변동성</small></h2>
       <p v-if="metricsErr" class="banner banner--error">{{ metricsErr }}</p>
@@ -111,8 +112,10 @@
         </li>
       </ul>
     </section>
+    </div>
 
-    <!-- ⑤ 스트레스 테스트 (유지) -->
+    <!-- ⑤·⑥ 스트레스 + 자산 추이 — 한 행 -->
+    <div class="rowflow">
     <section v-if="weights" class="card">
       <h2>스트레스 테스트 <small class="mut">지수 쇼크 시 예상 손실</small></h2>
       <template v-if="stress && stress.ok">
@@ -148,6 +151,7 @@
       </template>
       <p v-else class="mut">이력 2일째부터 그려집니다{{ trend ? ` (지금 ${trend.points.length}일째)` : '' }}.</p>
     </section>
+    </div>
 
     <!-- ⑦ 관심 종목 관리 (대시보드에서 이사 — useWatchlist 공용 모듈 그대로) -->
     <section class="card">
@@ -424,12 +428,12 @@ onMounted(async () => {
 
 <style scoped>
 .page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
-/* 🔴 2026-10-04 사용자: "width 100% 늘이지 말고 배치를 고민" — 초광폭(1700px+)에서
-   카드가 끝까지 퍼져 황량했다. 스크롤 컨테이너(.page)는 전폭을 유지하되(스크롤바가
-   오른쪽 끝에 있게) **콘텐츠만** 읽기 좋은 폭에서 멈춘다. */
-/* 🔄 10-05: 좌측 고정 1280 은 초광폭에서 오른쪽만 비어 보였다("오른쪽 여백 너무 많이 남고")
-   ⇒ 1440 으로 넓히고 **중앙 정렬** — 남는 공간이 양쪽으로 갈라져 여백이 디자인으로 읽힌다. */
-.page > * { width: 100%; max-width: 1440px; margin-inline: auto; }
+/* 🔴 2026-10-06 사용자(세 번째 지적): "max-width 주지 말라고" — 콘텐츠 폭 상한(1440px)
+   제거, 화면 전폭. 세로로 흐르던 카드들은 .rowflow 다단 그리드로 가로 배치한다. */
+
+/* 카드 2개를 한 행에 — auto-fit 이라 한쪽이 v-if 로 빠지면 남은 카드가 전폭을 받는다 */
+.rowflow { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: var(--space-sm); align-items: stretch; }
+.rowflow > .card { min-width: 0; }
 
 .page__head { display: flex; align-items: center; gap: var(--space-sm); }
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }

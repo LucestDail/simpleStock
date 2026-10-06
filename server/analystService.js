@@ -83,21 +83,32 @@ function readLastPrompt() {
   try { return require('node:fs').readFileSync(LAST_PROMPT_FILE, 'utf8'); } catch { return null; }
 }
 
-function saveLast(report) {
-  try {
-    const fs = require('node:fs');
-    fs.mkdirSync(require('node:path').dirname(LAST_FILE), { recursive: true });
-    const tmp = `${LAST_FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(report));
-    fs.renameSync(tmp, LAST_FILE);
-  } catch (e) {
-    logWarn('analyst.save_last_failed', { message: e.message });
+/**
+ * @param {object} report
+ * @param {object} [opts]
+ * @param {boolean} [opts.historyOnly] 🔴 **last 파일은 덮지 않고 이력에만** 남긴다 (2026-10-06).
+ *    dryRun(점검) 회차용 — 점검이 화면 정본(`analyst-last.json`)을 덮으면 안 되지만(09-21 규율),
+ *    이력에서 통째로 빠지면 화면 이력이 활동 로그의 `summary` 행으로만 남아 전문을 영영 못 본다.
+ */
+function saveLast(report, { historyOnly = false } = {}) {
+  if (!historyOnly) {
+    try {
+      const fs = require('node:fs');
+      fs.mkdirSync(require('node:path').dirname(LAST_FILE), { recursive: true });
+      const tmp = `${LAST_FILE}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(report));
+      fs.renameSync(tmp, LAST_FILE);
+    } catch (e) {
+      logWarn('analyst.save_last_failed', { message: e.message });
+    }
   }
   // 📜 이력 — saveLast 가 유일한 길목이라 호출부(수동·자동)가 자동으로 전부 덮인다.
   //    실패해도 last 저장을 막지 않는다(이력은 부가 축).
   try {
     require('./analystHistory').record({
       at: report?.at, trigger: report?.trigger, report, created: report?.created || [],
+      // 점검 회차 표식 — 화면이 실전과 구분해 그릴 수 있어야 한다
+      dryRun: report?.dryRun === true,
     });
   } catch (e) { logWarn('analyst.history_failed', { message: e.message }); }
 }

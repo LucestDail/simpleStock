@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+// 🔴 라이브 data/ 오염 차단(2026-10-06 — saveLast→history.record 가 실제 data/analyst-history.jsonl 에 테스트 행을 쌓고 있었다)
+process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-'));
 
 /**
  * 매도 뒤 **되살 자리** · 마지막 분석 보존 · 화면 자동 실행 제거 (2026-09-21)

@@ -123,9 +123,8 @@
       <p v-else class="panel__empty">아직 승급된 전략이 없습니다 — 조합 백테스트가 벤치를 이기면 여기로 올립니다.</p>
     </section>
 
-    <!-- ── 상세 모달 ──
-         🔴 .page 직계 자식이어야 한다 — 아래 scoped CSS 의 `.page > .mdl` 전폭 예외가
-            이 위치를 전제한다(깊이 묻으면 예외 선택자가 안 맞아 스크림이 또 좁아진다). -->
+    <!-- ── 상세 모달 ── (폭 상한이 사라져 `.page > .mdl` 전폭 예외도 함께 제거됐다 —
+         .mdl 자체의 fixed·inset:0 이 전폭을 보장한다) -->
     <div v-if="modal" class="mdl">
       <div class="mdl__scrim" @click="closeModal"></div>
       <div class="mdl__box" role="dialog" aria-modal="true">
@@ -340,12 +339,10 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('keydown', 
 
 <style scoped>
 .page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
-/* 초광폭(1700px+)에서 콘텐츠가 끝까지 퍼지면 황량하다 — 스크롤 컨테이너는 전폭을
-   유지하되(스크롤바가 오른쪽 끝) 콘텐츠만 1440 에서 멈추고 중앙 정렬한다. */
-.page > * { width: 100%; max-width: 1440px; margin-inline: auto; }
-/* 🔴 모달 스크림 전폭 예외 — 위 상한이 fixed 요소까지 좁혀 "화면 일부만 어두워지는"
-   실사고가 났다. 반드시 상한 선언보다 뒤에 있어야 이긴다(순서가 곧 안전장치다). */
-.page > .mdl { width: 100vw; max-width: none; margin: 0; }
+/* 🔴 2026-10-06 사용자(세 번째 지적): "max-width 주지 말라고" — 콘텐츠 폭 상한(1440px)
+   제거, 화면 전폭. 카드 그리드는 auto-fill 이라 폭이 늘면 컬럼 수가 따라 는다.
+   종전 `.page > .mdl` 전폭 예외도 함께 제거 — 상한이 없어져 충돌 자체가 사라졌고,
+   .mdl 자체 규칙(fixed·inset:0)이 전폭을 보장한다. */
 
 .page__head { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }

@@ -109,8 +109,9 @@
         <h2 class="sect__h">보고서 상세</h2>
         <p v-if="detailError" class="panel__err">{{ detailError }}</p>
         <p v-else-if="!sel" class="panel__empty">왼쪽 이력에서 보고서를 선택하세요.</p>
+        <!-- ⚠️ dryRun 점검 회차도 summaryOnly 로 온다 — "10-04 전" 단정은 점검 회차에서 거짓말이 된다(2026-10-06) -->
         <p v-if="sel?.summaryOnly" class="banner banner--empty">
-          이 회차는 이력 체계 신설(10-04) 전이라 <b>한 줄 요약만</b> 보존돼 있습니다 — 전문·제안 연결은 그 이후 분석부터 쌓입니다.
+          이 회차는 전문이 보존되지 않았습니다 — <b>한 줄 요약만</b> 남아 있습니다(10-04 이전 회차 또는 점검 실행).
         </p>
         <template v-else>
           <p class="detail__meta">
@@ -372,16 +373,10 @@ onUnmounted(() => clearInterval(timer));
 <style scoped>
 /* 페이지 뼈대 — ActivityView 와 같은 패턴 */
 .page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
-/* 🔴 2026-10-04 사용자: "width 100% 늘이지 말고 배치를 고민" — 초광폭(1700px+)에서
-   카드가 끝까지 퍼져 황량했다. 스크롤 컨테이너(.page)는 전폭을 유지하되(스크롤바가
-   오른쪽 끝에 있게) **콘텐츠만** 읽기 좋은 폭에서 멈춘다. */
-/* 🔄 10-05: 좌측 고정 1280 은 초광폭에서 오른쪽만 비어 보였다("오른쪽 여백 너무 많이 남고")
-   ⇒ 1440 으로 넓히고 **중앙 정렬** — 남는 공간이 양쪽으로 갈라져 여백이 디자인으로 읽힌다. */
-.page > * { width: 100%; max-width: 1440px; margin-inline: auto; }
-/* 🔴 오버레이 예외 — 위 상한이 fixed 스크림까지 좁혀 화면 좌측 2/3 만 어두웠다(2026-10-05
-   실화면). OrderTicket 자체의 max-width:none 은 **동특이성 + 라우트 청크가 나중 로드**라
-   져서(computed 1280px 실측), 상한을 건 쪽이 예외도 선언한다 — 같은 파일 안 뒤 선언이 이긴다. */
-.page > .ticket__scrim { width: 100vw; max-width: none; }
+/* 🔴 2026-10-06 사용자(세 번째 지적): "max-width 주지 말라고" — 콘텐츠 폭 상한(1440px)을
+   전면 제거, 화면 전폭을 쓴다. 길어지는 목록은 max-height 내부 스크롤로 자른다(아래 .hgrid).
+   ⚠️ 종전의 `.page > .ticket__scrim` 전폭 예외도 함께 제거 — 상한이 사라져 충돌 자체가
+   없어졌고, OrderTicket 자체 규칙(fixed·inset:0·width:100vw·max-width:none)이 전폭을 보장한다. */
 
 .page__head { display: flex; align-items: center; gap: var(--space-sm); }
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }
@@ -412,7 +407,8 @@ onUnmounted(() => clearInterval(timer));
 /* ② 좌우 분할 — 좌 이력 그리드 / 우 상세 */
 .split { display: grid; grid-template-columns: minmax(300px, 36%) 1fr; gap: var(--space-base); align-items: start; }
 .hist { display: flex; flex-direction: column; gap: var(--space-xs); min-width: 0; }
-.hgrid { display: flex; flex-direction: column; gap: var(--space-xs); max-height: 70vh; overflow-y: auto; }
+/* 이력이 길어도 화면 절반에서 자른다(내부 스크롤) — 아래 내용이 위로 끌려 올라온다 */
+.hgrid { display: flex; flex-direction: column; gap: var(--space-xs); max-height: 50vh; overflow-y: auto; }
 .hrow {
   background: var(--color-surface); border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md); padding: var(--space-sm) var(--space-base);

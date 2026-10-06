@@ -27,6 +27,9 @@ function record(entry) {
       id: crypto.randomUUID(),
       at: entry.at || new Date().toISOString(),
       trigger: entry.trigger ?? null,
+      // 🔍 점검(dryRun) 회차 표식 (2026-10-06) — 실전과 구분해 그려야 한다.
+      //    true 일 때만 싣는다(기존 행과 모양을 안 바꾼다 — 없으면 실전).
+      ...(entry.dryRun === true || entry.report?.dryRun === true ? { dryRun: true } : {}),
       report: entry.report ?? null,
       // 제안 연결 — id·방향·심볼만(상태는 조회 시점에 orders 쪽이 정본)
       proposals: (entry.created || []).map((c) => ({
@@ -68,6 +71,8 @@ function list({ limit = 100 } = {}) {
   const full = readAll().reverse().map((r) => ({
     kind: 'full',
     id: r.id, at: r.at,
+    // 점검 회차 표식 보존 — get() 은 행을 통째로 주니 자동이지만, 목록은 재조립이라 명시해야 나간다
+    dryRun: r.dryRun === true,
     trigger: r.trigger?.why || r.trigger?.kind || (typeof r.trigger === 'string' ? r.trigger : null),
     marketView: String(r.report?.marketView || '').slice(0, 140),
     positions: Array.isArray(r.report?.positions) ? r.report.positions.length : 0,
