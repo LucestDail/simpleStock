@@ -690,6 +690,38 @@ function propose(input = {}, { source = 'manual', notify = true, accrual = null 
             `자율 집행(${require('./agentControl').autonomyLevel()}단) — ${proposal.side === 'BUY' ? '매수' : '매도'} ${symbol} ${proposal.quantity}주${ex.dryRun ? ' (모의)' : ''}`,
             { proposalId: proposal.id, symbol });
         } catch { /* 기록 실패가 집행 결과를 바꾸지 않는다 */ }
+        /**
+         * 🔴 **자율 집행을 폰에 분명히 알린다** (2026-10-06 — 사용자:
+         *    *"텔레그램에 너가 자동으로 한게 바로 그냥 승인됨 떠버리는데 뭐냐 이게 AI 판단
+         *    구매인지 나한테 문의하는건지 텔레그램에 안내는 있어야 하지 않냐?"*).
+         *
+         *    종전 흐름: 제안 생성 → 텔레그램에 **승인/취소 버튼**과 함께 발송 → 곧바로
+         *    자율 집행이 approve+execute → 버튼이 "승인됨" 으로 바뀐다.
+         *    ⇒ 사용자 화면에는 **"내가 승인한 것"과 똑같이 보인다.** 실제로는 사람이 한 번도
+         *      손대지 않았고 **실주문이 이미 나간 뒤**다. 가장 나쁜 종류의 모호함이다
+         *      (돈이 나갔는데 누가 결정했는지 폰만 보고는 알 수 없다).
+         * ⚠️ activityLog 는 **화면에만** 남는다 — 결정을 내리는 사람은 폰을 본다
+         *    (10-01 "텔레그램이 모든 자기고발을 삼키고 있었다" 와 같은 자리).
+         * ⚠️ 발송 실패가 집행 결과를 바꾸지 않는다. 다만 조용하지도 않다.
+         */
+        try {
+          const lv = require('./agentControl').autonomyLevel();
+          const led = require('./agentLedger').status();
+          const side = proposal.side === 'BUY' ? '매수' : '매도';
+          const px = Number(proposal.price);
+          require('./telegramService').send(
+            [
+              `🤖 AI 자동 집행 — 사람 승인 없이 나갔습니다 (자율 ${lv}단)`,
+              `${side} ${symbol} ${proposal.quantity}주 @ ${Number.isFinite(px) ? px : '시장가'}${ex.dryRun ? '  ⚠️모의(실주문 아님)' : ''}`,
+              `AI 예산: 투입 $${led.openCostUsd} / $${led.budgetUsd} · 잔액 $${led.availableUsd}`,
+              `근거: ${String(proposal.reason || '').slice(0, 140)}`,
+              '',
+              '⚠️ 이 주문은 **버튼을 누르지 않아도** 나갑니다. 멈추려면 운용 규칙에서 자율 0단으로',
+              '   내리거나 AI 예산을 해제하십시오(비상정지는 전체를 멈춥니다).',
+            ].join('\n'),
+            { reason: 'auto_exec' },
+          );
+        } catch (e) { logWarn('orders.auto_exec_notify_failed', { id: proposal.id, message: e.message }); }
       } catch (e) {
         logWarn('orders.auto_exec_failed', { id: proposal.id, message: e.message });
         audit('auto_skipped', { id: proposal.id, symbol, reason: `error: ${e.message}`.slice(0, 160) });

@@ -235,3 +235,24 @@ test('1회 상한 — 코드 기본값 34 (env 없이도 걸린다)', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'agentLedger.js'), 'utf8');
   assert.match(src, /AGENT_MAX_ORDER_PCT \?\? 34/, '기본값이 34 가 아니다 — env 를 안 주면 상한이 사라진다');
 });
+
+/**
+ * 🔴 **자율 집행 텔레그램 알림** (2026-10-06 사용자: "텔레그램에 너가 자동으로 한게 바로
+ * 그냥 승인됨 떠버리는데 … AI 판단 구매인지 나한테 문의하는건지 안내는 있어야 하지 않냐?").
+ * 종전엔 제안 알림(승인 버튼)만 가고 자율 집행은 **activityLog(화면)에만** 남아서,
+ * 폰에는 "내가 승인한 것" 과 구분이 안 됐다 — 실주문이 이미 나간 뒤인데.
+ * ⇒ 소스로 배선·문구를 못박는다(라이브 발송은 실주문이 필요해 테스트가 원리상 못 본다).
+ */
+test('자율 집행 — 텔레그램에 AI 자동임을 명시하고 멈추는 법을 알린다', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'orderService.js'), 'utf8');
+  const i = src.indexOf("audit('auto_executed'");
+  assert.ok(i > 0, 'auto_executed 블록이 사라졌다');
+  const body = src.slice(i, i + 2600);
+  assert.match(body, /telegramService'\)\.send\(/, '자율 집행이 텔레그램으로 안 알린다 — 폰에서 사람 승인과 구분이 안 된다');
+  assert.match(body, /AI 자동 집행/, '메시지가 AI 자동임을 밝히지 않는다');
+  assert.match(body, /사람 승인 없이/, '사람 승인 없음을 명시하지 않는다');
+  assert.match(body, /자율 0단|예산을 해제/, '멈추는 방법을 안 알려준다 — 알림만 받고 끌 줄 모르면 소용없다');
+  assert.match(body, /reason: 'auto_exec'/, '발송 사유 태그가 없다(사후 집계가 안 된다)');
+  // ⚠️ 발송 실패가 집행을 되돌리지 않는다(try/catch 로 감쌌는지)
+  assert.match(body, /auto_exec_notify_failed/, '발송 실패를 조용히 삼킨다');
+});
