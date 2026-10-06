@@ -191,10 +191,17 @@ test('🔴 기본값은 0 — 버퍼가 매수를 막지 않는다 (사용자 �
  * 🔴 종목 집중 상한 (2026-10-04) — 한도표가 "20% 초과 시 추가 매수 차단 (계좌 검증)" 이라
  * **주장만** 하고 게이트가 없었다. vshape 백테스트 몰빵(-23.5% · 사다리 실탄 0)이 증거.
  */
-test('종목 집중 상한 — 20% 를 넘기는 매수는 거절, 사다리는 면제', async () => {
+test('종목 집중 상한 — 한도를 넘기는 매수는 거절, 사다리는 면제', async () => {
   for (const k of Object.keys(require.cache)) {
-    if (/orderService|tossClient|tossPortfolio|incomeLedger/.test(k)) delete require.cache[k];
+    if (/orderService|tossClient|tossPortfolio|riskMetrics|incomeLedger/.test(k)) delete require.cache[k];
   }
+  /**
+   * 🔴 한도 **값**이 아니라 **메커니즘**을 잰다 (2026-10-06). 사용자가 한도를 20→35 로
+   *    올리자 이 테스트의 기대 수량이 4→7 로 깨졌다 — 로직 회귀가 아니라 **의미 변경**이다.
+   *    ⇒ env 로 20 을 핀해 "상한이 추가 매수를 막고 사다리는 면제한다" 는 **동작**만 재고,
+   *      한도 값 자체는 아래 '종목 한도 35' 테스트가 전담한다(관심사 분리).
+   */
+  process.env.SINGLE_POSITION_MAX_PCT = '20';
   /**
    * ⚠️ 2026-10-06 — 집중 상한에 **수익 기반 적립 면제**(incomeLedger)가 붙었다. 그 판정은
    *    `config/target-allocation.json` 을 읽으므로, 핀을 안 박으면 그 파일이 생기는 날
@@ -240,4 +247,22 @@ test('🔴 가격-현재가 괴리 게이트(±2.5%) — 체결 불가능한 지
   assert.equal(near.ok, true, near.error);
   const farBuy = await o.checkAccountLimits({ symbol: 'SPY', side: 'BUY', quantity: 1, price: 95 });
   assert.equal(farBuy.kind, 'price-drift');
+});
+
+/**
+ * 🔴 종목 한도 35 (2026-10-06 사용자 결정: "35% 까지 · 4종목 이상 안 가져간다").
+ * 두 근거점을 자가 지킨다 — **QLD 31.8% 는 통과**(추가 매수 가능해야 전략이 성립)하고
+ * **40% 는 여전히 차단**(35 가 해제가 아니라는 것). 그리고 riskMetrics 가 같은 상수를 본다.
+ */
+test('종목 한도 35 — 31.8% 는 통과, 40% 는 차단, riskMetrics 와 한 벌', () => {
+  delete process.env.SINGLE_POSITION_MAX_PCT;
+  for (const k of Object.keys(require.cache)) if (/orderService|riskMetrics/.test(k)) delete require.cache[k];
+  const os = require('../server/orderService');
+  assert.equal(os.SINGLE_POSITION_MAX_PCT, 35, '기본값이 35 가 아니다 — QLD 추가 매수가 다시 막힌다');
+  const rm = require('../server/riskMetrics');
+  const m = rm.compute({ items: [], candlesBySymbol: new Map(), cashPct: 50, leveragePct: 30 });
+  assert.equal(m.limits.single, 35, 'riskMetrics 가 다른 한도를 본다 — 화면 경고와 게이트가 갈린다');
+  // 최소 3종목 강제: 35×3 = 105 > 100 이므로 2종목만으로는 100% 를 못 채운다
+  assert.ok(os.SINGLE_POSITION_MAX_PCT * 2 < 100, '두 종목으로 전액이 가능하면 분산 강제가 사라진다');
+  assert.ok(os.SINGLE_POSITION_MAX_PCT * 3 >= 100, '세 종목으로도 전액이 불가하면 4종목 운용과 모순된다');
 });
