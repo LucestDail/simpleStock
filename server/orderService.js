@@ -99,6 +99,18 @@ const ADVERSE_PRICE_PCT = Number(process.env.ADVERSE_PRICE_PCT ?? 0);
  *   목표를 채운 뒤에도 가격 상승으로 비중이 5%p 늘 여지가 있어 즉시 재-차단되지 않는다.
  */
 const SINGLE_POSITION_MAX_PCT = Number(process.env.SINGLE_POSITION_MAX_PCT ?? 40);
+/**
+ * 🔴 **보유 종목 수 상한** (2026-10-06 사용자: *"총 종목수 3종목 이하로 관리하도록
+ * 구성, 설정해"*).
+ *
+ * 종목 한도 40% 와 짝이다 — 40+40+20 = 100 이므로 **3종목이 구조적 상한**이고,
+ * 사용자가 그 운용 방식을 명시했다. 넷째 종목을 담으면 평균 비중이 25% 로 내려가
+ * "집중해서 소수만 본다" 는 전략 자체가 흐려진다.
+ * ⚠️ **신규 종목 매수만** 막는다 — 이미 보유한 종목의 추가 매수·전량 매도는 그대로다
+ *    (상한을 넘긴 기존 보유를 강제로 팔게 만들지 않는다. 집중 상한과 같은 철학).
+ * ⚠️ 0 이면 끈다.
+ */
+const MAX_POSITIONS = Math.max(0, Number(process.env.MAX_POSITIONS ?? 3));
 /** 🔴 즉시 제안 지정가의 현재가 괴리 상한 % — 넘으면 조건주문으로 안내(2026-09-24) */
 const PRICE_DRIFT_PCT = Math.max(0.5, Number(process.env.PRICE_DRIFT_PCT ?? 2.5));
 
@@ -456,6 +468,23 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency, exe
       try {
         const h = await require('./tossPortfolio').getHoldings({});
         const sameCur = (h.items || []).filter((it) => String(it.currency || '').toUpperCase() === cur);
+        /**
+         * 🔴 **보유 종목 수 상한** — 신규 종목이면 여기서 끊는다(위 MAX_POSITIONS 참조).
+         *    수량이 0 인 항목은 보유가 아니다(청산 직후 잔여 레코드가 칸을 먹으면 안 된다).
+         */
+        if (up === 'BUY' && MAX_POSITIONS > 0) {
+          const heldSyms = new Set((h.items || [])
+            .filter((it) => (Number(it.quantity) || 0) > 0)
+            .map((it) => String(it.symbol || '').toUpperCase()));
+          if (!heldSyms.has(sym) && heldSyms.size >= MAX_POSITIONS) {
+            logWarn('orders.position_count_blocked', { symbol: sym, held: [...heldSyms], max: MAX_POSITIONS });
+            return {
+              ok: false, kind: 'position-count',
+              error: `보유 종목이 이미 ${heldSyms.size}개(${[...heldSyms].join(', ')})입니다 — 상한 ${MAX_POSITIONS}개. 신규 종목을 담으려면 기존 종목을 먼저 정리하십시오.`,
+              held: [...heldSyms], maxPositions: MAX_POSITIONS,
+            };
+          }
+        }
         const holdingsVal = sameCur.reduce((sum, it) => sum + (Number(it.marketValue) || 0), 0);
         const equity = cash + holdingsVal;
         const symVal = sameCur.filter((it) => String(it.symbol).toUpperCase() === sym.toUpperCase())
@@ -1172,7 +1201,7 @@ module.exports = {
   cancelLiveOrder,
   reconcile,
   checkAccountLimits,
-  SINGLE_POSITION_MAX_PCT,
+  SINGLE_POSITION_MAX_PCT, MAX_POSITIONS,
   onSettled,
   attachNotice,
   _restoreForTest: restore,

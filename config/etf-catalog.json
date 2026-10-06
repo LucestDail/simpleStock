@@ -3744,6 +3744,13 @@
           "name": "DPST",
           "leverage": 3,
           "desc": "지역은행 3배 롱 — 단기"
+        },
+        {
+          "symbol": "FAS",
+          "name": "Direxion Daily Financial Bull 3X",
+          "market": "US",
+          "leverage": 3,
+          "desc": "금융 섹터(XLF) 일일 3배 — 금리 사이클·신용 이벤트에 민감. 사용자 분류: 매매 후보(거래량 받쳐주는 3배). 단기 전용."
         }
       ]
     },
