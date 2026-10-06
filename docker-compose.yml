@@ -61,6 +61,10 @@ services:
       ANALYST_WATCH_REPORT_TOP_N: "${ANALYST_WATCH_REPORT_TOP_N:-8}"
       PLAYBOOK_MAX: "${PLAYBOOK_MAX:-6}"
       CANDIDATE_STOCK_SLOT_MAX: "${CANDIDATE_STOCK_SLOT_MAX:-2}"
+      # 2026-10-06 사용자 지시 — 애널리스트 후보 풀을 감시 목록 기준으로(기본 target)
+      CANDIDATE_POOL: "${CANDIDATE_POOL:-target}"
+      # 보유 종목 수 상한 — 사용자 "총 종목수 3종목 이하"
+      MAX_POSITIONS: "${MAX_POSITIONS:-3}"
       MANAGER_BRIEF_PRESET_SCHEDULE: "${MANAGER_BRIEF_PRESET_SCHEDULE:-true}"
       AI_DAILY_CRON: "${AI_DAILY_CRON:-}"
       # ── my-computer MCP (시장 웹 검색) — **여기에 적지 않는다** ────

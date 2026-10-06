@@ -19,6 +19,10 @@ const LEVERAGED_ALLOWED = new Set([
   'QLD', 'TQQQ', 'SSO', 'UPRO', 'SPXL', 'TNA', 'KORU', 'FNGU', 'BULZ', '122630',
   // 섹터·테마 롱
   'SOXL', 'RAM', 'TECL', 'LABU', 'CURE', 'WEBL', 'RETL', 'NAIL', 'ROM', 'USD', 'DPST', 'DFEN',
+  // FAS 추가 2026-10-06 — 사용자 섹터 표의 '매매 후보'. 검증: Direxion Daily Financial
+  //   Bull 3X = **Russell 1000 금융 서비스 지수** 3배(단일종목 아님) ⇒ 허용 대상.
+  //   ★ 이 가드가 내가 검증 없이 추가하려던 것을 잡았다(설계대로 작동).
+  'FAS',
   // 상품·금리·변동성
   'NUGT', 'GDXU', 'TMF', 'TYD', 'UCO', 'BITU', 'UVXY',
   // 인버스(지수·섹터·금리)
