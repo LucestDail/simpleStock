@@ -301,6 +301,17 @@ app.post('/api/strategy/promoted/:id/active', (req, res) => {
 /** 🎚️ 종목 모멘텀 하한(%) — 혼재 그룹 속 ETF 가 그룹 임계에 묶이지 않게(2026-10-05) */
 app.put('/api/watchlist/groups/:id/tickers/:symbol/momentum-min', async (req, res) => {
   try {
+    /**
+     * 🔴 **`pct` 키가 없으면 400** (2026-10-06 — 내가 실제로 당했다).
+     *    `req.body?.pct ?? null` 은 키를 틀리면(예: `momentumMinPct`) **조용히 null = 삭제**로
+     *    처리하고 **200 을 돌려준다.** 그날 임계 8건을 설정한 줄 알았는데 파일엔 아무것도
+     *    안 남았고, 값이 있던 그룹이었다면 **사용자 설정을 지웠을 자리**다.
+     *    ⇒ 지우려면 `{"pct": null}` 을 **명시**해야 한다. 09-22 watch 토글이 빈 바디를
+     *      ON 으로 읽던 것과 같은 가족이고, 그때도 같은 처방(`typeof` 검사)을 썼다.
+     */
+    if (!('pct' in (req.body || {}))) {
+      return res.status(400).json({ error: '`pct` 를 보내야 합니다(지우려면 {"pct": null}).', got: Object.keys(req.body || {}) });
+    }
     const state = await require('./server/watchlistService').setTickerMomentumMin(req.params.id, req.params.symbol, req.body?.pct ?? null);
     return res.json(state);
   } catch (error) {
@@ -311,6 +322,10 @@ app.put('/api/watchlist/groups/:id/tickers/:symbol/momentum-min', async (req, re
 /** 🎚️ 그룹 모멘텀 하한(%) — 개별주 그룹을 넓게 감시하되 싸게(2026-10-05). null=전역 기본 */
 app.put('/api/watchlist/groups/:id/momentum-min', async (req, res) => {
   try {
+    // 🔴 위 티커 라우트와 같은 가드 — 키 오타가 그룹 임계를 조용히 지우면 발화가 폭증한다
+    if (!('pct' in (req.body || {}))) {
+      return res.status(400).json({ error: '`pct` 를 보내야 합니다(지우려면 {"pct": null}).', got: Object.keys(req.body || {}) });
+    }
     const state = await require('./server/watchlistService').setGroupMomentumMin(req.params.id, req.body?.pct ?? null);
     return res.json(state);
   } catch (error) {

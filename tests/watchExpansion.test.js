@@ -100,3 +100,24 @@ test('⑦ 왕복 — 저장한 그룹 임계가 직렬화(getWatchlistState)를 
   await w.setTickerMomentumMin(gidv, 'QQQ', null);
   assert.equal(w.getWatchThresholds().get('QQQ'), 7, '그룹 임계가 직렬화에서 떨어졌다');
 });
+
+/**
+ * 🔴 **momentum-min 라우트의 키 가드** (2026-10-06 — 내가 실제로 당했다).
+ * `req.body?.pct ?? null` 은 키를 틀리면(`momentumMinPct` 로 보냄) **조용히 null = 삭제**로
+ * 처리하고 **200 을 돌려준다.** 임계 8건을 설정한 줄 알았는데 파일엔 아무것도 안 남았고,
+ * 값이 있던 그룹이었다면 **사용자 설정을 지웠을 자리**다(09-22 watch 토글 빈 바디 = ON 과 같은 가족).
+ * ⇒ 소스를 훑어 **두 라우트 모두** 키 존재를 검사하는지 못박는다(형제 중 하나만 고치는 것을 막는다).
+ */
+test('키 가드 — momentum-min 두 라우트가 pct 키 없으면 400', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const routes = [...src.matchAll(/app\.put\('\/api\/watchlist\/groups[^']*momentum-min'/g)];
+  assert.ok(routes.length >= 2, `momentum-min 라우트가 ${routes.length}곳 — 2곳 미만이면 자가 대상을 잃었다`);
+  for (const m of routes) {
+    const body = src.slice(m.index, m.index + 900);
+    assert.match(body, /'pct' in \(req\.body \|\| \{\}\)/,
+      `키 가드 없는 라우트: ${body.slice(0, 70)} — 키 오타가 임계를 조용히 지운다`);
+    assert.match(body, /400/, '키 누락을 400 으로 돌려주지 않는다');
+  }
+});

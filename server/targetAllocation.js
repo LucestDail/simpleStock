@@ -195,12 +195,41 @@ function compare(items = [], summary = null, catalog = null, deps = {}) {
     };
   });
 
+  /**
+   * 🔴 **목표에 선언했는데 감시에 없는 심볼** (2026-10-06 라이브에서 잡힌 결함).
+   *
+   *    예산을 올리자 모델이 `ENTER` 로 돌아섰는데 대상이 **QQQ** 였다 — 목표의 기반 자산은
+   *    **QQQM** 인데 그게 **감시에서 꺼져 있어 후보 목록에 올라오지 않았고**, 모델이 가장
+   *    가까운(감시중인) QQQ 를 골랐다. 즉 *"목표에 적었다"* 와 *"후보로 도달한다"* 는
+   *    다른 층이다 — 이 저장소가 같은 날 네 번째로 밟은 **"등록됐다 ≠ 도달한다"**.
+   * ⚠️ 조용히 넘기면 모델이 **매 회차 비슷한 대체 종목을 고르고**, 그 결과는 나중에
+   *    `unclassified`(목표 밖 보유)로 쌓인다 — 원인은 안 보이고 증상만 남는다.
+   * ⚠️ 감시 목록을 못 읽으면 **빈 배열이 아니라 null** 이다("감시 안 됨" 과 "모름" 을 가른다).
+   */
+  let unwatchedTargets = null;
+  try {
+    const ws = (deps.watchState || require('./watchlistService').getWatchlistState)();
+    const on = new Set();
+    for (const g of (ws?.groups || [])) {
+      for (const t of (g.tickers || [])) if (t.watch) on.add(String(t.symbol).toUpperCase());
+    }
+    unwatchedTargets = [];
+    for (const b of buckets) {
+      for (const sym of (b.symbols || [])) {
+        if (!on.has(String(sym).toUpperCase())) unwatchedTargets.push({ symbol: sym, bucket: b.key });
+      }
+    }
+  } catch (e) {
+    logWarn('target.watch_check_failed', { message: e.message });   // 건너뜀은 "전부 감시중" 이 아니다
+  }
+
   return {
     asOf: new Date().toISOString(),
     totalValue: weights.total,
     toleranceBandPct: band,
     buckets,
     unclassified: unclassified.sort((a, b) => b.pct - a.pct),
+    unwatchedTargets,
     weights,
   };
 }
