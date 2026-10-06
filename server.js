@@ -1024,13 +1024,23 @@ app.get('/api/dashboard', async (req, res) => {
         if (t.symbol === '^KS11') bench.kospi = Number(t.price) || null;
         if (t.symbol === '^IXIC') bench.qqq = Number(t.price) || null;   // 나스닥 종합 — QQQ 대용(테이프에 있는 것만 쓴다)
       }
-      const totalKrw = Number(data?.portfolio?.summary?.value?.krw);
       // ⚠️ dashboard 의 portfolio 에는 weights 가 없다(/api/portfolio 모양과 다르다) —
       //    첫 라이브에서 cashPct/leveragePct 가 null 로 적혔다. 같은 한 벌(portfolioWeights)로 계산한다.
       const w = require('./server/analystService').portfolioWeights(
         data?.portfolio?.items || [], data?.portfolio?.summary || null,
         require('./server/regimeService').readCatalog()
       );
+      /**
+       * 🔴 총자산 = 주식 평가 + 현금 (2026-10-06) — 종전엔 summary.value.krw(주식만)를
+       *    "자산" 으로 적어, 사용자가 매도한 날 차트가 −28.6% 로 꺼졌다(현금화된 몫이
+       *    증발한 것처럼). 현금은 portfolioWeights 가 이미 재는 cashPct 로 유도한다
+       *    (riskMetrics 의 현금 포함 분모와 같은 식 — 같은 한 벌 원칙).
+       */
+      const stockKrw = Number(data?.portfolio?.summary?.value?.krw);
+      const cp = Number(w?.cashPct);
+      const totalKrw = (Number.isFinite(cp) && cp > 0 && cp < 100)
+        ? stockKrw / (1 - cp / 100)
+        : stockKrw;
       require('./server/snapshotService').recordDaily({
         totalKrw,
         cashPct: w?.cashPct ?? null,
