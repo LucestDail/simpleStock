@@ -822,6 +822,42 @@ function summarizeCandles(rows) {
  */
 const ENTRY_GAP_MAX_PCT = Number(process.env.ANALYST_ENTRY_GAP_MAX_PCT) || 50;
 
+/**
+ * 종목의 **시장**(US/KR) — 수수료율·세제가 갈리는 축.
+ * 보유 통화가 있으면 그것이 정본이고, 없으면(후보) 심볼 모양으로 본다 — KR 은 6자리 숫자다.
+ */
+/**
+ * 💸 **수수료 게이트** (2026-10-06 — 사용자: *"너 자꾸 왜 나 손해보게 팔려고 해 수수료
+ * 계산하면 1달러 손해인데"*).
+ *
+ * `computeTrade` 는 이미 `rrAfterFee`(수수료 반영 손익비)를 계산하고, 이익이 안 남으면
+ * `rrAfterFeeNote` 에 그 사실을 적는다. 그런데 **그 값을 소비하는 코드가 0곳이었다** —
+ * 계산해 놓고 버렸으니 *"수수료를 빼면 손해인 제안"* 이 그대로 나갔다(10-06 QQQ 1주 =
+ * 팔면 −$1.18). "수집해 놓고 안 쓰는" 가족.
+ *
+ * ⚠️ **명백한 경우만 막는다** — `rrAfterFee === null` + 그 사유가 붙은 것(= 수수료를 빼면
+ *    이익 자체가 없음). `rrAfterFee < 1` 은 막지 않는다: 적립(DCA)은 손익비로 판단하는
+ *    것이 아니라 목표 배분을 채우는 것이라, 조이면 전략이 막힌다.
+ * ⚠️ 손익비 계산이 **없으면 통과**다(판정 불가를 거부로 바꾸지 않는다 — 요율 조회 실패·
+ *    목표가 미제시가 제안을 통째로 죽이면 조회 장애가 판단을 멈춘다).
+ */
+function feeGate(proposal, positions = []) {
+  const sym = String(proposal?.symbol || '').toUpperCase();
+  const ps = (positions || []).find((x) => String(x?.symbol || '').toUpperCase() === sym);
+  const t = ps?.trade;
+  if (!t) return { ok: true };
+  if (t.rrAfterFee === null && t.rrAfterFeeNote) {
+    return { ok: false, why: `${t.rrAfterFeeNote} (진입 ${t.entry ?? '?'} · 목표 ${t.target ?? '?'} · 수수료율 ${t.costRate != null ? (t.costRate * 100).toFixed(3) + '%' : '?'})` };
+  }
+  return { ok: true };
+}
+
+function marketOfSymbol(symbol, currency = null) {
+  if (currency === 'USD') return 'US';
+  if (currency === 'KRW') return 'KR';
+  return /^\d{6}$/.test(String(symbol || '').trim()) ? 'KR' : 'US';
+}
+
 function computeTrade({ side, entry, stop, target, riskBudget, costRate, last }) {
   const e = Number(entry);
   const s2 = Number(stop);
@@ -2231,6 +2267,38 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    *    사후에 판정할 수 있다(위 savePrompt 주석 참조). dryRun 도 남긴다 — 검증 회차도
    *    같은 자로 재야 한다.
    */
+  /**
+   * 💸 **수수료율을 프롬프트에 싣는다** (2026-10-06 — 사용자: *"너 매수/매도할때 수수료
+   *    계산 안하고 있어?"*).
+   *
+   * 🔴 종전엔 이 블록이 **프롬프트가 굳은 뒤**(아래 `lines.join`)에 있어서 `lines.push` 가
+   *    아무 효과가 없었다 — **어떤 LLM 호출에도 수수료가 안 들어갔다.** 그래서 모델이
+   *    "QQQ 1주 분할 진입" 처럼 **왕복 수수료가 차익을 먹는 소액 주문**을 아무 제약 없이
+   *    냈고(10-06 SOXX 1주·QQQ 1주가 그 결과), 실제로 QQQ 는 **팔면 −$1.18** 이었다.
+   * ⚠️ 실패하면 `fees = null` 이고 손익비에 비용을 **안 넣는다**(0 으로 치지 않는다).
+   * 🔴 만료 경고도 여기서 나간다 — 라이브 실측(10-06): US 0.1% 의 `endDate` 가 **내일**이다.
+   */
+  let fees = null;
+  try {
+    const rows = await toss.getCommissions();
+    fees = {};
+    for (const r of rows) if (r.rate?.num != null) fees[r.market] = r.rate.num;
+    if (Object.keys(fees).length) {
+      lines.push('', `## 수수료율 (편도 · 왕복은 2배)`);
+      lines.push(Object.entries(fees).map(([k, v]) => `- ${k} ${(v * 100).toFixed(3)}%`).join('\n'));
+      lines.push('🔴 **수수료가 차익을 먹는 주문을 내지 마라.** 목표가와 진입가의 차이가');
+      lines.push('   **왕복 수수료보다 충분히 크지 않으면 제안하지 않는다** — 소액·1주 주문이');
+      lines.push('   특히 위험하다(가격이 맞아도 비용으로 손해가 난다).');
+      lines.push('⚠️ 세금·제비용은 이 숫자에 **빠져 있다** — 실제 비용은 이보다 크다.');
+      const soon = rows.filter((r) => r.endsSoon);
+      if (soon.length) {
+        lines.push(`⚠️ **곧 바뀌는 요율**: ${soon.map((r) => `${r.market} ${(r.rate.num * 100).toFixed(3)}% (~${r.endDate})`).join(' · ')} — 만료 후 올라갈 수 있다.`);
+      }
+    }
+  } catch (e) {
+    logWarn('analyst.commissions_failed', { kind: e.kind, message: e.message });
+  }
+
   const userPrompt = lines.join('\n');
   savePrompt(userPrompt);
   const raw = await generateStructuredOutput(
@@ -2593,6 +2661,16 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
      *    프롬프트에 적어 뒀는데도 12:19 에 `RAM SELL @14.1` 이 나갔고 사용자가 거절했다.
      *    ⚠️ 막는 쪽이 **방침과 같은 설정**을 읽으므로 둘이 갈라질 수 없다.
      */
+    /**
+     * 💸 수수료를 빼면 이익이 안 남는 제안은 **여기서 끊는다** — 한도 검사·주문 전에.
+     *    (게이트는 `feeGate` 한 함수이고 백테스트 경로도 같은 것을 쓴다)
+     */
+    const fg = feeGate(p, report.positions);
+    if (!fg.ok) {
+      rejected.push({ symbol: p.symbol, side: p.side, error: fg.why, kind: 'fee' });
+      logWarn('analyst.proposal_fee_blocked', { symbol: p.symbol, side: p.side, why: fg.why });
+      continue;
+    }
     /** 깎인 값이 있으면 여기 담긴다 — `p` 는 상수라 덮어쓰지 않는다 */
     let clamped = null;
     const chk = await orderService.checkAccountLimits({
@@ -2662,27 +2740,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    *    ⚠️ 위험예산은 **사용자가 정한 비율**에서 나온다 — 내가 임의로 정하지 않는다.
    *       설정이 없으면 계산을 **안 한다**(0 으로 두면 "위험 없음" 처럼 보인다).
    */
-  /**
-   * 수수료율 — **한 번만** 받아 모든 종목이 나눠 쓴다.
-   * ⚠️ 실패하면 `null` 이고, 그러면 손익비에 **비용을 안 넣는다**(0 으로 치지 않는다).
-   * 🔴 유효기간을 적용한다 — 라이브에서 미국 요율 `endDate` 가 **오늘**이었다(프로모션 종료).
-   */
-  let fees = null;
-  try {
-    const rows = await toss.getCommissions();
-    fees = {};
-    for (const r of rows) if (r.rate?.num != null) fees[r.market] = r.rate.num;
-    const soon = rows.filter((r) => r.endsSoon);
-    if (soon.length) {
-      lines.push('', `⚠️ **곧 바뀌는 수수료율**: ${soon.map((r) => `${r.market} ${(r.rate.num * 100).toFixed(3)}% (~${r.endDate})`).join(' · ')}`);
-    }
-    if (Object.keys(fees).length) {
-      lines.push('', `## 수수료율 (편도)\n${Object.entries(fees).map(([k, v]) => `${k} ${(v * 100).toFixed(3)}%`).join(' · ')}`);
-      lines.push('⚠️ **세금·제비용은 빠져 있다** — 손익비의 `rrAfterFee` 는 *수수료만* 반영한 값이다.');
-    }
-  } catch (e) {
-    logWarn('analyst.commissions_failed', { kind: e.kind, message: e.message });
-  }
+  // (수수료는 프롬프트 생성 전에 이미 받아 뒀다 — 아래 feesPromise 참조)
 
   const riskPct = Number(getDashboardSettings().riskPerTradePct);
   const accountKrw = Number(summary?.value?.krw) || 0;
@@ -2753,8 +2811,15 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
        */
       last: Number(held?.lastPrice) || Number(tech?.[String(ps.symbol).toUpperCase()]?.last)
         || Number(tech?.[ps.symbol]?.last) || null,
-      // ⚠️ 통화가 아니라 **시장**으로 고른다(US/KR 요율이 다르다). 못 받았으면 안 넘긴다 — 0 으로 치지 않는다
-      costRate: fees?.[held?.currency === 'USD' ? 'US' : 'KR'] ?? undefined,
+      /**
+       * ⚠️ 통화가 아니라 **시장**으로 고른다(US/KR 요율이 다르다). 못 받았으면 안 넘긴다 — 0 으로 치지 않는다.
+       * 🔴 종전엔 `held?.currency === 'USD' ? 'US' : 'KR'` 이라 **미보유 후보가 전부 KR**
+       *    요율로 떨어졌다(실측: KR 0.015% vs US 0.1% = **6.7배**). 미국 후보의 손익비가
+       *    실제보다 좋게 나오던 자리다 — 바로 위 `last` 주석이 경고한 그 함정
+       *    ("보유면 lastPrice, 후보면 tech.last")을 costRate 는 적용받지 못했다.
+       *    ⇒ 보유 통화가 있으면 그것으로, 없으면 **심볼 모양**으로 판정(KR 은 6자리 숫자).
+       */
+      costRate: fees?.[marketOfSymbol(ps.symbol, held?.currency)] ?? undefined,
     });
     ps.trade = { ...calc, currency: held?.currency || null };
   }
@@ -3360,6 +3425,9 @@ async function decideOnContext({ contextText, regimeState = null, holdings = [] 
     // 횡보 게이트 — 실전(analyze)과 같은 함수(게이트가 두 벌이면 갈라진다)
     const side = sideGate(p, regimeState, { heldSymbols: holdings, proposals: report.proposals });
     if (!side.ok) { rejected.push({ ...p, error: side.why }); continue; }
+    // 💸 수수료 게이트 — 실전(analyze)과 **같은 함수**(두 벌이면 갈라진다)
+    const fee = feeGate(p, report.positions);
+    if (!fee.ok) { rejected.push({ ...p, error: fee.why, kind: 'fee' }); continue; }
     accepted.push(p);
   }
   return { report, proposals: accepted, rejected };
@@ -3371,7 +3439,7 @@ module.exports = {
   _reportSchemaFor: reportSchemaFor, _REPORT_SCHEMA: REPORT_SCHEMA, _shapeReport: shapeReport,
   savePrompt, readLastPrompt, LAST_PROMPT_FILE, portfolioWeights,
   analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport,
-  computeTrade, decideOnContext, inverseGate, sideGate, REPORT_SCHEMA, SYSTEM_PROMPT,
+  computeTrade, decideOnContext, inverseGate, sideGate, feeGate, marketOfSymbol, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
   assessBuyingCapacity, capacityDetail, capacityBand, describeNoProposal, watchMovesSection,
   ledgerSection,
