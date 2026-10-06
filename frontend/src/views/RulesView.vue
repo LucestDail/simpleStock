@@ -162,7 +162,7 @@
             — 모멘텀 확정 시 {{ b.slot.momentum }} 최대 {{ b.slot.momentumMaxPctOfSlot }}%
           </template>
         </p>
-        <p v-for="b in notedBuckets" :key="`note-${b.key}`" class="mut">{{ b.name || b.key }}: {{ b.note }}</p>
+        <p v-for="b in notedBuckets" :key="`note-${b.key}`" class="mut bnote" :title="b.noteText"><b>{{ b.name || b.key }}</b> — {{ b.noteText }}</p>
 
         <!-- 🔴 목표에 없는 보유 = 정리 대상. 숨기면 "왜 비중이 안 맞지" 를 사용자가 혼자 찾는다 -->
         <p v-if="unclassified.length" class="unclf">
@@ -797,7 +797,17 @@ const gapWidth = (b) => {
 };
 
 const slotBuckets = computed(() => (alloc.value?.buckets || []).filter((b) => b.slot?.primary && b.slot?.momentum));
-const notedBuckets = computed(() => (alloc.value?.buckets || []).filter((b) => b.note));
+/**
+ * 🔴 config 의 `note` 는 **프롬프트와 화면이 함께 쓰는 한 벌**이다 — 모델은 마크다운(`**`)을
+ *    읽지만 화면은 plain text 로 그려서 `**한 슬롯이다**` 가 그대로 노출됐다(10-06 실측).
+ *    ⇒ config 를 바꾸지 않고(모델 쪽 강조를 잃지 않게) **화면에서만** 걷어낸다.
+ * ⚠️ 그리고 사용자 지적("운용규칙은 글자만 너무 많고") — 전문은 툴팁으로 넘기고
+ *    표면은 한 줄만 보여준다.
+ */
+const plainNote = (t) => String(t || '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/\s+/g, ' ').trim();
+const notedBuckets = computed(() => (alloc.value?.buckets || [])
+  .filter((b) => b.note)
+  .map((b) => ({ ...b, noteText: plainNote(b.note) })));
 /**
  * 🔴 **서버 실물을 읽고 고쳤다** (2026-10-06) — 계약서에는 `unclassified[].currentPct` 였는데
  *    `server/targetAllocation.js` 가 실제로 담는 것은 **`pct`** 다(`{symbol, pct, category, leverage}`).
@@ -1214,4 +1224,5 @@ onUnmounted(() => clearInterval(timer));
 }
 .stop__foot { display: flex; align-items: center; gap: var(--space-xs); font-size: var(--text-2xs); color: var(--color-faint); }
 .stop__gap { flex: 1; }
+.bnote { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 </style>
