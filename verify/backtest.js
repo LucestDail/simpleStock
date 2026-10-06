@@ -98,8 +98,13 @@ if (UNIV.length) {
 }
 
 function buildPrices(rets) {
+  /**
+   * 🔴 **가격은 전체 종목을 만든다** — 우주 제한은 "모델에게 보여주는 후보" 만 좁히는 것이다
+   *    (2026-10-06 실패: `BACKTEST_UNIVERSE` 에서 QQQ 를 빼니 **벤치마크 계산**이
+   *     `px.QQQ[...]` 에서 TypeError 로 죽었다 — 벤치는 우주와 무관하게 항상 필요하다).
+   */
   const px = {}; // sym → [prices]
-  for (const [sym, e] of Object.entries(EXPOSURE)) {
+  for (const [sym, e] of Object.entries(EXPOSURE_ALL)) {
     let p = 100; const arr = [];
     for (const r of rets) { p *= 1 + (e.beta * e.lev * r) + ((e.drift || 0) / 100); arr.push(p); }
     px[sym] = arr;
