@@ -111,6 +111,17 @@
           <span class="issue__tag">{{ issueTag(i) }}</span>{{ i.msg }}
         </li>
       </ul>
+
+      <!--
+        🎯 장기 목표 배분 괴리 — **한 줄 요약만** 둔다.
+        상세 표는 운용 규칙 화면이 정본이다(같은 표를 두 곳에 두면 한쪽만 고치는 일이 시작된다).
+        🔴 목표 배분 API 가 없으면 이 줄은 아예 안 나온다 — 0%p 를 그리지 않는다.
+      -->
+      <p v-if="allocGaps.length" class="allocline">
+        <span class="allocline__tag">목표 배분</span>
+        <span v-for="g in allocGaps" :key="g.key" class="allocline__item">{{ g.text }}</span>
+        <RouterLink class="allocline__more" to="/rules">운용 규칙에서 상세 →</RouterLink>
+      </p>
     </section>
     </div>
 
@@ -274,6 +285,53 @@ const issueTag = (i) => {
   return i.symbol ? `${axis} · ${i.symbol}` : axis;
 };
 
+/* ── 🎯 장기 목표 배분 괴리 (2026-10-06) ─────
+ * 🔴 상세 표는 운용 규칙 화면이 정본이다 — 여기는 "가장 큰 괴리" 한 줄만.
+ * ⚠️ 전용 엔드포인트가 없으면 `/api/risk/metrics` 에 실려 온 것을 쓰고, 둘 다 없으면 줄이 없다.
+ */
+const alloc = ref(null);
+
+async function loadAllocation(metricsBody) {
+  // ① 이미 받은 metrics 에 실려 있으면 그것으로 — 같은 것을 두 번 안 부른다
+  const inline = metricsBody?.targetAllocation;
+  if (Array.isArray(inline?.buckets) && inline.buckets.length) { alloc.value = inline; return; }
+  try {
+    const r = await apiFetch('/api/target-allocation');
+    if (!r.ok) return;
+    const b = await r.json();
+    if (Array.isArray(b?.buckets) && b.buckets.length) alloc.value = b;
+  } catch {
+    // 서버에 아직 없을 수 있다 — 줄을 안 그리는 것이 정답이다
+  }
+}
+
+/**
+ * 가장 큰 괴리 2개. 목표 밖 보유가 있으면 **한 자리를 그것에 준다** —
+ * 정리 대상은 괴리 크기와 별개로 사용자가 알아야 한다(비중이 안 맞는 이유가 거기 있다).
+ * 🔴 부족/초과 판정은 서버의 `direction` 만 본다(gapPct 부호 규약은 서버 것이다).
+ */
+const allocGaps = computed(() => {
+  const a = alloc.value;
+  if (!a) return [];
+  const absGap = (b) => { const g = Math.abs(Number(b?.gapPct)); return Number.isFinite(g) ? g : 0; };
+  const off = (a.buckets || [])
+    .filter((b) => b.direction === 'add' || b.direction === 'trim')
+    .sort((x, y) => absGap(y) - absGap(x));
+  // 🔴 서버 실물은 `pct` 로 담는다(`server/targetAllocation.js`) — 계약서의 `currentPct` 와
+  //    둘 다 받는다. 한쪽만 보면 정렬이 전부 0 이 되어 "가장 큰" 이 아무 의미가 없어진다.
+  const curOf = (u) => Number(u?.currentPct != null ? u.currentPct : u?.pct) || 0;
+  const un = [...(a.unclassified || [])].sort((x, y) => curOf(y) - curOf(x));
+  const out = [];
+  for (const b of off.slice(0, un.length ? 1 : 2)) {
+    const g = Number(b.gapPct);
+    const n = Number.isFinite(g) ? `${g > 0 ? '+' : ''}${g}%p ` : '';
+    const label = b.name || b.key;
+    out.push({ key: `b-${b.key}`, text: `${label} ${n}${b.direction === 'add' ? '부족' : '초과'}` });
+  }
+  if (un.length) out.push({ key: `u-${un[0].symbol}`, text: `${un[0].symbol} 정리 대상` });
+  return out;
+});
+
 /* ── ⑤ 스트레스 (유지) ────────────────────── */
 const stress = ref(null);
 const worst = (sc) => {
@@ -419,6 +477,7 @@ onMounted(async () => {
     const b = await r.json();
     if (b?.ok) metrics.value = b;
     else metricsErr.value = b?.error || '리스크 지표를 불러오지 못했습니다.';
+    await loadAllocation(b);
   } catch (e) { metricsErr.value = `리스크 지표 읽기 실패: ${e.message}`; }
   try { const r = await apiFetch('/api/performance'); perf.value = await r.json(); }
   catch (e) { perfErr.value = `자산 추이 읽기 실패: ${e.message}`; }
@@ -496,6 +555,21 @@ onMounted(async () => {
 .issue--warn { background: var(--color-warn-soft); border-color: var(--color-warn); }
 .issue--ok { background: var(--color-up-soft); border-color: var(--color-up); margin: 0; }
 .issue__tag { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: var(--rounded-xs); font-size: var(--text-2xs); font-weight: 700; background: var(--color-surface); border: 1px solid var(--color-hairline); color: var(--color-ink); }
+
+/* ── 🎯 목표 배분 괴리 한 줄 (상세는 /rules) ── */
+.allocline {
+  margin: 6px 0 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  font-size: var(--text-sm); color: var(--color-body);
+  border-top: 1px solid var(--color-hairline-soft); padding-top: 6px;
+}
+.allocline__tag {
+  padding: 0 7px; border-radius: var(--rounded-pill); font-size: var(--text-2xs); font-weight: 700;
+  border: 1px solid var(--color-primary-line); background: var(--color-primary-soft); color: var(--color-primary);
+}
+.allocline__item { color: var(--color-ink); font-weight: 600; }
+.allocline__item + .allocline__item::before { content: '·'; margin-right: 6px; color: var(--color-faint); }
+.allocline__more { margin-left: auto; font-size: var(--text-xs); color: var(--color-primary); text-decoration: none; white-space: nowrap; }
+.allocline__more:hover { text-decoration: underline; }
 
 /* ── 스트레스 표 ── */
 .tbl { width: 100%; border-collapse: collapse; font-size: var(--text-sm); margin-bottom: 6px; }

@@ -111,6 +111,125 @@
       </div>
     </section>
 
+    <!-- ⑧+⑨ 장기 목표 배분 · 수익 기반 적립 예산 (2026-10-06 — "방어주·수익으로 QLD·TQQQ 를 모아나간다")
+         🔴 엔드포인트가 없으면(서버 작업 동시 진행) 카드를 **아예 그리지 않는다** —
+            빈 껍데기나 0 을 보여주면 "목표가 0%" · "적립금 0" 으로 읽힌다. -->
+    <div v-if="alloc || income" class="row2">
+      <!-- 🎯 장기 목표 배분 -->
+      <section v-if="alloc" class="card">
+        <h2>장기 목표 배분
+          <span class="info" title="방어주·배당으로 바탕을 깔고, 레버리지(QLD·TQQQ)는 목표 비중 안에서만 모읍니다. 목표·현재·괴리는 서버가 계산한 값이고 화면은 그대로 보여줍니다.">ⓘ</span>
+        </h2>
+        <div class="allocwrap">
+          <table class="alloc">
+            <thead><tr>
+              <th>버킷</th>
+              <th class="num">목표</th>
+              <th class="num">현재</th>
+              <th class="num">괴리</th>
+              <th>방향</th>
+              <th>종목</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="b in alloc.buckets" :key="b.key">
+                <!-- 서버는 `key`(식별자) 와 `name`(사람이 읽는 이름)을 둘 다 준다 — 이름이 있으면 이름 -->
+                <td class="alloc__k">
+                  {{ b.name || b.key }}
+                  <small v-if="b.role" class="alloc__role">{{ b.role }}</small>
+                </td>
+                <td class="num mono-num">{{ pctText(b.targetPct) }}</td>
+                <td class="num mono-num">{{ pctText(b.currentPct) }}</td>
+                <!-- 🔴 괴리의 **부호 규약은 서버 것**이라 해석하지 않는다 — 숫자는 받은 대로 적고,
+                     부족/초과 판정은 서버가 명시한 direction 으로만 한다(추측하면 반대로 그린다) -->
+                <td class="num">
+                  <span class="mono-num" :class="dirTextClass(b)">{{ gapText(b) }}</span>
+                  <span class="gapbar">
+                    <i class="gapbar__fill" :class="dirFillClass(b)" :style="{ width: gapWidth(b) }"></i>
+                  </span>
+                </td>
+                <td><span class="dir" :class="dirBadgeClass(b)">{{ DIR_LABEL[b.direction] || b.direction || '—' }}</span></td>
+                <!-- 현금 버킷은 `symbols` 가 빈 배열이다(실측) — '—' 로 두면 "데이터 없음" 으로 읽힌다 -->
+                <td class="alloc__syms">{{ (b.symbols || []).join(' · ') || (b.isCash ? '현금' : '—') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 슬롯 스위칭 규칙 — 한 버킷 안에서 평시/모멘텀 종목을 갈아타는 규칙 -->
+        <p v-for="b in slotBuckets" :key="`slot-${b.key}`" class="slotrule">
+          🔁 {{ b.name || b.key }} · {{ b.slot.primary }} ↔ {{ b.slot.momentum }}
+          <template v-if="b.slot.momentumMaxPctOfSlot != null">
+            — 모멘텀 확정 시 {{ b.slot.momentum }} 최대 {{ b.slot.momentumMaxPctOfSlot }}%
+          </template>
+        </p>
+        <p v-for="b in notedBuckets" :key="`note-${b.key}`" class="mut">{{ b.name || b.key }}: {{ b.note }}</p>
+
+        <!-- 🔴 목표에 없는 보유 = 정리 대상. 숨기면 "왜 비중이 안 맞지" 를 사용자가 혼자 찾는다 -->
+        <p v-if="unclassified.length" class="unclf">
+          <span class="unclf__tag">목표 밖 보유 — 정리 대상</span>
+          <span v-for="u in unclassified" :key="u.symbol" class="mono-num unclf__item">
+            {{ u.symbol }} {{ pctText(u.currentPct) }}
+          </span>
+        </p>
+      </section>
+
+      <!-- 💵 수익 기반 적립 예산 -->
+      <section v-if="income" class="card">
+        <h2>수익 기반 적립 예산
+          <span class="info" title="배당과 AI 실현손익으로만 쌓는 적립 예산입니다. 원금을 더 넣지 않고 번 돈으로만 레버리지를 모으는 축이라, 예상(추정) 금액은 여기에 포함하지 않습니다.">ⓘ</span>
+        </h2>
+        <div class="acc">
+          <div class="acc__hero">
+            <small>적립 예산 (쓸 수 있는 돈)</small>
+            <b class="mono-num">${{ usd(income.accrualBudgetUsd) }}</b>
+          </div>
+          <dl class="acc__break">
+            <div><dt>배당</dt><dd class="mono-num">${{ usd(income.dividendUsd) }}</dd></div>
+            <div>
+              <dt>AI 실현손익</dt>
+              <dd class="mono-num" :class="signClass(income.realizedUsd)">{{ signedUsd(income.realizedUsd) }}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <!--
+          🔴 **예상은 쓸 수 있는 돈이 아니다.** 적립 예산과 같은 모양으로 그리면
+             사용자가 없는 돈으로 매수를 승인한다 ⇒ 점선·흐린 글자 + "예산 미포함" 을 라벨에 박는다.
+        -->
+        <!-- 설명문은 지어내지 않고 서버가 주는 `estimatedNote` 를 그대로 쓴다 -->
+        <p v-if="income.estimatedUsd != null" class="est" :title="income.estimatedNote || ''">
+          <span class="est__k">예상(추정)</span>
+          <span class="mono-num est__v">${{ usd(income.estimatedUsd) }}</span>
+          <span class="est__tag">예산 미포함</span>
+        </p>
+
+        <div class="divform">
+          <label>배당(USD)
+            <input v-model.number="divUsd" type="number" min="0" step="0.01" placeholder="예: 12.34" />
+          </label>
+          <!-- 서버가 메모를 200자로 자른다(실측) — 화면에서 같은 상한을 걸어 조용한 절단을 막는다 -->
+          <label>메모
+            <input v-model="divNote" type="text" maxlength="200" placeholder="예: O 10월 배당" />
+          </label>
+          <button class="btn btn--sm btn--primary" :disabled="divBusy || !(Number(divUsd) > 0)" @click="addDividend">
+            {{ divBusy ? '적립 중…' : '적립' }}
+          </button>
+          <span v-if="divMsg" class="mut">{{ divMsg }}</span>
+        </div>
+        <!-- 🔴 실측(2026-10-06): 토스 API 에 배당 내역 조회가 없다 — 사용자 입력이 유일한 경로다 -->
+        <p class="mut">토스 API 에 배당 내역 조회가 없어 수동 입력입니다.</p>
+
+        <ul v-if="recentAccruals.length" class="acclist">
+          <li v-for="(a, i) in recentAccruals" :key="i">
+            <span class="mono-num acclist__at">{{ fmtAt(a.at) }}</span>
+            <span class="acclist__sym">{{ a.symbol }}</span>
+            <span class="mono-num">{{ a.quantity }}주 @ ${{ usd(a.price) }}</span>
+          </li>
+        </ul>
+        <p v-else class="mut">아직 적립 이력이 없습니다.</p>
+      </section>
+    </div>
+
     <!-- ⑤+⑦ 한도 · 수동 분석 — 둘 다 짧은 카드라 한 줄 2열로 묶어 세로를 줄인다 -->
     <div class="row2">
       <section class="card">
@@ -628,6 +747,137 @@ function toggleRanking(t) {
   else form.value.rankingTypes.push(t);
 }
 
+/* ── ⑧ 장기 목표 배분 · ⑨ 수익 기반 적립 예산 (2026-10-06) ───────────────
+ * 🔴 두 엔드포인트는 **서버에서 동시에 만들고 있다** — 없으면(404·에러) 값이 null 로 남고
+ *    카드가 통째로 안 그려진다. 0 이나 빈 표를 그리면 "목표가 0%" 로 읽히고, 그건
+ *    데이터가 없다는 사실보다 나쁜 거짓이다.
+ * ⚠️ 받은 모양을 확장하지 않는다 — 계약에 없는 필드를 추측해 그리면 라이브 첫 값에서 깨진다.
+ */
+const alloc = ref(null);
+const income = ref(null);
+
+const DIR_LABEL = { add: '추가', trim: '축소', ok: '적정' };
+
+/** 숫자가 아니면 '—' — 0 과 '모른다' 를 섞지 않는다 */
+const pctText = (v) => (Number.isFinite(Number(v)) ? `${Number(v)}%` : '—');
+const usd = (v) => (Number.isFinite(Number(v))
+  ? Number(v).toLocaleString('ko-KR', { maximumFractionDigits: 2 })
+  : '—');
+const signedUsd = (v) => (Number.isFinite(Number(v))
+  ? `${Number(v) >= 0 ? '+' : '-'}$${usd(Math.abs(Number(v)))}`
+  : '—');
+const signClass = (v) => (Number.isFinite(Number(v)) ? (Number(v) >= 0 ? 'up' : 'down') : '');
+
+const gapText = (b) => {
+  const g = Number(b?.gapPct);
+  if (!Number.isFinite(g)) return '—';
+  return `${g > 0 ? '+' : ''}${g}%p`;
+};
+/* 🔴 색은 **방향(서버가 명시)** 으로만 가른다. 괴리의 부호 규약(목표-현재 / 현재-목표)은
+   서버 것이라 화면이 해석하면 반대로 칠할 수 있다. 그리고 손익색(up/down)은 쓰지 않는다 —
+   배분 괴리는 손해가 아니다(이 저장소 도넛에서 같은 규율). */
+const DIR_SUFFIX = { add: 'add', trim: 'trim', ok: 'ok' };
+const dirKey = (b) => DIR_SUFFIX[b?.direction] || 'ok';
+const dirTextClass = (b) => `gapnum--${dirKey(b)}`;
+const dirFillClass = (b) => `gapbar__fill--${dirKey(b)}`;
+const dirBadgeClass = (b) => `dir--${dirKey(b)}`;
+
+/** 막대는 **그 화면 안에서 가장 큰 괴리**를 기준으로 상대화한다(절대 %p 를 폭으로 쓰면 다 찬다) */
+const gapScale = computed(() => {
+  const gs = (alloc.value?.buckets || [])
+    .map((b) => Math.abs(Number(b.gapPct)))
+    .filter((g) => Number.isFinite(g));
+  return Math.max(1, ...gs);
+});
+const gapWidth = (b) => {
+  const g = Math.abs(Number(b?.gapPct));
+  if (!Number.isFinite(g) || g === 0) return '0%';
+  // 아주 작은 괴리도 보이게 최소 6% — 0 과는 구분된다
+  return `${Math.max(6, Math.min(100, (g / gapScale.value) * 100))}%`;
+};
+
+const slotBuckets = computed(() => (alloc.value?.buckets || []).filter((b) => b.slot?.primary && b.slot?.momentum));
+const notedBuckets = computed(() => (alloc.value?.buckets || []).filter((b) => b.note));
+/**
+ * 🔴 **서버 실물을 읽고 고쳤다** (2026-10-06) — 계약서에는 `unclassified[].currentPct` 였는데
+ *    `server/targetAllocation.js` 가 실제로 담는 것은 **`pct`** 다(`{symbol, pct, category, leverage}`).
+ *    `currentPct` 만 보면 비중이 전부 '—' 로 떴을 자리라 **둘 다 받는다**.
+ */
+const unclassified = computed(() => (alloc.value?.unclassified || []).map((u) => ({
+  ...u,
+  currentPct: u.currentPct != null ? u.currentPct : u.pct,
+})));
+/**
+ * 🔴 `accruals` 는 **오래된 것이 앞**이다(서버가 `state.accruals.slice(-30)` 으로 준다).
+ *    `slice(0, 3)` 은 **가장 오래된 3건**을 집는다 — "최근" 이라 적고 옛것을 보여줬을 자리다.
+ */
+const recentAccruals = computed(() => (income.value?.accruals || []).slice(-3).reverse());
+
+/**
+ * 목표 배분은 전용 엔드포인트가 정본이고, `/api/risk/metrics` 에 함께 실려 오는 형태도 받는다.
+ * ⚠️ 둘 다 없으면 **카드를 숨긴다** — "없다" 를 "0" 으로 그리지 않는다.
+ */
+async function loadAllocation() {
+  const candidates = [
+    ['/api/target-allocation', (b) => b],
+    ['/api/risk/metrics', (b) => b?.targetAllocation],
+  ];
+  for (const [url, pick] of candidates) {
+    try {
+      const r = await apiFetch(url);
+      if (!r.ok) continue;
+      const got = pick(await r.json());
+      if (Array.isArray(got?.buckets) && got.buckets.length) {
+        alloc.value = got;
+        return;
+      }
+    } catch {
+      // 다음 후보로 — 서버가 아직 안 만들어졌을 수 있다
+    }
+  }
+  alloc.value = null;
+}
+
+async function loadIncome() {
+  try {
+    const r = await apiFetch('/api/income/status');
+    if (!r.ok) { income.value = null; return; }
+    const b = await r.json();
+    // 🔴 적립 예산이 숫자로 오지 않으면 이 카드는 보여줄 것이 없다
+    income.value = Number.isFinite(Number(b?.accrualBudgetUsd)) ? b : null;
+  } catch {
+    income.value = null;
+  }
+}
+
+const divUsd = ref(null);
+const divNote = ref('');
+const divBusy = ref(false);
+const divMsg = ref('');
+
+async function addDividend() {
+  const amount = Number(divUsd.value);
+  if (!Number.isFinite(amount) || amount <= 0 || divBusy.value) return;
+  divBusy.value = true;
+  divMsg.value = '';
+  try {
+    const r = await apiFetch('/api/income/dividend', {
+      method: 'POST',
+      body: JSON.stringify({ usd: amount, note: String(divNote.value || '').trim() || undefined }),
+    });
+    const b = await r.json().catch(() => ({}));
+    if (!r.ok || b.ok === false) throw new Error(b.error || `적립 실패 (${r.status})`);
+    divUsd.value = null;
+    divNote.value = '';
+    divMsg.value = '적립했습니다.';
+    await loadIncome();
+  } catch (e) {
+    divMsg.value = `실패: ${e.message}`;
+  } finally {
+    divBusy.value = false;
+  }
+}
+
 /* ── ⑦ 수동 분석 실행 ── */
 const runBusy = ref(false);
 const runDry = ref(false);
@@ -663,6 +913,10 @@ let timer = null;
 onMounted(() => {
   loadStatus();
   loadSettings();
+  // ⚠️ 30초 폴링에 안 넣는다 — 서버에 아직 없는 경로를 30초마다 찌르면 로그만 쌓인다.
+  //    적립 예산은 배당을 넣은 직후 addDividend() 가 직접 다시 읽는다.
+  loadAllocation();
+  loadIncome();
   timer = setInterval(loadStatus, 30_000);
 });
 onUnmounted(() => clearInterval(timer));
@@ -741,6 +995,111 @@ onUnmounted(() => clearInterval(timer));
 .ledger__stats { display: flex; gap: var(--space-lg, 24px); margin: 4px 0 0; flex-wrap: wrap; }
 .ledger__stats dt { font-size: var(--text-2xs); color: var(--color-faint); }
 .ledger__stats dd { margin: 0; font-weight: 600; color: var(--color-ink); }
+
+/* ⑧ 장기 목표 배분 ───────────────────────────────────────────────
+   표가 길어져도 페이지를 못 늘인다 — 자기 안에서만 스크롤(max-height 50vh 규율) */
+.allocwrap { max-height: 50vh; overflow-y: auto; overflow-x: auto; margin-bottom: 6px; }
+.alloc { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.alloc th {
+  text-align: left; font-size: var(--text-2xs); color: var(--color-faint);
+  padding: 6px var(--space-sm); border-bottom: 1px solid var(--color-hairline);
+  position: sticky; top: 0; background: var(--color-surface); z-index: 1;
+}
+/* 🔴 `.alloc th` 가 `.num` 을 특이도로 이긴다 — 헤더만 왼쪽에 남는 그 버그라서 명시해 이긴다 */
+.alloc th.num { text-align: right; }
+.alloc td { padding: 6px var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); vertical-align: top; }
+.alloc td.num { text-align: right; white-space: nowrap; }
+.num { text-align: right; }
+.alloc__k { font-weight: 600; color: var(--color-ink); white-space: nowrap; }
+.alloc__role { display: block; font-weight: 400; font-size: var(--text-2xs); color: var(--color-muted); }
+.alloc__syms { color: var(--color-body); font-size: var(--text-xs); min-width: 0; }
+
+/* 괴리 — 숫자 + 가로 막대. 색은 방향 토큰만(손익색 금지) */
+.gapnum--add { color: var(--color-primary); }
+.gapnum--trim { color: var(--color-warn); }
+.gapnum--ok { color: var(--color-muted); }
+.gapbar {
+  display: block; height: 4px; margin-top: 3px; border-radius: var(--rounded-pill);
+  background: var(--color-flat-soft); overflow: hidden;
+}
+.gapbar__fill { display: block; height: 100%; background: var(--color-flat); }
+.gapbar__fill--add { background: var(--color-primary); }
+.gapbar__fill--trim { background: var(--color-warn); }
+.gapbar__fill--ok { background: var(--color-flat); }
+
+.dir {
+  display: inline-block; padding: 0 7px; border-radius: var(--rounded-pill);
+  font-size: var(--text-2xs); font-weight: 700; white-space: nowrap;
+  border: 1px solid var(--color-hairline); color: var(--color-muted);
+}
+.dir--add { border-color: var(--color-primary-line); background: var(--color-primary-soft); color: var(--color-primary); }
+.dir--trim { border-color: var(--color-warn); background: var(--color-warn-soft); color: var(--color-warn); }
+.dir--ok { border-color: var(--color-hairline); background: var(--color-flat-soft); color: var(--color-muted); }
+
+.slotrule {
+  margin: 4px 0 0; font-size: var(--text-xs); color: var(--color-body);
+  border-left: 2px solid var(--color-ai-line); padding-left: var(--space-sm);
+}
+.unclf {
+  margin: 6px 0 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  font-size: var(--text-xs); color: var(--color-body);
+}
+.unclf__tag {
+  padding: 1px 7px; border-radius: var(--rounded-pill); font-weight: 700; font-size: var(--text-2xs);
+  border: 1px solid var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger);
+}
+.unclf__item { color: var(--color-ink); }
+
+/* ⑨ 수익 기반 적립 예산 ─────────────────────────────────────── */
+.acc { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-base) var(--space-lg, 24px); margin-bottom: 6px; }
+.acc__hero {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  border: 1px solid var(--color-primary-line); background: var(--color-primary-soft);
+  border-radius: var(--rounded-md); padding: var(--space-sm) var(--space-base);
+}
+.acc__hero small { font-size: var(--text-2xs); color: var(--color-muted); }
+.acc__hero b { font-size: var(--text-2xl); color: var(--color-ink); }
+.acc__break { display: flex; gap: var(--space-lg, 24px); margin: 0; flex-wrap: wrap; }
+.acc__break dt { font-size: var(--text-2xs); color: var(--color-faint); }
+.acc__break dd { margin: 0; font-weight: 600; color: var(--color-ink); }
+/* 🔴 `.acc__break dd`(0,1,1) 가 전역 `.up`/`.down`(0,1,0) 을 이긴다 — 표 헤더 정렬과 같은
+   특이도 함정이라 명시해 이긴다(안 하면 손익 색이 조용히 안 먹는다) */
+.acc__break dd.up { color: var(--color-up); }
+.acc__break dd.down { color: var(--color-down); }
+
+/**
+ * 🔴 예상(추정)은 **쓸 수 있는 돈이 아니다.** 적립 예산 히어로와 한눈에 갈라져야 한다 —
+ *    점선 테두리 · 흐린 글자 · 바탕 없음 · "예산 미포함" 라벨.
+ */
+.est {
+  margin: 0 0 6px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  border: 1px dashed var(--color-hairline-strong); border-radius: var(--rounded-sm);
+  padding: 4px var(--space-sm); font-size: var(--text-xs); color: var(--color-muted);
+  background: none;
+}
+.est__k { color: var(--color-faint); }
+.est__v { color: var(--color-muted); font-weight: 600; }
+.est__tag {
+  padding: 0 6px; border-radius: var(--rounded-pill); font-size: var(--text-2xs); font-weight: 700;
+  border: 1px solid var(--color-warn); color: var(--color-warn); background: var(--color-warn-soft);
+}
+
+.divform { display: flex; align-items: flex-end; flex-wrap: wrap; gap: var(--space-sm); margin: 6px 0; }
+.divform label { display: flex; flex-direction: column; gap: 2px; font-size: var(--text-2xs); color: var(--color-faint); }
+/* 🔴 이 카드는 `.frm` 밖이라 전역 폼 스타일이 안 온다 — 맨몸으로 두면 브라우저 기본 흰 입력이
+   다크에서 허옇게 뜬다(2026-09-21 라이트 잔재 사고와 같은 모양). 여기서 직접 칠한다. */
+.divform input {
+  width: 160px; height: 28px; padding: 0 8px; font-size: var(--text-xs);
+  background: var(--color-surface-sunken); border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--rounded-md); color: var(--color-ink);
+}
+.divform input::placeholder { color: var(--color-faint); }
+.divform input:focus { outline: none; border-color: var(--color-primary-line); box-shadow: var(--ring); }
+
+.acclist { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.acclist li { display: flex; align-items: center; gap: var(--space-sm); font-size: var(--text-xs); color: var(--color-body); }
+.acclist__at { color: var(--color-faint); font-size: var(--text-2xs); }
+.acclist__sym { font-weight: 600; color: var(--color-ink); }
 
 /* ⑤ 한도 표 */
 .tbl { width: 100%; border-collapse: collapse; font-size: var(--text-sm); margin-bottom: 6px; }

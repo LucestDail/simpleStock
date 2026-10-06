@@ -395,6 +395,12 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency, exe
      * "VIX 사다리(코드 기계매수) 면제" 다. 사다리는 설계상 공포에서 한 종목(QQQ)을
      * 단계 매수하므로 집중 상한도 함께 면제가 맞다(막으면 사다리 존재 이유가 죽는다).
      */
+    /**
+     * 💰 적립 면제 결과를 **반환에 실어 호출자에게 넘긴다** (2026-10-06).
+     * 🔴 면제가 아니면 이 키들을 **넣지 않는다** — `accrualExempt: false` 를 싣는 모양을
+     *    만들면 어디선가 객체 존재만 보고 참으로 읽는다. "없음" 은 키의 부재로 표현한다.
+     */
+    let accrual = null;
     if (!exemptCashFloor && SINGLE_POSITION_MAX_PCT > 0) {
       try {
         const h = await require('./tossPortfolio').getHoldings({});
@@ -405,12 +411,44 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency, exe
           .reduce((sum, it) => sum + (Number(it.marketValue) || 0), 0);
         const capVal = equity * (SINGLE_POSITION_MAX_PCT / 100);
         if (symVal + need > capVal) {
-          const maxQty = Math.max(0, Math.floor((capVal - symVal) / px));
-          return {
-            ok: false, kind: 'concentration',
-            error: `매수 후 ${sym} 비중이 종목 한도(${SINGLE_POSITION_MAX_PCT}%)를 넘습니다 — 현재 ${equity > 0 ? ((symVal / equity) * 100).toFixed(1) : '?'}% + 이번 ${need.toFixed(2)} ${cur}. 가능 수량 ${maxQty}주.`,
-            maxQuantity: maxQty, currency: cur,
-          };
+          /**
+           * 💰 **수익 기반 적립 면제** (2026-10-06 — 사용자 전략 *"방어주/수익 기반으로 QLD 를
+           *    모아나간다"*). 집중 상한은 **원금을 레버리지로 옮기는 것**을 막는 장치인데,
+           *    배당·실현수익으로 적립하는 것은 원금이 줄지 않으므로 같은 위험이 아니다.
+           *    종전에는 둘이 코드에 같아 보여서, QLD 31.8% 에서 "모아나간다" 가 원리상 불가능했다.
+           *
+           * ⛔ 면제되는 것은 **이 집중 상한 하나**다. 불리가격·현금 버퍼·HITL·일일 손실·
+           *    `agentLedger` 예산 게이트는 그대로 지난다(다른 축이다).
+           * 🔴 조용한 면제는 구멍이다 — 걸릴 것이 안 걸렸으면 **왜 안 걸렸는지**가 로그에 남는다.
+           * ⚠️ 판정 실패(파일 없음·예산 부족)는 **면제 없음**으로 떨어진다(fail-closed) —
+           *    `incomeLedger.canAccrue` 가 그 책임을 진다.
+           */
+          const acc = require('./incomeLedger').canAccrue(sym, need, { currency: cur });
+          if (acc.ok) {
+            /**
+             * 🔴 **차감은 집행 시점에 하고, 그 근거는 여기서만 알 수 있다** — 그래서 제안에
+             *    실어 `execute()` 까지 들고 간다(아래 `accrual` → `propose` → `p.accrualExempt`).
+             * ❌ **기각한 대안: 집행 시점에 `canAccrue` 를 다시 묻기.** 그러면 *"한도 안이어서
+             *    면제가 필요 없었던 매수"* 까지 차감해, 적립 예산이 *"수익으로 모은 양"* 이 아니라
+             *    *"QLD 매수 총량"* 을 추적하게 된다 — 사용자가 **원금으로** QLD 를 사도 예산이
+             *    깎인다. 면제를 **근거로 한도를 뚫은 주문만** 차감하는 것이 이 원장의 정의다.
+             */
+            accrual = { accrualExempt: true, accrualUsd: Math.round(need * 100) / 100 };
+            logWarn('orders.accrual_exempt', {
+              symbol: sym, needUsd: Math.round(need * 100) / 100,
+              accrualBudgetUsd: acc.budgetUsd, currency: cur,
+              symPct: equity > 0 ? Math.round((symVal / equity) * 1000) / 10 : null,
+              capPct: SINGLE_POSITION_MAX_PCT,
+              why: '수익 기반 적립 예산 — 집중 상한만 면제',
+            });
+          } else {
+            const maxQty = Math.max(0, Math.floor((capVal - symVal) / px));
+            return {
+              ok: false, kind: 'concentration',
+              error: `매수 후 ${sym} 비중이 종목 한도(${SINGLE_POSITION_MAX_PCT}%)를 넘습니다 — 현재 ${equity > 0 ? ((symVal / equity) * 100).toFixed(1) : '?'}% + 이번 ${need.toFixed(2)} ${cur}. 가능 수량 ${maxQty}주. (적립 면제 불가: ${acc.why})`,
+              maxQuantity: maxQty, currency: cur, accrual: acc.why,
+            };
+          }
         }
       } catch (e) {
         // 집중 계산 실패가 정당한 매수를 막으면 오탐 게이트다 — 기본 현금 검증은 위에서 통과했다
@@ -437,7 +475,7 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency, exe
         logWarn('orders.cash_floor_check_failed', { message: e.message });
       }
     }
-    return { ok: true, available: bp.cash.raw, currency: cur };
+    return { ok: true, available: bp.cash.raw, currency: cur, ...(accrual || {}) };
   } catch (e) {
     // 🔴 조회 실패를 **통과로 읽지 않는다**
     logWarn('orders.account_check_failed', { symbol: sym, side: up, kind: e.kind, message: e.message });
@@ -445,7 +483,14 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency, exe
   }
 }
 
-function propose(input = {}, { source = 'manual', notify = true } = {}) {
+/**
+ * @param opts.accrual 💰 `checkAccountLimits` 결과를 그대로 넘기면 **적립 면제 플래그가
+ *   제안에 보존**된다(집행 시 차감의 근거). 호출자가 한도 검사를 **밖에서** 하는 경로를 위한
+ *   이음새다 — `POST /api/orders/proposals`(server.js) 와 `analystChat` 이 그 모양이고,
+ *   거기서는 `chk` 를 검사 후 버려서 면제 사실이 제안에 닿지 않는다.
+ *   ⚠️ 자율 경로는 `propose` **안에서** 검사하므로 이 인자가 필요 없다(아래에서 직접 심는다).
+ */
+function propose(input = {}, { source = 'manual', notify = true, accrual = null } = {}) {
   /**
    * 🛑 **비상정지 게이트** (2026-10-03 D-4) — 정지 중에는 어떤 제안도 만들어지지 않는다.
    *    여기가 길목이다: 분석·채팅·사다리·수동이 전부 이 함수를 지난다.
@@ -525,6 +570,18 @@ function propose(input = {}, { source = 'manual', notify = true } = {}) {
     executedAt: null,
     result: null,
   };
+  /**
+   * 💰 적립 면제 플래그 — 호출자가 밖에서 한도를 본 경우(위 `opts.accrual` 참조).
+   * ⚠️ 면제가 아니면 **키를 안 만든다**(부재로 "없음" 을 표현한다 — `false` 를 싣지 않는다).
+   * ★ 영속은 자동이다: `persist()` 가 제안 객체를 **통째로** 직렬화하고 `restore()` 가
+   *   `proposals.set(p.id, p)` 로 되읽는다 — 필드 허용목록이 없다(실측 확인). 그래도
+   *   왕복 테스트로 잠근다 — 나중에 누가 정규화를 넣으면 이 필드가 조용히 사라지고
+   *   **차감만 안 되는** 상태가 된다(09-22 watch 필드·10-05 momentumMinPct 와 같은 자리).
+   */
+  if (accrual?.accrualExempt) {
+    proposal.accrualExempt = true;
+    proposal.accrualUsd = Number(accrual.accrualUsd) || 0;
+  }
   proposals.set(proposal.id, proposal);
   persist();
   audit('proposed', {
@@ -590,6 +647,15 @@ function propose(input = {}, { source = 'manual', notify = true } = {}) {
           audit('auto_skipped', { id: proposal.id, symbol, reason: (chk.error || chk.kind || '').slice(0, 160) });
           logInfo('orders.auto_skipped', { id: proposal.id, symbol, kind: chk.kind });
           return; // HITL 대기로 남는다 — 한도 밖 자동은 없다
+        }
+        /**
+         * 💰 적립 면제로 한도를 뚫었으면 **제안에 적어 둔다** — `execute()` 가 그걸 보고 차감한다.
+         * 🔴 `execute()` 보다 **먼저** 심어야 한다(아래 approve→execute 가 이 플래그를 읽는다).
+         */
+        if (chk.accrualExempt) {
+          proposal.accrualExempt = true;
+          proposal.accrualUsd = Number(chk.accrualUsd) || 0;
+          persist();
         }
         const ap = approve(proposal.id);
         if (!ap.ok) { audit('auto_skipped', { id: proposal.id, symbol, reason: 'approve_failed' }); return; }
@@ -660,6 +726,35 @@ function reject(id, reason = '') {
 }
 
 /**
+ * 💰 **적립 예산 차감** — 집행 성공 시 한 번. `execute()` 의 성공 출구가 셋이라 함수로 뺐다
+ *    (한 곳만 고치면 나머지에서 조용히 안 깎인다 — "형제 중 하나만 빠짐" 의 그 자리).
+ *
+ * 🔴 `agentLedger.recordBuy` 와 **독립**이다 — 둘은 다른 축이고(AI 전용 자금 vs 적립 재원)
+ *    한 주문이 양쪽에 다 걸릴 수 있다. 그래서 여기서 agentLedger 를 보지 않는다.
+ * 🔴 **면제를 근거로 한도를 뚫은 매수만** 깎는다(`p.accrualExempt`). 한도 안의 매수는
+ *    적립 예산을 쓴 것이 아니므로 차감하지 않는다 — 안 그러면 예산이 "수익으로 모은 양" 이
+ *    아니라 "매수 총량" 을 추적하게 된다.
+ * ⚠️ 차감 실패가 **주문 결과를 바꾸지 않는다** — 주문은 이미 나갔다(되돌릴 수 없다). 대신
+ *    조용하지도 않다: 실패하면 warn 이고, 그건 "예산이 덜 깎였다 = 면제가 더 열려 있다" 는 뜻이다.
+ * ⚠️ **알려진 한계**: 기준이 `agentLedger` 와 같은 **"전송 = 투입"** 이다. 미체결·부분체결·
+ *    발동 안 된 조건주문은 예산을 돌려받지 못한다(reconcile 영역). 예산을 넉넉히 잠그는
+ *    방향의 오차라 안전한 쪽이고, 두 원장이 같은 주문을 다르게 세지 않게 기준을 맞춘 것이다.
+ */
+function deductAccrual(p, { dryRun = false } = {}) {
+  if (!p?.accrualExempt) return;
+  try {
+    const r = require('./incomeLedger').recordAccrual({
+      symbol: p.symbol, quantity: Number(p.quantity), price: Number(p.price),
+      proposalId: p.id, dryRun,
+    });
+    if (!r?.ok) logWarn('orders.accrual_deduct_rejected', { id: p.id, symbol: p.symbol, error: r?.error });
+    else audit('accrual_deducted', { id: p.id, symbol: p.symbol, usd: r.usd, remainingUsd: r.remainingUsd, dryRun });
+  } catch (e) {
+    logWarn('orders.accrual_deduct_failed', { id: p.id, symbol: p.symbol, message: e.message });
+  }
+}
+
+/**
  * 실행. 🔴 **지금은 no-op 이다.**
  *
  * `ORDERS_ENABLED` 와 `ORDERS_LIVE` 가 **둘 다** 켜져야 실제 호출로 간다.
@@ -693,6 +788,9 @@ async function execute(id) {
         : 'ORDERS_ENABLED 가 꺼져 있어 실제로 보내지 않았습니다.',
     };
     audit('dry_run', { id, symbol: p.symbol, side: p.side, quantity: p.quantity, price: p.price });
+    // 💰 dryRun 도 차감한다 — agentLedger.recordBuy 가 dryRun 을 투입으로 세는 것과 **같은 기준**.
+    //    두 원장이 같은 주문을 다르게 세면 어느 쪽이 맞는지 알 수 없다(예산을 잠그는 방향이라 안전).
+    deductAccrual(p, { dryRun: true });
     return { ok: true, proposal: p, dryRun: true };
   }
 
@@ -827,6 +925,9 @@ async function execute(id) {
     };
     persist();
     audit('conditional_sent', { id, conditionalOrderId, clientOrderId: key, conditional: p.conditional });
+    // ⚠️ 등록 = 감시 시작이지 체결이 아니다. 그래도 차감한다(위 '전송 = 투입' 기준) —
+    //    발동 안 된 예약은 예산을 돌려받지 못하는 것이 알려진 한계다.
+    deductAccrual(p);
     return { ok: true, proposal: p, conditionalOrderId };
   }
 
@@ -837,6 +938,7 @@ async function execute(id) {
   p.result = { mode: 'live', orderId, clientOrderId: key, note: '접수됐습니다. 체결 여부는 주문 조회로 확인합니다.' };
   persist();
   audit('sent', { id, orderId, clientOrderId: key });
+  deductAccrual(p);
 
   // 상태를 한 번 확인한다 — ⚠️ 실패해도 **주문은 이미 나갔다**(되돌리지 않는다)
   try {

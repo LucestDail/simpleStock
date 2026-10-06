@@ -216,6 +216,27 @@ app.get('/api/analyst/history/:id', (req, res) => {
 });
 
 /** 📐 리스크 지표 (2026-10-04) — 캔들 포함 전체 계산. 화면·RAG 의 정본. */
+/**
+ * 🎯 장기 목표 배분 (2026-10-06) — 화면(운용 규칙·리스크)이 읽는 창구.
+ *
+ * 🔴 모듈과 프롬프트 배선만 만들고 **이 라우트를 빠뜨려** 화면이 데이터를 못 받고 있었다
+ *    (서브에이전트가 보고해서 잡았다). *"등록됐다 ≠ 도달한다"* 를 같은 날 세 번째로 밟은
+ *    자리다 — 새 서버 모듈은 **모듈·프롬프트·라우트·화면** 네 자리를 다 보고서야 "됐다" 다.
+ * ⚠️ 보유 조회 실패는 502 로 알린다 — 조용히 빈 목표를 주면 화면이 "괴리 없음" 으로 그린다.
+ */
+app.get('/api/target-allocation', async (req, res) => {
+  try {
+    const port = await tossPortfolio.getHoldings({});
+    const cmp = require('./server/targetAllocation').compare(
+      port.items || [], port.summary || null, require('./server/regimeService').readCatalog());
+    if (!cmp) return res.status(503).json({ ok: false, error: '목표 배분 설정을 읽지 못했습니다(config/target-allocation.json).' });
+    return res.json({ ok: true, ...cmp });
+  } catch (error) {
+    logError('target.allocation_failed', error, {});
+    return res.status(502).json({ ok: false, error: error.message });
+  }
+});
+
 app.get('/api/risk/metrics', async (req, res) => {
   try {
     const port = await tossPortfolio.getHoldings({});
@@ -798,6 +819,21 @@ app.post('/api/agent/pause', (req, res) => {
 });
 app.post('/api/agent/resume', (req, res) => res.json(agentControl.resume({ by: 'web' })));
 
+/**
+ * 💰 수익 기반 적립 예산 (2026-10-06) — 배당·실현수익으로만 레버리지를 모아간다.
+ * 🔴 배당은 **자동 조회가 불가능**하다(토스 API 에 배당·입출금 내역 표면이 없다) ⇒ 사람이 입력한
+ *    **수령 확정분만** 예산이 된다. `estimate` 는 참고값이고 예산에 들어가지 않는다.
+ */
+app.get('/api/income/status', (req, res) => res.json({ ok: true, ...require('./server/incomeLedger').status() }));
+app.post('/api/income/dividend', (req, res) => {
+  const r = require('./server/incomeLedger').addDividend({ usd: req.body?.usd, note: req.body?.note, at: req.body?.at, by: 'web' });
+  return res.status(r.ok ? 200 : 400).json(r);
+});
+app.post('/api/income/estimate', (req, res) => {
+  const r = require('./server/incomeLedger').setEstimate(req.body?.usd ?? 0, { by: 'web' });
+  return res.status(r.ok ? 200 : 400).json(r);
+});
+
 /** 📈 성과 시계열 (D-10) — 스냅샷 이력 기반. 2건 미만이면 수익률 null(지어내지 않는다) */
 /** 🧪 백테스트 (D-9) — 🔴 LLM 을 실제로 태운다(수 분·토큰). 동시 1개. */
 app.get('/api/backtest/status', (req, res) => res.json(require('./server/backtestRunner').status()));
@@ -864,7 +900,10 @@ app.post('/api/orders/proposals', async (req, res) => {
    */
   const chk = await orderService.checkAccountLimits(req.body || {});
   if (!chk.ok) return res.status(400).json({ ok: false, error: chk.error, kind: chk.kind });
-  const r = orderService.propose(req.body || {}, { source: String(req.body?.source || 'manual'), notify });
+  // 🔴 `chk` 를 넘긴다 (2026-10-06) — 적립 면제(집중 상한 뚫기)를 **근거로 통과한 제안**임을
+  //    집행 시점까지 들고 가야 `incomeLedger` 가 차감한다. 안 넘기면 수동·채팅 면제 매수가
+  //    **차감되지 않아 같은 배당으로 무한히 상한을 뚫는다**(자율 경로는 propose 안에서 스스로 심는다).
+  const r = orderService.propose(req.body || {}, { source: String(req.body?.source || 'manual'), notify, accrual: chk });
   // 빠진 값을 400 으로 돌려준다 — **승인 화면에서 채우게 두지 않는다**
   return res.status(r.ok ? 201 : 400).json(r);
 });

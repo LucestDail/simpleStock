@@ -1,5 +1,15 @@
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
+/**
+ * 🔴 라이브 `data/orders-proposals.json` 오염·삭제 차단 (2026-10-06).
+ *    이 파일은 `ORDERS_FILE` 을 안 갈라서 **저장소의 승인 대기열을 지우고 있었다**(실측).
+ *    10-05 에 분석 이력에서 같은 것을 밟았다 — "테스트가 라이브 데이터" 가족.
+ */
+const fsIso = require('node:fs');
+const osIso = require('node:os');
+const pathIso = require('node:path');
+process.env.DATA_DIR = fsIso.mkdtempSync(pathIso.join(osIso.tmpdir(), 'ord-'));
+process.env.ORDERS_FILE = pathIso.join(process.env.DATA_DIR, 'orders-proposals.json');
 
 /**
  * 주문 제안 → 승인 → 실행 (2026-09-21)

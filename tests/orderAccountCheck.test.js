@@ -193,8 +193,15 @@ test('🔴 기본값은 0 — 버퍼가 매수를 막지 않는다 (사용자 �
  */
 test('종목 집중 상한 — 20% 를 넘기는 매수는 거절, 사다리는 면제', async () => {
   for (const k of Object.keys(require.cache)) {
-    if (/orderService|tossClient|tossPortfolio/.test(k)) delete require.cache[k];
+    if (/orderService|tossClient|tossPortfolio|incomeLedger/.test(k)) delete require.cache[k];
   }
+  /**
+   * ⚠️ 2026-10-06 — 집중 상한에 **수익 기반 적립 면제**(incomeLedger)가 붙었다. 그 판정은
+   *    `config/target-allocation.json` 을 읽으므로, 핀을 안 박으면 그 파일이 생기는 날
+   *    이 테스트가 통과/실패를 왕복한다(저장소 상태에 기댄 테스트). 없는 경로로 고정해
+   *    **fail-closed = 종전 동작**을 재는 것을 분명히 한다. 면제 축은 incomeLedger.test.js 가 잰다.
+   */
+  process.env.TARGET_ALLOCATION_FILE = path.join(__dirname, 'no-such-target-allocation.json');
   const tp3 = require.resolve('../server/tossClient');
   require.cache[tp3] = { id: tp3, filename: tp3, loaded: true, exports: { ...require(tp3), getBuyingPower: CASH('1000'), getPriceLimits: async () => ({}) } };
   const pp3 = require.resolve('../server/tossPortfolio');

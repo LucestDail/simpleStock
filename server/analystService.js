@@ -1497,6 +1497,53 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   }
 
   /**
+   * 🎯 **장기 목표 배분 RAG** (2026-10-06 사용자 전략 확정).
+   *
+   * 바로 위 "발동된 매뉴얼의 기준 배분" 은 **"지금 이 국면에서 어떻게"** 이고,
+   * 이 절은 **"장기적으로 어디로"** 다. 둘이 없으면 모델은 매 회차 *"지금 위험한가"* 만
+   * 보고, 레버리지를 **모아가는** 전략이 원리상 성립하지 않는다(사용자 지적:
+   * *"지금 현재 상태면 도저히 해당 구조를 너는 구성하지 못할 것 같다"* — 맞았다).
+   * ⚠️ 충돌 시 **국면이 단기 우선, 목표가 방향 제공**이다. 그 문장은 targetAllocation
+   *    쪽 promptSection 끝에 있다(길이에 밀려도 마지막은 남게).
+   */
+  try {
+    const ta = require('./targetAllocation');
+    const cmp = ta.compare(items, summary, require('./regimeService').readCatalog());
+    const sec = ta.promptSection(cmp);
+    if (sec) lines.push('', sec);
+  } catch (e) { logWarn('analyst.target_section_failed', { message: e.message }); }
+
+  /**
+   * 💰 **수익 기반 적립 예산 + 적립 규율(DCA)** (2026-10-06 사용자 전략 ③).
+   *
+   * 사용자 전략의 핵심은 *"방어주/수익 기반으로 QLD 를 모아나간다"* 이고, 그 돈은
+   * **배당·실현수익**이다(원금이 아니다). 이 절이 없으면 모델은 "모을 재원이 얼마인가" 를
+   * 모르고, 집중 상한 면제가 **왜** 열렸는지도 모른다.
+   * ⚠️ 예산 0 이면 절을 **생략**한다 — 0 을 보여 주면 모델이 "적립 불가" 를 매 회차
+   *    서술하며 토큰을 쓴다(그 사실은 이미 목표 배분 절의 괴리가 말해 준다).
+   * 🔴 `estimatedUsd`(예상 배당)는 **싣지 않는다** — 받지도 않은 돈을 모델이 재원으로
+   *    읽으면 없는 돈으로 매수를 제안한다. 화면에만 참고로 보여 준다.
+   */
+  try {
+    const il = require('./incomeLedger').status();
+    const budget = Number(il?.accrualBudgetUsd) || 0;
+    if (budget > 0) {
+      const syms = (il.accrualSymbols || []).join('/');
+      lines.push('', '## 적립 재원 (수익 기반 — 원금이 아니다)');
+      lines.push(`- 적립 가능 $${budget} (배당 수령 $${il.dividendUsd} + AI 실현손익 $${il.realizedUsd} − 이미 적립 $${il.accruedUsd})`);
+      lines.push(`- 적립 대상: ${syms} — 이 재원 안에서는 **종목 집중 상한(20%)이 면제**된다.`);
+      lines.push('🔴 이 돈은 **배당·실현수익으로 만든 것**이라 원금을 건드리지 않는다 — 그래서');
+      lines.push('   "레버리지 비중이 높으니 더 사지 않는다" 가 이 재원에는 적용되지 않는다.');
+      lines.push('   목표 배분에서 부족한 버킷을 이 금액 안에서 **분할로** 채우는 제안을 내라.');
+      lines.push('⚖️ 적립 규율: ①한 번에 전액을 쓰지 않는다(권장 1회 1/3 이하) ②국면이 나쁘면');
+      lines.push('   **금액을 줄이되 방향을 바꾸지 않는다**(적립은 멈추는 것이 아니라 느려지는 것)');
+      lines.push('   ③재원을 넘는 제안은 집행 단계에서 거부된다 — 수량·가격을 재원 안에서 계산하라.');
+      lines.push('⚠️ 이 재원을 **기존 보유 매도 대금과 혼동하지 마라** — 매도 대금은 원금이고');
+      lines.push('   적립 재원이 아니다. 여기 적힌 금액만이 집중 상한 면제를 받는다.');
+    }
+  } catch (e) { logWarn('analyst.income_section_failed', { message: e.message }); }
+
+  /**
    * 📐 리스크 지표 RAG (2026-10-04) — 화면(포트폴리오·리스크)과 **같은 계산**을 모델도 본다.
    *    지수 델타·변동성·VaR·보완필요 목록 — "무엇으로 밸런스를 맞출지" 의 수치 근거.
    * ⚠️ 캔들이 이 자리엔 없어 변동성 축은 요약 수준 — 지표 서버 계산은 /api/risk/metrics 가 정본.

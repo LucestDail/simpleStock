@@ -979,7 +979,8 @@ async function runTool(name, args = {}, ctx = {}) {
           price: args.price,
           reason: args.reason,
         },
-        { source: 'chat' }
+        // 적립 면제 근거를 집행까지 전달 — 안 넘기면 차감이 안 된다(server.js 주석 참조)
+        { source: 'chat', accrual: chk }
       );
       if (!r.ok) return { ok: false, error: r.error, missing: r.missing };
       return {
@@ -1021,7 +1022,8 @@ async function runTool(name, args = {}, ctx = {}) {
             expireDate: args.expireDate,
           },
         },
-        { source: 'chat' }
+        // 적립 면제 근거를 집행까지 전달 — 안 넘기면 차감이 안 된다(server.js 주석 참조)
+        { source: 'chat', accrual: chk }
       );
       if (!r.ok) return { ok: false, error: r.error, missing: r.missing };
       return {
