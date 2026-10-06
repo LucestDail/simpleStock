@@ -3228,6 +3228,11 @@ function ledgerSection(led, autonomyLevel = 0) {
   out.push(`## AI 운용 예산 — 너의 전용 자금 (자율 ${autonomyLevel}단)`);
   const rz = Number(led.realizedUsd) || 0;
   out.push(`- 예산 $${led.budgetUsd} · 가용 $${led.availableUsd} · 투입 중 $${led.openCostUsd} · 실현손익 ${rz >= 0 ? '+$' + rz : '-$' + Math.abs(rz)}`);
+  // 🔴 1회 한도를 안 알려주면 모델이 계속 초과 제안을 내고 집행 단계에서 거부당한다
+  //    (프롬프트와 코드가 같은 수를 말해야 한다 — 2026-10-06 사용자 질문으로 신설된 상한)
+  if (led.maxOrderUsd != null && led.maxOrderUsd < led.availableUsd) {
+    out.push(`- 🔴 **1회 주문 한도 $${led.maxOrderUsd}**(예산의 ${led.maxOrderPct}%) — 한 회차에 이보다 크게 넣는 제안은 **집행 단계에서 거부된다.** 분할로 들어가라.`);
+  }
   if (led.effectiveBudgetUsd != null && led.effectiveBudgetUsd !== led.budgetUsd) {
     out.push(`  ⚠️ 실현 손실이 반영돼 유효 예산은 $${led.effectiveBudgetUsd} 다 — 잃은 돈은 돌아오지 않는다.`);
   }

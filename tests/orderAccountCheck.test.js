@@ -254,15 +254,17 @@ test('🔴 가격-현재가 괴리 게이트(±2.5%) — 체결 불가능한 지
  * 두 근거점을 자가 지킨다 — **QLD 31.8% 는 통과**(추가 매수 가능해야 전략이 성립)하고
  * **40% 는 여전히 차단**(35 가 해제가 아니라는 것). 그리고 riskMetrics 가 같은 상수를 본다.
  */
-test('종목 한도 35 — 31.8% 는 통과, 40% 는 차단, riskMetrics 와 한 벌', () => {
+test('종목 한도 40 — 31.8% 는 통과, 45% 는 차단, riskMetrics 와 한 벌', () => {
   delete process.env.SINGLE_POSITION_MAX_PCT;
   for (const k of Object.keys(require.cache)) if (/orderService|riskMetrics/.test(k)) delete require.cache[k];
   const os = require('../server/orderService');
-  assert.equal(os.SINGLE_POSITION_MAX_PCT, 35, '기본값이 35 가 아니다 — QLD 추가 매수가 다시 막힌다');
+  assert.equal(os.SINGLE_POSITION_MAX_PCT, 40, '기본값이 40 이 아니다 — 사용자 20/40/40 비율과 어긋난다');
   const rm = require('../server/riskMetrics');
   const m = rm.compute({ items: [], candlesBySymbol: new Map(), cashPct: 50, leveragePct: 30 });
-  assert.equal(m.limits.single, 35, 'riskMetrics 가 다른 한도를 본다 — 화면 경고와 게이트가 갈린다');
+  assert.equal(m.limits.single, 40, 'riskMetrics 가 다른 한도를 본다 — 화면 경고와 게이트가 갈린다');
   // 최소 3종목 강제: 35×3 = 105 > 100 이므로 2종목만으로는 100% 를 못 채운다
   assert.ok(os.SINGLE_POSITION_MAX_PCT * 2 < 100, '두 종목으로 전액이 가능하면 분산 강제가 사라진다');
   assert.ok(os.SINGLE_POSITION_MAX_PCT * 3 >= 100, '세 종목으로도 전액이 불가하면 4종목 운용과 모순된다');
+  // 사용자가 제시한 20/40/40 이 정확히 경계 — 40 이 두 칸이고 남는 20 이 세 번째 칸이다
+  assert.equal(os.SINGLE_POSITION_MAX_PCT * 2 + 20, 100, '20/40/40 비율이 상한과 안 맞는다');
 });

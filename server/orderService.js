@@ -77,14 +77,15 @@ const ADVERSE_PRICE_PCT = Number(process.env.ADVERSE_PRICE_PCT ?? 0.3);
  * 4종목 이하로 운용하면 균등해도 종목당 25% 이므로 20 은 **운용 방식과 모순**이었다
  * (실제로 QLD 31.8% 가 상한을 넘어 **추가 매수가 하드 차단**됐고, 사용자 전략인
  *  "QLD 를 모아나간다" 가 원리상 불가능했다).
- * ★ 35 는 분산을 포기하는 값이 아니다 — **최소 3종목이 구조적으로 강제된다**
- *   (35+35+30 = 100). 20 이 "5종목 이상" 을 강제했듯 35 는 "3종목 이상" 을 강제한다.
+ * ★ 40 도 분산을 포기하는 값이 아니다 — **최소 3종목이 구조적으로 강제된다**
+ *   (40+40 = 80 < 100 이라 두 종목으로 전액을 채울 수 없다). 사용자가 제시한
+ *   **20/40/40** 비율이 정확히 이 상한의 경계다(2026-10-06 두 번째 조정: 35 → 40).
  * ⚠️ 위 주석의 vshape 몰빵(-23.5%) 교훈은 **그대로 유효하다** — 한 종목에 전 재산을
  *   넣는 것은 여전히 막힌다. 바뀐 것은 "몇 종목으로 나누는가" 의 가정뿐이다.
  * ⚠️ 목표 배분의 `core_aggressive`(QLD) 30% 와의 관계: 상한 35 − 목표 30 = **여유 5%p**.
  *   목표를 채운 뒤에도 가격 상승으로 비중이 5%p 늘 여지가 있어 즉시 재-차단되지 않는다.
  */
-const SINGLE_POSITION_MAX_PCT = Number(process.env.SINGLE_POSITION_MAX_PCT ?? 35);
+const SINGLE_POSITION_MAX_PCT = Number(process.env.SINGLE_POSITION_MAX_PCT ?? 40);
 /** 🔴 즉시 제안 지정가의 현재가 괴리 상한 % — 넘으면 조건주문으로 안내(2026-09-24) */
 const PRICE_DRIFT_PCT = Math.max(0.5, Number(process.env.PRICE_DRIFT_PCT ?? 2.5));
 

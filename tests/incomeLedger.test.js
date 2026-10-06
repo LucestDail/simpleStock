@@ -273,6 +273,14 @@ async function freshOrdersWithQld({ dividendUsd = 0, alloc = ALLOC } = {}) {
    *    1차 작업은 `checkAccountLimits` 만 불러서 안 드러났고, 집행 배선을 재는 순간 드러났다.
    */
   process.env.ORDERS_FILE = path.join(dir, 'orders-proposals.json');
+  /**
+   * 🔴 **집중 상한을 20 으로 핀한다** (2026-10-06) — 이 픽스처의 금액은 "한도를 넘는 매수"
+   *    를 만들기 위한 것이고, 사용자가 한도를 20→35→40 으로 올리자 같은 금액이 **한도에
+   *    안 걸리게 되어** 면제 판정을 아예 거치지 않았다(그래서 "면제를 받았다" 로 보였다).
+   *    로직 회귀가 아니라 **한도 값에 기댄 픽스처**였던 것 — 면제 메커니즘만 재게 고정한다.
+   *    한도 값 자체는 orderAccountCheck.test.js 의 전용 테스트가 전담한다.
+   */
+  process.env.SINGLE_POSITION_MAX_PCT = '20';
   const allocPath = path.join(dir, 'target-allocation.json');
   if (alloc) fs.writeFileSync(allocPath, JSON.stringify(alloc));
   process.env.TARGET_ALLOCATION_FILE = allocPath;

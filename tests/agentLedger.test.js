@@ -10,9 +10,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-function freshLedger() {
+/**
+ * ⚠️ `maxOrderPct` 기본 **100(1회 상한 끔)** — 2026-10-06.
+ *    1회 주문 상한이 신설되자 **총액 축을 재던 기존 테스트 2개가 깨졌다**(budget 1000 에
+ *    canBuy(500) 이 34% 상한에 걸림). 로직 회귀가 아니라 **관심사가 둘로 갈린 것**이다:
+ *    총액(예산 − 보유원가)과 1회 상한은 다른 축이고, 각자 자기 테스트가 있어야 한다.
+ *    ⇒ 총액 축 테스트는 1회 상한을 끄고 재고, 1회 상한은 전용 테스트가 전담한다
+ *      (집중 상한 20→35→40 에서 쓴 것과 같은 수법 — 한도를 또 조정해도 안 깨진다).
+ */
+function freshLedger({ maxOrderPct = 100 } = {}) {
   for (const k of Object.keys(require.cache)) if (/agentLedger/.test(k)) delete require.cache[k];
   process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'lg-'));
+  process.env.AGENT_MAX_ORDER_PCT = String(maxOrderPct);
   return require('../server/agentLedger');
 }
 
@@ -178,4 +187,51 @@ test('프롬프트 — analyze 경로가 ledgerSection 을 실제로 부른다(�
   const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
   const calls = (src.match(/ledgerSection\(/g) || []).length;
   assert.ok(calls >= 2, `선언 포함 ${calls}회 — 호출부가 사라졌다(배선 제거)`);
+});
+
+/**
+ * 🔴 **1회 주문 상한** (2026-10-06 — 사용자 질문이 구멍을 찾았다: "2000불만 가지고
+ * 지지고 볶는다는건가? 아니면 한번의 주문에 2000$씩 태운다는건가?" → 종전 답은 **둘 다**).
+ * 총액은 묶였는데 1회 상한이 코드에 0건이라 한 회차에 전액을 태울 수 있었다.
+ * DCA "1회 1/3 이하" 는 프롬프트 권고였을 뿐 — **프롬프트로 못 막는 것은 코드로 막는다.**
+ */
+test('1회 주문 상한 — 예산의 34% 초과는 거부, 그 안은 통과', () => {
+  const l = freshLedger({ maxOrderPct: 34 });   // 기본값과 같은 값 — 전용 축
+  l.setBudget(2000, { by: 'test' });
+  const st = l.status();
+  assert.equal(st.maxOrderPct, 34);
+  assert.equal(st.maxOrderUsd, 680, '1회 한도가 예산의 34% 가 아니다');
+  assert.equal(l.canBuy(680).ok, true);
+  assert.equal(l.canBuy(2000).ok, false, '한 회차에 전액이 통과했다 — 분할 규율이 코드로 안 막힌다');
+  assert.match(l.canBuy(2000).why, /1회 주문 상한/);
+  // 총액 축은 그대로 — 두 축이 독립임을 확인(한쪽을 고쳐 다른 쪽이 무너지지 않았다)
+  l.recordBuy({ symbol: 'QLD', quantity: 6, price: 100 });   // 600 투입
+  assert.equal(l.status().availableUsd, 1400);
+  assert.equal(l.canBuy(680).ok, true, '잔액이 충분한데 거부됐다');
+});
+
+test('1회 상한 — 잔액이 상한보다 작으면 잔액까지 허용(잔돈이 묶이지 않는다)', () => {
+  const l = freshLedger({ maxOrderPct: 34 });
+  l.setBudget(100, { by: 'test' });          // 1회 상한 $34
+  l.recordBuy({ symbol: 'QLD', quantity: 1, price: 60 });   // 잔액 40
+  const st = l.status();
+  assert.equal(st.availableUsd, 40);
+  assert.equal(st.maxOrderUsd, 34, '상한이 잔액보다 작을 때의 표시가 틀렸다');
+  assert.equal(l.canBuy(40).ok, false, '상한을 넘겼는데 통과');
+  assert.equal(l.canBuy(34).ok, true);
+  // 잔액이 상한 아래로 내려가면 그 잔액까지 쓸 수 있다
+  l.recordBuy({ symbol: 'QLD', quantity: 1, price: 30 });   // 잔액 10
+  assert.equal(l.canBuy(10).ok, true, '마지막 잔돈을 못 쓴다 — 예산이 조용히 묶인다');
+});
+
+test('1회 상한 — env 100 이면 끌 수 있다(끄는 것도 사람의 선택)', () => {
+  const l = freshLedger({ maxOrderPct: 100 });
+  l.setBudget(2000, { by: 'test' });
+  assert.equal(l.canBuy(2000).ok, true, 'env 로 끌 수 없다');
+});
+
+/** 🔴 **코드 기본값이 34 인가** — freshLedger 가 env 를 핀하므로 소스로 따로 확인한다 */
+test('1회 상한 — 코드 기본값 34 (env 없이도 걸린다)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'agentLedger.js'), 'utf8');
+  assert.match(src, /AGENT_MAX_ORDER_PCT \?\? 34/, '기본값이 34 가 아니다 — env 를 안 주면 상한이 사라진다');
 });

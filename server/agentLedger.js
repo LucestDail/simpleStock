@@ -22,6 +22,9 @@ const { logInfo, logWarn } = require('./logger');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const FILE = path.join(DATA_DIR, 'agent-ledger.json');
 
+/** 1회 주문 상한(예산 대비 %) — DCA 규율의 "1/3 이하" 와 같은 값. 100 이면 끈다 */
+const MAX_ORDER_PCT = Math.max(1, Math.min(100, Number(process.env.AGENT_MAX_ORDER_PCT ?? 34)));
+
 let state = load();
 
 function load() {
@@ -64,6 +67,8 @@ function status() {
   return {
     budgetUsd: state.budgetUsd,
     effectiveBudgetUsd: eff == null ? null : Math.round(eff * 100) / 100,
+    maxOrderPct: MAX_ORDER_PCT,
+    maxOrderUsd: eff == null ? null : Math.round(Math.min(Math.max(0, eff - openCostUsd()), eff * (MAX_ORDER_PCT / 100)) * 100) / 100,
     openCostUsd: Math.round(openCostUsd() * 100) / 100,
     availableUsd: eff == null ? 0 : Math.max(0, Math.round((eff - openCostUsd()) * 100) / 100),
     realizedUsd: Math.round(state.realizedUsd * 100) / 100,
@@ -96,6 +101,26 @@ function canBuy(needUsd) {
   if (needUsd > avail) {
     const lost = Math.min(0, Number(state.realizedUsd) || 0);
     return { ok: false, why: `AI 예산 잔액 부족 (필요 ${needUsd.toFixed(2)} > 잔액 ${avail.toFixed(2)} USD${lost < 0 ? ` · 실현 손실 ${lost.toFixed(2)} 반영` : ''})` };
+  }
+  /**
+   * 🔴 **1회 주문 상한** (2026-10-06 — 사용자 질문이 구멍을 찾았다:
+   *    *"AI 예산 2000불이면 2000불만 가지고 지지고 볶는다는건가? 아니면 한번의 주문에
+   *    2000$씩 태운다는건가?"*).
+   *
+   *    종전 답은 **"둘 다"** 였다 — 총액은 예산 안으로 묶였지만 **1회 주문 상한이
+   *    코드에 0건**이라 한 회차에 전액을 태울 수 있었다. DCA 규율("1회 1/3 이하")은
+   *    **프롬프트 권고**였을 뿐이고, 프롬프트는 지켜지지 않을 수 있다
+   *    (이 워크스페이스 규율: 프롬프트로 못 막는 것은 코드로 막는다).
+   *
+   * ⚠️ **잔액이 상한보다 작으면 잔액까지 허용**한다 — 안 그러면 마지막 잔돈을
+   *    영구히 못 쓰고(예산 $100 · 상한 $34 인데 잔액 $40 이 남는 상황) 예산이 조용히 묶인다.
+   * ⚠️ 기본 34% = DCA 규율의 "1/3 이하" 와 같은 값이다(프롬프트와 코드가 갈라지지 않게).
+   *    `AGENT_MAX_ORDER_PCT=100` 으로 끌 수 있다 — 끄는 것도 사람의 선택이다.
+   */
+  const cap = eff * (MAX_ORDER_PCT / 100);
+  const limit = Math.min(avail, cap);
+  if (needUsd > limit) {
+    return { ok: false, why: `1회 주문 상한 초과 (필요 ${needUsd.toFixed(2)} > 1회 한도 ${limit.toFixed(2)} USD = 예산의 ${MAX_ORDER_PCT}%) — 분할해서 들어가라.` };
   }
   return { ok: true };
 }
