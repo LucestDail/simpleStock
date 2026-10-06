@@ -196,6 +196,14 @@ const REPORT_SCHEMA = {
 };
 
 /**
+ * AI 전용 예산에 대한 판단 — `budgetDecision.action` (2026-10-06).
+ * ⚠️ 스키마 enum 과 `asBudgetDecision` 의 검사가 **같은 한 벌**을 본다 — 두 벌이면 갈라진다.
+ *   `WAIT` = 가용 예산이 있는데 근거가 안 서서 **안 들어갔다**(= 우리가 매 회차 보고 싶은 것).
+ *   `HOLD` = AI 보유가 있고 그대로 둔다. 둘은 다른 사건이다.
+ */
+const BUDGET_ACTIONS = new Set(['ENTER', 'HOLD', 'EXIT', 'WAIT']);
+
+/**
  * 🔴 **보유 종목에 자리를 따로 준다** (2026-10-02 — O 누락 네 회차 연속의 원인).
  *
  * ## 무엇이 일어났나
@@ -218,29 +226,70 @@ const REPORT_SCHEMA = {
  *    보유 종목은 **실재하고 시세·평단·이동평균을 전부 줬다.** 지어낼 것이 없고,
  *    최악이라도 `HOLD · LOW` 는 **코드가 대신 채우는 지금보다 낫다.**
  * ⚠️ 보유가 없으면 원래 스키마를 그대로 쓴다 — 빈 enum 은 스키마를 깨뜨린다.
+ *
+ * ---
+ * 📒 **`budgetDecision` — AI 전용 예산 판단에도 자리를 준다** (2026-10-06, 같은 수).
+ *
+ * 자율 1단 + AI 예산 $500 이 가동 중인데 **AI 매매가 0건**이었다. `ledgerSection` 은
+ * *"진입하지 않으면 왜 안 하는지 반드시 적어라"* 를 요구하는데 **스키마에 담을 자리가 없었다** —
+ * 실측(10-06 11:0x): 보고서를 전부 walk 해도 "예산/진입하지" 문자열 **0건**. 모델이 적어도
+ * `shapeReport` 가 **새 객체를 재조립**하며 버린다. ⇒ *"안 산 날도 왜 안 샀는지가 매 회차 남는다"*
+ * 를 구조로 만든다(프롬프트로 못 고치는 것은 스키마로 — 위 `holdings` 와 같은 처방).
+ * ⚠️ **예산 미설정이면 넣지 않는다** — 없는 예산에 대해 판단을 요구하면 모델이 지어낸다
+ *    (빈 enum 을 피하려 `holdings` 를 생략하는 것과 같은 이유).
+ * ⚠️ `holdings` 와 **합성된다** — 보유·예산 넷 조합 전부 성립해야 한다(자가 단언한다).
+ * ⚠️ 수치는 **인자에서 유도**한다. 하드코딩하면 예산을 바꾼 날 프롬프트가 거짓말한다.
  */
-function reportSchemaFor(heldSymbols = []) {
+function reportSchemaFor(heldSymbols = [], { budget = null } = {}) {
   // ⚠️ trim 을 빠뜨려 ' qld ' 가 그대로 enum 에 들어갔다 — 자가 잡았다(2026-10-02)
   const syms = [...new Set((heldSymbols || []).map((x) => String(x || '').trim().toUpperCase()).filter(Boolean))];
-  if (!syms.length) return REPORT_SCHEMA;
+  const hasBudget = Boolean(budget) && budget.budgetUsd != null;
+  // ⚠️ 둘 다 없으면 **원본 그대로** 돌려준다(기존 자가 identity 로 단언한다)
+  if (!syms.length && !hasBudget) return REPORT_SCHEMA;
+
   const base = REPORT_SCHEMA.properties.positions.items;
-  return {
-    ...REPORT_SCHEMA,
-    properties: {
-      ...REPORT_SCHEMA.properties,
-      holdings: {
-        type: 'array',
-        minItems: syms.length,
-        maxItems: syms.length,
-        description: `사용자가 **실제로 들고 있는** ${syms.length}개 종목 전부 — ${syms.join(', ')}. 하나도 빠뜨리지 말 것. 비중이 작아도 뺄 수 없다.`,
-        items: {
-          ...base,
-          properties: { ...base.properties, symbol: { type: 'string', enum: syms } },
-        },
+  const properties = { ...REPORT_SCHEMA.properties };
+  const required = [...REPORT_SCHEMA.required];
+
+  if (syms.length) {
+    properties.holdings = {
+      type: 'array',
+      minItems: syms.length,
+      maxItems: syms.length,
+      description: `사용자가 **실제로 들고 있는** ${syms.length}개 종목 전부 — ${syms.join(', ')}. 하나도 빠뜨리지 말 것. 비중이 작아도 뺄 수 없다.`,
+      items: {
+        ...base,
+        properties: { ...base.properties, symbol: { type: 'string', enum: syms } },
       },
-    },
-    required: [...REPORT_SCHEMA.required, 'holdings'],
-  };
+    };
+    required.push('holdings');
+  }
+
+  if (hasBudget) {
+    const aiSyms = Object.keys(budget.positions || {});
+    properties.budgetDecision = {
+      type: 'object',
+      description: [
+        `전용 예산 $${budget.budgetUsd} · 가용 $${budget.availableUsd ?? 0}`,
+        aiSyms.length ? `AI 보유 ${aiSyms.join(', ')}` : 'AI 보유 없음',
+        '— 이번 회차에 이 예산으로 진입할지.',
+        "진입하지 않으면 action='WAIT' 과 그 이유를 반드시 적는다.",
+      ].join(' '),
+      properties: {
+        action: {
+          type: 'string',
+          enum: [...BUDGET_ACTIONS],
+          description: 'ENTER=진입 제안 · HOLD=AI 보유 유지 · EXIT=AI 보유 정리 제안 · WAIT=가용 예산이 있는데 근거가 안 서서 미진입',
+        },
+        reason: { type: 'string', description: '2문장 이내 · 제공된 숫자를 인용' },
+        symbol: { type: 'string', description: 'ENTER·EXIT 일 때 대상 종목' },
+      },
+      required: ['action', 'reason'],
+    };
+    required.push('budgetDecision');
+  }
+
+  return { ...REPORT_SCHEMA, properties, required };
 }
 
 const SYSTEM_PROMPT = [
@@ -577,6 +626,46 @@ function dedupeProposals(proposals) {
   return kept;
 }
 
+/**
+ * 📒 **AI 예산 판단을 보존한다** (2026-10-06) — `shapeReport` 는 **새 객체를 재조립**하므로
+ *    여기 안 적으면 모델이 `budgetDecision` 을 채워도 **무조건 버려진다**(결함의 절반이 이것이었다).
+ *
+ * 방어는 *"파싱 성공이 안전을 뜻하지 않는다"*(10-01) 가족을 따른다 — 최상위가 객체가 아닐 수
+ * 있고, `action` 이 enum 밖일 수 있다.
+ * ⚠️ **버려지는 경로는 조용하면 안 된다**: 산문으로 답한 것·내용 없는 껍데기도 각각 짖는다.
+ * ⚠️ enum 밖이면 **버리지 않고 `WAIT` 로 보정한다** — 판단 자체를 버리면 *"왜 안 샀나"* 를
+ *    사용자가 **영영 못 본다**(09-29 `stance_unrecognized` 와 같은 처방: 고쳐 살리고 짖는다).
+ */
+function asBudgetDecision(v) {
+  if (typeof v === 'string') {
+    // 🔴 모델이 산문으로 답한 것이므로 **관측돼야 한다** — 값 앞부분까지 남긴다
+    if (v.trim()) logWarn('analyst.budget_decision_prose', { received: v.trim().slice(0, 120) });
+    return null;
+  }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+
+  const reason = typeof v.reason === 'string' ? v.reason.trim() : '';
+  if (!reason) {
+    // ⚠️ 내용 없는 껍데기는 싣지 않는다 — 다만 **왔다는 사실**은 남긴다
+    logWarn('analyst.budget_decision_empty', { keys: Object.keys(v).slice(0, 8), received: JSON.stringify(v).slice(0, 160) });
+    return null;
+  }
+
+  const raw = typeof v.action === 'string' ? v.action.trim().toUpperCase() : '';
+  let action = raw;
+  if (!BUDGET_ACTIONS.has(action)) {
+    logWarn('analyst.budget_decision_action_unrecognized', {
+      received: raw || null,
+      expected: [...BUDGET_ACTIONS].join('|'),
+      corrected: 'WAIT',
+    });
+    action = 'WAIT';
+  }
+
+  const symbol = typeof v.symbol === 'string' && v.symbol.trim() ? v.symbol.trim().toUpperCase() : null;
+  return { action, reason, symbol };
+}
+
 /** 어떤 모양으로 오든 리포트로 만든다 */
 function shapeReport(out) {
   const o = out && typeof out === 'object' ? out : {};
@@ -624,6 +713,8 @@ function shapeReport(out) {
     dataGaps: gaps.slice(0, 12),
     positions: dedupedPositions,
     proposals: dedupedProposals,
+    // 📒 예산 미설정 회차(스키마에 자리가 없다)·모양이 깨진 응답에서는 null 이다
+    budgetDecision: asBudgetDecision(o.budgetDecision),
     // 🔴 아무것도 못 읽었으면 **그 사실을 남긴다** — 조용히 빈 리포트를 내지 않는다
     _unreadable: !view && !dedupedPositions.length && !gaps.length ? JSON.stringify(o).slice(0, 300) : null,
   };
@@ -2100,7 +2191,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       systemPrompt: SYSTEM_PROMPT,
       userPrompt,
       // 🔴 **보유 전용 자리**를 가진 스키마 — 후보와 경쟁시키지 않는다(위 reportSchemaFor 참조)
-      schema: reportSchemaFor(items.map((h) => h.symbol)),
+      schema: reportSchemaFor(items.map((h) => h.symbol), { budget: require('./agentLedger').status() }),
       logLabel: 'trade_analyst',
     },
     { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
@@ -2158,7 +2249,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
           '판단이 "그대로 보유" 여도 `stance: "HOLD"` 로 **명시**하세요. 빠뜨리지 마세요.',
         ].join('\n'),
         // 🔴 **보유 전용 자리**를 가진 스키마 — 후보와 경쟁시키지 않는다(위 reportSchemaFor 참조)
-        schema: reportSchemaFor(items.map((h) => h.symbol)),
+        schema: reportSchemaFor(items.map((h) => h.symbol), { budget: require('./agentLedger').status() }),
         logLabel: 'trade_analyst_retry',
       },
       { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
@@ -2291,7 +2382,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
             ].join('\n')] : []),
           ].join('\n'),
           // 🔴 **보유 전용 자리**를 가진 스키마 — 후보와 경쟁시키지 않는다(위 reportSchemaFor 참조)
-          schema: reportSchemaFor(items.map((h) => h.symbol)),
+          schema: reportSchemaFor(items.map((h) => h.symbol), { budget: require('./agentLedger').status() }),
           logLabel: 'trade_analyst_price_fix',
         },
         { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
@@ -3033,6 +3124,8 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
      *    응답에 **조용히 빠졌다**(라이브에서 발견). 새 필드는 여기에도 넣어야 나간다.
      */
     pipeline: report.pipeline || null,
+    // 📒 AI 예산 판단 (2026-10-06) — ⚠️ 바로 위 경고대로 **여기 안 실으면 응답에서 조용히 빠진다**
+    budgetDecision: report.budgetDecision || null,
     marketView: report.marketView || '',
     momentumRead: report.momentumRead || '',
     dataGaps: gaps,
@@ -3099,6 +3192,13 @@ function ledgerSection(led, autonomyLevel = 0) {
   out.push(`   안에서 수량·지정가를 계산해 BUY 를 제안하라${autonomyLevel >= 1 ? ' — 자율 1단+ 라 그 제안은 자동 집행된다' : ''}.`);
   out.push('   확신이 약하면 관망이 아니라 **작게**(가용의 1/3 이하) 들어가는 것까지 검토하고,');
   out.push('   그래도 안 서면 이 예산에 대해 "왜 진입하지 않는지" 를 반드시 적어라.');
+  /**
+   * 🔴 **어디에 적는지**를 말해 준다 (2026-10-06) — 종전엔 *"반드시 적어라"* 만 있고 자리가 없어
+   *    `shapeReport` 가 버렸다. 스키마 `budgetDecision` 과 **이 문구가 같은 이름을 가리켜야** 한다.
+   */
+  out.push('📒 이 판단은 **`budgetDecision`** 에 적어라 — `action`(ENTER 진입 · HOLD 보유 유지 ·');
+  out.push('   EXIT 정리 · WAIT 미진입) + `reason`(2문장 이내, 숫자 인용) + ENTER·EXIT 면 `symbol`.');
+  out.push('   진입하지 않는 회차에는 반드시 `action="WAIT"` 과 그 이유를 남겨라 — 빈칸은 답이 아니다.');
   out.push('⚠️ 집중 상한(종목당 20%)·불리가격 게이트는 그대로다 — 비중이 이미 큰 종목(예: QLD)의');
   out.push('   추가 매수는 자동으로 못 나가고 승인 대기로 남는다. 사용자 기존 보유의 매도 제안도');
   out.push('   지금처럼 승인 대기로 간다 — **판단 자체는 계속 하라.**');

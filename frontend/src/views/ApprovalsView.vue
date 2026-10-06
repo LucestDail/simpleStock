@@ -95,7 +95,12 @@
               <span v-else class="hrow__trig">{{ h.trigger || '—' }}</span>
             </div>
             <p class="hrow__mv">{{ h.marketView || '(시황 요약 없음)' }}</p>
-            <div v-if="h.proposals?.length" class="hrow__chips">
+            <!-- 어느 회차가 예산 판단을 냈는지 **목록에서** 보여야 한다 — 하나씩 열어 보면 아무도 안 본다 -->
+            <div v-if="h.proposals?.length || budgetOf(h)" class="hrow__chips">
+              <span v-if="budgetOf(h)" class="pchip pchip--budget"
+                :class="`pchip--b-${budgetOf(h).action.toLowerCase()}`">
+                예산 {{ BUDGET_SHORT[budgetOf(h).action] }}
+              </span>
               <span v-for="pr in h.proposals" :key="pr.id || pr.symbol" class="pchip"
                 :class="pr.side === 'BUY' ? 'pchip--buy' : 'pchip--sell'">
                 {{ pr.side === 'BUY' ? '매수' : '매도' }} {{ pr.symbol }}
@@ -127,6 +132,23 @@
           <template v-if="sel.report?.momentumRead">
             <h3 class="detail__h">모멘텀 읽기</h3>
             <p class="detail__txt">{{ sel.report.momentumRead }}</p>
+          </template>
+
+          <!--
+            🔴 **AI 예산 판단** (2026-10-06) — 자율 1단 + AI 전용 예산이 가동 중인데 매매가 0건일 때,
+               *"안 산 날도 왜 안 샀는지"* 를 회차마다 읽을 수 있어야 한다. 침묵은 "고장" 과 구분되지 않는다.
+            ⚠️ 없으면 **아무것도 그리지 않는다** — 빈 껍데기·"없음" 플레이스홀더는 *판단이 실렸는지* 를 흐린다.
+               (그 "없음" 을 알려야 하는 자리는 대시보드 쪽 경고 한 줄이다. 여기는 보고서 열람이다.)
+          -->
+          <template v-if="selBudget">
+            <h3 class="detail__h">AI 예산 판단</h3>
+            <div class="bdec">
+              <span class="bdec__badge" :class="`bdec__badge--${selBudget.action.toLowerCase()}`">
+                {{ BUDGET_LABEL[selBudget.action] }}
+              </span>
+              <span v-if="selBudget.symbol" class="bdec__sym">{{ selBudget.symbol }}</span>
+              <p v-if="selBudget.reason" class="bdec__why">{{ selBudget.reason }}</p>
+            </div>
           </template>
 
           <template v-if="sel.report?.positions?.length">
@@ -355,6 +377,45 @@ function money(p) {
   return `${sign}${Number(p.price).toLocaleString('ko-KR')}`;
 }
 
+/**
+ * 🔴 **AI 예산 판단** — 서버 계약은 `report.budgetDecision` = `null` 또는
+ *    `{ action: 'ENTER'|'HOLD'|'EXIT'|'WAIT', reason: string, symbol: string|null }`.
+ *
+ * ⚠️ **모양을 검사하고 나서 그린다.** 09-21 에 모델이 배열 스키마를 문자열로 줘서
+ *    `.join()` 이 터지고 **Vue 가 서브트리를 통째로 버려** 패널 제목까지 사라진 전례가 있다
+ *    (API 는 내내 200 이었다). 여기도 `action.toLowerCase()` 가 같은 모양이라,
+ *    **받는 자리에서** enum 을 확인하고 아니면 `null` 로 떨군다.
+ * ⚠️ 없는 필드를 추정하지 않는다 — 계약의 세 키만 읽는다(10-04 에 사이드바가 없는 필드를
+ *    추정해 **실거래를 '모의' 로** 표시한 사고가 있었다).
+ */
+const BUDGET_LABEL = {
+  ENTER: '진입 제안', HOLD: 'AI 보유 유지', EXIT: 'AI 보유 정리', WAIT: '대기 (미진입)',
+};
+/** 목록용 압축 표기 — 한 줄에 제안 칩들과 나란히 선다 */
+const BUDGET_SHORT = { ENTER: '진입', HOLD: '유지', EXIT: '정리', WAIT: '대기' };
+
+/** 계약에 맞는 것만 통과시킨다. 어긋나면 null = 아무것도 그리지 않는다 */
+function normBudget(d) {
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+  if (!Object.prototype.hasOwnProperty.call(BUDGET_LABEL, d.action)) return null;
+  return {
+    action: d.action,
+    reason: typeof d.reason === 'string' ? d.reason : '',
+    symbol: typeof d.symbol === 'string' && d.symbol ? d.symbol : null,
+  };
+}
+
+/**
+ * 이력 **목록** 행에서 꺼낸다.
+ * ⚠️ 목록(`/api/analyst/history`)은 서버가 메타만 **재조립**해 주는 응답이라
+ *    `marketView` 처럼 평탄화될 수도 있고 `report` 째로 올 수도 있다 — 두 자리를 다 본다.
+ *    어느 쪽에도 없으면 칩을 안 그린다(조용한 것이 거짓말보다 낫다).
+ */
+const budgetOf = (h) => normBudget(h?.budgetDecision ?? h?.report?.budgetDecision);
+
+/** 선택한 보고서 상세 — 여기는 전문이 오므로 `report.budgetDecision` 이 정본 */
+const selBudget = computed(() => (sel.value?.summaryOnly ? null : normBudget(sel.value?.report?.budgetDecision)));
+
 const STATUS_LABEL = {
   PENDING: '승인 대기', APPROVED: '승인됨', REJECTED: '거절', EXECUTED: '전송됨',
   DRY_RUN: '모의 실행됨', EXPIRED: '만료', BLOCKED: '차단',
@@ -429,6 +490,12 @@ onUnmounted(() => clearInterval(timer));
 .pchip { font-size: var(--text-2xs); border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); padding: 1px 8px; white-space: nowrap; }
 .pchip--buy { color: var(--color-up); border-color: var(--color-up); }
 .pchip--sell { color: var(--color-down); border-color: var(--color-down); }
+/* 예산 판단 칩 — 제안 칩과 **한 줄에서 구분**돼야 한다(옅은 배경으로 갈랐다) */
+.pchip--budget { font-weight: 600; }
+.pchip--b-enter { color: var(--color-up); border-color: var(--color-up); background: var(--color-up-soft); }
+.pchip--b-exit { color: var(--color-down); border-color: var(--color-down); background: var(--color-down-soft); }
+.pchip--b-wait { color: var(--color-warn); border-color: var(--color-warn); background: var(--color-warn-soft); }
+.pchip--b-hold { color: var(--color-flat); border-color: var(--color-flat); background: var(--color-flat-soft); }
 
 /* 우측 상세 */
 .detail {
@@ -450,6 +517,24 @@ onUnmounted(() => clearInterval(timer));
 .pos__conf { color: var(--color-faint); font-size: var(--text-2xs); }
 .pos__why { margin: 0; color: var(--color-body); font-size: var(--text-sm); line-height: 1.55; }
 .pos__sc { margin: 0; color: var(--color-muted); font-size: var(--text-xs); }
+
+/* AI 예산 판단 블록 — 배지 + 대상 종목 + 이유. 색은 전부 토큰(라이트/다크 둘 다 따라온다) */
+.bdec {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-sm);
+  border: 1px solid var(--color-hairline-soft); border-radius: var(--rounded-md);
+  padding: var(--space-sm) var(--space-base);
+}
+.bdec__badge {
+  font-size: var(--text-2xs); font-weight: 700; white-space: nowrap;
+  border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); padding: 2px 10px;
+  color: var(--color-body);
+}
+.bdec__badge--enter { color: var(--color-up); border-color: var(--color-up); background: var(--color-up-soft); }
+.bdec__badge--exit { color: var(--color-down); border-color: var(--color-down); background: var(--color-down-soft); }
+.bdec__badge--wait { color: var(--color-warn); border-color: var(--color-warn); background: var(--color-warn-soft); }
+.bdec__badge--hold { color: var(--color-flat); border-color: var(--color-flat); background: var(--color-flat-soft); }
+.bdec__sym { font-weight: 700; color: var(--color-ink); font-size: var(--text-sm); }
+.bdec__why { margin: 0; flex: 1 1 100%; min-width: 0; color: var(--color-body); font-size: var(--text-sm); line-height: 1.55; }
 
 .gaps { margin: 0; padding-left: 18px; color: var(--color-warn); font-size: var(--text-xs); display: flex; flex-direction: column; gap: 2px; }
 

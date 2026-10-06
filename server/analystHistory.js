@@ -77,6 +77,14 @@ function list({ limit = 100 } = {}) {
     marketView: String(r.report?.marketView || '').slice(0, 140),
     positions: Array.isArray(r.report?.positions) ? r.report.positions.length : 0,
     proposals: (r.proposals || []).map((p) => ({ id: p.id, symbol: p.symbol, side: p.side })),
+    /**
+     * 📒 AI 예산 판단 (2026-10-06) — 목록에서 "어느 회차가 예산 판단을 냈나" 를 보려면
+     *    여기 **명시해야 나간다.** `get()` 은 행을 통째로 주니 자동인데 목록은 재조립이다
+     *    (바로 위 `dryRun` 과 같은 자리·같은 이유). 화면이 이 필드를 이미 읽고 있어서
+     *    여기 한 줄이 없으면 **코드는 다 있는데 칩만 영영 안 뜬다** —
+     *    "등록됐다 ≠ 도달한다" 가족이고, 실제로 그 상태로 한 번 완성 보고가 났다.
+     */
+    budgetDecision: r.report?.budgetDecision ?? null,
   }));
   let summaries = [];
   try {

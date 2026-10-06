@@ -246,6 +246,55 @@ async function loadLastReport() {
   }
 }
 
+/**
+ * 🔴 **AI 예산 판단** (2026-10-06) — 자율 1단 + AI 전용 예산이 켜져 있는데 매매가 0건이다.
+ *    사용자: *"안 산 날도 왜 안 샀는지"* 를 매 회차 화면에서 보고 싶다.
+ *
+ * 서버 계약: `report.budgetDecision` = `null` 또는
+ *   `{ action: 'ENTER'|'HOLD'|'EXIT'|'WAIT', reason: string, symbol: string|null }`.
+ *
+ * ⚠️ **모양을 검사하고 나서 그린다** — 09-21 에 모델이 스키마를 어긴 값을 줘서
+ *    `.join()` 이 터지고 **Vue 가 패널 서브트리를 통째로 버린** 전례가 있다(API 는 200 이었다).
+ * ⚠️ 계약의 세 키만 읽는다 — 10-04 에 없는 필드를 추정해 **실거래를 '모의' 로** 표시한 사고가 있었다.
+ */
+const BUDGET_LABEL = {
+  ENTER: '진입 제안', HOLD: 'AI 보유 유지', EXIT: 'AI 보유 정리', WAIT: '대기 (미진입)',
+};
+
+/**
+ * 자율 수준·AI 예산 — 아래 경고의 **전제**를 판정하려면 이 값이 필요하다.
+ * ⚠️ **새 폴링을 만들지 않는다** — 보고서를 가져오는 기존 주기(reportTimer 60초)에 얹는다.
+ */
+const agentStatus = ref(null);
+async function loadAgentStatus() {
+  try {
+    const res = await apiFetch('/api/agent/status');
+    if (res.ok) agentStatus.value = await res.json();
+  } catch { /* 못 읽으면 경고를 안 띄운다 — 모르는 것을 단정하지 않는다 */ }
+}
+
+const budgetDecision = computed(() => {
+  const d = report.value?.budgetDecision;
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+  if (!Object.prototype.hasOwnProperty.call(BUDGET_LABEL, d.action)) return null;
+  return {
+    action: d.action,
+    reason: typeof d.reason === 'string' ? d.reason : '',
+    symbol: typeof d.symbol === 'string' && d.symbol ? d.symbol : null,
+  };
+});
+
+/**
+ * 🔴 **침묵을 경고로 바꾼다** — 예산이 설정돼 있고 자율 1단 이상인데 이 회차 보고서에
+ *    판단이 안 실렸으면, 그게 바로 지금 고치고 있는 결함의 증상이다. 조용하면 또 모른다.
+ * ⚠️ 보고서 자체가 없는 때는 안 띄운다 — 그 자리는 "아직 분석 기록이 없습니다" 가 맡는다
+ *    (*"안 돌린 것"* 과 *"판단을 안 실은 것"* 은 다른 사실이다).
+ */
+const budgetDecisionMissing = computed(() => (
+  !!report.value && !budgetDecision.value
+  && agentStatus.value?.ledger?.budgetUsd != null
+  && Number(agentStatus.value?.autonomyLevel) >= 1
+));
 
 /** 시장 국면(코드 판정) — 데몬이 5분마다 갱신한다. 화면은 읽기만 */
 const regime = ref(null);
@@ -720,6 +769,7 @@ onMounted(async () => {
    * ⚠️ 낮에 주신 *"매매 분석은 바로 실행 시작해"* 를 되돌리는 것이라 **승인받고** 바꿨다.
    */
   loadLastReport();
+  loadAgentStatus();
   await load();
   await loadPortfolio();
   await loadDashboard();
@@ -743,6 +793,8 @@ onMounted(async () => {
     loadProposals();
     loadConditionals();
     loadOrderStats();
+    // 🔴 예산 판단 경고의 전제(예산·자율 수준) — **새 타이머를 만들지 않고** 이 주기에 얹는다
+    loadAgentStatus();
   }, 60000);
   openStream();
 });
@@ -1198,6 +1250,24 @@ onUnmounted(() => {
 
             <p class="analyst__view">{{ report.marketView }}</p>
             <p class="analyst__mom">{{ report.momentumRead }}</p>
+
+            <!--
+              🔴 **AI 예산 판단 한 줄** (2026-10-06) — 자율 1단 + AI 전용 예산이 도는데 매매가 0건이다.
+                 사용자: *"안 산 날도 왜 안 샀는지"*. ⇒ 회차마다 `[대기] 이유…` 를 여기서 읽는다.
+              ⚠️ 대시보드는 **보기 전용**이다(10-04 지시) — 버튼·입력 없이 텍스트만.
+              ⚠️ 판단이 없으면 **아무것도 안 그린다.** 단 하나 예외 = 아래 경고 한 줄:
+                 예산이 걸려 있고 자율 1단 이상인데 이 회차에 판단이 없으면 **그 침묵이 증상**이다.
+            -->
+            <p v-if="budgetDecision" class="bdec">
+              <span class="bdec__badge" :class="`bdec__badge--${budgetDecision.action.toLowerCase()}`">
+                {{ BUDGET_LABEL[budgetDecision.action] }}
+              </span>
+              <b v-if="budgetDecision.symbol" class="bdec__sym">{{ budgetDecision.symbol }}</b>
+              <span class="bdec__why">{{ budgetDecision.reason }}</span>
+            </p>
+            <p v-else-if="budgetDecisionMissing" class="banner banner--warn">
+              ⚠️ <b>AI 예산 판단 없음</b> — 이 회차 보고서에 판단이 실리지 않았습니다
+            </p>
 
             <!-- 📊 성과 + 리스크 — 따로 두 카드였던 것을 한 표로(2026-10-04 사용자 지시) -->
             <div v-if="orderStats || portfolio?.weights" class="risk">
@@ -2369,6 +2439,26 @@ onUnmounted(() => {
   border-radius: 0 var(--rounded-sm) var(--rounded-sm) 0;
   font-size: var(--text-md); line-height: 1.6; color: var(--color-body);
 }
+/* 🔴 AI 예산 판단 한 줄 — 색은 전부 토큰(라이트/다크가 같이 따라온다. 하드코딩 색 금지) */
+.bdec {
+  margin: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-base);
+  border: 1px solid var(--color-hairline-soft); border-radius: var(--rounded-md);
+  /* 이유가 길어져도 패널을 밀어내지 않는다 — 폭 상한은 주지 않는다(전폭 유지) */
+  max-height: 50vh; overflow-y: auto;
+}
+.bdec__badge {
+  font-size: var(--text-2xs); font-weight: 700; white-space: nowrap;
+  border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); padding: 2px 10px;
+  color: var(--color-body);
+}
+.bdec__badge--enter { color: var(--color-up); border-color: var(--color-up); background: var(--color-up-soft); }
+.bdec__badge--exit { color: var(--color-down); border-color: var(--color-down); background: var(--color-down-soft); }
+.bdec__badge--wait { color: var(--color-warn); border-color: var(--color-warn); background: var(--color-warn-soft); }
+.bdec__badge--hold { color: var(--color-flat); border-color: var(--color-flat); background: var(--color-flat-soft); }
+.bdec__sym { color: var(--color-ink); font-size: var(--text-sm); }
+.bdec__why { flex: 1 1 60%; min-width: 0; color: var(--color-body); font-size: var(--text-sm); line-height: 1.55; }
+
 .props { display: flex; flex-direction: column; gap: var(--space-sm); }
 .prop {
   border: 1px solid var(--color-hairline); border-radius: var(--rounded-md);
