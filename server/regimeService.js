@@ -610,13 +610,27 @@ const CANDIDATE_MAX = Math.max(1, Number(process.env.CANDIDATE_MAX) || 24);
  * ⚠️ **카테고리당 1개·같은 심볼 1회는 전역 규칙**이다(시나리오별이 아니다) — 두 시나리오가
  *    `gold` 를 공유해도 GLD 는 한 번만 나온다. 라운드로빈이 그 규칙을 깨면 안 된다.
  */
-function roundRobinCandidates(scenarios, catalog, held) {
+function roundRobinCandidates(scenarios, catalog, held, watched = null) {
+  /**
+   * 🔴 **후보는 "감시 걸어 둔 것" 안에서만 고른다** (2026-10-06 사용자 지시:
+   *    *"별 쓰레기같은 ETF 다 넣으라는게 아니라 실제 필요한 것들로 추리라고"*).
+   *
+   *    종전엔 **카탈로그 940종**에서 골랐고 감시 목록과 무관했다. 그래서 사용자가 감시를
+   *    16종으로 추려도 보고서에는 VONG·XLE·IBIT·IONQ 처럼 **본 적 없는 종목**이 계속
+   *    올라왔다(전부 `HOLD`·`LOW` = 근거 불충분인데 자리만 차지한다).
+   *    ⇒ 감시 목록이 곧 *"내가 보겠다고 한 것"* 이다. 그것이 후보 풀이어야 한다.
+   * ⚠️ `watched === null`(감시 목록을 **못 읽음**)이면 종전 동작으로 폴백한다 —
+   *    "모름" 을 "없음" 으로 읽어 후보를 0 으로 만들면 조회 장애가 판단을 멈춘다.
+   *    반면 **빈 배열은 후보 0 이 맞다**(감시를 아무것도 안 켠 상태).
+   */
+  const watchSet = watched == null ? null : new Set(watched.map((s) => String(s).trim().toUpperCase()));
   // 시나리오별 '카테고리 줄' — 각 칸은 그 카테고리에서 쓸 수 있는 ETF 후보들(선언 순서)
   const queues = scenarios.map((sc) => scenarioCategories(sc, catalog).map((key) => ({
     key,
     // 1배(정방향·인버스 -1 포함 — 인버스 헤지는 사용자 결정 09-24) · 미보유 · KR 은 원화 현금이 있어야 의미
     etfs: catalog.categories[key].etfs.filter(
       (e) => Math.abs(e.leverage) === 1 && !held.has(e.symbol) && e.market !== 'KR'
+        && (watchSet == null || watchSet.has(String(e.symbol).toUpperCase()))
     ),
   })));
   const cursor = queues.map(() => 0);
@@ -731,13 +745,27 @@ function quantGate(rows) {
 /** 후보 6자리 중 개별주 최대 수 — 지수·섹터 ETF 중심 전략(플레이북)의 구조적 보장 */
 const STOCK_SLOT_MAX = Math.max(0, Number(process.env.CANDIDATE_STOCK_SLOT_MAX ?? 2));
 
-async function candidateSection(scenarios, { heldSymbols = [], summarize, getCandles } = {}) {
+async function candidateSection(scenarios, { heldSymbols = [], summarize, getCandles, watchedSymbols = undefined } = {}) {
   if (!scenarios?.length || typeof summarize !== 'function' || typeof getCandles !== 'function') return '';
   const catalog = readCatalog();
   const held = new Set(heldSymbols.map((s) => String(s).toUpperCase()));
+  /**
+   * 감시 목록이 후보 풀이다(위 roundRobinCandidates 주석 참조). 호출부가 안 주면
+   * 스스로 읽고, **읽기에 실패하면 null** 로 둬서 종전 동작(카탈로그 전체)으로 폴백한다.
+   */
+  let watched = watchedSymbols;
+  if (watched === undefined) {
+    try {
+      const ws = require('./watchlistService').getWatchlistState();
+      watched = (ws?.groups || []).flatMap((g) => (g.tickers || []).filter((t) => t.watch).map((t) => t.symbol));
+    } catch (e) {
+      watched = null;
+      logWarn('regime.watch_unreadable_for_candidates', { message: e.message });
+    }
+  }
   // 🔴 판정은 scenarioCategories 한 곳 — promptSection(도구상자)과 반드시 같은 집합이어야 한다.
   //    어긋나면 "모델에게 보여준 목록" 과 "후보로 시세를 뜬 목록" 이 갈라지는데 아무도 모른다.
-  const wanted = roundRobinCandidates(scenarios, catalog, held);
+  const wanted = roundRobinCandidates(scenarios, catalog, held, watched);
   const measured = [];
   for (const w of wanted) {
     try {
