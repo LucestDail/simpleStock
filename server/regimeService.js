@@ -610,6 +610,49 @@ const CANDIDATE_MAX = Math.max(1, Number(process.env.CANDIDATE_MAX) || 24);
  * ⚠️ **카테고리당 1개·같은 심볼 1회는 전역 규칙**이다(시나리오별이 아니다) — 두 시나리오가
  *    `gold` 를 공유해도 GLD 는 한 번만 나온다. 라운드로빈이 그 규칙을 깨면 안 된다.
  */
+/**
+ * 🔴 **"살 수 있는 것" 의 정본은 목표 배분이다** (2026-10-06 사용자 지적).
+ *
+ * 오늘 내가 후보 풀을 **감시 목록**으로 묶었는데 그게 틀렸다 — 감시는 *"시세·모멘텀을
+ * 보는 것"* 이고 거기에는 **국면 판정용 신호**(SPY·TLT·UUP·VIXY·HYG)가 섞여 있다.
+ * 그 결과 **금리 상승 국면에 TLT(장기채) 매수 제안**이 가능해졌다. 역할이 다른 둘을
+ * 한 목록으로 묶은 것이 원인이고, 사용자 질문("섹터별로 다 포함중이야?")이 그걸 찍었다.
+ *
+ * ⇒ 두 축을 분리한다:
+ *   **감시** = 시세·모멘텀을 본다(신호 포함, 넓게)
+ *   **후보** = `config/target-allocation.json` 의 심볼만(좁게, 사람이 선언한 것)
+ * ⚠️ 3단 폴백이고 **각 단계를 로그로 남긴다** — 조용히 넓어지면(카탈로그 전체) 오늘 같은
+ *    사고가 재발하고, 조용히 0이 되면 제안이 통째로 멈춘다. 어느 쪽이든 알아야 한다.
+ */
+function candidateUniverse() {
+  try {
+    const ta = require('./targetAllocation').load();
+    if (ta?.buckets?.length) {
+      const out = [];
+      for (const b of ta.buckets) {
+        for (const x of (b.symbols || [])) out.push(x);
+        const sl = b.slot || {};
+        for (const x of [sl.primary, sl.momentum]) if (x) out.push(x);
+      }
+      const uniq = [...new Set(out.map((x) => String(x).trim().toUpperCase()).filter(Boolean))];
+      if (uniq.length) return uniq;
+    }
+    logWarn('regime.candidates_from_watchlist', { why: '목표 배분이 비었다 — 감시 목록으로 폴백' });
+  } catch (e) {
+    logWarn('regime.target_unreadable_for_candidates', { message: e.message });
+  }
+  try {
+    const ws = require('./watchlistService').getWatchlistState();
+    const on = (ws?.groups || []).flatMap((g) => (g.tickers || []).filter((t) => t.watch).map((t) => t.symbol));
+    if (on.length) return on;
+  } catch (e) {
+    logWarn('regime.watch_unreadable_for_candidates', { message: e.message });
+  }
+  // 🔴 둘 다 못 읽으면 null = 종전 동작(카탈로그 전체). 조용히 넓어지는 것이므로 **warn 으로 남긴다**
+  logWarn('regime.candidates_fallback_catalog', { why: '목표 배분·감시 모두 못 읽음 — 카탈로그 전체로 폴백(넓다)' });
+  return null;
+}
+
 function roundRobinCandidates(scenarios, catalog, held, watched = null) {
   /**
    * 🔴 **후보는 "감시 걸어 둔 것" 안에서만 고른다** (2026-10-06 사용자 지시:
@@ -754,15 +797,7 @@ async function candidateSection(scenarios, { heldSymbols = [], summarize, getCan
    * 스스로 읽고, **읽기에 실패하면 null** 로 둬서 종전 동작(카탈로그 전체)으로 폴백한다.
    */
   let watched = watchedSymbols;
-  if (watched === undefined) {
-    try {
-      const ws = require('./watchlistService').getWatchlistState();
-      watched = (ws?.groups || []).flatMap((g) => (g.tickers || []).filter((t) => t.watch).map((t) => t.symbol));
-    } catch (e) {
-      watched = null;
-      logWarn('regime.watch_unreadable_for_candidates', { message: e.message });
-    }
-  }
+  if (watched === undefined) watched = candidateUniverse();
   // 🔴 판정은 scenarioCategories 한 곳 — promptSection(도구상자)과 반드시 같은 집합이어야 한다.
   //    어긋나면 "모델에게 보여준 목록" 과 "후보로 시세를 뜬 목록" 이 갈라지는데 아무도 모른다.
   const wanted = roundRobinCandidates(scenarios, catalog, held, watched);
@@ -884,6 +919,6 @@ module.exports = {
   compute, judgeMarket, vixBandOf, matchScenarios, diffTransitions, promptSection,
   refresh, getState, setManual, readPlaybook, readCatalog, candidateSection, ladderProposals,
   quantGate, CANDIDATE_PROMPT_MAX, readLastGate,
-  scenarioCategories, roundRobinCandidates, CANDIDATE_MAX,
+  scenarioCategories, roundRobinCandidates, candidateUniverse, CANDIDATE_MAX,
   vixStaleNote, VIX_BAND_LABEL, TREND_KO,
 };

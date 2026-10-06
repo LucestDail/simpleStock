@@ -61,3 +61,28 @@ test('레버리지·보유 필터는 그대로 — 감시 필터가 기존 규�
   const held = regime.roundRobinCandidates(SCEN, CAT, new Set(['QQQM']), ['QQQM', 'QQQ']);
   assert.deepEqual(held.map((w) => w.symbol), ['QQQ'], '보유 종목이 후보로 올라왔다');
 });
+
+/**
+ * 🔴 **후보 풀의 정본은 목표 배분이다** (2026-10-06 사용자 지적:
+ * *"지금 감시 대상이 뭔데 레버리지도 포함중이야? 섹터별로 다 포함중이야?"*).
+ *
+ * 내가 후보 풀을 **감시 목록**으로 묶은 것이 틀렸다 — 감시에는 **국면 판정용 신호**
+ * (SPY·TLT·UUP·VIXY·HYG)가 섞여 있어서 **금리 상승 국면에 TLT 매수 제안**이 가능해졌다.
+ * 역할이 다른 둘을 한 목록으로 묶은 것이 원인이다.
+ *   감시 = 시세·모멘텀을 본다(넓게, 신호 포함)
+ *   후보 = 목표 배분 심볼만(좁게, 사람이 선언한 것)
+ */
+test('후보 풀 = 목표 배분 — 신호용(TLT·UUP·VIXY·SPY·HYG)은 후보가 아니다', () => {
+  const regime2 = require('../server/regimeService');
+  const pool = regime2.candidateUniverse();
+  assert.ok(Array.isArray(pool) && pool.length, '후보 풀이 비었다 — 제안이 통째로 멈춘다');
+  for (const sig of ['TLT', 'UUP', 'VIXY', 'SPY', 'HYG', 'SMH']) {
+    assert.ok(!pool.includes(sig), `${sig} 가 후보 풀에 있다 — 신호용인데 매수 대상이 된다`);
+  }
+  // 목표 배분 심볼은 전부 들어 있다(슬롯의 primary·momentum 포함)
+  for (const want of ['QQQM', 'TQQQ', 'QLD', 'O', 'SCHD', 'VNQ']) {
+    assert.ok(pool.includes(want), `${want} 가 후보 풀에 없다 — 목표인데 못 산다`);
+  }
+  // 🔴 QQQ 는 목표 밖 — 팔아도 후보로 돌아오지 않는다(사용자가 "털어야 해" 라고 한 종목)
+  assert.ok(!pool.includes('QQQ'), 'QQQ 가 후보 풀에 있다 — 털어도 다시 추천된다');
+});

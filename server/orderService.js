@@ -69,7 +69,20 @@ const CASH_FLOOR_PCT = Math.max(0, Number(process.env.CASH_FLOOR_PCT ?? 0));
  * **추가 매수만** 막는다.
  */
 /** 불리 방향(매도↓·매수↑) 지정가 허용 괴리 — 슬리피지 하한을 모델이 못 정하게(2026-10-05) */
-const ADVERSE_PRICE_PCT = Number(process.env.ADVERSE_PRICE_PCT ?? 0.3);
+/**
+ * 🔴 **불리 방향 허용 폭 0.3% → 0** (2026-10-06 사용자: *"또 현재 시세보다 싸게 qld
+ * 올려놓았네 너 진짜 왜그러는거야?"*).
+ *
+ * 0.3% 는 "마켓터블 리밋이라 체결이 보장된다" 는 이유로 뒀는데, 사용자 기준은 분명하다 —
+ * **현재가보다 싸게 파는 제안은 그 자체가 손해**다(QLD SELL @100.16 vs 현재가 100.19).
+ * 0.03% 라 게이트는 설계대로 통과했지만, 설계가 사용자 의도와 달랐다.
+ * ⇒ 0 = 불리 방향을 **전면 금지**. 매도는 현재가 이상, 매수는 현재가 이하만.
+ * ⚠️ 체결 가능성은 낮아진다(현재가 지정은 호가에 걸려야 체결) — 그 대가를 알고 고른 값이다.
+ *    급히 털어야 하면 사람이 시장가로 내면 된다(그건 사람의 판단).
+ * ⚠️ `analyst` 경로는 거부 대신 **현재가로 보정**한다(clamp) — 그쪽이 먼저 걸리므로
+ *    실제로는 "제안이 사라지는" 게 아니라 "현재가로 고쳐져" 올라온다.
+ */
+const ADVERSE_PRICE_PCT = Number(process.env.ADVERSE_PRICE_PCT ?? 0);
 /**
  * 🔴 종목 한도 20 → **35** (2026-10-06 사용자 결정).
  *
@@ -341,7 +354,30 @@ async function checkAccountLimits({ symbol, side, quantity, price, currency, exe
     if (Number.isFinite(px) && px > 0) {
       try {
         const pm = await toss.getPrices([sym]);
-        const now = Number(pm.get(sym)?.price);
+        const last = Number(pm.get(sym)?.price);
+        /**
+         * 🔴 **기준가는 `lastPrice` 가 아니라 "내가 받을 수 있는 쪽 호가" 다** (2026-10-06).
+         *
+         *    사용자가 **세 번** 같은 것을 지적했다: `SELL @97.5 vs 97.87`(10-05) ·
+         *    `SELL @100.16 vs 100.19` · `SELL @100.17 vs ask 100.19`(내가 올린 것).
+         *    원인은 하나다 — 게이트가 `lastPrice` 하나만 봤고, **`lastPrice` 는 bid 일 수도
+         *    ask 일 수도 있다.** 그래서 "불리 0%" 로 조여도 **매수 호가에 매도를 던지는**
+         *    일이 그대로 통과했다(실측: last 100.17 = bid 100.17, ask 는 100.19).
+         * ⇒ 매도는 **ask 최상단**, 매수는 **bid 최상단**을 기준으로 본다. 그 방향이 곧
+         *    "같은 조건에서 더 받는/덜 내는" 쪽이고, 사용자가 말한 "이득" 이다.
+         * ⚠️ 호가 조회 실패면 `lastPrice` 로 폴백하고 **warn** — 조용히 옛 기준으로
+         *    돌아가면 같은 사고가 재발한다.
+         */
+        let now = last;
+        try {
+          const ob = await toss.getOrderbook(sym);
+          const side1 = up === 'SELL' ? (ob?.asks || [])[0] : (ob?.bids || [])[0];
+          const q = Number(side1?.price);
+          if (q > 0) now = q;
+          else logWarn('orders.orderbook_empty', { symbol: sym, side: up, fallback: last });
+        } catch (e) {
+          logWarn('orders.orderbook_failed', { symbol: sym, side: up, message: e.message, fallback: last });
+        }
         if (now > 0) {
           const driftPct = ((px - now) / now) * 100;
           if (Math.abs(driftPct) > PRICE_DRIFT_PCT) {
