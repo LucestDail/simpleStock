@@ -71,6 +71,11 @@ function createDefaultSettings() {
        * ⚠️ 여기 두는 이유: 화면에서 자주 바꾸는 값이다. 위험한 스위치(주문)는 여전히 env 다.
        */
       targets: null,
+      /**
+       * 🔴 정리 완료 종목 — 감시·되살 추적에서 통째로 뺀다 (2026-10-06).
+       *    감시·목표가를 지우는 것만으로는 매도 체결 시 `reentry` 로 20일간 되살아난다.
+       */
+      retiredSymbols: null,
     },
     updatedAt: null,
   };
@@ -132,6 +137,7 @@ const DASHBOARD_DEFAULTS = Object.freeze({
    *    `createDefaultSettings` 에만 넣었더니 **응답에서 통째로 빠졌다**(화면이 못 읽는다).
    *    ★ 같은 항목을 **두 곳에** 적어야 하는 구조라 한쪽을 빠뜨리기 쉽다.
    */
+  retiredSymbols: null,
   targets: null,
   /**
    * 한 건에 걸 수 있는 **최대 손실 비율**(계좌 평가액 대비 %).
@@ -183,6 +189,12 @@ function normalizeDashboard(d) {
         out[key] = { target, stop };
       }
       return Object.keys(out).length ? out : null;
+    })(),
+    retiredSymbols: (() => {
+      const r = Array.isArray(d?.retiredSymbols) ? d.retiredSymbols : null;
+      if (!r) return null;
+      const out = [...new Set(r.map((x) => String(x || '').trim().toUpperCase()).filter(Boolean))];
+      return out.length ? out : null;
     })(),
     rankingCountries: (() => {
       const c = Array.isArray(d?.rankingCountries) ? d.rankingCountries.filter((x) => RANKING_COUNTRIES.includes(x)) : null;

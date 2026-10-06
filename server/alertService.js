@@ -1038,7 +1038,8 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
          */
         logWarn('analyst.trigger_watched_failed', { message: e.message });
       }
-      st.universe = trigger.trackUniverse(st.universe, items.map((i) => i.symbol), targeted, now, watched);
+      st.universe = trigger.trackUniverse(st.universe, items.map((i) => i.symbol), targeted, now, watched,
+        getDashboardSettings().retiredSymbols || []);
       const rows = await collectMomentumRows(st, st.universe, items, now);
       // 🎚️ 종목·그룹별 모멘텀 하한(2026-10-05) — 판정은 trigger.decide 가 row 단위로 쓴다
       for (const r of rows) {

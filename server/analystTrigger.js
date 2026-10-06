@@ -102,12 +102,25 @@ function zScore(dailyChangePct, history) {
  * @param {string[]} targeted 목표·손절을 지정한 심볼
  * @param {number} now
  */
-function trackUniverse(prev, held, targeted, now, watched = []) {
+function trackUniverse(prev, held, targeted, now, watched = [], retired = []) {
   const heldSet = new Set((held || []).map((s) => String(s).toUpperCase()));
   const targetSet = new Set((targeted || []).map((s) => String(s).toUpperCase()));
+  /**
+   * 🔴 **정리 완료 종목(retired)** 은 감시 세계에서 통째로 빼낸다 (2026-10-06 사용자 지시:
+   *    *"RAM 전량 매도 걸었어 … 관련된 내부 ram 관련 감시나 목표가 이런거 싹 다 정리해"*).
+   *
+   *    감시·목표가를 손으로 지우는 것만으로는 **부족하다** — 보유했다 팔면 아래 로직이
+   *    `wasHeld: true` 를 보고 **`reentry`(되살 후보)로 20일간 되살린다.** 그게 평소엔
+   *    옳은 설계지만(매도 뒤 재진입 자리를 봐 주는 것), *"다시 안 산다"* 고 선언한 종목엔
+   *    **매도 체결 순간 자동으로 되살아나는 유령**이 된다.
+   * ⚠️ 보유 중이어도 배제한다 — 이미 매도 주문이 걸린 상태에서 감시가 제안을 더 낼 이유가 없다.
+   *    실제 보유분은 `holdings`(보유 조회 기반)에 그대로 나오므로 **보고서에서 사라지지 않는다.**
+   */
+  // ⚠️ trim 을 빠뜨려 ' ram ' 이 안 걸렸다 — 자가 잡았다(10-02 holdings enum 과 같은 가족)
+  const retiredSet = new Set((retired || []).map((s) => String(s).trim().toUpperCase()).filter(Boolean));
   const next = {};
 
-  for (const sym of heldSet) next[sym] = { role: 'held', since: prev?.[sym]?.since ?? now };
+  for (const sym of heldSet) if (!retiredSet.has(sym)) next[sym] = { role: 'held', since: prev?.[sym]?.since ?? now };
 
   /**
    * 🔴 직전엔 있었는데 지금 없다 = 판 것이다 ⇒ **되살 자리를 봐 줄 대상**으로 남긴다
@@ -147,11 +160,12 @@ function trackUniverse(prev, held, targeted, now, watched = []) {
      *    `>` 로 두면 "20일 추적" 이라 적어 놓고 21일을 추적한다 — 문서와 코드가 어긋난다.
      */
     if (now - exitedAt >= REENTRY_DAYS * DAY_MS) continue;
+    if (retiredSet.has(sym)) continue;   // 정리 완료 — 되살 후보로 만들지 않는다
     next[sym] = { role: 'reentry', wasHeld: true, exitedAt, since: v.since };
   }
 
   // 사용자가 목표·손절을 찍은 것은 보유가 아니어도 본다
-  for (const sym of targetSet) if (!next[sym]) next[sym] = { role: 'targeted', since: now };
+  for (const sym of targetSet) if (!next[sym] && !retiredSet.has(sym)) next[sym] = { role: 'targeted', since: now };
 
   /**
    * 🔴 **한 번도 안 산 종목** (2026-09-21 사용자 지적: *"감시 대상 기준을 내가 한번도 안샀으면
@@ -164,7 +178,7 @@ function trackUniverse(prev, held, targeted, now, watched = []) {
    *    41종목을 다 감시해도 분석은 **월 ~17회**(z=2)다.
    */
   for (const sym of (watched || []).map((x) => String(x).toUpperCase())) {
-    if (!next[sym]) next[sym] = { role: 'watch', since: now };
+    if (!next[sym] && !retiredSet.has(sym)) next[sym] = { role: 'watch', since: now };
   }
 
   return next;
