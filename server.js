@@ -797,6 +797,20 @@ const agentControl = require('./server/agentControl');
  */
 /** 📒 AI 운용 원장 — 예산·보유·실현손익 (2026-10-05 "비율 일임") */
 app.get('/api/agent/ledger', (req, res) => res.json({ ok: true, ...require('./server/agentLedger').status() }));
+/**
+ * 🔁 미결(SENT) 제안을 거래소 실제 상태로 종결 — 읽기 전용(주문을 내지 않는다).
+ *    daily 알림이 "앱에서 보정하세요" 라고 안내하는데 **그 기능이 없어서** 10-06 건이
+ *    6일째 반복 통보되고 있었다(2026-10-12).
+ */
+app.post('/api/orders/reconcile', async (req, res) => {
+  try {
+    const r = await orderService.reconcileSent();
+    return res.json({ ok: true, ...r });
+  } catch (error) {
+    return res.status(502).json({ ok: false, error: error.message });
+  }
+});
+
 app.put('/api/agent/budget', (req, res) => {
   const r = require('./server/agentLedger').setBudget(req.body?.usd ?? null, { by: 'web' });
   return res.status(r.ok ? 200 : 400).json(r);

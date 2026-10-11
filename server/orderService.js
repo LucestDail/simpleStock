@@ -873,6 +873,47 @@ function deductAccrual(p, { dryRun = false } = {}) {
  * 그 전까지는 흐름만 돌려 보고 결과를 `DRY_RUN` 으로 남긴다 —
  * **승인 흐름의 결함을 실주문으로 배우면 안 된다**(샌드박스가 없다).
  */
+/**
+ * 🔁 **미결(SENT) 제안을 거래소 실제 상태로 종결한다** (2026-10-12).
+ *
+ * 🔴 왜 필요했나: `SENT` 로 바꾸는 코드는 둘인데 **거기서 벗어나는 코드가 0곳**이었다.
+ *    그래서 10-06 에 보낸 7건이 **6일째 "미결 주문" 알림**을 매일 보냈다 — 거래소에서는
+ *    전부 끝난 지 오래였는데(실측: FILLED 5 · CANCELED 2) 앱만 모르고 있었다.
+ *    알림 문구는 *"확정되면 앱에서 보정하세요"* 라고 안내하는데 **보정 기능 자체가 없었다**
+ *    ("문서가 주장하는 안전망이 실재하지 않는" 가족).
+ *
+ * ⚠️ **토스가 답을 준다** — `getOrder(orderId)` 가 FILLED/CANCELED 를 그대로 돌려준다.
+ *    묻지 않았을 뿐이다. 그래서 이 함수는 **추측하지 않는다**: 조회가 실패하거나 상태가
+ *    아직 진행 중이면 **그대로 SENT 로 둔다**(모르는 것을 끝난 것으로 적지 않는다).
+ * ⚠️ 주문을 **내지 않는다** — 읽기 전용 동기화다. `ORDERS_ENABLED=false` 여도 돈다.
+ */
+const TERMINAL = { FILLED: 'FILLED', CANCELED: 'CANCELED', CANCELLED: 'CANCELED', REJECTED: 'REJECTED', EXPIRED: 'EXPIRED' };
+async function reconcileSent() {
+  const toss = require('./tossClient');
+  const out = { checked: 0, settled: [], unresolved: [], failed: [] };
+  for (const p of proposals.values()) {
+    if (p.status !== 'SENT' || !p.orderId) continue;
+    out.checked += 1;
+    try {
+      const d = await toss.getOrder(p.orderId);
+      const raw = String(d?.status || d?.orderStatus || '').toUpperCase();
+      const term = TERMINAL[raw];
+      if (!term) { out.unresolved.push({ id: p.id, symbol: p.symbol, status: raw || '(없음)' }); continue; }
+      p.status = term;
+      p.settledAt = new Date().toISOString();
+      p.result = { ...(p.result || {}), orderStatus: raw, settledBy: 'reconcile' };
+      audit('settled', { id: p.id, orderId: p.orderId, symbol: p.symbol, side: p.side, status: term });
+      out.settled.push({ id: p.id, symbol: p.symbol, side: p.side, quantity: p.quantity, status: term });
+    } catch (e) {
+      // 조회 실패는 **종결이 아니다** — 다음 회차에 다시 묻는다
+      out.failed.push({ id: p.id, symbol: p.symbol, message: String(e.message).slice(0, 120) });
+    }
+  }
+  if (out.settled.length) persist();
+  logInfo('orders.reconciled', { checked: out.checked, settled: out.settled.length, unresolved: out.unresolved.length, failed: out.failed.length });
+  return out;
+}
+
 async function execute(id) {
   const p = proposals.get(id);
   if (!p) return { ok: false, error: '제안을 찾을 수 없습니다.' };
@@ -1201,7 +1242,7 @@ module.exports = {
   cancelLiveOrder,
   reconcile,
   checkAccountLimits,
-  SINGLE_POSITION_MAX_PCT, MAX_POSITIONS,
+  SINGLE_POSITION_MAX_PCT, MAX_POSITIONS, reconcileSent,
   onSettled,
   attachNotice,
   _restoreForTest: restore,
