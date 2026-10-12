@@ -577,7 +577,7 @@ onMounted(async () => {
 /* 표는 **카드 안에서** 스크롤한다 — 페이지를 늘리지 않는다 */
 /* ⚠️ 표는 **세로로 자르고 가로로 흘린다** — 340px 열에 7컬럼 표를 욱여넣으면
    헤더 글자가 세로로 쪼개져(`레/버/리/지`) 읽을 수 없다(스크린샷에서 확인). */
-.flow .tblwrap, .flow .mtblwrap { max-height: 186px; overflow: auto; }
+.flow .tblwrap, .flow .mtblwrap { max-height: 160px; overflow: auto; }
 .flow .rtbl { min-width: 430px; }
 .flow .tblwrap .tbl { min-width: 380px; }
 .flow .tbl th, .flow .tbl td,
@@ -585,8 +585,8 @@ onMounted(async () => {
 .flow .tbl thead th,
 .flow .rtbl thead th { position: sticky; top: 0; background: var(--color-surface); z-index: 1; }
 /* 긴 목록(밸런스 판정·미분류)도 같은 규칙 */
-.flow .issues { max-height: 168px; overflow: auto; }
-.flow .wts { max-height: 196px; overflow: auto; }
+.flow .issues { max-height: 150px; overflow: auto; }
+.flow .wts { max-height: 176px; overflow: auto; }
 .flow .gauges { gap: 6px; }
 .flow .mstats { gap: 5px; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 .flow .mstat { padding: 5px 8px; }

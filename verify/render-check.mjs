@@ -137,6 +137,7 @@ async function main() {
   if (!version) { console.log('🔴 Chromium 디버깅 포트가 안 열렸다'); chrome.kill(); process.exit(2); }
 
   let bad = 0;
+  let unmeasured = 0;
   for (const page of PAGES) {
     const tab = await getJson(`/json/new?${encodeURIComponent(BASE + page.path)}`, 'PUT');
     const ws = await wsConnect(tab.webSocketDebuggerUrl);
@@ -158,7 +159,24 @@ async function main() {
 
     await call('Runtime.enable');
     await call('Page.enable');
-    await sleep(3500); // SPA 라우팅 + 첫 API 왕복. ⚠️ 짧으면 "랭킹 0" 류 오경보가 난다(10-06 선례)
+    /**
+     * SPA 라우팅 + 첫 API 왕복을 기다린다.
+     * 🔴 **고정 대기는 쓰지 않는다** — 차트는 캔들을 늦게 받아 `불러오는 중…` 이 남고,
+     *    그 상태에서 재면 **"덜 그려져서 짧은" 높이**를 참값으로 적게 된다(실제로 그럴 뻔했다).
+     *    ⇒ 로딩 문구가 사라질 때까지 폴링하고, 상한까지 안 끝나면 **판정 불가**로 분리한다
+     *      ("깨졌다" 와 "못 쟀다" 는 다르다).
+     */
+    const LOADING = /읽는 중|불러오는 중|로딩/;
+    let stillLoading = true;
+    await sleep(1500);
+    for (let i = 0; i < 24 && stillLoading; i += 1) {
+      const probe = await call('Runtime.evaluate', {
+        expression: "(document.querySelector('main')||document.body).innerText",
+        returnByValue: true,
+      });
+      stillLoading = LOADING.test(probe.result.value || '');
+      if (stillLoading) await sleep(500);
+    }
 
     /**
      * 🔴 **문서 높이로 "한 화면" 을 재면 안 된다.** 이 앱은 .page 가 overflow-y:auto 라
@@ -206,8 +224,9 @@ async function main() {
      *    재기동 직후 `/api/risk/metrics` 가 안 와서 카드 둘이 비었고, 그만큼 짧아져
      *    **"한 화면에 들어옴" 이 나왔다.** 빠진 내용 덕에 통과한 것은 통과가 아니다.
      */
-    const loading = /읽는 중|불러오는 중|로딩/.test(text);
+    const loading = LOADING.test(text);
     const ok = info.len > 100 && miss.length === 0 && errors.length === 0 && !loading;
+    if (loading) unmeasured += 1; // 판정 불가 — 종료코드 2
     if (!ok) bad += 1;
     /**
      * **페이지 넘침**(사용자가 *"한 화면에 다 보이게"* 라고 한 그것)과
@@ -220,7 +239,7 @@ async function main() {
     const innerNote = info.over.inner.length ? ` · 카드내 스크롤: ${info.over.inner.join(', ')}` : '';
     console.log(`${ok ? '✅' : '🔴'} ${page.name.padEnd(8)} 텍스트 ${String(info.len).padStart(5)}자 · ${scroll}${innerNote}`);
     if (process.env.DEBUG) console.log('     debug:', JSON.stringify({ url: info.url, ready: info.ready, bodyLen: info.bodyLen, hasMain: info.hasMain }));
-    if (loading) console.log('     ⏳ 아직 "읽는 중" 인 카드가 있다 — 이 회차의 높이·길이는 믿을 수 없다');
+    if (loading) console.log('     ⏳ 상한(13초)까지 로딩이 안 끝났다 — **판정 불가**(깨진 것이 아니다)');
     if (miss.length) console.log(`     빠진 문구: ${miss.join(', ')}`);
     for (const e of errors.slice(0, 3)) console.log(`     에러: ${e.split("\n").slice(0,2).join(" | ").slice(0, 240)}`);
     if (process.env.SHOT) {
@@ -236,7 +255,9 @@ async function main() {
   }
   chrome.kill();
   // 🔴 "검사 못 함" 과 "통과" 를 구분한다 — 2 는 측정 불가, 1 은 실제 실패
-  process.exit(bad ? 1 : 0);
+  // 🔴 1 = 실제 렌더 실패 · 2 = 측정 불가 — 섞으면 "못 쟀다" 가 "깨졌다" 로 보고된다
+  if (bad > unmeasured) process.exit(1);
+  process.exit(unmeasured ? 2 : 0);
 }
 
 main().catch((e) => { console.log('🔴 하니스 실패:', e.message); process.exit(2); });
