@@ -546,7 +546,9 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
+/* ⚠️ 상하 여백을 줄인 것은 **28px 를 맞추려는 것**이다(실측값). 좌우는 그대로 둔다 — 
+   좌우를 줄이면 카드가 화면 가장자리에 붙어 읽기가 나빠지는데, 세로는 그런 손해가 없다. */
+.page { flex: 1; min-height: 0; overflow-y: auto; padding: 10px var(--space-base) 8px; display: flex; flex-direction: column; gap: 8px; }
 
 /**
  * 🔴 **2026-10-12 — 행(grid)을 흐름(columns)으로 바꿨다.**

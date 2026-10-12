@@ -201,7 +201,13 @@ async function main() {
     });
     const text = full.result.value || '';
     const miss = page.must.filter((k) => !text.includes(k));
-    const ok = info.len > 100 && miss.length === 0 && errors.length === 0;
+    /**
+     * 🔴 **"읽는 중" 상태에서 통과시키면 안 된다** (2026-10-12 실제로 그럴 뻔했다).
+     *    재기동 직후 `/api/risk/metrics` 가 안 와서 카드 둘이 비었고, 그만큼 짧아져
+     *    **"한 화면에 들어옴" 이 나왔다.** 빠진 내용 덕에 통과한 것은 통과가 아니다.
+     */
+    const loading = /읽는 중|불러오는 중|로딩/.test(text);
+    const ok = info.len > 100 && miss.length === 0 && errors.length === 0 && !loading;
     if (!ok) bad += 1;
     /**
      * **페이지 넘침**(사용자가 *"한 화면에 다 보이게"* 라고 한 그것)과
@@ -214,6 +220,7 @@ async function main() {
     const innerNote = info.over.inner.length ? ` · 카드내 스크롤: ${info.over.inner.join(', ')}` : '';
     console.log(`${ok ? '✅' : '🔴'} ${page.name.padEnd(8)} 텍스트 ${String(info.len).padStart(5)}자 · ${scroll}${innerNote}`);
     if (process.env.DEBUG) console.log('     debug:', JSON.stringify({ url: info.url, ready: info.ready, bodyLen: info.bodyLen, hasMain: info.hasMain }));
+    if (loading) console.log('     ⏳ 아직 "읽는 중" 인 카드가 있다 — 이 회차의 높이·길이는 믿을 수 없다');
     if (miss.length) console.log(`     빠진 문구: ${miss.join(', ')}`);
     for (const e of errors.slice(0, 3)) console.log(`     에러: ${e.split("\n").slice(0,2).join(" | ").slice(0, 240)}`);
     if (process.env.SHOT) {
