@@ -100,14 +100,25 @@ test('🔴 요약이 **결손**과 **해당 없음**을 갈라 센다', () => {
   assert.match(block, /\bgaps:/, '⚠️ 합계도 남겨야 한다(종전 소비자)');
 });
 
-test('🔴 ETF 줄은 **양쪽에** 들어간다 (합계에도, 해당없음에도)', () => {
+/**
+ * 🔴 **2026-10-12 — 계약이 뒤집혔다.** 사용자: *"이런거 그만 쓰라고."*
+ *
+ * 종전 계약은 *"ETF 줄은 **양쪽에** 들어간다(합계에도, 해당없음에도)"* 였고,
+ * 근거는 *"사람에게는 '못 본 것' 으로 한 줄에 보이는 편이 낫다"* 였다.
+ * **사용자가 아니라고 했다** — 매 회차 *"이 분석이 못 본 것"* 에 뜨는데
+ * ETF 에 기업 점수가 없는 것은 **결손이 아니라 설계**다.
+ * ⇒ `notApplicable` 에만 넣는다. **세는 자리에는 남아** 집계는 그대로 된다.
+ */
+test('🔴 ETF 줄은 `notApplicable` **에만** 들어간다 (화면의 "못 본 것" 을 더럽히지 않는다)', () => {
   const code = codeOnly(SRC);
   const i = code.indexOf('const notApplicable = []');
   assert.ok(i > 0, '분류 바구니가 없다');
-  const block = code.slice(i, i + 700);
+  const block = code.slice(i, i + 900);
   assert.match(block, /isFund/, '🔴 ETF 판정을 안 본다');
-  assert.match(block, /gaps\.push\(line\)/, '🔴 합친 목록에서 빠지면 화면에서 사라진다');
-  assert.match(block, /notApplicable\.push\(line\)/, '🔴 분류가 안 된다');
+  assert.match(block, /notApplicable\.push\(`\$\{sym\} 은 ETF/, '🔴 분류가 안 된다');
+  // 🔴 발동 축의 짝 — ETF 줄이 gaps 로 **다시 새지 않는지** 함께 잠근다
+  const fundBlock = block.slice(block.indexOf('isFund'));
+  assert.doesNotMatch(fundBlock.slice(0, 500), /gaps\.push\([^)]*ETF/, '🔴 ETF 줄이 gaps 로 다시 샌다');
 });
 
 /** 🔴 **자의 판별력** — 05시 실데이터 모양으로 계산이 맞는가 */

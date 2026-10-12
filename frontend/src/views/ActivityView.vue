@@ -62,7 +62,9 @@
     </section>
 
     <p v-if="error" class="banner banner--error">{{ error }}</p>
-    <table v-else class="tbl">
+    <!-- 🔴 표만 자기 영역 안에서 스크롤한다 — 헤더는 sticky 로 붙여 둔다 -->
+    <div v-else class="logwrap">
+    <table class="tbl">
       <thead><tr><th class="tbl__when">시각</th><th class="tbl__kind">유형</th><th class="tbl__sym">종목</th><th>내용</th></tr></thead>
       <tbody>
         <tr v-for="(r, i) in shown" :key="i">
@@ -73,6 +75,7 @@
         </tr>
       </tbody>
     </table>
+    </div>
   </div>
 </template>
 
@@ -162,7 +165,10 @@ onMounted(async () => {
 .ucard em { font-style: normal; font-size: var(--text-2xs); }
 .mut { color: var(--color-muted); font-size: var(--text-xs); }
 
-.page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
+/* 🔴 2026-10-12 사용자: "활동 로그도 좀 창 크기 줄이고 **카드 내에서 스크롤**되게 해
+   전체 스크롤 하게 하지말고." ⇒ 페이지는 스크롤하지 않고(`overflow: hidden`),
+   표만 자기 영역 안에서 스크롤한다. 상단 필터·사용량 패널이 항상 보인다. */
+.page { flex: 1; min-height: 0; overflow: hidden; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
 /* 🔴 2026-10-06 사용자(세 번째 지적): "max-width 주지 말라고" — 콘텐츠 폭 상한(1440px)
    제거, 표가 화면 전폭을 쓴다. 표는 페이지의 유일한 패널이라 내부 스크롤로 자르지 않는다
    (.page 자체가 스크롤 컨테이너 — 아래로 끌어올릴 다른 패널이 없다). */
@@ -171,6 +177,8 @@ onMounted(async () => {
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }
 .input--sel { max-width: 140px; height: 32px; border: 1px solid var(--color-hairline); border-radius: var(--rounded-md); background: var(--color-surface); color: var(--color-body); padding: 0 var(--space-sm); }
 .chip { border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); padding: 2px 10px; font-size: var(--text-xs); color: var(--color-body); }
+.logwrap { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--color-hairline); border-radius: var(--rounded-md); }
+.tbl thead th { position: sticky; top: 0; z-index: 1; background: var(--color-surface-sunken); }
 .tbl { width: 100%; border-collapse: collapse; background: var(--color-surface); border: 1px solid var(--color-hairline); border-radius: var(--rounded-md); font-size: var(--text-sm); table-layout: fixed; }
 .tbl th { text-align: left; font-size: var(--text-2xs); color: var(--color-faint); padding: 6px var(--space-sm); border-bottom: 1px solid var(--color-hairline); }
 .tbl td { padding: 5px var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); vertical-align: top; }

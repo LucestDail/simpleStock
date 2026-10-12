@@ -20,7 +20,7 @@
             <span class="stage__no mono-num">{{ i + 1 }}</span>
             <b class="stage__name">{{ st.name }}</b>
           </header>
-          <p class="stage__desc">{{ st.desc }}</p>
+          <p class="stage__desc" :title="st.desc">{{ st.desc }}</p>
           <dl class="stage__metrics">
             <div v-for="m in st.metrics" :key="m.label" class="stage__metric">
               <dt>{{ m.label }}</dt><dd class="mono-num">{{ mval(m.value) }}</dd>
@@ -28,7 +28,7 @@
           </dl>
           <!-- 📜 숫자 아래 최근 이력 2줄 (2026-10-05 — "이력은 안 보이고 숫자만") -->
           <ul v-if="st.recent && st.recent.length" class="stage__recent">
-            <li v-for="(r, j) in st.recent.slice(0, 2)" :key="st.key + j" :title="r.text">
+            <li v-for="(r, j) in st.recent.slice(0, 1)" :key="st.key + j" :title="r.text">
               <span class="stage__rat mono-num">{{ fmtAt(r.at) }}</span>
               <span class="stage__rtx">{{ r.text }}</span>
             </li>
@@ -261,12 +261,16 @@ onMounted(async () => {
 .mut { margin: 0; font-size: var(--text-sm); color: var(--color-muted); }
 
 /* ── 7단계 띠 — 가로 배치, 좁으면 자기 영역 안에서만 가로 스크롤 ── */
-.stages { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(180px, 1fr); gap: var(--space-sm); overflow-x: auto; padding-bottom: 4px; }
-.stage { border: 1px solid var(--color-hairline); border-radius: var(--rounded-sm); padding: var(--space-sm); display: flex; flex-direction: column; gap: 6px; min-width: 0; background: var(--color-surface-raised);; min-height: 190px; display: flex; flex-direction: column; }
+/* 🔴 2026-10-12 사용자(반복 지적): "한 화면에 다 나오게 구성해."
+   종전 `grid-auto-flow: column` + `overflow-x: auto` 는 7칸을 **옆으로 길게** 늘어놓아
+   화면 밖으로 나갔고, 좁아지면 세로로 쌓여 페이지가 통째로 길어졌다.
+   ⇒ **4열 2행 고정 그리드**(1600px 기준 한 칸 ≈ 360px). 가로 스크롤을 만들지 않는다. */
+.stages { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-sm); padding-bottom: 4px; }
+.stage { border: 1px solid var(--color-hairline); border-radius: var(--rounded-sm); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; background: var(--color-surface-raised);; min-height: 190px; display: flex; flex-direction: column; }
 .stage__head { display: flex; align-items: center; gap: 6px; }
 .stage__no { width: 18px; height: 18px; border-radius: var(--rounded-pill); background: var(--color-primary-soft); color: var(--color-primary); font-size: var(--text-2xs); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
 .stage__name { font-size: var(--text-sm); color: var(--color-ink); }
-.stage__desc { margin: 0; font-size: var(--text-2xs); color: var(--color-muted); }
+.stage__desc { margin: 0; font-size: var(--text-2xs); color: var(--color-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stage__metrics { margin: 0; display: flex; flex-direction: column; gap: 2px; }
 .stage__metric { display: flex; justify-content: space-between; gap: 6px; font-size: var(--text-xs); }
 .stage__metric dt { color: var(--color-faint); min-width: 0; }
@@ -277,6 +281,9 @@ onMounted(async () => {
 .stage__rat { color: var(--color-faint); flex: 0 0 auto; }
 .stage__rtx { color: var(--color-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .stage__note { margin: 4px 0 0; font-size: var(--text-2xs); color: var(--color-warn); }
+/* 좁은 화면에서만 열을 줄인다 — 넓은 화면의 "한 화면" 약속을 깨지 않는다 */
+@media (max-width: 1200px) { .stages { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 860px)  { .stages { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* recent 가 없는 카드(이력 0건)는 note 가 바닥 정렬을 이어받는다 — desc·metrics 바로 뒤의 note */
 .stage__metrics + .stage__note { margin-top: auto; }
 

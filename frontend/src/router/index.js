@@ -16,9 +16,16 @@ const routes = [
   { path: '/lab', name: 'lab', component: () => import('../views/StrategyView.vue'), meta: { title: '전략 연구소' } },
   { path: '/lab/run/:id', name: 'backtest', component: () => import('../views/BacktestView.vue'), meta: { title: '백테스트 결과' } },
   { path: '/risk', name: 'risk', component: () => import('../views/RiskView.vue'), meta: { title: '리스크' } },
-  { path: '/watchlist', name: 'watchlist', component: () => import('../views/RulesView.vue'), meta: { title: '감시 목록' } },
+  {
+    /**
+     * 🔴 2026-10-12 — `/watchlist` → `/settings`. 사용자: *"감시목록 이런거 다 설정창으로 빼.
+     *    이런거 그냥 너가 설정값으로 가지는거지 내가 건들일 이유가 없잖아."*
+     *    매일 보는 화면과 **한 번 정하는 설정**을 메뉴에서 섞지 않는다.
+     */
+    path: '/settings', name: 'settings', component: () => import('../views/RulesView.vue'), meta: { title: '설정' },
+  },
   { path: '/report', name: 'report', component: () => import('../views/ReportView.vue'), meta: { title: '성과' } },
-  { path: '/activity', name: 'activity', component: () => import('../views/ActivityView.vue'), meta: { title: '활동 · 설정' } },
+  { path: '/activity', name: 'activity', component: () => import('../views/ActivityView.vue'), meta: { title: '활동 로그' } },
   { path: '/symbol/:code', name: 'symbol', component: () => import('../views/SymbolView.vue'), meta: { title: '종목 상세' } },
 
   /**
@@ -27,7 +34,8 @@ const routes = [
    *    자리로 보낸다(`/activity` 에 개편 안내가 있다).
    */
   { path: '/approvals', redirect: { name: 'activity' } },
-  { path: '/rules', redirect: { name: 'watchlist' } },
+  { path: '/rules', redirect: { name: 'settings' } },
+  { path: '/watchlist', redirect: { name: 'settings' } },
   { path: '/:pathMatch(.*)*', redirect: { name: 'portfolio' } },
 ];
 

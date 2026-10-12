@@ -26,7 +26,12 @@
               @click="rankTab = k"
             >{{ rankLabel(k) }}</button>
           </div>
-          <p v-if="!rankKeys.length" class="panel__empty">랭킹을 불러오지 못했습니다.</p>
+          <!--
+            🔴 **"아직 안 왔다" 와 "못 받았다" 를 구분한다** (2026-10-12 사용자 지적).
+               종전엔 둘 다 *"불러오지 못했습니다"* 라 **로딩 중에도 실패처럼** 보였다.
+          -->
+          <p v-if="!rankKeys.length && error" class="panel__empty">랭킹을 불러오지 못했습니다 — {{ error }}</p>
+          <p v-else-if="!rankKeys.length" class="panel__empty">랭킹을 불러오는 중…</p>
           <template v-else-if="activeRank">
             <!-- 🔴 이 종류만 실패했으면 그렇게 말한다("없음" 과 다르다) -->
             <p v-if="activeRank.error" class="rank__err">{{ activeRank.error }}</p>

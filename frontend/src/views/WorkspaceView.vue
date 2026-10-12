@@ -259,6 +259,30 @@ function statusLabel(p) {
 }
 
 
+/**
+ * 🔴 보고서 나이(일). `null` 이면 **계산하지 않는다** — 0 으로 채우면 "오늘 것" 으로 읽힌다.
+ */
+const reportAgeDays = computed(() => {
+  const at = report.value?.at;
+  if (!at) return 0;
+  const ms = Date.now() - new Date(at).getTime();
+  return Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 86400000) : 0;
+});
+
+/**
+ * 🔴 **그 판단의 종목 중 지금 안 들고 있는 것.**
+ * ⚠️ 보유 목록을 **못 읽었으면 빈 배열**을 돌려준다 — 못 읽은 것을 "안 들고 있다" 로 읽으면
+ *    멀쩡한 보유를 전부 경고로 찍는다(검사 못 함 ≠ 미보유).
+ */
+const staleSymbols = computed(() => {
+  const held = portfolio.value?.items;
+  if (!Array.isArray(held) || !held.length) return [];
+  const set = new Set(held.map((h) => String(h.symbol || '').toUpperCase()));
+  return (report.value?.positions || [])
+    .map((p) => String(p.symbol || '').toUpperCase())
+    .filter((sym) => sym && !set.has(sym));
+});
+
 const dash = ref(null);
 const dashError = ref('');
 const selected = ref({ symbol: '', name: '' });
@@ -619,11 +643,13 @@ onMounted(async () => {
    *    *"안 돌린 것"* 과 *"고장난 것"* 이 구분되지 않는다.
    * ⚠️ 낮에 주신 *"매매 분석은 바로 실행 시작해"* 를 되돌리는 것이라 **승인받고** 바꿨다.
    */
+  /**
+   * 🔴 **2026-10-12 — 순차에서 병렬로.** 종전에는 `load → loadPortfolio → loadDashboard`
+   *    를 `await` 로 줄 세워서, 앞의 둘이 느리면 **랭킹 패널이 한참 "불러오지 못했습니다"**
+   *    를 보여줬다(사용자 지적). 서로 의존하지 않으므로 함께 띄운다.
+   */
   loadLastReport();
-  await load();
-  await loadPortfolio();
-  await loadDashboard();
-  await loadRegime();
+  await Promise.all([load(), loadPortfolio(), loadDashboard(), loadRegime()]);
   regimeTimer = setInterval(loadRegime, 5 * 60 * 1000);
   restartDashTimer();
   clockTimer = setInterval(() => {
@@ -1090,6 +1116,22 @@ onUnmounted(() => {
               <span v-if="portfolio?.asOf" class="meta__chip">잔고 {{ new Date(portfolio.asOf).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) }}</span>
             </div>
             <p v-if="report.web && !report.web.ok" class="analyst__src">웹 검색 미반영 — {{ report.web.error }}</p>
+
+            <!--
+              🔴🔴 **낡은 분석을 현재처럼 보여주지 않는다** (2026-10-12 사용자: *"나 QLD 없는데?"*)
+
+              10-06 회차가 QLD 를 보유로 판단했는데 **지금 계좌에 QLD 가 없다.** 화면이 그 판단을
+              오늘 것처럼 보여줬다. 두 사실을 모두 말한다:
+                ① 이 분석이 **며칠 전 것**인가
+                ② 그 판단의 종목 중 **지금 안 들고 있는 것**이 무엇인가
+              ⚠️ 보고서를 숨기지 않는다 — 지난 판단도 사실이다. **언제 것인지를 말할 뿐이다.**
+            -->
+            <p v-if="reportAgeDays >= 1" class="analyst__stale">
+              ⏳ <b>{{ reportAgeDays }}일 전 분석</b>입니다 — 지금 시장·계좌와 다를 수 있습니다.
+              <span v-if="staleSymbols.length">
+                특히 <b>{{ staleSymbols.join(', ') }}</b> 은(는) <b>현재 보유하지 않습니다.</b>
+              </span>
+            </p>
 
             <p class="analyst__view">{{ report.marketView }}</p>
             <p class="analyst__mom">{{ report.momentumRead }}</p>
@@ -2211,6 +2253,11 @@ onUnmounted(() => {
   background: var(--color-surface-sunken); color: var(--color-faint); font-size: var(--text-2xs);
 }
 .websearch__tag--on { background: var(--color-ai-soft); color: var(--color-ai); }
+.analyst__stale {
+  margin: 0; padding: 6px var(--space-sm); border-radius: var(--rounded-md);
+  border: 1px solid var(--color-warn); background: var(--color-warn-soft);
+  color: var(--color-ink); font-size: var(--text-sm);
+}
 .analyst__src { margin: 0; font-size: var(--text-2xs); color: var(--color-faint); }
 
 .analyst {

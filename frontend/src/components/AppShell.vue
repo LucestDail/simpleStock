@@ -20,10 +20,16 @@
         <RouterLink to="/analysis" class="side__item" active-class="side__item--on">분석 리포트</RouterLink>
         <RouterLink to="/lab" class="side__item" active-class="side__item--on">전략 연구소</RouterLink>
         <RouterLink to="/risk" class="side__item" active-class="side__item--on">리스크</RouterLink>
-        <RouterLink to="/watchlist" class="side__item" active-class="side__item--on">감시 목록</RouterLink>
         <RouterLink to="/report" class="side__item" active-class="side__item--on">성과</RouterLink>
-        <RouterLink to="/activity" class="side__item" active-class="side__item--on">활동 · 설정</RouterLink>
+        <RouterLink to="/activity" class="side__item" active-class="side__item--on">활동 로그</RouterLink>
         <!-- 종목 상세는 종목을 클릭해 들어간다 — 메뉴 항목이 아니라 경로다 -->
+        <!--
+          🔴 **설정은 메뉴가 아니다** (2026-10-12 사용자: *"감시목록 이런거 다 설정창으로 빼.
+             그냥 사이드 메뉴에서 나오게. 이런거 그냥 너가 설정값으로 가지는거지 내가 건들일
+             이유가 없잖아."*) — 매일 보는 것과 한 번 정하는 것을 섞지 않는다.
+        -->
+        <span class="side__spacer"></span>
+        <RouterLink to="/settings" class="side__item side__item--sub" active-class="side__item--on">⚙ 설정</RouterLink>
       </nav>
       <button class="side__theme" :title="theme === 'light' ? '어두운 테마로' : '밝은 테마로'" @click="toggleTheme">
         {{ theme === 'light' ? '☾ 다크 모드' : '☀ 라이트 모드' }}
@@ -75,6 +81,8 @@ const { theme, toggle: toggleTheme } = useTheme();
 }
 .side__item:hover { background: var(--color-surface-hover); }
 .side__item--on { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
+.side__spacer { flex: 1; }
+.side__item--sub { color: var(--color-muted); font-size: var(--text-sm); }
 .side__item--off { color: var(--color-faint); cursor: default; }
 .side__item--off small { font-size: var(--text-2xs); border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); padding: 0 6px; }
 .side__theme {

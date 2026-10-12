@@ -121,6 +121,22 @@
                 <span class="wts__gap mono-num" :class="dirClass(b.gapPct)">{{ signedPct(b.gapPct) }}</span>
               </li>
             </ul>
+            <!--
+              🔴 **미분류를 숨기지 않는다** (2026-10-12 사용자: *"이거 맞아?"*).
+                 버킷 합이 31.5% 인데 미분류가 **68.5%** 였다 — 그걸 안 보여주니 괴리 숫자가
+                 거짓말처럼 보인다. **목표 밖에 자산의 2/3 가 있다는 것이 진짜 정보다.**
+            -->
+            <div v-if="unclassified.length" class="unc">
+              <div class="unc__head">
+                <b>목표 배분 밖 {{ pctText(unclassifiedPct) }}</b>
+                <small class="mut">아래 종목은 어느 버킷에도 없습니다 — 괴리 합이 안 맞는 이유입니다</small>
+              </div>
+              <ul class="unc__list">
+                <li v-for="u in unclassified" :key="u.symbol">
+                  <span>{{ u.symbol }}</span><span class="mono-num">{{ pctText(u.pct) }}</span>
+                </li>
+              </ul>
+            </div>
           </section>
 
           <section v-if="income" class="card">
@@ -164,6 +180,12 @@ const overRules = computed(() => (data.value?.rules?.checks || []).filter((c) =>
  *    (처음에 `rows`·`actualPct`·`label` 로 지어 썼다가 소스를 열어 고쳤다 —
  *     없는 필드를 추정해 쓰면 조용히 비고 화면은 "목표 없음" 으로 보인다.)
  */
+const unclassified = computed(() => {
+  const u = data.value?.target?.unclassified;
+  return Array.isArray(u) ? u : [];
+});
+const unclassifiedPct = computed(() => unclassified.value.reduce((a, u) => a + (Number(u.pct) || 0), 0));
+
 const targetRows = computed(() => {
   const rows = data.value?.target?.buckets;
   return Array.isArray(rows) ? rows : [];
@@ -282,6 +304,12 @@ onMounted(load);
 .wts__bar i { display: block; height: 100%; background: var(--color-primary); }
 .wts__v { color: var(--color-ink); }
 .wts__gap { min-width: 4rem; text-align: right; }
+
+.unc { border: 1px solid var(--color-warn); background: var(--color-warn-soft); border-radius: var(--rounded-md); padding: var(--space-sm); display: flex; flex-direction: column; gap: 4px; }
+.unc__head { display: flex; flex-direction: column; gap: 1px; }
+.unc__head b { color: var(--color-warn); font-size: var(--text-sm); }
+.unc__list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--text-xs); }
+.unc__list li { display: flex; gap: 6px; color: var(--color-body); }
 
 .dl { display: flex; gap: var(--space-lg, 24px); margin: 0; flex-wrap: wrap; }
 .dl dt { font-size: var(--text-2xs); color: var(--color-faint); }

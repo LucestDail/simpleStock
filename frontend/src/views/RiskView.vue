@@ -1,5 +1,5 @@
 <!--
-  D-8 포트폴리오·리스크 (2026-10-04 심화 재구축)
+  리스크 (2026-10-12 — 메뉴명과 제목을 맞췄다. 사용자: "메뉴명이랑 일치시키고")
   유지: 한도 게이지 3종 · 스트레스 표 · /symbol 링크.
   확장: 자산 구성 도넛(SVG 직접) · 리스크 지표(/api/risk/metrics — 현물 환산 그릭스) ·
         밸런스 판정(issues) · 자산 추이 꺾은선(/api/performance) · 관심 종목 관리(대시보드에서 이사).
@@ -8,7 +8,7 @@
 -->
 <template>
   <div class="page">
-    <header class="page__head"><h1>포트폴리오·리스크</h1>
+    <header class="page__head"><h1>리스크</h1>
       <span v-if="asOf" class="chip mono-num">{{ fmtAt(asOf) }} 기준</span></header>
     <p v-if="error" class="banner banner--error">{{ error }}</p>
 
@@ -524,10 +524,16 @@ onMounted(async () => {
 /* ── 게이지 ── */
 /* 우열 카드 안에서는 세로 스택 — 카드가 도넛 카드와 같은 높이(stretch)가 되므로
    게이지 3개를 **세로로 고르게 분배**해 아래가 비지 않게 한다(2026-10-04 "우측이 좀 비거나") */
-.gauges { display: flex; flex-direction: column; justify-content: space-evenly; gap: var(--space-base); flex: 1; min-height: 0; }
+/* 🔴 2026-10-12 사용자: "한도 대비 현재 위치 width 너무 길어. 폰트도 줄이고 크기도 줄여서
+   한 화면에 좀 들어오게." ⇒ 세로 1열 full-width → **2열 그리드** + 활자·막대 축소.
+   세로를 반으로 줄여 아래 패널이 같은 화면에 들어온다. */
+.gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--space-sm) var(--space-base); align-content: start; flex: 1; min-height: 0; }
 .gauge { min-width: 0; }
-.gauge__head { display: flex; justify-content: space-between; font-size: var(--text-sm); margin-bottom: 4px; }
-.gauge__bar { height: 10px; border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); overflow: hidden; }
+.gauge__head { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--text-xs); margin-bottom: 3px; gap: 6px; }
+.gauge__head span { color: var(--color-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gauge__head b { font-size: var(--text-sm); }
+.gauge__head small { font-size: var(--text-2xs); color: var(--color-faint); }
+.gauge__bar { height: 6px; border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); overflow: hidden; }
 .gauge__fill { display: block; height: 100%; background: var(--color-primary); }
 .gauge__fill--warn { background: var(--color-warn); }
 

@@ -20,8 +20,16 @@
     <p class="mut">플레이북 정본은 서버 config — 저장 시 서버가 검증·백업 후 라이브 판정에 즉시 반영한다.
       카드 체크 = 백테스트 조합 · 카드 클릭 = 상세/편집.</p>
 
-    <!-- ── 시나리오 카드 그리드 ── -->
-    <div class="grid">
+    <!--
+      🔴 **카드 캐로셀** (2026-10-12 사용자: *"전략 연구소 카드를 캐로셀로 좀 구성하고,
+         하단 차트 좀 끌어올려서 한 화면에 height overflow scroll 없게"*)
+      시나리오가 25개라 그리드로 깔면 세로 다섯 줄이 되고 **차트가 화면 밖으로 밀렸다.**
+      한 줄로 눕히고 좌우로 넘긴다 — 세로는 카드 한 장 높이만 쓴다.
+    -->
+    <div class="carousel">
+      <button class="carousel__nav carousel__nav--prev" type="button" aria-label="이전 전략"
+              @click="scrollCards(-1)">‹</button>
+      <div ref="trackEl" class="carousel__track">
       <article
         v-for="sc in scenarios" :key="sc.id"
         class="sc" :class="{ 'sc--on': checked.has(sc.id) }"
@@ -39,6 +47,9 @@
           <span v-if="sc.categories.length > 4" class="sc__chip">+{{ sc.categories.length - 4 }}</span>
         </div>
       </article>
+      </div>
+      <button class="carousel__nav carousel__nav--next" type="button" aria-label="다음 전략"
+              @click="scrollCards(1)">›</button>
     </div>
     <p v-if="!scenarios.length && !error" class="panel__empty">플레이북을 불러오는 중입니다…</p>
 
@@ -245,6 +256,16 @@ async function loadRegime() {
   } catch { /* 국면 칩은 곁가지 */ }
 }
 
+/**
+ * 캐로셀 좌우 이동 — 한 번에 **보이는 폭만큼** 민다(카드 수를 세지 않는다. 폭이 바뀌어도 맞는다).
+ */
+const trackEl = ref(null);
+function scrollCards(dir) {
+  const el = trackEl.value;
+  if (!el) return;
+  el.scrollBy({ left: dir * Math.max(240, el.clientWidth * 0.8), behavior: 'smooth' });
+}
+
 // ── 백테스트 ──
 const LABEL = { vshape: 'V자 반등', bull: '지속 상승', bear: '지속 하락', chop: '횡보' };
 const running = ref(null);
@@ -343,7 +364,9 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('keydown', 
 </script>
 
 <style scoped>
-.page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
+/* 🔴 2026-10-12 — 페이지는 세로로 넘치지 않는다. 카드는 캐로셀(가로), 백테스트 카드가
+   남은 높이를 차지하고 **그 안에서** 스크롤한다. 사용자: "한 화면에 overflow scroll 없게". */
+.page { flex: 1; min-height: 0; overflow: hidden; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
 /* 🔴 2026-10-06 사용자(세 번째 지적): "max-width 주지 말라고" — 콘텐츠 폭 상한(1440px)
    제거, 화면 전폭. 카드 그리드는 auto-fill 이라 폭이 늘면 컬럼 수가 따라 는다.
    종전 `.page > .mdl` 전폭 예외도 함께 제거 — 상한이 없어져 충돌 자체가 사라졌고,
@@ -358,8 +381,26 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('keydown', 
 .mut { font-size: var(--text-xs); color: var(--color-muted); margin: 0; }
 .warn { margin: 0 0 6px; font-size: var(--text-sm); color: var(--color-warn); }
 
-/* ── 카드 그리드 ── */
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-sm); }
+/* ── 카드 캐로셀 (2026-10-12) ── */
+.carousel { position: relative; display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.carousel__track {
+  display: flex; gap: var(--space-sm); overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x proximity; padding: 2px; flex: 1; min-width: 0;
+  scrollbar-width: thin;
+}
+.carousel__track > .sc { flex: 0 0 236px; scroll-snap-align: start; }
+.carousel__nav {
+  flex: 0 0 auto; width: 26px; height: 56px; border: 1px solid var(--color-hairline);
+  background: var(--color-surface); color: var(--color-muted); border-radius: var(--rounded-md);
+  cursor: pointer; font-size: 17px; line-height: 1;
+}
+.carousel__nav:hover { color: var(--color-ink); border-color: var(--color-primary-line); }
+/* 좌우 버튼은 지금 같은 모양이지만 **클래스를 썼으면 규칙을 쓴다**(가드가 잡았다) —
+   나중에 한쪽만 손볼 때 붙을 자리를 비워 두지 않는다 */
+.carousel__nav--prev { margin-right: 2px; }
+.carousel__nav--next { margin-left: 2px; }
+/* 좁은 화면에선 버튼을 숨기고 손가락 스크롤에 맡긴다 */
+@media (max-width: 760px) { .carousel__nav { display: none; } }
 .sc {
   background: var(--color-surface); border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg); padding: var(--space-base);
@@ -387,6 +428,9 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('keydown', 
 /* ── 공용 카드 섹션 ── */
 .card { background: var(--color-surface); border: 1px solid var(--color-hairline); border-radius: var(--rounded-md); padding: var(--space-base); }
 .card h2 { margin: 0 0 8px; font-size: var(--text-md); color: var(--color-ink); }
+/* 🔴 2026-10-12 — 백테스트 카드가 **남은 높이를 전부** 차지하고 그 안에서만 스크롤한다.
+   종전엔 카드가 내용만큼 커져 페이지가 길어졌고 차트가 화면 밖으로 밀렸다. */
+.page > .card:last-of-type { flex: 1; min-height: 0; overflow-y: auto; }
 .card h3 { margin: 10px 0 4px; }
 
 .tbl { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
@@ -407,7 +451,7 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('keydown', 
 }
 .hero__cell--ex { border-color: var(--color-primary-line); }
 .hero__lbl { font-size: var(--text-xs); color: var(--color-muted); }
-.hero__num { font-size: var(--text-3xl); line-height: 1.15; }
+.hero__num { font-size: var(--text-2xl); line-height: 1.1; }
 
 .btchart { width: 100%; height: 220px; border: 1px solid var(--color-hairline-soft); border-radius: var(--rounded-xs); background: var(--color-surface-sunken); }
 .legend { display: flex; align-items: center; gap: 6px; }

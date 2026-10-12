@@ -13,7 +13,7 @@
 -->
 <template>
   <div class="page">
-    <header class="page__head"><h1>감시 목록 · 운용 기준</h1></header>
+    <header class="page__head"><h1>설정</h1><span class="mut">감시 목록 · 목표 배분 · 진단 기준선 · 브리핑</span></header>
 
     <!-- ⑧+⑨ 장기 목표 배분 · 수익 기반 적립 예산 (2026-10-06 — "방어주·수익으로 QLD·TQQQ 를 모아나간다")
          🔴 엔드포인트가 없으면(서버 작업 동시 진행) 카드를 **아예 그리지 않는다** —
