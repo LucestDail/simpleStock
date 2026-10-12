@@ -31,6 +31,7 @@ import { spawn } from 'node:child_process';
 import net from 'node:net';
 import crypto from 'node:crypto';
 import http from 'node:http';
+import fs from 'node:fs';
 
 /**
  * 🔴 **nginx 를 통과시켜야 한다.** 앱 포트(50000)에 직접 붙으면 `index.html` 은 200 인데
@@ -45,7 +46,8 @@ const PORT = 9333;
 
 /** 화면마다 "그려졌으면 반드시 보이는" 문구. 이름이 아니라 **사용자가 읽는 글자**로 고른다. */
 const PAGES = [
-  { path: '/', name: '분석 리포트', must: ['분석 리포트', '관심'] },
+  // ⚠️ 기대 문구는 **지금 화면에 실제로 있는 글자**로 — 낡으면 자가 멀쩡한 화면을 빨간불로 만든다
+  { path: '/', name: '분석 리포트', must: ['분석 리포트', '국면'] },
   { path: '/portfolio', name: '포트폴리오', must: ['총평가액', '보유 종목', '한도 대비 현재 위치'] },
   { path: '/lab', name: '전략 연구소', must: ['전략'] },
   { path: '/activity', name: '활동 로그', must: ['활동'] },
@@ -158,6 +160,13 @@ async function main() {
     await call('Page.enable');
     await sleep(3500); // SPA 라우팅 + 첫 API 왕복. ⚠️ 짧으면 "랭킹 0" 류 오경보가 난다(10-06 선례)
 
+    /**
+     * 🔴 **문서 높이로 "한 화면" 을 재면 안 된다.** 이 앱은 .page 가 overflow-y:auto 라
+     *    스크롤이 그 안에서 일어난다 ⇒ document.scrollHeight === innerHeight 가 되어
+     *    화면이 **잘려 있는데도 "한 화면에 들어옴"** 으로 보고했다(스크린샷이 잡았다).
+     *    ⇒ main 안에서 **실제로 넘치는 요소**를 찾아 초과 px 를 잰다.
+     * ⚠️ 아래 식은 템플릿 리터럴 안이라 **백틱을 쓸 수 없다** — 주석은 여기 바깥에 둔다.
+     */
     const r = await call('Runtime.evaluate', {
       expression: `(() => {
         const m = document.querySelector('main') || document.body;
@@ -166,6 +175,19 @@ async function main() {
           url: location.href, ready: document.readyState,
           bodyLen: (document.body.innerHTML || '').length,
           hasMain: !!document.querySelector('main'),
+          over: (() => {
+            var pg = document.querySelector('.page') || document.querySelector('main');
+            var pageOver = pg ? pg.scrollHeight - pg.clientHeight : 0;
+            var inner = [];
+            var all = document.querySelectorAll('main *');
+            for (var i = 0; i < all.length; i += 1) {
+              var el = all[i];
+              if (el === pg) continue;
+              var d = el.scrollHeight - el.clientHeight;
+              if (d > 8 && el.clientHeight > 80) inner.push(String(el.className || el.tagName).slice(0, 24));
+            }
+            return { page: pageOver, inner: inner.slice(0, 4) };
+          })(),
           h: document.documentElement.scrollHeight, v: window.innerHeight });
       })()`,
       returnByValue: true,
@@ -181,11 +203,28 @@ async function main() {
     const miss = page.must.filter((k) => !text.includes(k));
     const ok = info.len > 100 && miss.length === 0 && errors.length === 0;
     if (!ok) bad += 1;
-    const scroll = info.h > info.v + 8 ? `세로 스크롤 있음(${info.h}>${info.v})` : '한 화면에 들어옴';
-    console.log(`${ok ? '✅' : '🔴'} ${page.name.padEnd(8)} 텍스트 ${String(info.len).padStart(5)}자 · ${scroll}`);
+    /**
+     * **페이지 넘침**(사용자가 *"한 화면에 다 보이게"* 라고 한 그것)과
+     * **카드 안 스크롤**(의도된 것 — 활동 로그·채팅 로그)을 **가른다.**
+     * 안 가르면 의도된 내부 스크롤이 전부 위반으로 보여 자가 쓸모없어진다.
+     */
+    const scroll = info.over.page > 8
+      ? `🔻 페이지 ${info.over.page}px 넘침`
+      : '한 화면 ✓';
+    const innerNote = info.over.inner.length ? ` · 카드내 스크롤: ${info.over.inner.join(', ')}` : '';
+    console.log(`${ok ? '✅' : '🔴'} ${page.name.padEnd(8)} 텍스트 ${String(info.len).padStart(5)}자 · ${scroll}${innerNote}`);
     if (process.env.DEBUG) console.log('     debug:', JSON.stringify({ url: info.url, ready: info.ready, bodyLen: info.bodyLen, hasMain: info.hasMain }));
     if (miss.length) console.log(`     빠진 문구: ${miss.join(', ')}`);
     for (const e of errors.slice(0, 3)) console.log(`     에러: ${e.split("\n").slice(0,2).join(" | ").slice(0, 240)}`);
+    if (process.env.SHOT) {
+      // CDP 스크린샷 — `--screenshot` 플래그와 달리 **로드가 끝난 뒤** 찍는다
+      const png = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+      if (png?.data) {
+        const file = `/tmp/shot-${page.path.replace(/\W/g, '_') || 'root'}.png`;
+        fs.writeFileSync(file, Buffer.from(png.data, 'base64'));
+        console.log(`     스크린샷: ${file}`);
+      }
+    }
     ws.close();
   }
   chrome.kill();
