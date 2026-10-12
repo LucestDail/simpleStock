@@ -36,7 +36,12 @@
             ⚠️ `profitRateDerived` 는 증권사 값과 부호가 어긋날 때 우리가 계산한 값이다 —
                **원본을 먼저 쓰고**, 어긋나면 그 사실을 따로 말한다(10-01 결정).
           -->
-          <b class="mono-num" :class="dirClass(summary?.profit)">{{ signed(summary?.profit) }}</b>
+          <!--
+            🔴 **같은 실수를 두 번 했다** — `summary.profit` 은 **숫자가 아니라 객체**
+               (`{ krw, usd, converted }`)다. 반면 **보유 행의 `h.profit` 은 숫자**다.
+               같은 이름이 층에 따라 다른 모양이라 더 잘 틀린다 ⇒ 둘 다 실물로 확인하고 쓴다.
+          -->
+          <b class="mono-num" :class="dirClass(summary?.profit?.krw)">{{ money(summary?.profit?.krw) }}</b>
           <em class="mut mono-num">{{ pctText(summary?.profitRate) }}</em>
         </div>
         <div class="kcard">
@@ -248,7 +253,12 @@ function gapText(symbol) {
 
 const fmt = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 });
 function num(v) { return Number.isFinite(Number(v)) ? fmt.format(Number(v)) : '—'; }
-function money(v) { return Number.isFinite(Number(v)) ? `₩${fmt.format(Math.round(Number(v)))}` : '—'; }
+function money(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  // 🔴 손익에도 쓰므로 **부호를 유지**한다(음수를 ₩-639,230 이 아니라 -₩639,230 으로)
+  return `${n < 0 ? '-' : ''}₩${fmt.format(Math.abs(Math.round(n)))}`;
+}
 function signed(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return '—';
