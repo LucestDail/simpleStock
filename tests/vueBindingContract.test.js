@@ -348,6 +348,64 @@ test('③-c 호출하는데 선언이 없는 함수 (loadStatus 류)', () => {
   assert.deepEqual(bad, []);
 });
 
+/**
+ * ③-d **서버가 문자열로 주는 필드를 `v-for` 로 돌지 않는다.**
+ *
+ * 🔴 `SymbolView` 가 `v-for="t in rating.strengths"` 를 썼는데 서버 스키마는
+ *    `strengths: { type: 'string' }` 이다 ⇒ **글자 하나하나가 항목**이 됐다
+ *    (`+ 단` `+ 기` `+ 적` …). `(문자열).length > 0` 이라 `v-if` 도 통과해 아무도 못 막았다.
+ *    2026-09-21 의 *"모델이 array 필드를 문자열로 줬다"* 와 **같은 가족의 반대 방향**이다.
+ *
+ * 판정 = `server/` 의 JSON 스키마에서 `type: 'string'` 인 필드 이름을 모아 두고,
+ *        템플릿의 `v-for="… in <무엇>"` 의 **마지막 속성 이름**이 거기 들어가면 위반.
+ * ⚠️ 정규화를 거친 computed(`strengthList`)는 이름이 다르므로 **자동으로 통과**한다 —
+ *    고치면 자가 꺼지는 것이 아니라, **고친 모양만 통과**한다.
+ */
+/**
+ * ⚠️ **JSON Schema 키워드를 필드명으로 읽으면 안 된다.** 첫 판이 그랬다 —
+ *    `items: { type: 'string' }` 은 *"items 라는 문자열 필드"* 가 아니라
+ *    **"문자열의 배열"** 이라는 뜻이다. 그래서 멀쩡한 `v-for="h in items"` 셋이 위반으로 찍혔다.
+ * ⚠️ 같은 이름이 어딘가에서 `type: 'array'` 로도 선언돼 있으면 **모호하므로 건너뛴다**
+ *    (한쪽만 보고 단정하면 오탐이 나고, 오탐이 나면 다음 사람이 가드를 끈다).
+ */
+const SCHEMA_KEYWORDS = new Set([
+  'items', 'additionalProperties', 'contains', 'propertyNames',
+  'properties', 'patternProperties', 'not', 'if', 'then', 'else',
+]);
+
+function stringSchemaFields() {
+  const str = new Set();
+  const arr = new Set();
+  const dir = path.join(__dirname, '..', 'server');
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith('.js')) continue;
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    for (const m of src.matchAll(/([A-Za-z_$][\w$]*)\s*:\s*\{\s*type:\s*'string'/g)) str.add(m[1]);
+    for (const m of src.matchAll(/([A-Za-z_$][\w$]*)\s*:\s*\{\s*type:\s*'array'/g)) arr.add(m[1]);
+  }
+  for (const k of SCHEMA_KEYWORDS) str.delete(k);
+  for (const k of arr) str.delete(k);
+  return str;
+}
+
+test("③-d 문자열 필드를 v-for 로 돌지 않는다 (strengths 류)", () => {
+  const stringFields = stringSchemaFields();
+  // ★ 대상이 0건이면 "위반 없음" 이 아니라 "안 쟀다"
+  assert.ok(stringFields.size >= 5, `서버 스키마에서 문자열 필드를 ${stringFields.size}개만 찾았다 — 탐지가 빠졌다`);
+  const bad = [];
+  for (const f of FILES) {
+    const src = fs.readFileSync(f, 'utf8');
+    const tpl = src.slice(src.indexOf('<template>'), src.lastIndexOf('</template>'));
+    for (const m of tpl.matchAll(/v-for="[^"]*\bin\s+([A-Za-z_$][\w$.?()]*)/g)) {
+      const last = m[1].replace(/\?\.|\(\)/g, '.').split('.').filter(Boolean).pop();
+      if (last && stringFields.has(last)) {
+        bad.push(`${path.relative(SRC, f)}: v-for 가 \`${m[1]}\` — 서버가 **문자열**로 주는 필드다`);
+      }
+    }
+  }
+  assert.deepEqual(bad, []);
+});
+
 test('④ 자기검증 — 바인딩을 지우면 실제로 잡는다', () => {
   // 가드가 **무엇을 잡는지** 모르면 초록불은 아무 뜻이 없다(이 저장소의 변이 검증 규율)
   const tpl = '<template><p>{{ money(x) }}</p></template>';

@@ -57,12 +57,19 @@
           <b class="mono-num">{{ rating.total }}</b><span class="mut"> / {{ rating.maxTotal || 100 }}</span>
           <span v-if="rating.opinion" class="rate__op">{{ rating.opinion }}</span>
         </p>
-        <p v-else class="mut">기업 점수는 **해당 없음** — {{ rating.type }}는 100점 채점 대상이 아닙니다.</p>
-        <ul v-if="(rating.strengths || []).length" class="rate__list">
-          <li v-for="(t, i) in rating.strengths" :key="`s${i}`"><span class="up">+</span> {{ t }}</li>
+        <!-- ⚠️ 마크다운은 여기서 렌더되지 않는다 — `**…**` 는 별표 그대로 찍힌다(실화면에서 확인) -->
+        <p v-else class="mut">기업 점수 <b>해당 없음</b> — {{ rating.type }}는 100점 채점 대상이 아닙니다.</p>
+        <!--
+          🔴 **`strengths`·`weaknesses` 는 배열이 아니라 문자열이다**(서버 스키마 `type:'string'`).
+             종전엔 `v-for` 로 돌려서 **글자 하나하나가 항목**이 됐다(`+ 단` `+ 기` `+ 적` …).
+             `(문자열).length > 0` 이라 `v-if` 도 멀쩡히 통과해 **아무도 못 막았다.**
+          ⇒ 받는 자리에서 **모양을 정규화**(`asList`)하고, 화면은 그 결과만 돌린다.
+        -->
+        <ul v-if="strengthList.length" class="rate__list">
+          <li v-for="(t, i) in strengthList" :key="`s${i}`"><span class="up">+</span> {{ t }}</li>
         </ul>
-        <ul v-if="(rating.weaknesses || []).length" class="rate__list">
-          <li v-for="(t, i) in rating.weaknesses" :key="`w${i}`"><span class="down">−</span> {{ t }}</li>
+        <ul v-if="weaknessList.length" class="rate__list">
+          <li v-for="(t, i) in weaknessList" :key="`w${i}`"><span class="down">−</span> {{ t }}</li>
         </ul>
       </template>
     </section>
@@ -93,6 +100,28 @@ const viewAt = ref(null);
 const rating = ref(null);
 const ratingErr = ref('');
 const news = ref([]);
+
+/**
+ * 서술 필드를 **목록으로** 정규화한다.
+ *
+ * 서버(`stockRating`)는 `strengths`/`weaknesses` 를 **문자열**로 준다
+ * (스키마 `type:'string'` · 여러 개면 `' · '` 나 빈 줄로 이어 붙인다).
+ * 🔴 그런데 화면이 배열로 착각해 `v-for` 를 돌려 **글자가 항목이 됐다.**
+ *
+ * ⚠️ 서버가 **배열을 줄 때도 있다**(2026-09-21 실측 — 스키마는 지시일 뿐 강제가 아니다).
+ *    그래서 **둘 다 받는다.** 모양을 추측하지 않고, 받은 것을 보고 정한다.
+ * ⚠️ 쉼표로는 쪼개지 않는다 — 한 문장 안의 쉼표까지 끊어 버린다.
+ */
+function asList(v) {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
+  return String(v)
+    .split(/\n{2,}|\n|\s·\s|\s\u2022\s/)       // 빈 줄 · 줄바꿈 · 가운뎃점 · 불릿
+    .map((t) => t.replace(/^[-–—•*+]\s*/, '').trim()) // 앞에 붙은 불릿 기호 제거
+    .filter(Boolean);
+}
+const strengthList = computed(() => asList(rating.value?.strengths));
+const weaknessList = computed(() => asList(rating.value?.weaknesses));
 const newsNote = ref('');
 
 /** 활동 로그와 같은 압축 시각 — "10. 4. 오전 12:11" 장황체의 재발 방지 */

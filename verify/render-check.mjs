@@ -52,6 +52,14 @@ const PAGES = [
   { path: '/lab', name: '전략 연구소', must: ['전략'] },
   { path: '/activity', name: '활동 로그', must: ['활동'] },
   { path: '/settings', name: '설정', must: ['감시'] },
+  /**
+   * 🔴 **2026-10-12 — 종목 상세가 목록에 없어서 결함이 살아남았다.**
+   *    `v-for` 가 문자열을 돌아 **글자 하나하나가 항목**이 된 것을 사용자가 발견했다.
+   *    ⇒ 사람이 여는 화면은 **전부** 여기 있어야 한다. 빠진 화면은 검사되지 않는다.
+   * ⚠️ 보유 종목이 바뀌어도 도는 경로를 쓴다(`SOXL` 은 지금 보유 중이지만, 없어도
+   *    화면 자체는 그려진다 — 이 검사는 "평가가 있는가" 가 아니라 "그려지는가" 다).
+   */
+  { path: '/symbol/SOXL', name: '종목 상세', must: ['종목'] },
 ];
 
 /* ── 최소 WebSocket 클라이언트 (텍스트 프레임 전용) ───────────────── */
@@ -224,8 +232,33 @@ async function main() {
      *    재기동 직후 `/api/risk/metrics` 가 안 와서 카드 둘이 비었고, 그만큼 짧아져
      *    **"한 화면에 들어옴" 이 나왔다.** 빠진 내용 덕에 통과한 것은 통과가 아니다.
      */
+    /**
+     * 🔴 **글자 단위로 쪼개진 목록을 잡는다** — `v-for` 가 배열인 줄 알고 **문자열**을 돌면
+     *    `+ 단` `+ 기` `+ 적` 처럼 한 글자짜리 항목이 줄줄이 생긴다.
+     *    텍스트 길이·필수 문구·콘솔 에러 **어느 것도 이걸 못 잡는다**(예외가 아니라 정상 렌더다).
+     * ⚠️ 짧은 항목 자체는 정상일 수 있다(`O`·`+17`) ⇒ **한 글자 항목이 5개 이상 연달아**일 때만.
+     */
+    const split = await call('Runtime.evaluate', {
+      expression: `(() => {
+        var worst = 0;
+        var lists = document.querySelectorAll('main ul, main ol');
+        for (var i = 0; i < lists.length; i += 1) {
+          var run = 0; var best = 0;
+          var kids = lists[i].children;
+          for (var j = 0; j < kids.length; j += 1) {
+            var t = (kids[j].innerText || '').replace(/[^\\p{L}\\p{N}]/gu, '');
+            if (t.length === 1) { run += 1; if (run > best) best = run; } else { run = 0; }
+          }
+          if (best > worst) worst = best;
+        }
+        return worst;
+      })()`,
+      returnByValue: true,
+    });
+    const charSplit = Number(split.result.value) || 0;
+
     const loading = LOADING.test(text);
-    const ok = info.len > 100 && miss.length === 0 && errors.length === 0 && !loading;
+    const ok = info.len > 100 && miss.length === 0 && errors.length === 0 && !loading && charSplit < 5;
     if (loading) unmeasured += 1; // 판정 불가 — 종료코드 2
     if (!ok) bad += 1;
     /**
@@ -239,6 +272,7 @@ async function main() {
     const innerNote = info.over.inner.length ? ` · 카드내 스크롤: ${info.over.inner.join(', ')}` : '';
     console.log(`${ok ? '✅' : '🔴'} ${page.name.padEnd(8)} 텍스트 ${String(info.len).padStart(5)}자 · ${scroll}${innerNote}`);
     if (process.env.DEBUG) console.log('     debug:', JSON.stringify({ url: info.url, ready: info.ready, bodyLen: info.bodyLen, hasMain: info.hasMain }));
+    if (charSplit >= 5) console.log(`     🔤 한 글자 항목이 ${charSplit}개 연달아 — **문자열을 v-for 로 돌고 있다**`);
     if (loading) console.log('     ⏳ 상한(13초)까지 로딩이 안 끝났다 — **판정 불가**(깨진 것이 아니다)');
     if (miss.length) console.log(`     빠진 문구: ${miss.join(', ')}`);
     for (const e of errors.slice(0, 3)) console.log(`     에러: ${e.split("\n").slice(0,2).join(" | ").slice(0, 240)}`);
