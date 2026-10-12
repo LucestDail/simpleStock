@@ -1127,6 +1127,16 @@ function capacityDetail(byCurrency) {
  * ⚠️ 매수 여력 판정은 **매수에만** 걸린다 — 현금이 0 이어도 **매도 제안은 가능하다**.
  *    그래서 문구를 "제안 불가" 가 아니라 "**신규 매수** 불가" 로 적는다.
  */
+/**
+ * ⛔ **2026-10-13 — 라이브 호출부가 0이 됐다(죽은 코드).**
+ *
+ * 10-12 에 주문 집행을 걷어내며 라이브가 제안을 **묻지 않게** 되어, *"왜 0건인가"* 라는
+ * 질문 자체가 사라졌다. 쓸모 있는 절반(현금 사실)은 `describeCashCapacity` 로 옮겼다.
+ *
+ * 🔴 **지우지 않고 표시만 한다** — 단위 테스트 2건이 아직 이 함수를 직접 재고 있고,
+ *    지우는 것은 별도 정리 작업이다(사용자 판단). **다만 다음 사람이 이 문구를 "지금
+ *    사용자가 보는 것" 으로 오해하면 안 되므로** 여기 못박는다: **아무도 안 부른다.**
+ */
 function describeNoProposal(reason, capacity, { proposed = 0, rejected = [] } = {}) {
   const detail = capacityDetail(capacity?.byCurrency);
   switch (reason) {
@@ -1143,6 +1153,34 @@ function describeNoProposal(reason, capacity, { proposed = 0, rejected = [] } = 
     default:
       return `현금 여력은 있으나 (${detail}) 모델이 제안을 내지 않았습니다 — 판단이 "지금은 아니다" 였습니다.`;
   }
+}
+
+/**
+ * 💵 **매수 여력을 사실로만 말한다** (2026-10-13 신설).
+ *
+ * `describeNoProposal` 은 *"제안이 0건인 이유"* 를 설명한다 — 그 전제가 2026-10-12 에 무너졌다
+ * (주문 집행을 걷어내며 `proposals` 를 **백테스트 전용 스키마**로 옮겼다. 라이브는 모델에게
+ * 제안을 **묻지 않는다**). 그래서 *"현금이 없어 제안을 못 했다"* 는 **거짓**이 됐다 —
+ * 현금과 무관하게 제안은 만들어지지 않는다.
+ *
+ * 🔴 그런데 **버릴 수 없는 절반**이 있다: *"버퍼를 빼면 1주도 살 수 없다"* 는
+ *    **직접 거래하는 사람에게 그대로 쓸모 있는 사실**이다. 전제만 걷고 사실은 남긴다.
+ * ⚠️ 매수 여력은 **매수에만** 걸린다 — 현금이 0 이어도 매도는 할 수 있다.
+ *    그래서 "거래 불가" 가 아니라 "**신규 매수** 불가" 로 적는다.
+ * ⚠️ 여력이 **있을 때는 아무 말도 하지 않는다** — 매 회차 "현금 넉넉합니다" 가 붙으면
+ *    소음이 되고, 소음이 되면 침묵과 같아진다.
+ */
+function describeCashCapacity(capacity) {
+  const detail = capacityDetail(capacity?.byCurrency);
+  const state = String(capacity?.state || '');
+  if (state === 'blocked') {
+    return `💵 신규 매수 여력 없음 — 버퍼(평가액의 ${capacity.floorPct}%)를 빼면 남는 돈이 없습니다`
+      + ` (${detail}). 가장 싼 보유 종목 1주도 살 수 없는 상태입니다.`;
+  }
+  if (state === 'unknown') {
+    return `💵 현금을 확인하지 못했습니다 (${detail}) — 매수 여력을 판단할 근거가 없습니다.`;
+  }
+  return '';
 }
 
 /**
@@ -2346,7 +2384,6 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    * ⚠️ 재요청이 더 나쁘게 나올 수도 있으므로 **판단이 더 많이 잡힌 쪽을** 쓴다(회귀 방지).
    */
   /** stance 는 BUY/SELL 인데 제안이 없는 종목 — 폰 본문에 사실대로 적는다 */
-  let stanceGap = [];
   const heldSymbols = items.map((h) => String(h.symbol).toUpperCase());
   /**
    * 🔴 **개수로 판정하면 종목이 통째로 바뀌어도 통과한다** (2026-10-02 라이브 dryRun).
@@ -2840,29 +2877,25 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
             : 'model_proposed_none';
 
   /**
-   * 🔴 **판단과 제안이 끊겼다** (2026-10-02 실측).
+   * ⛔ **2026-10-13 — `analyst.stance_without_proposal` 경고를 들어냈다.**
    *
-   * 같은 계좌·같은 국면에서 3회 돌리니 한 회차가 `stances ["SELL","SELL","SELL"]` 인데
-   * **`proposals` 는 0건**이었다. 모델이 *"팔아야 한다"* 고 결론 내리고도 수량·가격을
-   * 못 정해 배열을 비워 둔 것이다. 사용자 화면에는 **"매매 제안 0건"** 만 남고,
-   * *"모델이 지금은 아니라고 했다"* 와 **구분이 안 된다** — 침묵이 두 상태를 같게 만드는
-   * 그 자리다(이 저장소가 09-28 하루 전체를 쓴 축).
-   *
-   * ⚠️ **코드가 제안을 지어내지 않는다.** 수량·가격은 주문의 핵심이고, 모델이 못 정한 것을
-   *    코드가 채우면 그건 판단이 아니라 날조다. 대신 **사실을 말한다.**
+   * 2026-10-02 에 만들 때는 참이었다: 모델이 SELL 이라 해놓고 수량·가격을 못 정해
+   * `proposals` 를 비워 두는 회차가 실제로 있었다. 그런데 **2026-10-12 에 내가 그 칸을
+   * 라이브 스키마에서 들어냈다** — 이제 BUY/SELL 판단이 하나라도 있으면 이 경고가
+   * **구조적으로 매번** 뜬다(간밤 4회 + 오늘 프리장 1회 = **5/5 재현**).
+   * 항상 짖는 경고는 **옆의 진짜 경고를 묻는다** — 이 파일이 다른 자리에 적어 둔
+   * *"소음이 되면 침묵과 같아진다"* 그대로다.
+   * ⚠️ 백테스트(`decideOnContext`)는 `trades:true` 로 제안 칸을 열지만 **폰으로 안 보낸다** —
+   *    이 블록은 라이브 전용(`analyze`)이라 되살릴 자리가 아니다.
    */
-  {
-    const acted = new Set((report.proposals || []).map((p) => String(p.symbol || '').toUpperCase()));
-    const gap = (report.positions || [])
-      .filter((p) => !p._codeFilled && /^(BUY|SELL)$/.test(String(p.stance || '').toUpperCase()))
-      .map((p) => ({ symbol: String(p.symbol || '').toUpperCase(), stance: String(p.stance).toUpperCase() }))
-      .filter((p) => !acted.has(p.symbol));
-    if (gap.length) {
-      logWarn('analyst.stance_without_proposal', { items: gap, proposals: (report.proposals || []).length });
-      stanceGap = gap;
-    }
-  }
-
+  /**
+   * ⚠️ **이름은 역사적이다** (2026-10-13). 2026-10-12 에 라이브에서 제안을 걷어냈으므로
+   *    이 값은 더 이상 *"왜 제안이 0건인가"* 가 아니라 **매수 여력 판정**을 뜻한다.
+   *    🔴 그런데 이름을 **안 바꾼다** — 이 이벤트는 *"그 회차가 돌았는가"* 의 표식으로
+   *       런북(`MONITOR-2026-10-02.md`)과 테스트가 grep 하고 있다. 이름을 바꾸면 그 자들이
+   *       **조용히 0건을 보고**하게 된다(= 안 돈 것과 구분이 안 된다).
+   *    ⇒ 읽을 때 `reason` 을 **"제안이 없는 원인"으로 읽지 말 것.** 매수 여력 상태다.
+   */
   logInfo('analyst.no_proposal_reason', {
     reason: noProposalReason,
     dryRun,
@@ -3080,28 +3113,26 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
         symbols: missed, judged: [...judged], held: heldSymbols, partial: judged.size > 0,
       });
     }
-    // (2026-10-12~ 제안은 만들어지지 않는다 — 건수는 항상 0)
-    if (created.length) lines.push('', `🟡 매매 제안 ${created.length}건 — 승인 버튼이 곧 옵니다`);
     /**
-     * 🔴 **0건으로 끝난 회차는 "왜 0건인지" 를 사용자에게 말한다** (2026-10-01).
+     * 🔴 **2026-10-13 — "매매 제안" 세 줄을 들어냈다. 전부 거짓이 돼 있었다.**
      *
-     * 지금까지 이 자리는 **침묵**이었다. 그래서 사용자 화면에서
-     *   · 현금이 없어 **구조적으로 제안이 불가능한 상태**(실측: USD 3.76 · 버퍼 2,351)와
-     *   · 모델이 보고 판단해서 **"지금은 아니다" 라고 한 정상 회차**가
-     * **똑같이 보였다.** 침묵이 정상과 고장을 같은 모양으로 만드는 그 자리다.
+     * ```
+     * 🟡 매매 제안 N건 — 승인 버튼이 곧 옵니다     ← 승인 버튼은 10-12 에 사라졌다
+     * 💤 매매 제안 0건 — {왜 0건인지}             ← 라이브는 제안을 **묻지 않는다**
+     * 🔴 판단은 났는데 제안이 없습니다 … 다시 돌려 주세요  ← 몇 번을 돌려도 같다
+     * ```
+     * 10-12 에 주문 집행을 걷어내며 `proposals` 를 **백테스트 전용 스키마**로 옮겼는데
+     * (`reportSchemaFor(…, { trades: true })` — 라이브 호출부 셋은 그 인자를 안 준다)
+     * **이 문구들을 안 고쳤다.** 바로 위에 *"제안은 만들어지지 않는다 — 건수는 항상 0"* 이라고
+     * 주석까지 달아 놓고 그 결론을 따라가지 않았다. 간밤 4회 + 오늘 프리장 1회 **모두 발송됐다.**
      *
-     * ⚠️ 코드가 보장하는 사실이므로 `proseLines`(LLM 서술·토스라이팅 정제 대상)가 아니라
-     *    **여기(`lines`)** 에 넣는다 — 정제 모델이 "잡초" 로 쳐내면 안 되는 문장이다.
+     * ★ *"코드를 고칠 때 그것을 설명하는 문장이 함께 거짓이 되지 않았는지 본다"*(2026-10-01)의 재현.
+     *   그때는 로그 한 줄이었고 이번엔 **사용자 폰**이었다.
+     *
+     * ⚠️ 대신 **현금 사실은 남긴다** — 직접 거래하는 사람에게 *"1주도 못 산다"* 는 그대로 쓸모 있다.
      */
-    else lines.push('', `💤 매매 제안 0건 — ${describeNoProposal(noProposalReason, capacity, { proposed: proposedCount, rejected })}`);
-    /**
-     * 🔴 **"팔라고 해놓고 제안이 없다" 를 사용자에게 말한다** — 안 적으면 "제안 0건" 이
-     *    *"모델이 지금은 아니라고 했다"* 로 읽힌다. 그건 사실이 아니다.
-     */
-    if (stanceGap.length) {
-      lines.push('', `🔴 판단은 났는데 제안이 없습니다 — ${stanceGap.map((x) => `${x.symbol} ${x.stance}`).join(' · ')}`
-        + ' (모델이 수량·가격을 정하지 못했습니다. 직접 정하시거나 다시 분석을 돌려 주세요.)');
-    }
+    const cashLine = describeCashCapacity(capacity);
+    if (cashLine) lines.push('', cashLine);
     /**
      * 🔴 **검색 품질 저하를 사용자가 보는 곳에도 코드로 적는다** (2026-09-28, pm1 지시).
      *    `web.degraded` 는 지금까지 **LLM 프롬프트에만**(1137행) 실렸다 — 모델이 그 귀띔을
@@ -3302,6 +3333,6 @@ module.exports = {
   analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport,
   computeTrade, decideOnContext, inverseGate, sideGate, feeGate, marketOfSymbol, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
-  assessBuyingCapacity, capacityDetail, capacityBand, describeNoProposal, watchMovesSection,
+  assessBuyingCapacity, capacityDetail, capacityBand, describeNoProposal, describeCashCapacity, watchMovesSection,
   TRADE_ARRAY_SCHEMA,
 };

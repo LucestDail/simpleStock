@@ -144,42 +144,46 @@ test('오탐 축: 종목 판단이 0건이면 근거 절을 만들지 않는다'
 });
 
 /**
- * 🔴 **판단과 제안이 끊긴 것을 사용자에게 말한다** — 2026-10-02 실측
+ * 🔴 **2026-10-13 — 이 테스트들은 "낡은 세계" 를 지키고 있었다. 계약을 뒤집는다.**
  *
- * 같은 계좌·같은 국면에서 3회 돌리니 한 회차가 `stances ["SELL","SELL","SELL"]` 인데
- * **`proposals` 는 0건**이었다. 모델이 *"팔아야 한다"* 고 결론 내리고도 수량·가격을
- * 못 정해 배열을 비워 둔 것이다.
- * 화면에는 **"매매 제안 0건"** 만 남아서 *"모델이 지금은 아니라고 했다"* 와 **구분이 안 됐다.**
+ * 원래(2026-10-02)는 참이었다: 모델이 SELL 이라 해놓고 수량·가격을 못 정해 `proposals` 를
+ * 비워 두는 회차가 있었고, 그걸 폰에 적는 것이 맞았다.
  *
- * ⚠️ 코드가 제안을 **지어내지 않는다** — 수량·가격은 주문의 핵심이고, 못 정한 것을
- *    코드가 채우면 판단이 아니라 날조다. 사실만 말한다.
+ * 그런데 **2026-10-12 에 주문 집행을 걷어내며 `proposals` 를 백테스트 전용 스키마로 옮겼다**
+ * (`reportSchemaFor(…, { trades: true })` — 라이브 호출부는 그 인자를 안 준다).
+ * ⇒ 라이브는 모델에게 제안을 **묻지 않는다.** 그러니
+ *   *"모델이 수량·가격을 정하지 못했습니다 … 다시 분석을 돌려 주세요"* 는 **거짓**이고,
+ *   몇 번을 다시 돌려도 결과는 같다.
+ *
+ * 🔴 **왜 이 테스트들이 못 잡았나** — `REPORT.proposals = [...]` 를 **목에 직접 주입**했다.
+ *    라이브 스키마엔 그 칸이 아예 없으니 **일어날 수 없는 상황**을 만들어 놓고 통과시킨 것이다.
+ *    ⇒ 이제 **라이브 계약 자체**를 단언한다: 스키마에 칸이 없고, 폰에 그 문구가 없다.
  */
-test('🔴 stance 는 SELL 인데 제안이 없으면 폰에 그 사실을 적는다', async () => {
+test('🔴 라이브 스키마에는 `proposals` 칸이 없다 (이 계약이 아래 두 테스트의 근거다)', () => {
+  const analyst = fresh();
+  const live = analyst._reportSchemaFor(['QLD', 'RAM']);
+  assert.ok(!('proposals' in (live.properties || {})), '라이브가 제안을 묻고 있다 — 아래 단언들의 전제가 깨졌다');
+  assert.ok(!(live.required || []).includes('proposals'));
+  // ★ 자의 판별력 — 백테스트 경로는 **열려 있어야** 한다(둘 다 닫히면 이 테스트는 공허하다)
+  const bt = analyst._reportSchemaFor([], { trades: true });
+  assert.ok('proposals' in (bt.properties || {}), '백테스트까지 닫혔다 — 시뮬레이션이 돌 수 없다');
+});
+
+test('🔴 SELL 판단이 있어도 폰에 "제안이 없다" 는 말을 하지 않는다 (라이브는 제안을 묻지 않는다)', async () => {
   REPORT.positions = [
     { symbol: 'QLD', stance: 'SELL', confidence: 'MEDIUM', rationale: '레버리지 축소', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' },
     { symbol: 'RAM', stance: 'HOLD', confidence: 'LOW', rationale: '보유', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' },
   ];
   REPORT.proposals = [];
-  try {
-    const analyst = fresh();
-    await analyst.analyze(DASH(), { useWebSearch: false });
-    await new Promise((r) => setTimeout(r, 60));
-    const b = body();
-    assert.match(b, /판단은 났는데 제안이 없습니다/, `🔴 "제안 0건" 과 구분이 안 된다: ${b.slice(0, 300)}`);
-    assert.match(b, /QLD SELL/, '어느 종목이 그런지 안 적혔다');
-    assert.ok(!/RAM SELL/.test(b), 'HOLD 종목까지 끌어왔다(오탐)');
-  } finally { REPORT.proposals = []; }
-});
-
-test('오탐 축: 제안이 실제로 있으면 그 말을 하지 않는다', async () => {
-  REPORT.positions = [{ symbol: 'QLD', stance: 'SELL', confidence: 'MEDIUM', rationale: 'x', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' }];
-  REPORT.proposals = [{ symbol: 'QLD', side: 'SELL', quantity: 5, price: 96.5, reason: '축소' }];
-  try {
-    const analyst = fresh();
-    await analyst.analyze(DASH(), { useWebSearch: false });
-    await new Promise((r) => setTimeout(r, 60));
-    assert.ok(!/판단은 났는데 제안이 없습니다/.test(body()), '제안이 있는데 없다고 했다');
-  } finally { REPORT.proposals = []; }
+  const analyst = fresh();
+  await analyst.analyze(DASH(), { useWebSearch: false });
+  await new Promise((r) => setTimeout(r, 60));
+  const b = body();
+  assert.ok(!/판단은 났는데 제안이 없습니다/.test(b), `🔴 거짓 문구가 되살아났다: ${b.slice(0, 300)}`);
+  assert.ok(!/다시 분석을 돌려 주세요/.test(b), '🔴 몇 번을 돌려도 같은데 다시 돌리라고 했다');
+  assert.ok(!/매매 제안 \d+건/.test(b), '🔴 "제안 N건" — 라이브에는 제안이라는 개념이 없다');
+  // ⚠️ 판단 자체는 **그대로 가야 한다** — 문구를 지운다고 내용까지 사라지면 안 된다
+  assert.match(b, /QLD/, '종목 판단이 통째로 사라졌다');
 });
 
 test('오탐 축: 전부 HOLD 면 아무 말도 안 한다', async () => {
