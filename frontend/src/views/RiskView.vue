@@ -306,8 +306,13 @@ async function loadAllocation(metricsBody) {
 }
 
 /**
- * 가장 큰 괴리 2개. 목표 밖 보유가 있으면 **한 자리를 그것에 준다** —
- * 정리 대상은 괴리 크기와 별개로 사용자가 알아야 한다(비중이 안 맞는 이유가 거기 있다).
+ * 가장 큰 괴리 2개 + 목표 밖 보유 1개.
+ *
+ * 🔴🔴 **2026-10-12 — "정리 대상" 이라는 단정을 걷어냈다.** 사용자: *"SOXL 정리 대상 이거는 또 뭐고."*
+ *    목표 배분은 **사람이 정하는 값**이고 낡을 수 있다. 실제로 그랬다 — 목표는 QLD 30% 인데
+ *    사용자는 QLD 를 다 팔고 SOXL·SOXX·UDOW 로 갔다. 그 상태에서 *"SOXL 정리 대상"* 은
+ *    **낡은 목표를 근거로 멀쩡한 보유를 팔라고 하는 것**이다.
+ *    ⇒ 화면은 **사실만** 말한다: *"목표 밖"*. 정리할지는 사람이 정한다.
  * 🔴 부족/초과 판정은 서버의 `direction` 만 본다(gapPct 부호 규약은 서버 것이다).
  */
 const allocGaps = computed(() => {
@@ -328,7 +333,10 @@ const allocGaps = computed(() => {
     const label = b.name || b.key;
     out.push({ key: `b-${b.key}`, text: `${label} ${n}${b.direction === 'add' ? '부족' : '초과'}` });
   }
-  if (un.length) out.push({ key: `u-${un[0].symbol}`, text: `${un[0].symbol} 정리 대상` });
+  if (un.length) {
+    const more = un.length > 1 ? ` 외 ${un.length - 1}` : '';
+    out.push({ key: `u-${un[0].symbol}`, text: `${un[0].symbol}${more} 목표 밖 보유` });
+  }
   return out;
 });
 
@@ -524,10 +532,12 @@ onMounted(async () => {
 /* ── 게이지 ── */
 /* 우열 카드 안에서는 세로 스택 — 카드가 도넛 카드와 같은 높이(stretch)가 되므로
    게이지 3개를 **세로로 고르게 분배**해 아래가 비지 않게 한다(2026-10-04 "우측이 좀 비거나") */
-/* 🔴 2026-10-12 사용자: "한도 대비 현재 위치 width 너무 길어. 폰트도 줄이고 크기도 줄여서
-   한 화면에 좀 들어오게." ⇒ 세로 1열 full-width → **2열 그리드** + 활자·막대 축소.
-   세로를 반으로 줄여 아래 패널이 같은 화면에 들어온다. */
-.gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--space-sm) var(--space-base); align-content: start; flex: 1; min-height: 0; }
+/* 🔴 2026-10-12 — **내 첫 수정이 더 나빴다.** `grid + align-content: start` 로 바꿨더니
+   게이지 셋이 위로 몰리고 **카드 아래 2/3 가 비었다**(사용자: "개기냐?").
+   원래 문제는 *열 수* 가 아니라 **막대가 카드 전폭이라 길어 보이는 것**이었다.
+   ⇒ 세로 1열로 되돌리되 **막대 폭을 제한**하고 활자를 줄인다. 카드 높이는 균등 분배. */
+.gauges { display: flex; flex-direction: column; justify-content: space-evenly; gap: var(--space-sm); flex: 1; min-height: 0; }
+.gauge__bar { max-width: 420px; }
 .gauge { min-width: 0; }
 .gauge__head { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--text-xs); margin-bottom: 3px; gap: 6px; }
 .gauge__head span { color: var(--color-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

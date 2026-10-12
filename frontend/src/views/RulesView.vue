@@ -68,9 +68,10 @@
         </p>
         <p v-for="b in notedBuckets" :key="`note-${b.key}`" class="mut bnote" :title="b.noteText"><b>{{ b.name || b.key }}</b> — {{ b.noteText }}</p>
 
-        <!-- 🔴 목표에 없는 보유 = 정리 대상. 숨기면 "왜 비중이 안 맞지" 를 사용자가 혼자 찾는다 -->
+        <!-- 🔴 목표에 없는 보유 = **목표 밖**(정리 대상이 아니다 — 2026-10-12 사용자 지적).
+             숨기면 "왜 비중이 안 맞지" 를 사용자가 혼자 찾고, 단정하면 낡은 목표로 멀쩡한 보유를 팔게 한다 -->
         <p v-if="unclassified.length" class="unclf">
-          <span class="unclf__tag">목표 밖 보유 — 정리 대상</span>
+          <span class="unclf__tag">목표 밖 보유 — 목표에 넣거나 비중을 조정하세요</span>
           <span v-for="u in unclassified" :key="u.symbol" class="mono-num unclf__item">
             {{ u.symbol }} {{ pctText(u.currentPct) }}
           </span>

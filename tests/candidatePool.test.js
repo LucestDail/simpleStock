@@ -80,7 +80,13 @@ test('후보 풀 = 목표 배분 — 신호용(TLT·UUP·VIXY·SPY·HYG)은 후�
     assert.ok(!pool.includes(sig), `${sig} 가 후보 풀에 있다 — 신호용인데 매수 대상이 된다`);
   }
   // 목표 배분 심볼은 전부 들어 있다(슬롯의 primary·momentum 포함)
-  for (const want of ['QQQM', 'TQQQ', 'QLD', 'O', 'SCHD', 'VNQ']) {
+  /**
+   * 🔴 2026-10-12 — 목표 배분이 **반도체 중심으로 재구성**되면서 목록을 갱신했다
+   *    (QLD → SOXX·SOXL·DIA·UDOW 추가). 사용자가 QLD 를 전량 매도하고 옮겨 갔다.
+   *    ⚠️ **축은 그대로다**: 목표에 있는 것은 살 수 있어야 하고, 신호용은 후보가 아니다.
+   *    ⚠️ 목표 파일을 바꾸면 **이 목록도 함께** 바꾼다 — 안 그러면 자가 옛 전략을 고정한다.
+   */
+  for (const want of ['SOXX', 'SOXL', 'QQQM', 'TQQQ', 'DIA', 'UDOW', 'O', 'SCHD', 'VNQ']) {
     assert.ok(pool.includes(want), `${want} 가 후보 풀에 없다 — 목표인데 못 산다`);
   }
   // 🔴 QQQ 는 목표 밖 — 팔아도 후보로 돌아오지 않는다(사용자가 "털어야 해" 라고 한 종목)

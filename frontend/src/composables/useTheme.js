@@ -1,11 +1,16 @@
 import { ref, watch } from 'vue';
 
 /**
- * 테마 (2026-10-02 — 와이어프레임 수용)
+ * 테마
  *
- * 와이어프레임은 **밝은 바탕에 흰 카드**이고 상단 우측에 **테마 토글(☀)** 이 있다.
- * 종전 화면은 **다크 고정**이었다 — 사용자: *"와이어프레임 디자인이 하나도 반영 안된거
- * 같은데?"* 맞는 지적이었고, 그 중 가장 큰 것이 이것이다.
+ * 🔴 **2026-10-12 — 기본이 다시 다크다.** 사용자가 *"와이어프레임처럼 다크로"* 를 골랐다.
+ *    10-12 설계도(`docs/wireframe-2026-10-12.html`)와 제품 디자인 토큰이 같은 말을 한다 —
+ *    *"오래 켜 두고 보는 화면이므로 바탕은 차분한 딥 슬레이트, 전압은 강조 하나에만."*
+ *    (10-02 에 와이어프레임을 라이트로 그려 기본을 light 로 바꿨던 것을 되돌린다.)
+ *
+ * ⚠️ **저장 키를 올렸다**(`.v2`). 안 올리면 이미 light 를 저장한 브라우저가 **그대로 라이트**로
+ *    떠서, 사용자는 *"바꿨다는데 안 바뀌었다"* 를 본다. 사람의 선택은 여전히 이긴다 —
+ *    **이번 전환 한 번만** 기본값을 다시 적용하는 것이다.
  *
  * ⚠️ **사람이 고른 것이 시스템 설정을 이긴다.** 저장된 값이 있으면 그걸 쓰고,
  *    없을 때만 와이어프레임 기본(light)을 쓴다 — 매번 시스템을 따르면
@@ -13,7 +18,7 @@ import { ref, watch } from 'vue';
  * ⚠️ `document.documentElement` 에 **속성으로** 건다 — 토큰이 `:root[data-theme='light']`
  *    로 덮이므로 컴포넌트 CSS 는 **한 줄도 안 바뀐다**(두 테마가 갈라지지 않는다).
  */
-const KEY = 'simplestock.theme';
+const KEY = 'simplestock.theme.v2';
 const VALID = new Set(['light', 'dark']);
 
 function initial() {
@@ -21,8 +26,8 @@ function initial() {
     const saved = localStorage.getItem(KEY);
     if (VALID.has(saved)) return saved;
   } catch { /* 사생활 모드 등 — 저장을 못 해도 화면은 산다 */ }
-  // 🔴 와이어프레임 기본은 **light** 다(종전 다크 고정에서 바뀐 지점)
-  return 'light';
+  // 🔴 기본 = **dark**(2026-10-12 사용자 선택 · 제품 토큰의 원래 정체성)
+  return 'dark';
 }
 
 const theme = ref(initial());

@@ -23,6 +23,11 @@ const LEVERAGED_ALLOWED = new Set([
   //   Bull 3X = **Russell 1000 금융 서비스 지수** 3배(단일종목 아님) ⇒ 허용 대상.
   //   ★ 이 가드가 내가 검증 없이 추가하려던 것을 잡았다(설계대로 작동).
   'FAS',
+  // UDOW 추가 2026-10-12 — 사용자가 실제로 보유 중이고 목표 배분의 `index_aggressive` 슬롯에
+  //   들어간다. 검증: ProShares UltraPro **Dow30**(지수) 3배 — 단일종목 아님 ⇒ 허용 대상.
+  //   ⚠️ 목표 파일에만 적고 카탈로그에 안 넣었더니 `target.symbol_not_in_catalog` 로
+  //      **조용히 버려졌다**(경고가 잡았다) — 목표·카탈로그는 함께 고쳐야 한다.
+  'UDOW',
   // 상품·금리·변동성
   'NUGT', 'GDXU', 'TMF', 'TYD', 'UCO', 'BITU', 'UVXY',
   // 인버스(지수·섹터·금리)

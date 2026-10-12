@@ -64,9 +64,15 @@ test('실제 config/target-allocation.json 은 합 100 으로 통과한다', () 
   const t = ta.load({ catalog: CATALOG });
   assert.ok(t, '정본 목표 파일이 load 에서 null 이 됐다');
   assert.equal(t.sumPct, 100);
-  assert.equal(t.buckets.length, 4);
+  /**
+   * 🔴 2026-10-12 — 목표 배분을 **현재 포트폴리오 기준으로 재구성**했다(사용자 지시).
+   *    종전 4버킷(방어·기반슬롯·QLD·현금) → **6버킷**(반도체 코어/공격 · 지수 기반/공격 · 방어 · 현금).
+   *    ⚠️ 키 목록을 여기 적어 두는 이유: 목표 파일을 고치면 **이 자가 먼저 깨져서**
+   *       "후보 풀·프롬프트도 같이 봐야 한다" 를 알려 준다(실제로 이번에 그랬다).
+   */
+  assert.equal(t.buckets.length, 6);
   assert.deepEqual(t.buckets.map((b) => b.key),
-    ['defensive_income', 'base_slot', 'core_aggressive', 'cash']);
+    ['semi_core', 'semi_aggressive', 'index_base', 'index_aggressive', 'defensive_income', 'cash']);
 });
 
 test('합이 90 이면 null + warn — 깨진 목표로 괴리를 계산하지 않는다', () => {
@@ -145,39 +151,13 @@ test('목표 파일을 못 읽으면 null + warn', () => {
 
 // ────────────────── ③ compare — 라이브 모양 괴리 ──────────────────
 
-test('compare 가 라이브 모양(O 4 · QLD 50 · RAM 200 · 현금 8045)의 괴리를 낸다', () => {
-  const cmp = ta.compare(LIVE_ITEMS, LIVE_SUMMARY, CATALOG);
-  assert.ok(cmp, 'compare 가 null 을 냈다');
-
-  // 분모 = 주식 7986.92 + 현금 8045 = 16031.92
-  assert.equal(Math.round(cmp.totalValue * 100) / 100, 16031.92);
-
-  const by = Object.fromEntries(cmp.buckets.map((b) => [b.key, b]));
-
-  // QLD 4997 / 16031.92 = 31.2% vs 목표 30 → 괴리 +1.2 → 밴드(±3) 안이라 ok
-  assert.equal(by.core_aggressive.currentPct, 31.2);
-  assert.equal(by.core_aggressive.gapPct, 1.2);
-  assert.equal(by.core_aggressive.direction, 'ok');
-
-  // QQQM·TQQQ 보유 0 → 20%p 부족 → add
-  assert.equal(by.base_slot.currentPct, 0);
-  assert.equal(by.base_slot.gapPct, -20);
-  assert.equal(by.base_slot.direction, 'add');
-  assert.deepEqual(by.base_slot.held, []);
-
-  // O 215.92 / 16031.92 = 1.3% vs 목표 25 → add
-  assert.equal(by.defensive_income.currentPct, 1.3);
-  assert.equal(by.defensive_income.direction, 'add');
-  assert.deepEqual(by.defensive_income.held, [{ symbol: 'O', pct: 1.3, leverage: 1 }]);
-
-  // 현금 8045 / 16031.92 = 50.2% vs 목표 25 → trim
-  assert.equal(by.cash.currentPct, 50.2);
-  assert.equal(by.cash.gapPct, 25.2);
-  assert.equal(by.cash.direction, 'trim');
-
-  // 🔴 RAM 은 목표 어느 칸에도 없다 → 미분류(= 정리 대상)
-  assert.deepEqual(cmp.unclassified, [{ symbol: 'RAM', pct: 17.3, category: 'semiconductor', leverage: 1 }]);
-});
+/**
+ * ⚠️ (2026-10-12 제거) *"compare 가 라이브 모양(O 4 · QLD 50 · RAM 200 · 현금 8045)의 괴리를 낸다"*
+ *    — 그 픽스처는 **옛 버킷 키**(core_aggressive=QLD)를 전제로 숫자를 박아 뒀다.
+ *    목표를 반도체 중심으로 재구성하면서 **그 모양 자체가 존재하지 않게 됐다.**
+ *    ⚠️ 분모 계산(주식+현금)과 비중 합산 축은 아래 다른 테스트들이 그대로 잠근다 —
+ *       이 하나를 지운다고 그 축이 비는 것은 아니다.
+ */
 
 test('🔴 분모 동치 — 괴리의 비중이 portfolioWeights 와 글자 그대로 같다', () => {
   const weights = require('../server/analystService').portfolioWeights(LIVE_ITEMS, LIVE_SUMMARY, CATALOG);
@@ -226,13 +206,17 @@ test('목표가 깨졌으면 compare 도 null — 깨진 목표로 괴리를 내
 test('promptSection 에 버킷별 목표·현재·괴리 숫자가 실린다', () => {
   const s = ta.promptSection(ta.compare(LIVE_ITEMS, LIVE_SUMMARY, CATALOG));
   assert.match(s, /장기 목표 배분/);
-  // 표에 네 버킷이 다 있고 목표·현재 숫자가 보인다
-  for (const name of ['방어·현금흐름', '기반 자산 슬롯', '코어 공격', '현금']) {
+  /**
+   * 🔴 2026-10-12 — 버킷 이름이 바뀌었다(목표 재구성). **축은 그대로**:
+   *    버킷마다 목표·현재·괴리가 프롬프트에 실려야 한다 — 괴리를 모르면 리밸런싱 판단이
+   *    원리상 안 나온다. ⚠️ 종전엔 `31.2%` 같은 **픽스처 숫자를 박아** 뒀는데, 목표가 바뀌면
+   *    그 숫자도 바뀌어 **자가 통째로 못 쓰게 된다** ⇒ 모양(`%p`)으로 잠근다.
+   */
+  for (const name of ['반도체 코어', '지수 기반 슬롯', '방어·현금흐름', '현금']) {
     assert.ok(s.includes(name), `${name} 버킷이 프롬프트에 없다`);
   }
-  assert.ok(s.includes('31.2%'), 'QLD 현재 비중(31.2%)이 안 실렸다 — 괴리를 모르면 리밸런싱 제안은 원리상 안 나온다');
-  assert.ok(s.includes('-20%p'), 'base_slot 괴리(-20%p)가 안 실렸다');
-  assert.ok(s.includes('+25.2%p'), '현금 초과(+25.2%p)가 안 실렸다');
+  assert.match(s, /\d+(\.\d+)?%p/, '괴리(%p)가 한 건도 안 실렸다');
+  assert.match(s, /목표/, '목표 숫자 열이 없다');
 });
 
 test('🔴 promptSection 에 base_slot 스위칭 규칙이 실린다 (안 적으면 둘 다 쌓는 제안이 나온다)', () => {
@@ -260,8 +244,10 @@ test('🔴 promptSection 에 미분류 보유가 정리 우선순위로 실린�
 });
 
 test('미분류가 없으면 그렇다고 적는다 — 빈칸으로 두지 않는다', () => {
+  // ⚠️ 2026-10-12 — 목표 재구성으로 QLD 가 버킷 밖이 됐다. **목표 안 종목으로** 바꾼다
+  //    (안 바꾸면 "미분류가 없는 경우" 를 만들지 못해 이 테스트가 재려던 것을 못 잰다)
   const onlyTargets = [
-    { symbol: 'QLD', quantity: 50, lastPrice: 99.94, marketValue: 4997, leverageFactor: 2 },
+    { symbol: 'SOXX', quantity: 10, lastPrice: 500, marketValue: 5000, leverageFactor: 1 },
     { symbol: 'QQQM', quantity: 10, lastPrice: 200, marketValue: 2000, leverageFactor: 1 },
   ];
   const s = ta.promptSection(ta.compare(onlyTargets, LIVE_SUMMARY, CATALOG));

@@ -288,7 +288,9 @@ onMounted(async () => {
 .stage__metrics + .stage__note { margin-top: auto; }
 
 /* ── 꺾은선 ── */
-.linechart { display: block; width: 100%; height: auto; }
+/* 🔴 2026-10-12 — `height: auto` 는 viewBox 비율을 그대로 따라가서 **전폭(1600px)에서
+   세로가 화면을 다 먹었다**(사용자 스크린샷). 높이를 고정하고 가로만 늘린다. */
+.linechart { display: block; width: 100%; height: 260px; }
 .linechart__grid { stroke: var(--color-hairline-soft); stroke-width: 1; }
 .linechart__line { stroke-width: 2; }
 .linechart__lbl { font-size: 10px; fill: var(--color-faint); }

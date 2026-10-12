@@ -30,10 +30,14 @@
         </div>
         <div class="kcard">
           <small>평가손익</small>
-          <b class="mono-num" :class="dirClass(summary?.profitLoss?.amount)">
-            {{ signed(summary?.profitLoss?.amount) }}
-          </b>
-          <em class="mut mono-num">{{ pctText(summary?.profitLoss?.rate) }}</em>
+          <!--
+            🔴 **필드명을 또 지어냈다**(2026-10-12). 실제 계약은 `summary.profit`·`profitRate` 인데
+               `profitLoss.amount` 로 써서 화면에 **"—"** 가 떴다. 없는 필드는 조용히 빈다.
+            ⚠️ `profitRateDerived` 는 증권사 값과 부호가 어긋날 때 우리가 계산한 값이다 —
+               **원본을 먼저 쓰고**, 어긋나면 그 사실을 따로 말한다(10-01 결정).
+          -->
+          <b class="mono-num" :class="dirClass(summary?.profit)">{{ signed(summary?.profit) }}</b>
+          <em class="mut mono-num">{{ pctText(summary?.profitRate) }}</em>
         </div>
         <div class="kcard">
           <small>보유 종목</small>
@@ -82,9 +86,7 @@
                   <td class="r mono-num">{{ num(h.quantity) }}</td>
                   <td class="r mono-num">{{ num(h.avgPrice) }}</td>
                   <td class="r mono-num">{{ num(h.lastPrice) }}</td>
-                  <td class="r mono-num" :class="dirClass(h.profitLoss?.amount ?? h.profitLossAmount)">
-                    {{ signed(h.profitLoss?.amount ?? h.profitLossAmount) }}
-                  </td>
+                  <td class="r mono-num" :class="dirClass(h.profit)">{{ signed(h.profit) }}</td>
                   <td class="r mono-num">{{ pctText(weightOf(h.symbol)) }}</td>
                   <td class="r mono-num" :class="dirClass(gapOf(h.symbol))">{{ gapText(h.symbol) }}</td>
                 </tr>
@@ -126,10 +128,21 @@
                  버킷 합이 31.5% 인데 미분류가 **68.5%** 였다 — 그걸 안 보여주니 괴리 숫자가
                  거짓말처럼 보인다. **목표 밖에 자산의 2/3 가 있다는 것이 진짜 정보다.**
             -->
+            <!--
+              🔴🔴 **목표가 낡았을 수 있다는 것을 먼저 말한다** (2026-10-12 사용자 지적).
+                 화면이 *"코어 공격(QLD) −30%p 부족"* 이라고 했는데 **사용자는 QLD 를 다 팔았다.**
+                 목표 배분은 **사람이 정하는 값**이라, 낡으면 괴리·부족 표시가 **전부 거짓**이 된다.
+                 ⇒ 자산의 절반 이상이 목표 밖이면 **괴리를 읽기 전에** 그 사실을 띄운다.
+            -->
+            <p v-if="targetStale" class="stalebox">
+              ⚠️ <b>목표 배분이 지금 포트폴리오와 많이 다릅니다</b>(자산의 {{ pctText(unclassifiedPct) }}가 목표 밖).
+              위 괴리 숫자는 <b>낡은 목표</b> 기준일 수 있습니다 — <RouterLink to="/settings">설정에서 목표 배분</RouterLink>을 갱신하세요.
+            </p>
             <div v-if="unclassified.length" class="unc">
               <div class="unc__head">
                 <b>목표 배분 밖 {{ pctText(unclassifiedPct) }}</b>
-                <small class="mut">아래 종목은 어느 버킷에도 없습니다 — 괴리 합이 안 맞는 이유입니다</small>
+                <small class="mut">아래 종목은 어느 버킷에도 없습니다 — 괴리 합이 안 맞는 이유입니다.
+                  <b>정리하라는 뜻이 아닙니다</b> — 목표에 아직 안 넣은 것일 수 있습니다.</small>
               </div>
               <ul class="unc__list">
                 <li v-for="u in unclassified" :key="u.symbol">
@@ -137,6 +150,32 @@
                 </li>
               </ul>
             </div>
+          </section>
+
+          <!--
+            📈 **자산 추이** — 와이어프레임 D-1 이 약속했는데 **만들지 않고 넘어갔다**(2026-10-12).
+               사용자: *"와이어프레임 기반으로 디자인 전면 개편한거 맞아?"* — 맞는 지적이다.
+            ⚠️ 두 점 미만이면 **그리지 않는다**(한 점짜리 선은 "변화 없음" 으로 읽힌다).
+          -->
+          <section class="card">
+            <h2>자산 추이 <small class="mut" v-if="perfRange">{{ perfRange }}</small></h2>
+            <p v-if="perfSeries.length < 2" class="mut">
+              {{ perfSeries.length ? '관측이 하루치뿐입니다 — 이틀째부터 그립니다.' : '자산 스냅샷이 아직 없습니다.' }}
+            </p>
+            <template v-else>
+              <svg class="spark" :viewBox="`0 0 ${SW} ${SH}`" preserveAspectRatio="none" role="img"
+                   aria-label="총자산 추이">
+                <path :d="perfArea" class="spark__area" />
+                <path :d="perfLine" class="spark__line" />
+              </svg>
+              <div class="spark__foot">
+                <span class="mut mono-num">{{ money(perfSeries[0].totalKrw) }}</span>
+                <span class="gap"></span>
+                <span class="mono-num" :class="dirClass(perfChangePct)">
+                  {{ signedPct(perfChangePct) }} · {{ money(perfSeries[perfSeries.length - 1].totalKrw) }}
+                </span>
+              </div>
+            </template>
           </section>
 
           <section v-if="income" class="card">
@@ -155,7 +194,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, RouterLink } from 'vue-router';
 import { apiFetch } from '../lib/apiClient';
 
 const router = useRouter();
@@ -185,6 +224,8 @@ const unclassified = computed(() => {
   return Array.isArray(u) ? u : [];
 });
 const unclassifiedPct = computed(() => unclassified.value.reduce((a, u) => a + (Number(u.pct) || 0), 0));
+/** 🔴 자산의 절반 이상이 목표 밖이면 목표가 낡은 것으로 본다 — 괴리를 읽기 전에 말해야 한다 */
+const targetStale = computed(() => targetRows.value.length > 0 && unclassifiedPct.value >= 50);
 
 const targetRows = computed(() => {
   const rows = data.value?.target?.buckets;
@@ -241,6 +282,47 @@ function goSymbol(symbol) {
   router.push({ name: 'symbol', params: { code: String(symbol).toUpperCase() } });
 }
 
+/* ── 📈 자산 추이 ─────────────────────────── */
+const perf = ref(null);
+const SW = 600; const SH = 90;
+const perfSeries = computed(() => {
+  const rows = perf.value?.series;
+  return Array.isArray(rows) ? rows.filter((r) => Number.isFinite(Number(r.totalKrw))) : [];
+});
+const perfRange = computed(() => {
+  const r = perfSeries.value;
+  return r.length >= 2 ? `${r[0].day} ~ ${r[r.length - 1].day}` : '';
+});
+const perfChangePct = computed(() => {
+  const r = perfSeries.value;
+  if (r.length < 2) return null;
+  const a = Number(r[0].totalKrw); const b = Number(r[r.length - 1].totalKrw);
+  return a > 0 ? Math.round(((b - a) / a) * 1000) / 10 : null;
+});
+function perfPoints() {
+  const r = perfSeries.value;
+  if (r.length < 2) return [];
+  const vals = r.map((x) => Number(x.totalKrw));
+  const hi = Math.max(...vals); const lo = Math.min(...vals);
+  const span = hi - lo || 1;
+  return vals.map((v, i) => [(i / (vals.length - 1)) * SW, SH - ((v - lo) / span) * SH]);
+}
+const perfLine = computed(() => {
+  const p = perfPoints();
+  return p.length ? p.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ') : '';
+});
+const perfArea = computed(() => {
+  const p = perfPoints();
+  return p.length ? `${perfLine.value} L${SW} ${SH} L0 ${SH} Z` : '';
+});
+
+async function loadPerf() {
+  try {
+    const r = await apiFetch('/api/performance');
+    perf.value = await r.json();
+  } catch { /* 추이는 곁가지 — 포트폴리오 본문은 그대로 보여준다 */ }
+}
+
 async function load() {
   busy.value = true;
   fatal.value = '';
@@ -259,7 +341,7 @@ async function load() {
   }
 }
 
-onMounted(load);
+onMounted(() => { load(); loadPerf(); });
 </script>
 
 <style scoped>
@@ -305,11 +387,18 @@ onMounted(load);
 .wts__v { color: var(--color-ink); }
 .wts__gap { min-width: 4rem; text-align: right; }
 
+.stalebox { margin: 0; padding: 8px 10px; border-radius: var(--rounded-md); border: 1px solid var(--color-danger); background: var(--color-danger-soft); color: var(--color-ink); font-size: var(--text-sm); }
+.stalebox a { color: var(--color-primary); }
 .unc { border: 1px solid var(--color-warn); background: var(--color-warn-soft); border-radius: var(--rounded-md); padding: var(--space-sm); display: flex; flex-direction: column; gap: 4px; }
 .unc__head { display: flex; flex-direction: column; gap: 1px; }
 .unc__head b { color: var(--color-warn); font-size: var(--text-sm); }
 .unc__list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--text-xs); }
 .unc__list li { display: flex; gap: 6px; color: var(--color-body); }
+
+.spark { width: 100%; height: 92px; display: block; }
+.spark__area { fill: var(--color-primary-soft); }
+.spark__line { fill: none; stroke: var(--color-primary); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.spark__foot { display: flex; align-items: baseline; font-size: var(--text-xs); }
 
 .dl { display: flex; gap: var(--space-lg, 24px); margin: 0; flex-wrap: wrap; }
 .dl dt { font-size: var(--text-2xs); color: var(--color-faint); }
