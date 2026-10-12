@@ -2516,8 +2516,22 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       });
     }
     if (drift.length) {
+      /**
+       * 🔴 **문장을 함께 싣는다** (2026-10-13). 검출기는 `sample`(앞 90자)을 **계산해 놓고
+       *    버리고 있었다** — 그래서 라이브에서 8건이 잡혔는데 **그것이 진짜 오염인지
+       *    과탐인지 판정할 근거가 없었다.**
+       *
+       * ⚠️ 이 판정은 쉬운 문제가 아니다: 전부 **같은 지수의 1배↔3배 짝**이었다
+       *    (DIA←UDOW 6 · SOXX←SOXL 2). 그런 짝은 **비교 서술이 자연스럽고**,
+       *    규칙은 *"자기 이름이 없고 남의 티커가 있으면 오염"* 이다 ⇒
+       *    *"UDOW와 중복이라 1배 노출로 유지"* 같은 **진짜 DIA 분석도 찍힌다.**
+       *    실제로 통과한 DIA 문장들도 "DIA" 를 한 번도 안 썼다(남의 티커를 안 불렀을 뿐).
+       * 🔴 과탐의 대가가 크다 — **멀쩡한 분석을 지우고** 사용자에게
+       *    *"모델이 다른 종목 이야기를 했습니다"* 라는 **거짓**을 보여준다.
+       * ⇒ 고치기 전에 **문장을 모은다.** 샘플은 모델이 쓴 종목 서술이라 비밀이 없다.
+       */
       logWarn('analyst.prose_subject_drift', {
-        hits: drift.map((d) => ({ symbol: d.symbol, others: d.others })),
+        hits: drift.map((d) => ({ symbol: d.symbol, others: d.others, sample: d.sample })),
       });
     }
 
@@ -2610,7 +2624,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
         const bad = new Set(remainDrift.map((d) => d.symbol));
         logWarn('analyst.prose_subject_drift_unfixed', {
           symbols: [...bad], action: 'cleared_with_notice',
-          hits: remainDrift.map((d) => ({ symbol: d.symbol, others: d.others })),
+          // ⚠️ 지우기 **직전의 문장**을 남긴다 — 안 남기면 그 판단이 옳았는지 영영 알 수 없다
+          hits: remainDrift.map((d) => ({ symbol: d.symbol, others: d.others, sample: d.sample })),
         });
         report = {
           ...report,
