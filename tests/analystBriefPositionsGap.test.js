@@ -31,7 +31,7 @@ let warnCalls = [];
 /** `tests/analystTelegram.test.js` 와 같은 대역 패턴 — LLM·테이프·토스·MCP·로거를 갈아끼운다 */
 function fresh() {
   for (const k of Object.keys(require.cache)) {
-    if (/analystService|aiService|telegramService|orderService|activityLog|mcpClient|tossClient|settingsService|logger/.test(k)) {
+    if (/analystService|aiService|telegramService|activityLog|mcpClient|tossClient|settingsService|logger/.test(k)) {
       delete require.cache[k];
     }
   }

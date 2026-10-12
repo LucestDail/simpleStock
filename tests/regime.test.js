@@ -102,7 +102,9 @@ test('🔴 인버스 게이트 — 동작으로 잰다(구조 grep 아님) + 실
   assert.equal(inverseGate({ symbol: 'QQQ', side: 'BUY' }, side).ok, true);
   // 🔴 게이트 한 벌: 실전 루프와 decideOnContext 둘 다 inverseGate( 를 부른다(두 벌이면 갈라진다)
   const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
-  assert.ok((src.match(/inverseGate\(/g) || []).length >= 3, 'inverseGate 호출이 2곳 미만 — 한쪽이 게이트를 안 탄다');
+  // 🔴 2026-10-12 — 3 → 2. 실전(analyze) 경로가 사라졌다(주문 집행 제거).
+  //    선언 1 + 백테스트 1 = 2. **백테스트는 여전히 이 게이트를 타야 한다.**
+  assert.ok((src.match(/inverseGate\(/g) || []).length >= 2, 'inverseGate 호출이 2곳 미만 — 백테스트가 게이트를 안 탄다');
 });
 
 test('🔴 VIX 사다리 — 코드가 제안을 만든다(백테스트 실증: LLM 은 공포에서 안 산다)', () => {

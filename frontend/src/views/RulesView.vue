@@ -13,103 +13,7 @@
 -->
 <template>
   <div class="page">
-    <header class="page__head"><h1>운용 규칙 설정</h1></header>
-
-    <!-- ①+④ 운용 상태 · 자율 수준 · AI 예산 — 한 카드 2열 (2026-10-05 글자 다이어트:
-         산문은 한 줄 이하, 긴 설명은 ⓘ 툴팁(title)으로. 기능·API 는 전부 그대로다) -->
-    <section class="card">
-      <h2>운용 상태</h2>
-      <div class="st">
-        <span class="st__state" :class="{ 'st__state--paused': control?.paused }">
-          {{ control?.paused ? `⏸ 정지됨 (${scopeLabel})` : '● 에이전트 운용 중' }}
-        </span>
-        <span class="st__chip">{{ autonomy }}</span>
-        <span v-if="control?.paused && control?.resumeAt" class="st__chip">
-          재개 예약 {{ fmtAt(control.resumeAt) }}
-        </span>
-        <span v-if="control?.paused && control?.at" class="st__chip">
-          정지 {{ fmtAt(control.at) }}{{ control?.reason ? ` · ${control.reason}` : '' }}
-        </span>
-        <span class="st__spacer"></span>
-        <!-- 오늘 손익 — /api/portfolio summary.dailyRate (숫자 %) -->
-        <span v-if="dailyPct != null" class="st__chip mono-num" :class="dailyPct < 0 ? 'down' : 'up'">
-          오늘 {{ dailyPct > 0 ? '+' : '' }}{{ dailyPct }}%
-        </span>
-        <span v-else class="st__chip">오늘 손익 —</span>
-        <button v-if="!control?.paused" class="btn btn--sm" @click="quickPause">일시정지</button>
-        <button v-if="!control?.paused" class="btn btn--sm btn--danger" @click="stopOpen = true">비상정지</button>
-        <button v-else class="btn btn--sm btn--primary" @click="resume">▶ 재개</button>
-      </div>
-      <p v-if="statusError" class="err">{{ statusError }}</p>
-      <p class="mut">재개는 사람만 — 정지·재개 기록은 활동 로그에 남습니다.</p>
-
-      <div class="ops">
-        <div class="ops__col">
-          <h3 class="subh">자율 수준
-            <span class="info" title="1단: 에이전트 발 제안 중 계좌 한도·가드 전부 통과한 것만 자동 승인·전송 — 한도에 걸리면 승인 대기로 남습니다. 2단: 집행은 1단과 동일, 2단 고유 동작(예약 자동 등록)은 아직 코드가 없습니다. 전환은 이 화면의 사람만 — 코드는 스스로 올리지 않습니다.">ⓘ</span>
-          </h3>
-          <div class="levels">
-            <button
-              v-for="(lv, i) in LEVELS" :key="i"
-              class="level" :class="{ 'level--on': autonomyLevel === i }"
-              @click="askLevel(i)"
-            >
-              <b>{{ i }}단 · {{ lv.name }}</b><small>{{ lv.desc }}</small>
-              <small v-if="autonomyLevel === i" class="level__now">현재 단계</small>
-            </button>
-          </div>
-          <p class="mut">전환은 사람만 · 1단부터 한도 통과 제안은 자동 전송 — 상세는 ⓘ.</p>
-        </div>
-
-        <!-- 📒 AI 운용 예산 (2026-10-05 — "비율 일임") -->
-        <div class="ops__col">
-          <h3 class="subh">AI 운용 예산
-            <span class="info" title="자동 매수는 이 예산 안에서만 나갑니다. 자동 매도는 AI 가 산 것만 — 기존 보유는 항상 승인 대기입니다. 예산을 비우면(미설정) 1단을 켜도 자동 매수가 0 입니다.">ⓘ</span>
-          </h3>
-          <p v-if="ledger && ledger.budgetUsd == null" class="mut">🔒 예산 미설정 = 자동 매수 0 — 맡기기 전엔 사지 않습니다.</p>
-          <div class="ledger__row">
-            <label>예산(USD)
-              <input v-model.number="budgetInput" type="number" min="0" step="50" class="xs" placeholder="예: 150" />
-            </label>
-            <button class="btn btn--sm btn--primary" :disabled="budgetBusy" @click="saveBudget">저장</button>
-            <button class="btn btn--sm" :disabled="budgetBusy || ledger?.budgetUsd == null" @click="clearBudget">예산 해제</button>
-            <span v-if="budgetMsg" class="mut">{{ budgetMsg }}</span>
-          </div>
-          <dl v-if="ledger" class="ledger__stats">
-<!-- 🔴 손실 이월(10-05): 유효 예산 = 예산 + min(0, 실현손익). 잃은 돈은 잔액으로 돌아오지
-                 않는다 — 예산과 달라졌을 때만 보여 "왜 잔액이 안 맞지" 를 화면이 먼저 답한다 -->
-            <div><dt>예산</dt><dd class="mono-num">{{ ledger.budgetUsd == null ? '미설정' : '$' + ledger.budgetUsd }}<template v-if="ledger.effectiveBudgetUsd != null && ledger.effectiveBudgetUsd !== ledger.budgetUsd"> <span class="mut">(손실 반영 ${{ ledger.effectiveBudgetUsd }})</span></template></dd></div>
-            <div><dt>투입 중</dt><dd class="mono-num">${{ ledger.openCostUsd }}</dd></div>
-            <div><dt>잔액</dt><dd class="mono-num">${{ ledger.availableUsd }}</dd></div>
-            <div><dt>실현손익</dt><dd class="mono-num" :class="ledger.realizedUsd >= 0 ? 'up' : 'down'">{{ ledger.realizedUsd >= 0 ? '+' : '' }}${{ ledger.realizedUsd }}</dd></div>
-          </dl>
-          <p v-if="ledger && Object.keys(ledger.positions || {}).length" class="mut">
-            AI 보유: <span v-for="(p, s2) in ledger.positions" :key="s2" class="mono-num">{{ s2 }} {{ p.qty }}주(평단 ${{ p.avgUsd }}) </span>
-          </p>
-        </div>
-      </div>
-
-      <!-- 전환 확인 모달 — 실거래 자동 발사가 걸린 조작이라 타이핑 확인 -->
-      <div v-if="levelAsk != null" class="stop__scrim" @click.self="levelAsk = null">
-        <section class="stop" role="dialog" aria-modal="true">
-          <h2>자율 수준 전환 — {{ autonomyLevel }}단 → {{ levelAsk }}단</h2>
-          <p class="stop__sub" v-if="levelAsk >= 1">
-            🔴 {{ levelAsk }}단부터는 에이전트 발 제안이 한도 통과 시 <b>자동으로 전송</b>됩니다.
-            지금 <b>실거래 모드</b>면 실제 주문이 나갑니다. 확인을 위해 "자율"을 입력하세요.
-          </p>
-          <p class="stop__sub" v-else>0단으로 내리면 모든 제안이 다시 승인 대기로 옵니다.</p>
-          <label v-if="levelAsk >= 1" class="stop__confirm">
-            <input v-model="levelWord" class="input" placeholder="자율" />
-          </label>
-          <footer class="stop__foot">
-            <small>전환 기록은 활동 로그에 남습니다</small>
-            <span class="stop__gap"></span>
-            <button class="btn" @click="levelAsk = null">취소</button>
-            <button class="btn btn--danger" :disabled="levelAsk >= 1 && levelWord !== '자율'" @click="setLevel">전환</button>
-          </footer>
-        </section>
-      </div>
-    </section>
+    <header class="page__head"><h1>감시 목록 · 운용 기준</h1></header>
 
     <!-- ⑧+⑨ 장기 목표 배분 · 수익 기반 적립 예산 (2026-10-06 — "방어주·수익으로 QLD·TQQQ 를 모아나간다")
          🔴 엔드포인트가 없으면(서버 작업 동시 진행) 카드를 **아예 그리지 않는다** —
@@ -411,30 +315,6 @@
       </div>
     </section>
 
-    <!-- 🛑 비상정지 모달 (D-4) — 구 AppShell(HEAD) 구현 이식: 범위 3단 + "정지" 타이핑 확인 -->
-    <div v-if="stopOpen" class="stop__scrim" @click.self="stopOpen = false">
-      <section class="stop" role="dialog" aria-modal="true">
-        <h2>에이전트 비상정지</h2>
-        <p class="stop__sub">정지 범위를 고르세요. 정지 중에는 어떤 자동 주문도 나가지 않습니다.</p>
-        <label class="stop__opt"><input v-model="stopScope" type="radio" value="halt_new" />
-          <span><b>신규 주문만 중단</b><small>보유 종목과 미체결 주문은 그대로 둡니다</small></span></label>
-        <label class="stop__opt"><input v-model="stopScope" type="radio" value="halt_cancel" />
-          <span><b>미체결 주문 취소 + 중단</b><small>대기 중인 제안을 모두 거절 처리합니다</small></span></label>
-        <label class="stop__opt stop__opt--danger"><input v-model="stopScope" type="radio" value="halt_flatten" />
-          <span><b>전 포지션 청산 요청 + 중단</b><small>⚠️ 청산 주문 자동 발사는 아직 막혀 있습니다 — 요청이 기록되고 사람이 집행합니다</small></span></label>
-        <label class="stop__resume"><input v-model="stopResume" type="checkbox" /> 다음 거래일에 자동 재개</label>
-        <!-- 🔴 타이핑 확인 — 실수 클릭으로 전 포지션이 멈추면 안 된다 (와이어프레임 그대로) -->
-        <label class="stop__confirm">확인을 위해 "정지"를 입력하세요
-          <input v-model="stopWord" class="input" placeholder="정지" />
-        </label>
-        <footer class="stop__foot">
-          <small>정지·재개 기록은 활동 로그에 남습니다</small>
-          <span class="stop__gap"></span>
-          <button class="btn" @click="stopOpen = false">취소</button>
-          <button class="btn btn--danger" :disabled="stopWord !== '정지'" @click="doStop">에이전트 정지</button>
-        </footer>
-      </section>
-    </div>
   </div>
 </template>
 
@@ -442,140 +322,17 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { apiFetch } from '../lib/apiClient';
 
-/* ── ①②③ 운용 상태 · 일시정지/재개 · 비상정지 (구 AppShell HEAD 에서 이식) ── */
-const control = ref(null);
-const autonomy = ref('승인 후 실행');
-const autonomyLevel = ref(0);
-const LEVELS = [
-  { name: '제안 + 승인', desc: '모든 제안이 승인 대기(HITL) — 기본' },
-  { name: '한도 내 자동', desc: '한도·가드 통과한 에이전트 제안만 자동 전송' },
-  { name: '안내 후 자율', desc: '집행은 1단과 동일 (고유 동작은 추후)' },
-];
-const ledger = ref(null);
-const budgetInput = ref(null);
-const budgetBusy = ref(false);
-const budgetMsg = ref('');
-async function saveBudget() {
-  budgetBusy.value = true; budgetMsg.value = '';
-  try {
-    const r = await apiFetch('/api/agent/budget', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usd: budgetInput.value }) });
-    const b = await r.json();
-    if (!r.ok || !b.ok) throw new Error(b.error || `저장 실패 (${r.status})`);
-    budgetMsg.value = '저장됨';
-    await loadStatus();
-  } catch (e) { budgetMsg.value = `실패: ${e.message}`; }
-  finally { budgetBusy.value = false; }
-}
-async function clearBudget() {
-  budgetBusy.value = true;
-  try {
-    await apiFetch('/api/agent/budget', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usd: null }) });
-    budgetInput.value = null;
-    await loadStatus();
-  } finally { budgetBusy.value = false; }
-}
-const levelAsk = ref(null);
-const levelWord = ref('');
-function askLevel(i) {
-  if (i === autonomyLevel.value) return;
-  levelAsk.value = i; levelWord.value = '';
-}
-async function setLevel() {
-  try {
-    const r = await apiFetch('/api/agent/autonomy', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ level: levelAsk.value }),
-    });
-    const b = await r.json();
-    if (!r.ok || !b.ok) throw new Error(b.error || `전환 실패 (${r.status})`);
-    levelAsk.value = null; levelWord.value = '';
-    await loadStatus();
-  } catch (e) { statusError.value = e.message; }
-}
-const dailyPct = ref(null);
-const dailyLossPct = ref(null);
-const statusError = ref('');
-
-const stopOpen = ref(false);
-const stopScope = ref('halt_new');
-const stopResume = ref(false);
-const stopWord = ref('');
-
-const scopeLabel = computed(() => ({
-  halt_new: '신규 중단', halt_cancel: '미체결 취소', halt_flatten: '청산 요청',
-}[control.value?.scope] || control.value?.scope || ''));
-
-/** 시각 표기는 MM-DD HH:mm 로 통일한다 */
-function fmtAt(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const p = (n) => String(n).padStart(2, '0');
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 /**
- * 🔴 상태만 다시 읽는다 — 설정 폼(form)은 건드리지 않는다.
- *    30초 폴링이 입력 중인 폼을 덮으면 "내가 적던 값이 사라졌다" 가 된다.
+ * 🔴 **2026-10-12 — 운용 제어가 통째로 사라졌다.**
+ *
+ * 종전 이 자리에는 운용 상태·자율 수준(0·1·2)·AI 예산·일시정지·비상정지가 있었다.
+ * 주문 집행을 걷어내면서 **정지시킬 집행이 없어졌다** — 남겨 두면 누르는 곳은 있는데
+ * 아무 일도 안 일어나는 버튼이 된다.
+ *
+ * 남은 것: 장기 목표 배분 · 적립(배당) · **진단 기준선**(한도) · 브리핑 설정 · 감시 목록.
+ * ⚠️ 한도는 이제 *막는 선* 이 아니라 **기준선**이다 — 넘으면 리스크 화면이 말한다.
  */
-async function loadStatus() {
-  try {
-    const r = await apiFetch('/api/agent/status');
-    const b = await r.json();
-    control.value = b.control || null;
-    autonomy.value = b.autonomy || '승인 후 실행';
-    autonomyLevel.value = Number(b.autonomyLevel) || 0;
-    ledger.value = b.ledger || null;
-    if (budgetInput.value == null && b.ledger?.budgetUsd != null) budgetInput.value = b.ledger.budgetUsd;
-    const lim = Number(b?.limits?.dailyLossPct);
-    dailyLossPct.value = Number.isFinite(lim) ? lim : null;
-    statusError.value = '';
-  } catch {
-    statusError.value = '운용 상태를 불러오지 못했습니다 — 아래 버튼은 동작하지 않을 수 있습니다.';
-  }
-  try {
-    const r = await apiFetch('/api/portfolio');
-    const b = await r.json();
-    const v = Number(b?.summary?.dailyRate);
-    dailyPct.value = Number.isFinite(v) ? v : null;
-    // 보유 종목은 가격 기준선 선택지로도 쓴다(같은 응답 재사용)
-    if (Array.isArray(b?.items)) { holdings.value = b.items; holdingsError.value = ''; }
-  } catch { dailyPct.value = null; }
-}
 
-async function quickPause() {
-  // 일시정지 = 신규 중단 + 사유 고정. 비상정지 모달과 달리 한 번에 — 가장 흔한 동작이라 가볍게.
-  try {
-    const r = await apiFetch('/api/agent/pause', { method: 'POST', body: JSON.stringify({ scope: 'halt_new', reason: '운용 규칙 화면 일시정지' }) });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `일시정지 실패 (${r.status})`);
-  } catch (e) { statusError.value = e.message; }
-  await loadStatus();
-}
-async function resume() {
-  try {
-    const r = await apiFetch('/api/agent/resume', { method: 'POST' });
-    if (!r.ok) throw new Error(`재개 실패 (${r.status})`);
-  } catch (e) { statusError.value = e.message; }
-  await loadStatus();
-}
-async function doStop() {
-  try {
-    const r = await apiFetch('/api/agent/pause', {
-      method: 'POST',
-      body: JSON.stringify({ scope: stopScope.value, reason: '비상정지', resumeNextDay: stopResume.value }),
-    });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `정지 실패 (${r.status})`);
-  } catch (e) { statusError.value = e.message; }
-  stopOpen.value = false; stopWord.value = '';
-  await loadStatus();
-}
-
-/* ── ⑥ 브리핑·분석 설정 — 구 SettingsPanel 의 폼·API 를 인라인으로 ──
- * 읽기  GET /api/system/status → dashboardSettings (+ usingDefault)
- * 저장  PUT /api/system/settings  body { dashboard: {...} }
- * 테마  GET /api/watchlist · POST /api/watchlist/groups · DELETE /api/watchlist/groups/:id
- *       POST /api/watchlist/presets
- * ⚠️ 서버가 범위를 벗어난 값을 기본값으로 되돌린다 — 저장 후 서버 값을 다시 읽어 그린다.
- */
 const form = ref({
   momentumPct: 3, refreshSec: 60, rankingTypes: [], rankingCountries: [],
   briefingPrompt: '', briefingCron: '',

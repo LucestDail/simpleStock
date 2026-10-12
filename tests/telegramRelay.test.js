@@ -18,7 +18,7 @@ let chatCalls = [];
 
 function fresh({ chatImpl } = {}) {
   for (const k of Object.keys(require.cache)) {
-    if (/telegramBot|analystChat|marketDataService|orderService/.test(k)) delete require.cache[k];
+    if (/telegramBot|analystChat|marketDataService/.test(k)) delete require.cache[k];
   }
   const acPath = require.resolve('../server/analystChat');
   require.cache[acPath] = { id: acPath, filename: acPath, loaded: true, exports: {

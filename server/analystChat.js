@@ -8,7 +8,6 @@ const { logInfo, logWarn, logError } = require('./logger');
 const toss = require('./tossClient');
 const tossPortfolio = require('./tossPortfolio');
 const mcp = require('./mcpClient');
-const orderService = require('./orderService');
 const rating = require('./stockRating');
 
 /**
@@ -34,7 +33,7 @@ const rating = require('./stockRating');
  * ## 도구는 **읽기 전용**이다
  *
  * 주문은 여기서 내지 않는다. 사용자 결정(09-21): *"주문은 제안만 · 실행은 항상 사람 승인."*
- * 매매는 `orderService` 의 제안·승인 경로로만 간다.
+ * 🔴 **이 채팅은 주문을 내지 못한다**(2026-10-12 집행 제거). 분석·조회만 한다.
  */
 
 /**
@@ -147,52 +146,6 @@ const TOOL_DECLARATIONS = [
       type: 'object',
       properties: { symbol: { type: 'string', description: '종목 티커. 한국 종목은 6자리 코드' } },
       required: ['symbol'],
-    },
-  },
-  {
-    /**
-     * 🔴 **유일하게 쓰기 비슷한 도구다.** 사용자 지시(스크린샷):
-     *    *"상단 매매 분석 및 주식 관련 내용 발생시 상단 HITL 에 토픽으로 등록 ·
-     *      사용자 승인시 매수/매도 실행"*
-     * ⚠️ 그래도 **주문이 아니다** — `PENDING` 제안을 하나 만들 뿐이고,
-     *    승인·실행은 여전히 사람이 화면에서 누른다. 이 도구는 승인도 실행도 못 한다.
-     */
-    name: 'propose_order',
-    description:
-      '매수/매도 제안을 상단 HITL 목록에 등록한다. 주문이 아니라 **제안**이며 사람이 승인해야 한다.'
-      + ' 종목·방향·수량·지정가를 전부 확신할 때만 쓴다. 하나라도 모르면 쓰지 말고 사람에게 물어라.',
-    parameters: {
-      type: 'object',
-      properties: {
-        symbol: { type: 'string', description: '종목 코드 또는 티커' },
-        side: { type: 'string', description: 'BUY 또는 SELL' },
-        quantity: { type: 'number', description: '수량(주). 매도는 보유 수량 이내' },
-        price: { type: 'number', description: '지정가' },
-        reason: { type: 'string', description: '왜 이 제안인지 한두 문장' },
-      },
-      required: ['symbol', 'side', 'quantity', 'price', 'reason'],
-    },
-  },
-  {
-    name: 'propose_conditional_order',
-    description:
-      '예약(조건부) 매매 제안을 등록한다 — "가격이 X에 도달하면 Y에 매도/매수" 형태.'
-      + ' 즉시 주문이 아니라 거래소가 감시가를 지켜보다 발동한다. 사람이 승인해야 예약이 등록된다.'
-      + ' 예: "100불 도달하면 100.5 지정가로 전량 매도" → triggerPrice 100, orderPrice 100.5, side SELL.'
-      + ' 값을 하나라도 모르면 지어내지 말고 사람에게 물어라(특히 expireDate — 사용자가 기간을 안 줬으면 물어라).',
-    parameters: {
-      type: 'object',
-      properties: {
-        symbol: { type: 'string', description: '종목 코드 또는 티커' },
-        side: { type: 'string', description: 'BUY 또는 SELL' },
-        quantity: { type: 'number', description: '수량(주). 매도는 보유 수량 이내' },
-        triggerPrice: { type: 'number', description: '감시가 — 이 가격에 닿으면 주문이 나간다' },
-        orderPrice: { type: 'number', description: '주문가(지정가). 시장가면 생략' },
-        orderType: { type: 'string', description: 'LIMIT(기본) 또는 MARKET' },
-        expireDate: { type: 'string', description: '예약 만료일 YYYY-MM-DD — 사용자가 말한 기간. 없으면 묻는다' },
-        reason: { type: 'string', description: '왜 이 예약인지 한두 문장' },
-      },
-      required: ['symbol', 'side', 'quantity', 'triggerPrice', 'expireDate', 'reason'],
     },
   },
   {
@@ -450,11 +403,9 @@ function decidePrompt() {
     '    · 급등·급락·랭킹 → get_rankings',
     '    · 뉴스·최근 소식·전망 → web_search',
     '    · 예전에 한 얘기 → recall',
-    '    · 매수/매도를 **하자고 정했을 때** → propose_order (주문이 아니라 제안 등록이다)',
     '    🔴 propose 계열은 사용자가 **명시적으로 요청**했을 때만("사줘/팔아줘/제안해줘/걸어줘").',
     '      "뭘 사겠냐/어떻게 생각하냐/판다면 뭘로" 는 **질문**이다 — 답만 하고 제안을 만들지 마라.',
     '      (실측 2026-09-23: 가정형 질문에 제안 3건을 등록해 사용자 폰에 승인 버튼이 갔다)',
-    '    · "X 도달하면/떨어지면 사줘·팔아줘" 같은 **조건이 붙은 매매** → propose_conditional_order',
     '      (만료일을 사용자가 안 줬으면 도구를 부르지 말고 먼저 물어라)',
     '    · "예약 주문 뭐 있어" → list_conditional_orders · "내 주문 체결됐어?" → get_my_orders',
     '    · 한 종목의 단기 체결 강도가 필요할 때 → get_trades',
@@ -944,94 +895,6 @@ async function runTool(name, args = {}, ctx = {}) {
         note: '이 점수는 **기업의 질**이다. 지금 사고팔 것인가는 가격·추세와 함께 별도로 판단하라.',
       };
     }
-    case 'propose_order': {
-      /**
-       * 🔴 **계좌로 먼저 막는다** (2026-09-22). 구조 가드가 이 경로를 찾아냈다 —
-       *    분석·라우트에는 검증을 붙였는데 **채팅 경로만 빠져 있었다.**
-       *    문이 셋인데 둘만 막으면 **안 막는 것**이고, 하필 여기가 사용자가
-       *    *"이거 사줘"* 라고 말하면 바로 제안이 만들어지는 자리다.
-       * ⚠️ 못 물어봤으면 통과가 아니다 — 모델에게 **왜 막혔는지**를 돌려줘야
-       *    "다시 시도" 대신 사용자에게 설명한다.
-       */
-      const chk = await orderService.checkAccountLimits({
-        symbol: args.symbol,
-        side: String(args.side || '').toUpperCase(),
-        quantity: args.quantity,
-        price: args.price,
-      });
-      if (!chk.ok) {
-        return {
-          ok: false,
-          error: chk.error,
-          kind: chk.kind,
-          note: chk.kind === 'unknown'
-            ? '계좌를 확인하지 못해 제안을 만들지 않았다. **추측해서 다시 시도하지 말고** 사용자에게 알려라.'
-            : '계좌 한도를 넘어 제안을 만들지 않았다. 수량을 줄이거나 사용자에게 알려라.',
-        };
-      }
-      // 🔴 빈칸이 있으면 `orderService` 가 거부한다 — 승인 화면이 주문 화면이 되면 안 된다
-      const r = orderService.propose(
-        {
-          symbol: args.symbol,
-          side: String(args.side || '').toUpperCase(),
-          type: 'LIMIT',
-          quantity: args.quantity,
-          price: args.price,
-          reason: args.reason,
-        },
-        // 적립 면제 근거를 집행까지 전달 — 안 넘기면 차감이 안 된다(server.js 주석 참조)
-        { source: 'chat', accrual: chk }
-      );
-      if (!r.ok) return { ok: false, error: r.error, missing: r.missing };
-      return {
-        ok: true,
-        proposalId: r.proposal.id,
-        note: '상단 HITL 목록에 등록했습니다. **아직 주문이 아닙니다** — 사람이 승인해야 진행됩니다.',
-      };
-    }
-    case 'propose_conditional_order': {
-      /**
-       * 🔴 예약도 **계좌로 먼저 막는다** — 즉시 주문과 같은 규율(문이 둘인데 하나만 막으면 안 막는 것).
-       *    예산 검사의 가격은 주문가(없으면 감시가) 기준 — 발동 시 그 가격 근처에서 체결된다.
-       */
-      const chk = await orderService.checkAccountLimits({
-        symbol: args.symbol,
-        side: String(args.side || '').toUpperCase(),
-        quantity: args.quantity,
-        price: args.orderPrice ?? args.triggerPrice,
-      });
-      if (!chk.ok) {
-        return {
-          ok: false, error: chk.error, kind: chk.kind,
-          note: chk.kind === 'unknown'
-            ? '계좌를 확인하지 못해 예약 제안을 만들지 않았다. 추측해서 다시 시도하지 말고 사용자에게 알려라.'
-            : '계좌 한도를 넘어 예약 제안을 만들지 않았다. 수량을 줄이거나 사용자에게 알려라.',
-        };
-      }
-      const r = orderService.propose(
-        {
-          symbol: args.symbol,
-          side: String(args.side || '').toUpperCase(),
-          type: 'LIMIT',
-          quantity: args.quantity,
-          reason: args.reason,
-          conditional: {
-            triggerPrice: args.triggerPrice,
-            orderPrice: args.orderPrice ?? null,
-            orderType: String(args.orderType || 'LIMIT').toUpperCase(),
-            expireDate: args.expireDate,
-          },
-        },
-        // 적립 면제 근거를 집행까지 전달 — 안 넘기면 차감이 안 된다(server.js 주석 참조)
-        { source: 'chat', accrual: chk }
-      );
-      if (!r.ok) return { ok: false, error: r.error, missing: r.missing };
-      return {
-        ok: true,
-        proposalId: r.proposal.id,
-        note: '예약 제안을 등록했습니다. **사람이 승인해야 거래소에 예약이 걸립니다** — 승인 후에도 감시가 도달 전엔 체결되지 않습니다.',
-      };
-    }
     case 'list_conditional_orders': {
       const toss = require('./tossClient');
       const r = await toss.listConditionalOrders({ status: 'OPEN' });
@@ -1461,12 +1324,9 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
        *   (내가 처음에 "거짓" 이라고 적은 것이 틀렸다), 진짜 결함은 **조회를 한 번 더
        *   부르려다 중복에 막힌 턴이 그대로 도구 단계를 닫아 버린 것**이다.
        *
-       * ⇒ **한 번만** 더 돌 기회를 준다. 그 라운드에서 모델이 할 수 있는 일은 둘뿐이다 —
-       *   `propose_order` 로 제안을 내거나, 아무것도 안 부르고 끝내거나.
+       * ⇒ **한 번만** 더 돌 기회를 준다.
        * ⚠️ **한 번뿐**이다(`duplicateGraceUsed`). 안 그러면 중복 → 기회 → 중복 → 기회로
        *    루프가 돌고 예산을 태운다.
-       * ⚠️ 제안을 **강요하지 않는다** — *"필요 없으면 부르지 마라"* 를 함께 적는다.
-       *    강요하면 모델이 억지 제안을 만들고, 그건 사용자 폰으로 간다.
        */
       if (!duplicateGraceUsed) {
         duplicateGraceUsed = true;
@@ -1474,11 +1334,12 @@ async function chat({ message, emit, fx = null, contextNote = '', userInstructio
         contents.push({
           role: 'user',
           parts: [{ text: '[시스템] 방금 요청한 도구는 이미 이전 라운드에서 불러 결과를 받았습니다.'
-            + ' 조회는 더 필요 없습니다 — **지금 가진 결과로 판단하세요.**'
-            + ' 매수·매도 판단이 섰다면 **이번 라운드에서 `propose_order`(또는'
-            + ' `propose_conditional_order`)를 호출해 제안을 등록**하세요. 이 다음에는'
-            + ' 도구를 쓸 수 없고 답변만 쓰게 됩니다.'
-            + ' 제안이 필요 없으면 아무 도구도 부르지 말고 그대로 두세요.' }],
+            + ' 조회는 더 필요 없습니다 — **지금 가진 결과로 답하세요.**'
+            + ' 이 다음에는 도구를 쓸 수 없고 답변만 쓰게 됩니다.'
+            // ⚠️ **빠져나갈 길을 준다** — 안 주면 모델이 억지로 도구를 만들어 부른다.
+            //    (2026-10-12: 종전 문구의 '제안' 을 '도구' 로 바꿨다. 제안 도구가 사라졌을 뿐
+            //     "강요하지 않는다" 는 조회 도구에도 그대로 유효하다.)
+            + ' 더 부를 도구가 필요 없으면 아무 도구도 부르지 말고 그대로 답하세요.' }],
         });
         continue;
       }

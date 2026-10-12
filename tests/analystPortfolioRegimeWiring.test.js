@@ -25,7 +25,7 @@ let prompt;
 function fresh() {
   prompt = '';
   for (const k of Object.keys(require.cache)) {
-    if (/analystService|aiService|telegramService|orderService|mcpClient|tossClient|settingsService|tickerTapeService|tossPortfolio|tossWriting|regimeService/.test(k)) delete require.cache[k];
+    if (/analystService|aiService|telegramService|mcpClient|tossClient|settingsService|tickerTapeService|tossPortfolio|tossWriting|regimeService/.test(k)) delete require.cache[k];
   }
   const put = (rel, exports) => { const p = require.resolve(rel); require.cache[p] = { id: p, filename: p, loaded: true, exports }; };
   put('../server/aiService', {

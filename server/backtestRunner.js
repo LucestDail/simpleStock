@@ -74,6 +74,14 @@ function run(scenario, { onlyScenarios = [] } = {}) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
       fs.writeFileSync(LAST_FILE, JSON.stringify(result, null, 2));
     } catch (e) { logWarn('backtest.persist_failed', { message: e.message }); }
+    /**
+     * 🔴 **회차를 누적 보관한다** (2026-10-12) — `LAST_FILE` 은 **덮인다**.
+     *    전략 둘을 비교하려면 둘이 동시에 있어야 하고, 자를 고친 뒤 소급 채점을 하려면
+     *    그때의 원자료가 있어야 한다. 저장 실패는 **실행을 되돌리지 않는다**(이미 돈 사실이다).
+     */
+    try {
+      require('./backtestStore').save(result, { scenario, onlyScenarios: onlyScenarios || [] });
+    } catch (e) { logWarn('backtest.store_failed', { message: e.message }); }
     logInfo('backtest.finished', { scenario, exitCode: code, ok: result.ok, final: result.final, bench: result.bench });
   });
   return { ok: true, startedAt };

@@ -74,7 +74,7 @@ function fresh({ holdings = HOLDINGS, holdingsError = null, decide = { tools: []
   captured = { contents: null, decidePrompts: [], warns: [], notices: [], holdingsCalls: 0, proposed: [] };
 
   for (const k of Object.keys(require.cache)) {
-    if (/analystChat|geminiClient|aiService|settingsService|tossPortfolio|tossClient|logger|orderService|mcpClient|stockRating|analystService/.test(k)) {
+    if (/analystChat|geminiClient|aiService|settingsService|tossPortfolio|tossClient|logger|mcpClient|stockRating|analystService/.test(k)) {
       delete require.cache[k];
     }
   }
@@ -122,14 +122,6 @@ function fresh({ holdings = HOLDINGS, holdingsError = null, decide = { tools: []
       if (holdingsError) throw new Error(holdingsError);
       return holdings;
     },
-  });
-  /**
-   * ⚠️ 실물 `orderService` 는 테스트 환경에서 계좌 한도 확인에 실패해 `ok:false` 를 낸다.
-   *    그러면 *"제안이 등록됐다"* 축을 **원리상 못 재고**, 오탐 테스트가 거짓 빨간불을 낸다.
-   */
-  put('../server/orderService', {
-    checkAccountLimits: async () => ({ ok: true }),
-    propose: (p) => { captured.proposed.push(p); return { ok: true, proposal: { id: 'p-test' } }; },
   });
 
   const chat = require('../server/analystChat');
@@ -237,15 +229,13 @@ test('🔴 "제안을 등록합니다" 라고 쓰고 실제로 안 했으면 잡
     '사용자에게 "말뿐이었다" 를 안 알리면 승인 버튼을 찾으러 간다');
 });
 
-test('오탐 축: 실제로 제안을 등록했으면 경고하지 않는다', async () => {
-  const chat = fresh({
-    decide: { tools: [{ name: 'propose_order', argsJson: '{"symbol":"O","side":"BUY","quantity":1,"price":54.5}' }] },
-    answer: '제안을 등록했습니다. 상단에서 승인해 주세요.',
-  });
-  await run(chat, 'O 1주 사줘');
-  assert.ok(!captured.warns.some((w) => w.ev === 'chat.proposal_claim_unbacked'),
-    '정상 등록인데 경고가 났다 — 오탐하면 다음 사람이 이 가드를 끈다');
-});
+/**
+ * ⚠️ (2026-10-12 제거) *"실제로 제안을 등록했으면 경고하지 않는다"* 오탐 축 —
+ *    제안 등록 자체가 불가능해져 **이 축을 만들 수 없다.**
+ *    🔴 짝인 발동 축(*"등록합니다 라고 쓰고 안 했으면 잡는다"*)은 **남긴다** —
+ *       집행이 사라진 지금 모델이 그렇게 말하면 그건 **언제나 거짓**이라 더 필요하다.
+ */
+
 
 test('오탐 축: 제안 얘기를 안 한 답은 건드리지 않는다', async () => {
   const chat = fresh({ answer: 'QLD 는 20일선 위라 추세가 살아 있습니다.' });

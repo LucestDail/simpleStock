@@ -4,7 +4,7 @@
   /api/report/lifecycle(10-04 신설) 집계로 그린다 — 기존 데이터를 단계 프레임으로 읽을 뿐,
   새 기록 체계를 만들지 않는다.
   🔴 note("실주문 0 — 데이터 없음" 류)는 정직 표기라 반드시 보인다 — 빈 차트를 채우면 거짓말이 된다.
-  유지: 생애 집계 카드(/api/orders/stats) · 수익률(내 계좌/KOSPI/나스닥 + 월별 표, /api/performance).
+  유지: 수익률(내 계좌/KOSPI/나스닥 + 월별 표, /api/performance).
 -->
 <template>
   <div class="page">
@@ -72,24 +72,7 @@
       <p v-else class="mut">이력 2일째부터 그려집니다{{ life ? ` (지금 ${(life.series || []).length}일째)` : '' }}.</p>
     </section>
 
-    <!-- ③ 생애 집계 카드 (유지) -->
-    <p v-if="statsErr" class="banner banner--error">{{ statsErr }}</p>
-    <p v-else-if="!stats" class="banner banner--empty">감사 데이터를 읽는 중…</p>
-    <template v-else>
-      <div class="kcards">
-        <div class="kcard"><small>제안</small><b class="mono-num">{{ stats.proposed }}</b></div>
-        <div class="kcard"><small>승인</small><b class="mono-num">{{ stats.approved + stats.executed }}</b></div>
-        <div class="kcard"><small>거절</small><b class="mono-num" :class="{ down: rejectRate >= 50 }">{{ stats.rejected }} · {{ rejectRate }}%</b></div>
-        <div class="kcard"><small>만료</small><b class="mono-num">{{ stats.expired }}</b></div>
-        <div class="kcard"><small>실주문 체결</small><b class="mono-num">{{ stats.executed }}</b></div>
-        <div class="kcard"><small>차단(가드·정지)</small><b class="mono-num">{{ stats.blocked ?? 0 }}</b></div>
-      </div>
-      <section class="card">
-        <h2>사용자 개입 효과</h2>
-        <p class="mut">자율 모드 해금의 전제 = 거절률이 내려가는 추세. 지금 {{ rejectRate }}% —
-          에이전트 제안의 품질이 올라가면 이 수치가 먼저 움직인다.</p>
-      </section>
-    </template>
+    <!-- ③ (2026-10-12 제거) 제안 생애 집계 — 주문 집행이 사라져 셀 것이 없다 -->
 
     <!-- ④ 실매매 손익 -->
     <section class="card">
@@ -247,14 +230,7 @@ const bench = computed(() => {
   };
 });
 
-/* ── ③ 생애 집계 (유지) ───────────────────── */
-const stats = ref(null);
-const statsErr = ref('');
-const rejectRate = computed(() => {
-  const s = stats.value; if (!s) return 0;
-  const d = (s.approved || 0) + (s.executed || 0) + (s.rejected || 0);
-  return d ? Math.round((s.rejected / d) * 100) : 0;
-});
+/* ── ③ (2026-10-12 제거) 제안 생애 집계 ───── */
 
 /* ── ⑤ 수익률 (유지) ─────────────────────── */
 const perf = ref(null);
@@ -267,12 +243,6 @@ onMounted(async () => {
     if (b?.ok) life.value = b;
     else lifeErr.value = b?.error || '수명주기 집계를 불러오지 못했습니다.';
   } catch (e) { lifeErr.value = `수명주기 읽기 실패: ${e.message}`; }
-  try {
-    const r = await apiFetch('/api/orders/stats');
-    const b = await r.json();
-    if (b?.ok) stats.value = b;
-    else statsErr.value = b?.error || '감사 집계를 불러오지 못했습니다.';
-  } catch (e) { statsErr.value = `감사 집계 읽기 실패: ${e.message}`; }
   try { const r = await apiFetch('/api/performance'); perf.value = await r.json(); }
   catch (e) { perfErr.value = `수익률 읽기 실패: ${e.message}`; }
 });

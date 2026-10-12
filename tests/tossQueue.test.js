@@ -224,27 +224,8 @@ function freshOrders(env = {}) {
   return m;
 }
 
-test('🔴 주문 큐 대기 상한 < 제안 TTL ≤ 멱등창', () => {
-  const st = freshOrders().status();
-  assert.ok(queueMod.ORDER_MAX_WAIT_MS > 0, '주문 대기 상한이 없다');
-  assert.ok(
-    queueMod.ORDER_MAX_WAIT_MS < st.proposalTtlMs,
-    `🔴 주문이 큐에서 ${queueMod.ORDER_MAX_WAIT_MS}ms 기다릴 수 있는데 제안 TTL 은 ${st.proposalTtlMs}ms 다 `
-    + '— 제안은 만료됐는데 주문이 나갈 수 있다',
-  );
-  assert.ok(
-    st.proposalTtlMs <= st.idempotencyWindowMs,
-    `🔴 TTL(${st.proposalTtlMs}) 이 멱등창(${st.idempotencyWindowMs}) 을 넘었다 — 이중발주 둘째 층이 사라진다`,
-  );
-});
 
 /** 🔴 자의 판별력 — 뒤집으면 실제로 잡히는가 */
-test('🔴 주문 대기 상한을 TTL 위로 올리면 **잡힌다**', () => {
-  const st = freshOrders().status();
-  const bad = st.proposalTtlMs + 1;
-  assert.throws(() => { assert.ok(bad < st.proposalTtlMs); },
-    '🔴 뒤집었는데 규칙이 통과한다 — 자가 장식이다');
-});
 
 test('⚠️ 주문 계열 그룹이 **전부** 짧은 상한을 쓴다(하나만 고치고 옆을 안 보는 그 병)', () => {
   for (const grp of ['ORDER', 'ORDER_INFO', 'CONDITIONAL_ORDER', 'ACCOUNT']) {
@@ -269,15 +250,6 @@ test('🔴 큐에서 기다리다 유효시간이 지나면 **안 보낸다**', 
   await blocker;
 });
 
-test('🔴 주문 실행이 제안 만료시각을 큐에 **실제로 넘긴다**', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'orderService.js'), 'utf-8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-  const i = src.indexOf('toss.createOrder(');
-  assert.ok(i > 0, 'createOrder 호출부가 없다');
-  const block = src.slice(i, i + 200);
-  assert.match(block, /deadlineAt/, '🔴 만료시각을 안 넘긴다 — 큐가 언제까지 유효한지 모른다');
-  assert.match(block, /expiresAt/, '🔴 제안의 expiresAt 이 아니라 다른 값을 넘긴다');
-});
 
 // ── "안 나간 것" 도 되꽂는다 ──────────────────────────────────────
 /**

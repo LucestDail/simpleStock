@@ -19,7 +19,7 @@
  *
  * | 출처 | 뜻 | 예산 포함 |
  * |---|---|---|
- * | `realizedUsd`  | `agentLedger.realizedUsd` (AI 매매 실현손익) | ✅ 확정 |
+ * | `realizedUsd`  | **2026-10-12~ 항상 0**(AI 매매 원장 제거) | ⚠️ 미집계 |
  * | `dividendUsd`  | 사용자가 입력한 **실제 배당 수령액**        | ✅ 확정 |
  * | `estimatedUsd` | 보유 × 배당률로 계산한 **예상**             | ❌ 참고 표시만 |
  *
@@ -84,17 +84,18 @@ function persist() {
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
 /**
- * AI 매매 실현손익(USD). ⚠️ `agentLedger` 를 **지연 require** 한다 — 두 원장이 서로를
- * 모듈 로드 시점에 참조하면 순환이 된다. 읽기 실패는 **0 으로** 본다(모름이 수익이 되면 안 된다).
+ * 실현손익(USD).
+ *
+ * 🔴 **2026-10-12 부터 항상 0 이다.** 종전에는 `agentLedger`(AI 매매 원장)에서 읽었는데
+ *    주문 집행을 걷어내면서 그 원장이 사라졌다. 체결 이력을 들여오기 전까지 이 축은
+ *    **재원으로 치지 않는다** — *"받지도 않은 돈으로 매수 금지"* 와 같은 이유로,
+ *    **모르는 것을 0 으로 두는 쪽**이 안전하다.
+ *
+ * ⚠️ 이 함수를 지우지 않고 남긴 이유: 적립 재원 공식(`배당 + 실현손익`)이 호출부와
+ *    화면에 그대로 있고, 거래 내역을 들여오면 **여기만 고치면 된다**(열어 둔 질문 ①).
  */
 function realizedUsd() {
-  try {
-    const v = Number(require('./agentLedger').status().realizedUsd);
-    return Number.isFinite(v) ? v : 0;
-  } catch (e) {
-    logWarn('income.realized_read_failed', { message: e.message });
-    return 0;
-  }
+  return 0;
 }
 
 /**

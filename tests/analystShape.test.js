@@ -70,7 +70,7 @@ test('완전한 주문은 제안이지 판단이 아니다', () => {
   );
 });
 
-/** 🔴 **반쪽 제안은 줍지 않는다** — `orderService` 가 거부하고 사용자는 "왜 사라졌지" 를 겪는다 */
+/** 🔴 **반쪽 모의 거래는 줍지 않는다** — 백테스트 시뮬레이션에서 쓸 수 없다 */
 test('수량·가격이 빠진 제안은 제안으로 만들지 않는다', () => {
   const r = shapeReport({ marketView: 'v', orders: [{ symbol: 'QLD', side: 'SELL', quantity: 10 }] });
   assert.equal(r.proposals.length, 0, '가격 없는 제안을 만들었다 — 거부될 것을 만들지 않는다');

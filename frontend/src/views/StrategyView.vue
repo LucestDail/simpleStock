@@ -59,6 +59,11 @@
         <h3>마지막 결과 — {{ LABEL[last.scenario] || last.scenario }}
           <small class="mut">{{ when(last.finishedAt) }}</small>
           <small v-if="last.onlyScenarios" class="chip">조합: {{ last.onlyScenarios.join(', ') }}</small>
+          <!--
+            🔴 2026-10-12 — 보관된 회차로 가는 길. 종전에는 `backtest-last.json` **한 개**뿐이라
+               앞 회차를 볼 방법이 없었고, 그래서 **전략 둘을 비교할 수가 없었다.**
+          -->
+          <RouterLink class="chip chip--link" :to="{ name: 'backtest' }">보관된 회차 전부 →</RouterLink>
         </h3>
 
         <!-- 수익률 비교 히어로 — 결과가 끝나자마자 숫자부터 크게 -->
@@ -347,6 +352,8 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('keydown', 
 .page__head { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
 .page__head h1 { margin: 0; font-size: var(--text-lg); color: var(--color-ink); }
 .page__sp { flex: 1; }
+.chip--link { color: var(--color-primary); text-decoration: none; }
+.chip--link:hover { text-decoration: underline; }
 .chip { border: 1px solid var(--color-hairline); border-radius: var(--rounded-pill); padding: 2px 10px; font-size: var(--text-xs); color: var(--color-body); }
 .mut { font-size: var(--text-xs); color: var(--color-muted); margin: 0; }
 .warn { margin: 0 0 6px; font-size: var(--text-sm); color: var(--color-warn); }

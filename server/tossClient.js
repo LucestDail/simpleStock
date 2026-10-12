@@ -666,10 +666,7 @@ async function apiPostOnce(path, body, { accountSeq, method = 'POST' } = {}) {
   return json?.result ?? json ?? null;
 }
 
-/** 주문 생성. ⚠️ 응답은 **`orderId` 뿐**이다 — 상태·체결은 `getOrder` 로 따로 봐야 한다 */
-async function createOrder(body, { accountSeq, deadlineAt = null } = {}) {
-  return apiPost('/api/v1/orders', body, { accountSeq: await withAccount(accountSeq), deadlineAt });
-}
+
 
 /** 주문 상세 — **"들어갔는지 모를 때" 확정하는 유일한 수단** */
 async function getOrder(orderId, { accountSeq } = {}) {
@@ -682,14 +679,7 @@ async function listOrders(query = {}, { accountSeq } = {}) {
   return apiGet(`/api/v1/orders${q.toString() ? `?${q}` : ''}`, { accountSeq: await withAccount(accountSeq) });
 }
 
-/**
- * 주문 취소.
- * 🔴 **성공해도 새 `orderId` 가 발급된다**(원 ID 와 다르다) — 이후 추적은 새 ID 로.
- * 🔴 **멱등키가 없다** ⇒ 자동 재시도 금지.
- */
-async function cancelOrder(orderId, { accountSeq } = {}) {
-  return apiPost(`/api/v1/orders/${encodeURIComponent(orderId)}/cancel`, undefined, { accountSeq: await withAccount(accountSeq) });
-}
+
 
 /** 주문 정정. 🔴 취소와 같다 — **새 orderId** · **멱등키 없음** · POST(PUT 아님) */
 async function modifyOrder(orderId, body, { accountSeq } = {}) {
@@ -997,10 +987,8 @@ module.exports = {
   getOrderbook,
   getCandles,
   apiPost,
-  createOrder,
   getOrder,
   listOrders,
-  cancelOrder,
   modifyOrder,
   createConditionalOrder,
   listConditionalOrders,

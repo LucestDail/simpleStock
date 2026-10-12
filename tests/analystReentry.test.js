@@ -21,7 +21,7 @@ process.env.SETTINGS_FILE = path.join(os.tmpdir(), `ss-re-set-${process.pid}.jso
 /** LLM 에 실제로 넘어간 프롬프트를 붙잡는다 — **무엇을 물었는가**가 이 테스트의 대상이다 */
 function freshWithCapture(candles = null) {
   for (const k of Object.keys(require.cache)) {
-    if (/analystService|aiService|telegramService|orderService|activityLog|mcpClient|tossClient|settingsService|stockRating/.test(k)) {
+    if (/analystService|aiService|telegramService|activityLog|mcpClient|tossClient|settingsService|stockRating/.test(k)) {
       delete require.cache[k];
     }
   }

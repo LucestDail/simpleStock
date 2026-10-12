@@ -33,7 +33,6 @@ process.env.TELEGRAM_SEND_ENABLED = 'true';
 
 const realFetch = global.fetch;
 let sent = [];
-let proposed = [];
 let replies = [];
 
 /**
@@ -42,7 +41,7 @@ let replies = [];
  */
 function fresh(generate) {
   for (const k of Object.keys(require.cache)) {
-    if (/analystService|aiService|telegramService|orderService|activityLog|mcpClient|tossClient|settingsService|stockRating|tickerTapeService/.test(k)) {
+    if (/analystService|aiService|telegramService|activityLog|mcpClient|tossClient|settingsService|stockRating|tickerTapeService/.test(k)) {
       delete require.cache[k];
     }
   }
@@ -81,22 +80,7 @@ function fresh(generate) {
     id: mcpPath, filename: mcpPath, loaded: true,
     exports: { ...realMcp, searchMarketNews: async () => ({ ok: false, error: '꺼짐', kind: 'disabled', results: [] }) },
   };
-  const ordPath = require.resolve('../server/orderService');
-  const realOrd = require(ordPath);
-  require.cache[ordPath] = {
-    id: ordPath, filename: ordPath, loaded: true,
-    exports: {
-      ...realOrd,
-      /**
-       * ⚠️ **계좌 검증이 새로 생겼다**(2026-09-22) — 제안은 이제 현금·판매가능수량을
-       *    통과해야 만들어진다. 스텁하지 않으면 토스가 미설정이라 `unknown` 으로 **막히고**,
-       *    그러면 이 테스트가 *"기본값인데 제안을 안 만들었다"* 로 보인다.
-       *    ★ 실패 메시지가 제품 결함처럼 읽히는 자리라 여기 적어 둔다.
-       */
-      checkAccountLimits: async () => ({ ok: true, available: '99999' }),
-      propose: (o) => { proposed.push(o); return { ok: true, proposal: { id: 'p1', ...o } }; },
-    },
-  };
+  // ⚠️ 2026-10-12 — `orderService` 스텁 제거(모듈이 없다). 제안 경로가 사라져 계좌 검증도 없다.
   return require('../server/analystService');
 }
 
@@ -112,7 +96,6 @@ const REPORT = (marketView) => ({
 
 beforeEach(() => {
   sent = [];
-  proposed = [];
   replies = [];
   global.fetch = async (url, init) => {
     /**
@@ -129,14 +112,15 @@ beforeEach(() => {
 });
 afterEach(() => { global.fetch = realFetch; });
 
-test('🔴 `dryRun` 이면 텔레그램도 제안도 **나가지 않는다**', async () => {
+test('🔴 `dryRun` 이면 텔레그램이 **나가지 않는다**', async () => {
   replies = [REPORT('점검용 시황')];
   const analyst = fresh();
   const r = await analyst.analyze(DASH, { dryRun: true });
   await new Promise((x) => setTimeout(x, 30));
 
   assert.equal(sent.length, 0, '🔴 점검인데 사용자 폰으로 갔다');
-  assert.equal(proposed.length, 0, '🔴 점검인데 매매 제안이 만들어졌다 — 승인 버튼이 곧 간다');
+  // ⚠️ 2026-10-12 — `proposed` 단언 제거. 주문 집행이 사라져 **제안 자체가 불가능**하다
+  //    (불가능한 것을 0 으로 재면 공허한 통과다). 발송 축은 그대로 잠근다.
   assert.equal(r.marketView, '점검용 시황', '분석 결과 자체는 돌아와야 검증이 된다');
 });
 
@@ -148,7 +132,6 @@ test('🔴 자기검증: 같은 지문이 기본값에서는 발송된다', asyn
   await new Promise((x) => setTimeout(x, 30));
 
   assert.equal(sent.length, 1, '🔴 기본값인데 안 보냈다 — "판단하면 바로 쏴" 를 깼다');
-  assert.equal(proposed.length, 1, '🔴 기본값인데 제안을 안 만들었다');
 });
 
 /**

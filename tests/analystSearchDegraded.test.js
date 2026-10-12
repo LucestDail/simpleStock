@@ -28,7 +28,7 @@ let mcpResultToReturn = null;
 /** `tests/analystBriefPositionsGap.test.js` 와 같은 대역 패턴 */
 function fresh() {
   for (const k of Object.keys(require.cache)) {
-    if (/analystService|aiService|telegramService|orderService|activityLog|mcpClient|tossClient|settingsService|logger/.test(k)) {
+    if (/analystService|aiService|telegramService|activityLog|mcpClient|tossClient|settingsService|logger/.test(k)) {
       delete require.cache[k];
     }
   }

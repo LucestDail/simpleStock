@@ -29,7 +29,7 @@ let sent = [];
 /** ⚠️ 스텁은 alertService 를 require 하기 *전*에 꽂는다(alerts.test.js 와 같은 함정) */
 function freshAlerts(env = {}, before = null) {
   for (const k of Object.keys(require.cache)) {
-    if (/alertService|telegramBot|telegramService|tickerTapeService|tossPortfolio|tossClient|activityLog|settingsService|regimeService|orderService/.test(k)) {
+    if (/alertService|telegramBot|telegramService|tickerTapeService|tossPortfolio|tossClient|activityLog|settingsService|regimeService/.test(k)) {
       delete require.cache[k];
     }
   }

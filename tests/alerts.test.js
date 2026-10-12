@@ -101,73 +101,7 @@ afterEach(() => {
 
 // ── ① 권한: 승인 버튼 ────────────────────────────────────────
 
-test('🔴 다른 대화에서 누른 버튼은 거부한다 (봇 토큰이 새도 주문은 못 건드린다)', async () => {
-  process.env.TELEGRAM_BOT_ENABLED = 'true';
-  for (const k of Object.keys(require.cache)) if (/telegramBot|orderService/.test(k)) delete require.cache[k];
-  const bot = require('../server/telegramBot');
-  const orders = require('../server/orderService');
-  orders._resetForTest();
-  const p = orders.propose({ symbol: '005930', side: 'BUY', type: 'LIMIT', quantity: 1, price: 100 }).proposal;
-
-  const r = await bot.handleCallback({
-    id: 'cb1', data: `ok:${p.id}`,
-    message: { chat: { id: '12345' }, message_id: 7 },   // ← 설정된 999 가 아니다
-  });
-
-  assert.equal(r.ok, false);
-  assert.equal(r.reason, 'foreign_chat');
-  // 🔴 제안이 **승인되지 않았어야** 한다 — 이게 이 테스트의 전부다
-  assert.equal(orders.list().find((x) => x.id === p.id).status, 'PENDING');
-});
-
-test('설정된 대화에서 누르면 승인된다 — 다만 **실행은 아니다**', async () => {
-  process.env.TELEGRAM_BOT_ENABLED = 'true';
-  for (const k of Object.keys(require.cache)) if (/telegramBot|orderService/.test(k)) delete require.cache[k];
-  const bot = require('../server/telegramBot');
-  const orders = require('../server/orderService');
-  orders._resetForTest();
-  const p = orders.propose({ symbol: '005930', side: 'BUY', type: 'LIMIT', quantity: 1, price: 100 }).proposal;
-
-  const r = await bot.handleCallback({ id: 'cb2', data: `ok:${p.id}`, message: { chat: { id: '999' }, message_id: 7 } });
-  assert.equal(r.ok, true);
-  const after = orders.list().find((x) => x.id === p.id);
-  assert.equal(after.status, 'APPROVED');
-  assert.ok(after.approvedAt, '승인 시각이 없으면 실행 게이트가 구조로 막지 못한다');
-
-  // 🔴 사용자에게 **실행이 아니라는 것**을 말했는가 — "승인했으니 샀겠지" 가 제일 위험하다
-  const notice = sent.map((s) => JSON.stringify(s.body)).join(' ');
-  assert.match(notice, /실제 주문은 나가지 않습니다|주문을 보냅니다/);
-});
-
-test('취소 버튼은 거절로 남는다', async () => {
-  process.env.TELEGRAM_BOT_ENABLED = 'true';
-  for (const k of Object.keys(require.cache)) if (/telegramBot|orderService/.test(k)) delete require.cache[k];
-  const bot = require('../server/telegramBot');
-  const orders = require('../server/orderService');
-  orders._resetForTest();
-  const p = orders.propose({ symbol: 'QLD', side: 'SELL', type: 'LIMIT', quantity: 2, price: 90 }).proposal;
-  await bot.handleCallback({ id: 'cb3', data: `no:${p.id}`, message: { chat: { id: '999' }, message_id: 8 } });
-  assert.equal(orders.list().find((x) => x.id === p.id).status, 'REJECTED');
-});
-
 /** ⚠️ 피어 제안: 텔레그램은 메시지가 남아 **어제 제안을 오늘 누른다** — 유효기간을 본문에 적는다 */
-test('제안 메시지에 유효기간이 적혀 있다', async () => {
-  process.env.TELEGRAM_BOT_ENABLED = 'true';
-  for (const k of Object.keys(require.cache)) if (/telegramBot|telegramService|orderService/.test(k)) delete require.cache[k];
-  const bot = require('../server/telegramBot');
-  const orders = require('../server/orderService');
-  orders._resetForTest();
-  const p = orders.propose({ symbol: '005930', side: 'BUY', type: 'LIMIT', quantity: 3, price: 70000 }).proposal;
-
-  await bot.sendProposal(p);
-  const body = sent.map((s) => s.body.text || '').join('\n');
-  assert.match(body, /까지/, '유효기간이 없으면 만료된 버튼을 누르고 "왜 안 되지" 를 겪는다');
-  assert.match(body, /승인 필요/);
-  // 버튼이 실제로 붙었는가
-  const kb = sent.find((s) => s.body.reply_markup)?.body.reply_markup?.inline_keyboard?.[0] || [];
-  assert.deepEqual(kb.map((b) => b.callback_data), [`ok:${p.id}`, `no:${p.id}`]);
-});
-
 // ── ② 소음 ──────────────────────────────────────────────────
 
 test('기본은 꺼져 있고, 꺼져 있으면 한 건도 안 나간다', async () => {
@@ -428,30 +362,6 @@ test('지원하지 않는 항목을 상태에 적어 둔다', () => {
 });
 
 // ── 제안 → 알림 배선 ────────────────────────────────────────
-
-test('제안이 만들어지면 알림 훅이 불린다 (배선이 실제로 돈다)', () => {
-  for (const k of Object.keys(require.cache)) if (/orderService/.test(k)) delete require.cache[k];
-  const orders = require('../server/orderService');
-  orders._resetForTest();
-  const seen = [];
-  orders.onProposed((p) => seen.push(p.symbol));
-  orders.propose({ symbol: 'QLD', side: 'BUY', type: 'LIMIT', quantity: 1, price: 90 });
-  assert.deepEqual(seen, ['QLD']);
-
-  // ⚠️ 빈칸이 있어 **거부된** 제안은 알리지 않는다(없는 일을 알리면 안 된다)
-  seen.length = 0;
-  orders.propose({ symbol: '', side: 'BUY', type: 'LIMIT', quantity: 1, price: 90 });
-  assert.deepEqual(seen, []);
-});
-
-test('알림 훅이 터져도 제안은 살아 있다 (곁가지가 본체를 죽이지 않는다)', () => {
-  for (const k of Object.keys(require.cache)) if (/orderService/.test(k)) delete require.cache[k];
-  const orders = require('../server/orderService');
-  orders._resetForTest();
-  orders.onProposed(() => { throw new Error('텔레그램 죽음'); });
-  const r = orders.propose({ symbol: '005930', side: 'BUY', type: 'LIMIT', quantity: 1, price: 100 });
-  assert.equal(r.ok, true, '알림 실패가 제안을 되돌렸다');
-});
 
 /**
  * 🔴 **자기검증: `QUIET_OFF` 가 이름값을 하는가**

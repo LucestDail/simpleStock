@@ -62,9 +62,16 @@ test('배선 — 수수료 절이 프롬프트가 굳기 전에 들어간다', (
   assert.match(src.slice(fee, freeze), /수수료가 차익을 먹는 주문을 내지 마라/);
 });
 
-test('배선 — feeGate 가 실전·백테스트 양쪽에서 불린다(게이트가 두 벌이면 갈라진다)', () => {
+/**
+ * 🔴 **2026-10-12 — 기대값을 3에서 2로 내렸다(선언 1 + 백테스트 1).**
+ *
+ * 실전 경로가 사라졌다 — 주문 집행을 걷어내면서 `analyze()` 가 제안을 만들지 않는다.
+ * ⚠️ 수를 그냥 줄인 게 아니라 **어느 경로가 없어졌는지**를 적는다. 안 적으면 다음 사람이
+ *    *"하나가 빠졌는데 왜 통과하지"* 를 다시 조사한다.
+ * ★ 백테스트 경로는 **그대로 잠근다** — 모의 매매는 여전히 수수료를 반영해야 한다.
+ */
+test('배선 — feeGate 가 백테스트 경로에서 불린다(게이트가 두 벌이면 갈라진다)', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
   const calls = (src.match(/feeGate\(/g) || []).length;
-  assert.ok(calls >= 3, `feeGate 호출이 ${calls}회 — 선언 1 + 실전 1 + 백테스트 1 = 3 미만이면 한쪽이 빠졌다`);
-  assert.match(src, /analyst\.proposal_fee_blocked/, '거부를 로그로 남기지 않는다 — 조용한 게이트는 죽어도 모른다');
+  assert.ok(calls >= 2, `feeGate 호출이 ${calls}회 — 선언 1 + 백테스트 1 = 2 미만이면 백테스트가 게이트를 안 탄다`);
 });

@@ -212,7 +212,7 @@ function analystPrompt() {
 
 function fresh() {
   for (const k of Object.keys(require.cache)) {
-    if (/analystService|aiService|telegramService|orderService|activityLog|mcpClient|tossClient|settingsService|tickerTapeService/.test(k)) delete require.cache[k];
+    if (/analystService|aiService|telegramService|activityLog|mcpClient|tossClient|settingsService|tickerTapeService/.test(k)) delete require.cache[k];
   }
   const aiPath = require.resolve('../server/aiService');
   require.cache[aiPath] = {

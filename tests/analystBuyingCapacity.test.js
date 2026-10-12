@@ -59,7 +59,7 @@ function analystPrompt() {
 
 function fresh() {
   for (const k of Object.keys(require.cache)) {
-    if (/analystService|aiService|telegramService|orderService|activityLog|mcpClient|tossClient|settingsService|tickerTapeService/.test(k)) {
+    if (/analystService|aiService|telegramService|activityLog|mcpClient|tossClient|settingsService|tickerTapeService/.test(k)) {
       delete require.cache[k];
     }
   }
@@ -140,15 +140,6 @@ afterEach(() => { global.fetch = realFetch; });
 
 // ── ① 판정 자체 (순수 함수) ──────────────────────────────────
 
-test('🔴 실측 상태(USD 3.76 · KRW 0)는 **blocked** 로 판정된다', () => {
-  const analyst = fresh();
-  const cap = analyst.assessBuyingCapacity(dash(LIVE_CASH).portfolio.summary, LIVE_ITEMS);
-  assert.equal(cap.state, 'blocked', '🔴 3.76 달러로 살 수 있다고 판정했다 — 종전 `usd<=0` 조건의 그 구멍이다');
-  assert.equal(cap.byCurrency.USD.state, 'floor-exhausted');
-  assert.ok(cap.byCurrency.USD.available < 0, '버퍼를 빼면 음수여야 한다');
-  // ★ 버퍼는 (현금 + 그 통화 보유 평가액) × 15% — orderService 와 같은 식
-  assert.ok(Math.abs(cap.byCurrency.USD.floor - (3.76 + 15674.05) * 0.15) < 0.01);
-});
 
 /**
  * 🔴 **종전 조건(`krw<=0 && usd<=0`)이 왜 못 잡았는지**를 자가 직접 보여 준다.
@@ -391,10 +382,3 @@ test('⚠️ 브리핑 본문의 금액은 **유지**된다 (로그와 기준이
  *    누가 값을 바꿔도 이 판정이 옛 값을 보고 "살 수 있다" 고 거짓말하지 않는다.
  *    (이 저장소가 적어 둔 *"가드가 검사하는 값이 실제로 쓰이는 값인가"* 그 실패 모드)
  */
-test('🔴 버퍼 비율을 orderService 와 **같은 한 벌**로 읽는다', () => {
-  const analyst = fresh();
-  const order = require('../server/orderService');
-  const cap = analyst.assessBuyingCapacity(dash(LIVE_CASH).portfolio.summary, LIVE_ITEMS);
-  assert.equal(typeof order.CASH_FLOOR_PCT, 'number', '🔴 게이트를 거는 쪽이 값을 공개하지 않는다');
-  assert.equal(cap.floorPct, order.CASH_FLOOR_PCT, '🔴 비율이 두 벌이다 — 하나만 바뀌면 조용히 갈린다');
-});

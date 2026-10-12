@@ -56,7 +56,6 @@ const SESSION = require('./server/session');
 const tossPortfolio = require('./server/tossPortfolio');
 const tossClient = require('./server/tossClient');
 const dashboardService = require('./server/dashboardService');
-const orderService = require('./server/orderService');
 const telegram = require('./server/telegramService');
 const analyst = require('./server/analystService');
 const mcp = require('./server/mcpClient');
@@ -205,14 +204,9 @@ app.get('/api/analyst/history', (req, res) => {
 app.get('/api/analyst/history/:id', (req, res) => {
   const row = require('./server/analystHistory').get(req.params.id);
   if (!row) return res.status(404).json({ ok: false, error: '그 보고서가 없습니다.' });
-  // 제안의 **현재 상태**는 orders 가 정본 — 이력에 박힌 당시 값에 상태를 덧입힌다
-  const props = orderService.list();
-  const rows = Array.isArray(props) ? props : (props?.proposals || []);
-  const withStatus = (row.proposals || []).map((p) => {
-    const live = rows.find((x) => x.id === p.id);
-    return { ...p, status: live?.status || null, decidedAt: live?.decidedAt || null };
-  });
-  return res.json({ ok: true, ...row, proposals: withStatus });
+  // ⚠️ 2026-10-12~ 제안은 만들어지지 않는다. 옛 이력에 박힌 `proposals` 는 **그대로** 둔다
+  //    (지난 회차의 사실이다 — 지우면 그때 무슨 일이 있었는지 알 수 없게 된다)
+  return res.json({ ok: true, ...row });
 });
 
 /** 📐 리스크 지표 (2026-10-04) — 캔들 포함 전체 계산. 화면·RAG 의 정본. */
@@ -790,63 +784,7 @@ app.post('/api/telegram/portfolio', async (req, res) => {
  * 🛑 에이전트 운용 제어 (2026-10-03 와이어프레임 D-4 · 상단 상태바).
  * 🔴 정지는 즉시, 재개는 사람만 — resume 에 조건을 달지 않는다.
  */
-const agentControl = require('./server/agentControl');
-/**
- * 🤖 자율 수준 전환 (2026-10-04) — 사람의 명시 조작. 1단부터는 에이전트 발 제안이
- * 한도 통과 시 **자동 전송**되므로(실거래 모드면 실제 주문), 화면이 타이핑 확인을 받는다.
- */
-/** 📒 AI 운용 원장 — 예산·보유·실현손익 (2026-10-05 "비율 일임") */
-app.get('/api/agent/ledger', (req, res) => res.json({ ok: true, ...require('./server/agentLedger').status() }));
-/**
- * 🔁 미결(SENT) 제안을 거래소 실제 상태로 종결 — 읽기 전용(주문을 내지 않는다).
- *    daily 알림이 "앱에서 보정하세요" 라고 안내하는데 **그 기능이 없어서** 10-06 건이
- *    6일째 반복 통보되고 있었다(2026-10-12).
- */
-app.post('/api/orders/reconcile', async (req, res) => {
-  try {
-    const r = await orderService.reconcileSent();
-    return res.json({ ok: true, ...r });
-  } catch (error) {
-    return res.status(502).json({ ok: false, error: error.message });
-  }
-});
 
-app.put('/api/agent/budget', (req, res) => {
-  const r = require('./server/agentLedger').setBudget(req.body?.usd ?? null, { by: 'web' });
-  return res.status(r.ok ? 200 : 400).json(r);
-});
-
-app.post('/api/agent/autonomy', (req, res) => {
-  const r = agentControl.setAutonomy({ level: req.body?.level, by: 'web' });
-  return res.status(r.ok ? 200 : 400).json(r);
-});
-
-app.get('/api/agent/status', (req, res) => {
-  const st = getDashboardSettings();
-  res.json({
-    control: agentControl.effective(),
-    // 자율 수준 — 사람이 운용 규칙 화면에서 전환한다(2026-10-04 선택 가능해짐)
-    autonomyLevel: agentControl.autonomyLevel(),
-    autonomy: ['승인 후 실행', '한도 내 자동', '안내 후 자율'][agentControl.autonomyLevel()] || '승인 후 실행',
-    ledger: require('./server/agentLedger').status(),
-    limits: {
-      // 상단 상태바 "일일 손실 -0.7% / -2.0%" 용. ⚠️ 손실 실측치는 화면이 portfolio 에서 계산 —
-      // 여기는 **한도**만 준다(두 곳에서 계산하면 갈라진다).
-      dailyLossPct: Number(st.riskPerTradePct) || null,
-    },
-  });
-});
-app.post('/api/agent/pause', (req, res) => {
-  const r = agentControl.pause({
-    scope: String(req.body?.scope || 'halt_new'),
-    reason: String(req.body?.reason || ''),
-    resumeNextDay: req.body?.resumeNextDay === true,
-    by: 'web',
-  });
-  if (!r.ok) return res.status(400).json(r);
-  res.json(r);
-});
-app.post('/api/agent/resume', (req, res) => res.json(agentControl.resume({ by: 'web' })));
 
 /**
  * 💰 수익 기반 적립 예산 (2026-10-06) — 배당·실현수익으로만 레버리지를 모아간다.
@@ -874,6 +812,101 @@ app.post('/api/backtest/run', (req, res) => {
   const r = require('./server/backtestRunner').run(String(req.body?.scenario || ''), { onlyScenarios: only });
   if (!r.ok) return res.status(r.kind === 'busy' ? 409 : 400).json(r);
   res.json(r);
+});
+
+/**
+ * 📜 백테스트 회차 목록·상세 (2026-10-12 — 전략 연구소 D-4)
+ * ⚠️ `backtest-last.json` 은 **덮이는 파일**이다. 비교·소급 채점은 여기서만 된다.
+ */
+app.get('/api/backtest/runs', (req, res) => {
+  res.json({ ok: true, items: require('./server/backtestStore').list({ limit: req.query.limit }) });
+});
+app.get('/api/backtest/runs/:id', (req, res) => {
+  const row = require('./server/backtestStore').get(req.params.id);
+  if (!row) return res.status(404).json({ ok: false, error: '그 회차가 없습니다.' });
+  res.json({ ok: true, ...row });
+});
+
+/**
+ * 🎯 포트폴리오 한 화면 요약 (2026-10-12 — D-1)
+ *
+ * 🔴 **한 번에 준다.** 종전 화면은 보유·비중·목표 괴리·손익을 각각 다른 라우트에서
+ *    모아 그렸고, 그중 하나가 느리면 **화면 절반이 빈 채로** 떴다.
+ * ⚠️ 부분 실패를 **통째 실패로 만들지 않는다** — 각 조각의 성패를 `parts` 로 함께 준다
+ *    ("없음" 과 "못 받음" 을 화면이 구분할 수 있어야 한다).
+ */
+app.get('/api/portfolio/summary', async (req, res) => {
+  const parts = {};
+  const out = { ok: true, at: new Date().toISOString() };
+
+  if (!tossPortfolio.isEnabled()) {
+    return res.status(503).json({ ok: false, error: '토스 연동이 설정되지 않았습니다.', configured: false });
+  }
+  try {
+    const mkt = getMarketSnapshot();
+    const rate = Number(mkt?.fx?.USDKRW?.rate) || 0;
+    const data = await tossPortfolio.getHoldings({
+      fx: rate ? { rate, asOf: mkt?.lastRefreshAt || null, source: mkt?.providers?.fx || mkt?.provider || null } : null,
+    });
+    out.items = data.items || [];
+    out.summary = data.summary || null;
+    parts.holdings = 'ok';
+    try {
+      out.weights = require('./server/analystService').portfolioWeights(
+        data.items || [], data.summary || null, require('./server/regimeService').readCatalog(),
+      );
+      parts.weights = 'ok';
+    } catch (e) { out.weights = null; parts.weights = e.message; }
+  } catch (e) {
+    return res.status(e.kind === 'unconfigured' ? 503 : 502)
+      .json({ ok: false, error: e.message || '보유 현황을 불러오지 못했습니다.', kind: e.kind || 'unknown' });
+  }
+
+  try {
+    out.target = require('./server/targetAllocation').compare(
+      out.items || [], out.summary || null, require('./server/regimeService').readCatalog(),
+    );
+    parts.target = 'ok';
+  } catch (e) { out.target = null; parts.target = e.message; }
+
+  try {
+    out.income = require('./server/incomeLedger').status();
+    parts.income = 'ok';
+  } catch (e) { out.income = null; parts.income = e.message; }
+
+  /**
+   * 🔴 한도는 **막는 선이 아니라 기준선**이다(2026-10-12) — 넘었다고 아무것도 거부하지
+   *    않는다. 화면이 "넘었다" 고 말할 뿐이다.
+   */
+  try {
+    const w = out.weights || {};
+    // ⚠️ `maxWeightPct` 는 weights 에 **없다** — 보유 비중에서 유도한다(없는 필드를 추정해
+    //    쓰면 조용히 null 이 되고 "검사 못 함" 이 "통과" 로 보인다)
+    const pcts = (w.holdings || []).map((h) => Number(h.pct)).filter((n) => Number.isFinite(n));
+    out.rules = require('./server/portfolioRules').diagnose({
+      maxWeightPct: pcts.length ? Math.max(...pcts) : null,
+      positionCount: (out.items || []).length,
+      leveragePct: w.leveragePct ?? null,
+      cashPct: w.cashPct ?? null,
+    });
+    parts.rules = 'ok';
+  } catch (e) { out.rules = null; parts.rules = e.message; }
+
+  out.parts = parts;
+  res.json(out);
+});
+
+/**
+ * 💸 LLM 사용량 (2026-10-12 — D-8)
+ * 사용자가 *"너 계속 LLM 비용 나가잖아"* 라고 했는데 **화면 어디에도 그 숫자가 없었다.**
+ * ⚠️ 비용은 **추정**이다 — 게이트웨이가 청구액을 주지 않는다. 추정임을 숨기지 않는다.
+ */
+app.get('/api/usage/llm', (req, res) => {
+  try {
+    res.json({ ok: true, ...require('./server/llmUsage').monthly() });
+  } catch (e) {
+    res.status(200).json({ ok: false, error: e.message, note: '사용량을 집계하지 못했습니다.' });
+  }
 });
 
 app.get('/api/performance', (req, res) => {
@@ -905,86 +938,11 @@ app.get('/api/risk/stress', async (req, res) => {
   }
 });
 
-app.get('/api/orders/stats', (req, res) => {
-  const stats = orderService.proposalStats();
-  if (!stats) return res.status(200).json({ ok: false, error: '감사 파일을 읽지 못했습니다.' });
-  res.json({ ok: true, ...stats });
-});
 
-app.get('/api/orders/proposals', (req, res) => {
-  res.json({ status: orderService.status(), proposals: orderService.list() });
-});
 
-app.post('/api/orders/proposals', async (req, res) => {
-  /**
-   * 🔴 `{"notify": false}` 면 **폰의 승인 버튼을 안 보낸다**(점검용).
-   *    pm2 가 이 경로로 영속화를 검증하다 사용자 폰에 버튼을 보냈다 — 본인은 안 보내는 줄 알았다.
-   *    발송이 **리스너**에서 일어나 함수 본문만 봐서는 안 보이기 때문이다.
-   *    ⚠️ 기본은 **보낸다** — 사용자 지시를 바꾸지 않는다.
-   */
-  const notify = req.body?.notify !== false;
-  /**
-   * 🔴 여기서도 **계좌로 막는다** — 제안을 만드는 문이 둘이면 한쪽만 막는 건 안 막는 것이다.
-   * ⚠️ `{"skipAccountCheck":true}` 로 건너뛸 수 있게 두지 **않는다** — 그런 문이 생기면 결국 쓰인다.
-   */
-  const chk = await orderService.checkAccountLimits(req.body || {});
-  if (!chk.ok) return res.status(400).json({ ok: false, error: chk.error, kind: chk.kind });
-  // 🔴 `chk` 를 넘긴다 (2026-10-06) — 적립 면제(집중 상한 뚫기)를 **근거로 통과한 제안**임을
-  //    집행 시점까지 들고 가야 `incomeLedger` 가 차감한다. 안 넘기면 수동·채팅 면제 매수가
-  //    **차감되지 않아 같은 배당으로 무한히 상한을 뚫는다**(자율 경로는 propose 안에서 스스로 심는다).
-  const r = orderService.propose(req.body || {}, { source: String(req.body?.source || 'manual'), notify, accrual: chk });
-  // 빠진 값을 400 으로 돌려준다 — **승인 화면에서 채우게 두지 않는다**
-  return res.status(r.ok ? 201 : 400).json(r);
-});
 
-/**
- * 🔴 **주문 사전 점검** (2026-10-02 — 와이어프레임 ⑨ "제안 → 승인 → 토스 주문 플로우").
- *
- * 종전 화면에는 **제안 → 실제 주문 경로가 없었다.** 사람이 승인 버튼을 누를 때
- * *무엇을 근거로* 누르는지가 화면에 없었다 — 잔고·장 운영시간·미체결·체결 후 비중이
- * 전부 보이지 않았다.
- * ⚠️ 이 엔드포인트는 **읽기 전용**이다. 아무것도 집행하지 않는다.
- */
-app.get('/api/orders/proposals/:id/precheck', async (req, res) => {
-  const p = orderService.list().find((x) => x.id === req.params.id);
-  if (!p) return res.status(404).json({ ok: false, error: '제안을 찾을 수 없습니다.' });
-  try {
-    const r = await require('./server/orderPrecheck').precheck(p, {
-      // ⚠️ 미체결 조회는 **있으면** 쓴다 — 없으면 precheck 가 `unknown` 으로 정직하게 적는다
-      // 🔗 2026-10-05 연결 — listOrders 는 **{status:'OPEN'} 필수**였다(400 프로브로 확정).
-      //    사전점검의 '조회 수단 미연결' 이 이걸로 실데이터가 된다(중복 주문 방지 축).
-      getOpenOrders: async (sym) => {
-        const r = await tossClient.listOrders({ status: 'OPEN' });
-        return (r?.orders || []).filter((o) => String(o.symbol).toUpperCase() === String(sym).toUpperCase());
-      },
-    });
-    return res.json({ ok: true, ...r });
-  } catch (e) {
-    logError('orders.precheck_failed', e, { id: req.params.id });
-    return res.status(502).json({ ok: false, error: e.message || '사전 점검에 실패했습니다.' });
-  }
-});
 
-app.post('/api/orders/proposals/:id/approve', (req, res) => {
-  const r = orderService.approve(req.params.id);
-  return res.status(r.ok ? 200 : 400).json(r);
-});
 
-app.post('/api/orders/proposals/:id/reject', (req, res) => {
-  /**
-   * ⚠️ **사유가 비면 출처라도 남긴다** (2026-10-03). 감사에 `reason: ""` 로 남으면
-   *    *"누가 왜 거절했나"* 를 영영 모른다 — 텔레그램 거절은 `"telegram"` 을 보내는데
-   *    화면 거절은 아무것도 안 보내서 **같은 사건처럼 보였다.**
-   * ⚠️ 만료는 `EXPIRED` 상태로 **따로** 관리되므로 여기 섞이지 않는다(확인함).
-   */
-  const r = orderService.reject(req.params.id, String(req.body?.reason || '').trim() || 'web');
-  return res.status(r.ok ? 200 : 400).json(r);
-});
-
-app.post('/api/orders/proposals/:id/execute', async (req, res) => {
-  const r = await orderService.execute(req.params.id);
-  return res.status(r.ok ? 200 : 400).json(r);
-});
 
 // ── 시장 국면 (2026-09-23) — 판정은 코드, 화면은 읽기만 ─────────
 app.get('/api/regime', (req, res) => {
@@ -1019,47 +977,6 @@ app.post('/api/regime/manual', (req, res) => {
 });
 
 // ── 예약(조건부) 주문 (2026-09-23) ─────────────────────────────
-/** 📋 미체결(일반 지정가) 주문 — listOrders({status:OPEN}) (2026-10-05 연결) */
-app.get('/api/orders/open', async (req, res) => {
-  try {
-    const r = await tossClient.listOrders({ status: 'OPEN' });
-    return res.json({ ok: true, orders: (r?.orders || []).map((o) => ({
-      orderId: o.orderId, symbol: o.symbol, side: o.side, price: o.price, quantity: o.quantity,
-      status: o.status, orderedAt: o.orderedAt, filledQuantity: o.execution?.filledQuantity ?? '0',
-    })) });
-  } catch (error) { return res.status(502).json({ ok: false, error: error.message }); }
-});
-
-app.get('/api/orders/conditional', async (req, res) => {
-  try {
-    const status = String(req.query.status || 'OPEN').toUpperCase() === 'CLOSED' ? 'CLOSED' : 'OPEN';
-    const r = await tossClient.listConditionalOrders({ status });
-    const items = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
-    return res.json({ status, items });
-  } catch (error) {
-    logError('conditional.list_failed', error, { kind: error.kind });
-    return res.status(502).json({ error: error.message, kind: error.kind || 'unknown' });
-  }
-});
-
-/**
- * 예약 취소 — HITL 승인 없이 즉시 실행한다. 취소는 포지션을 여는 게 아니라 **예약을 없애는 것**이고
- * 되돌릴 수 있다(다시 걸면 된다). 다만 감사에는 남는다.
- * 🔴 명세: 정정·취소는 멱등키가 없다 ⇒ 타임아웃이면 **재시도하지 말고** 목록으로 확정해야 한다.
- */
-app.post('/api/orders/conditional/:id/cancel', async (req, res) => {
-  try {
-    await tossClient.cancelConditionalOrder(req.params.id);
-    orderService.auditExternal('conditional_canceled', { conditionalOrderId: req.params.id, via: 'web' });
-    return res.json({ ok: true });
-  } catch (error) {
-    logError('conditional.cancel_failed', error, { kind: error.kind });
-    const note = error.kind === 'unknown' || error.kind === 'timeout'
-      ? '취소가 접수됐는지 알 수 없습니다 — 재시도하지 말고 목록을 새로고침해 확인하세요.'
-      : null;
-    return res.status(502).json({ ok: false, error: error.message, kind: error.kind || 'unknown', note });
-  }
-});
 
 // ── 대시보드 (한 화면에 필요한 것을 한 번에) ──────────────────
 app.get('/api/dashboard', async (req, res) => {
@@ -1446,18 +1363,12 @@ async function startAiSchedule() {
   // ⚠️ v2 매니저 브리핑 크론 6개(ensureManagerBriefSchedule)는 2026-10-03 에 제거 —
   //    v3 분석(alertService 의 장 세션 트리거)이 유일한 브리핑 체계다. 상단 주석 참조.
 
-  // ⚠️ 조용한 우회를 만들지 않는다 — LAN 면제가 켜져 있으면 그 사실을 기동 때 말한다
-  logInfo('orders.mode', orderService.status());
   // 조용히 켜져 있지도, 조용히 꺼져 있지도 않게 — 어느 쪽이 막는지 이유까지 남긴다
   logInfo('telegram.mode', telegram.status());
   // 어느 쪽이 막고 있는지(미설정/꺼짐)까지 기동 로그에 남긴다
   logInfo('mcp.mode', mcp.status());
   logInfo('telegram.bot', telegramBot.status());
   logInfo('alerts.mode', alerts.status());
-  // 🔴 제안 → 텔레그램(승인 버튼). 알림이 꺼져 있으면 onProposal 이 스스로 건너뛴다
-  orderService.onProposed((p) => alerts.onProposal(p));
-  // 🔴 끝난 제안은 **폰의 버튼도 지운다** — 안 지우면 사용자가 아직 결정할 게 있다고 믿는다
-  orderService.onSettled((p, why) => alerts.onProposalSettled(p, why));
   telegramBot.start();
   alerts.start();
 

@@ -23,9 +23,18 @@ const SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'tossClient.js'
 /** 계좌 헤더가 필요한 함수 — 명세 기준. 늘어나면 여기 추가해야 하고, 그때 이 자가 강제한다 */
 const NEED_ACCOUNT = [
   'getBuyingPower', 'getSellableQuantity', 'getCommissions',
-  'createOrder', 'getOrder', 'listOrders', 'cancelOrder', 'modifyOrder',
+  'getOrder', 'listOrders', 'modifyOrder',
   'createConditionalOrder', 'listConditionalOrders', 'cancelConditionalOrder',
 ];
+
+/**
+ * 🔴 **2026-10-12 — `createOrder`·`cancelOrder` 를 목록에서 뺐다.**
+ *    주문 집행을 걷어내면서 `tossClient` 에서 **두 함수를 지웠기 때문**이다.
+ *    ⚠️ 목록에 남겨 두면 자가 *"못 찾았다 — 이름이 바뀌었나?"* 로 **영구 실패**한다.
+ *    ★ 지우는 대신 **왜 뺐는지**를 여기 적는다 — 안 적으면 다음 사람이 "빠뜨렸나" 하고 되돌린다.
+ *    ⚠️ 조회 계열(`getOrder`·`listOrders`)은 **남아 있다** — 사용자가 증권사 앱에서
+ *       직접 낸 주문을 읽는 경로다(관측이지 집행이 아니다).
+ */
 
 test('🔴 계좌 헤더가 필요한 함수는 **전부** withAccount 를 거친다', () => {
   const missing = [];

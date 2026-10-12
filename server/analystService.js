@@ -1,6 +1,6 @@
 const { generateStructuredOutput, getAiSettings } = require('./aiService');
 const { getDashboardSettings } = require('./settingsService');
-const orderService = require('./orderService');
+const portfolioRules = require('./portfolioRules');
 const toss = require('./tossClient');
 const stockIdentity = require('./stockIdentity');
 const mcp = require('./mcpClient');
@@ -36,7 +36,7 @@ const { logInfo, logWarn } = require('./logger');
  * ## 제안은 **완전한 값**이어야 한다
  *
  * 모델이 종목·방향·수량·가격을 **전부** 채워야 제안이 만들어진다. 빈칸이 있으면
- * `orderService` 가 거부한다 — **승인 화면이 주문 화면이 되면 안 된다.**
+ * 🔴 2026-10-12 집행 제거 — 이 분석은 **판단만** 한다.
  * 그리고 실행은 여전히 **사람 승인 + no-op** 이다(샌드박스가 없다).
  */
 
@@ -176,23 +176,36 @@ const REPORT_SCHEMA = {
         required: ['symbol', 'stance', 'confidence', 'rationale', 'evidence', 'risk'],
       },
     },
-    proposals: {
-      type: 'array',
-      maxItems: 4,
-      items: {
-        type: 'object',
-        properties: {
-          symbol: { type: 'string' },
-          side: { type: 'string', enum: ['BUY', 'SELL'] },
-          quantity: { type: 'number' },
-          price: { type: 'number' },
-          reason: { type: 'string' },
-        },
-        required: ['symbol', 'side', 'quantity', 'price', 'reason'],
-      },
-    },
   },
-  required: ['marketView', 'momentumRead', 'dataGaps', 'positions', 'proposals'],
+  required: ['marketView', 'momentumRead', 'dataGaps', 'positions'],
+};
+
+/**
+ * 🔴 **모의 거래 스키마 — 백테스트 전용** (2026-10-12)
+ *
+ * 2026-10-12 에 주문 집행을 걷어내면서 `proposals` 를 **라이브 스키마에서 뺐다.**
+ * 라이브 분석은 이제 *판단만* 한다 — 집행할 곳이 없는데 수량·지정가를 받으면
+ * **받아 놓고 안 쓰는** 자리가 된다(이 저장소가 열한 번 밟은 그 패턴).
+ *
+ * 그런데 **백테스트는 다르다.** "이 전략이 과거에 어떻게 매매했을까" 를 재려면
+ * 모델이 *무엇을 얼마에 사고팔지* 를 내야 한다 — 그건 주문이 아니라 **시뮬레이션 입력**이다.
+ * ⇒ 경로를 가른다: 라이브는 `REPORT_SCHEMA`, 백테스트는 `reportSchemaFor(…, { trades: true })`.
+ */
+const TRADE_ARRAY_SCHEMA = {
+  type: 'array',
+  maxItems: 4,
+  description: '모의 매매(백테스트 시뮬레이션 입력) — 실제 주문이 아니다',
+  items: {
+    type: 'object',
+    properties: {
+      symbol: { type: 'string' },
+      side: { type: 'string', enum: ['BUY', 'SELL'] },
+      quantity: { type: 'number' },
+      price: { type: 'number' },
+      reason: { type: 'string' },
+    },
+    required: ['symbol', 'side', 'quantity', 'price', 'reason'],
+  },
 };
 
 /**
@@ -240,12 +253,12 @@ const BUDGET_ACTIONS = new Set(['ENTER', 'HOLD', 'EXIT', 'WAIT']);
  * ⚠️ `holdings` 와 **합성된다** — 보유·예산 넷 조합 전부 성립해야 한다(자가 단언한다).
  * ⚠️ 수치는 **인자에서 유도**한다. 하드코딩하면 예산을 바꾼 날 프롬프트가 거짓말한다.
  */
-function reportSchemaFor(heldSymbols = [], { budget = null } = {}) {
+function reportSchemaFor(heldSymbols = [], { budget = null, trades = false } = {}) {
   // ⚠️ trim 을 빠뜨려 ' qld ' 가 그대로 enum 에 들어갔다 — 자가 잡았다(2026-10-02)
   const syms = [...new Set((heldSymbols || []).map((x) => String(x || '').trim().toUpperCase()).filter(Boolean))];
   const hasBudget = Boolean(budget) && budget.budgetUsd != null;
-  // ⚠️ 둘 다 없으면 **원본 그대로** 돌려준다(기존 자가 identity 로 단언한다)
-  if (!syms.length && !hasBudget) return REPORT_SCHEMA;
+  // ⚠️ 셋 다 없으면 **원본 그대로** 돌려준다(기존 자가 identity 로 단언한다)
+  if (!syms.length && !hasBudget && !trades) return REPORT_SCHEMA;
 
   const base = REPORT_SCHEMA.properties.positions.items;
   const properties = { ...REPORT_SCHEMA.properties };
@@ -263,6 +276,12 @@ function reportSchemaFor(heldSymbols = [], { budget = null } = {}) {
       },
     };
     required.push('holdings');
+  }
+
+  // 백테스트 경로만 모의 거래 칸을 연다
+  if (trades) {
+    properties.proposals = TRADE_ARRAY_SCHEMA;
+    required.push('proposals');
   }
 
   if (hasBudget) {
@@ -303,8 +322,8 @@ const SYSTEM_PROMPT = [
    *    없는 한도를 말하면 모델이 스스로 제안을 깎는다(문서가 코드보다 오래 사는 그 병).
    */
   '## 운용 기조 — 공격적 (2026-10-02 사용자 결정)',
-  '- 🔴 현금 버퍼(15%)와 보유 방침 게이트는 **제거됐습니다.** 인위적 한도로 제안을 깎지 마십시오.',
-  '- 확신의 근거는 **숫자**입니다 — 추세·상대강도·손익비가 서면 **제안을 내십시오.** 뉴스가 없어도 됩니다.',
+  '- 🔴 인위적 한도로 **판단을 깎지 마십시오.** 한도는 포트폴리오 진단 기준선일 뿐입니다.',
+  '- 확신의 근거는 **숫자**입니다 — 추세·상대강도·손익비가 서면 **분명히 말하십시오.** 뉴스가 없어도 됩니다.',
   '  "관망" 은 판단이 아니라 판단 회피입니다. 다만 숫자가 안 서면 빈 배열이 정답입니다.',
   '- 공격적이란 위험을 **모르고** 가는 게 아니라 위험을 **정량화하고** 가는 것입니다 —',
   '  그래서 `stop` 이 더 중요해집니다. 손절선 없는 공격은 공격이 아니라 도박입니다.',
@@ -320,7 +339,7 @@ const SYSTEM_PROMPT = [
   '🔴 **종목의 등락을 국면으로 먼저 설명하십시오.** "52주 신저가" 는 증상이지 원인이 아닙니다.',
   '   금리 상승기에 리츠·유틸·고배당이 함께 내리는 것은 **그 종목의 문제가 아닙니다** —',
   '   그걸 "약세라 매도" 로 읽으면 국면이 바뀔 때 **가장 싼 자리에서 팔게 됩니다**(2026-10-02 실사고).',
-  '🔴 **사용자가 적립·보유를 정한 종목에 매도 제안을 내려면 근거가 "가격이 내렸다" 보다 강해야 합니다** —',
+  '🔴 **사용자가 적립·보유를 정한 종목에 매도 의견을 내려면 근거가 "가격이 내렸다" 보다 강해야 합니다** —',
   '   배당 삭감·신용등급 하락·사업 훼손처럼 **종목 자체의 변화**여야 합니다. 국면 역풍은 그 근거가 아닙니다.',
   '',
   /**
@@ -334,13 +353,12 @@ const SYSTEM_PROMPT = [
    *    모델이 스스로 판정하게 하면 회차마다 흔들린다. ⚠️ 두 줄로 유지 — 길이 = 시간.
    */
   '"## 시장 국면" 절의 판정을 그대로 쓰라 — 다시 판정하지 마라.',
-  '"## 발동된 매뉴얼" 이 있으면 그 스텝 안에서만 제안하고, 티커는 "## 도구상자" 안에서만 고른다.',
+  '"## 발동된 매뉴얼" 이 있으면 그 스텝 안에서만 판단하고, 티커는 "## 도구상자" 안에서만 고른다.',
   '',
   '⚠️ 길이 규칙 — 어기면 답이 잘려 **통째로 버려집니다**:',
   '- marketView·momentumRead: 각 2문장 이내',
   '- 종목별 rationale: 2문장 · evidence: **40자 이내 인용** 최대 2개 · risk: 1문장',
   '- scenarioUp/scenarioDown: 각 1문장 · dataGaps: 항목당 15자 이내',
-  '- proposals 의 reason: 1문장',
   '',
   '## 반드시 지킬 것',
   '1. **제공된 데이터만 근거로 씁니다.** 재무제표·DCF·PER/PBR·기관 수급·내부자 거래·옵션 IV 는',
@@ -368,16 +386,16 @@ const SYSTEM_PROMPT = [
   '- 보유 종목을 여기 넣지 마십시오 — 그건 `holdings` 자리입니다.',
   '- 살 만한 것이 없으면 **빈 배열**이 정답입니다. 억지로 채우지 마십시오.',
   '',
-  '## proposals (매매 제안)',
-  '- 추세·상대강도·손익비가 서면 **냅니다.** 숫자가 안 서면 빈 배열이 정답입니다.',
-  '  ⚠️ 한도 때문에 못 낸다고 적지 마십시오 — 현금 버퍼 규칙은 제거됐습니다(2026-10-02).',
-  '- symbol·side·quantity·price 를 **전부 숫자로** 채웁니다. 하나라도 비면 그 제안은 버려집니다.',
-  '- quantity 는 **보유 수량과 현금 여력을 넘지 않게** 합니다. 매도는 보유 수량 이내입니다.',
-  '- price 는 지정가입니다. 🔴 **현재가 ±2.5% 안**이어야 합니다(코드가 거부합니다 — 09-23 실물:',
-  '🔴 체결 **불리 방향 금지**: 매도 지정가는 현재가 **이상**, 매수는 현재가 **이하**로 — 반대로 내면 코드가 현재가로 보정합니다(2026-10-05).',
-  '  당일 고가 옆 지정가 3건이 전부 10분 TTL 안에 체결 불가였다). 그 밖의 가격을 원하면 제안 대신',
-  '  **조건주문**을 서술하세요(사람이 예약으로 겁니다).',
-  '- 🔴 이 제안은 **사람이 승인해야만** 실행됩니다. 당신은 실행하지 않습니다.',
+  /**
+   * 🔴 **2026-10-12 — `proposals` 지시를 들어냈다.**
+   *    주문 집행이 사라져 **수량·지정가를 받을 곳이 없다.** 지시를 남겨 두면 모델이
+   *    매 회차 그 칸을 채우고 그게 **통째로 버려진다**(받아 놓고 안 쓰는 자리).
+   *    ⚠️ 백테스트 경로만 `reportSchemaFor(…, { trades: true })` 로 모의 거래 칸을 연다.
+   */
+  '## 이 분석은 주문을 내지 않습니다',
+  '- 당신의 산출물은 **판단**입니다 — 종목별 stance 와 근거, 그리고 가격 레벨.',
+  '- 수량·주문가를 적지 마십시오. 사람이 보고 **직접** 증권사에서 주문합니다.',
+  '- 그래서 `stop`·`target`·`entry` 가 **더** 중요합니다 — 사람이 그 숫자로 주문을 겁니다.',
   '',
   '## 손익비 · 손절 · 시나리오 (2026-09-21 추가)',
   '각 종목 판단에 아래를 **숫자로** 답하세요. 없는 데이터를 지어내지 말고, 제공된',
@@ -392,7 +410,7 @@ const SYSTEM_PROMPT = [
   // 🔴 2026-10-02: 아래 두 줄이 없어서 QLD 목표 97 < 현재가 97.6 (이미 달성된 목표)이 나왔다.
   //    ⚠️ 프롬프트는 **보조**다 — 코드(`computeTrade`)가 현재가와 대조해 실제로 잡는다.
   '🔴 `target` 은 **현재가를 넘어선 자리**여야 합니다 — 매수면 현재가 **위**, 매도면 **아래**.',
-  '   현재가 이미 지난 목표는 "지금 청산하라" 와 같은 말이라 제안으로서 의미가 없습니다.',
+  '   현재가 이미 지난 목표는 "지금 청산하라" 와 같은 말이라 판단으로서 의미가 없습니다.',
   '🔴 `entry` 가 현재가와 다르면 **왜 그 가격인지** `rationale` 에 한 마디 적으세요',
   '   (예: "20일선 92.7 까지 눌리면" / "저항 29.6 을 넘으면"). 안 적으면 사용자는',
   '   그 숫자가 추격매수인지 지정가 대기인지 알 수 없습니다.',
@@ -415,7 +433,7 @@ const SYSTEM_PROMPT = [
  *   · 종목 판단 = `stance` 값이 BUY/SELL/HOLD 인 객체 (배열이든 최상위든)
  *   · 제안     = side + quantity + price 가 **다 있는** 객체
  *   · 시황     = 알려진 이름 → 없으면 **가장 긴 산문 문자열**
- * ⚠️ 제안은 **네 칸이 다 있을 때만** 줍는다 — 반쪽을 주우면 `orderService` 가 거부하고
+ * ⚠️ 모의 거래는 **네 칸이 다 있을 때만** 줍는다 — 반쪽은 백테스트 시뮬레이션에서 쓸 수 없고
  *    사용자는 "왜 제안이 사라졌지" 를 겪는다.
  */
 const STANCES = new Set(['BUY', 'SELL', 'HOLD']);
@@ -960,7 +978,7 @@ const round2 = (n) => Math.round(Number(n) * 100) / 100;
  * 🔴 **"매수 제안 0건" 의 이유를 사실로 만든다** (2026-10-01)
  *
  * 실측 상태: 가용 현금 **USD 3.76 · KRW 0**(총 평가액 15,674 USD). 현금 버퍼 15% 는
- * 2,351 USD 라 `orderService` 의 `cash-floor` 게이트는 **도달조차 불가능한 사문**이었다 —
+ * 2,351 USD 라 `cash-floor` 기준선은 **도달조차 불가능한 사문**이었다 —
  * 신규 매수가 **물리적으로 불가능**한 상태인데 프롬프트도, 폰 브리핑도, 로그도 그 사실을
  * **한 번도 말하지 않았다.** 사용자는 `proposed:0` 만 보고 "제안이 없다" 로 읽는다.
  * ⇒ 침묵이 **"정상"과 "고장"을 똑같이 보이게** 만드는 그 자리다.
@@ -970,13 +988,13 @@ const round2 = (n) => Math.round(Number(n) * 100) / 100;
  *    그 다음이고, 참조가는 **이미 들고 있는 종목의 현재가**를 쓴다(새 의존성을 만들지 않는다).
  * ⚠️ **못 읽은 것과 0 은 다르다.** `cash[cur]` 이 없으면 `unknown` 이고, 그 통화가 하나라도
  *    있으면 전체를 `blocked` 로 **단정하지 않는다** — "살 수 없다" 는 전부 읽고서만 하는 말이다.
- * ⚠️ 버퍼 비율은 게이트를 실제로 거는 `orderService.CASH_FLOOR_PCT` 를 **그대로 읽는다**(복제 금지).
+ * ⚠️ 버퍼 비율은 기준선을 쥔 `portfolioRules.CASH_FLOOR_PCT` 를 **그대로 읽는다**(복제 금지).
  *
  * @param {{cash?:{krw?:object,usd?:object,failed?:string[]}}|null} summary `dash.portfolio.summary`
  * @param {Array<{currency?:string, marketValue?:number, lastPrice?:number}>} items 보유 종목
  */
 function assessBuyingCapacity(summary, items = []) {
-  const floorPct = Number(orderService.CASH_FLOOR_PCT) || 0;
+  const floorPct = Number(portfolioRules.CASH_FLOOR_PCT) || 0;
   const list = Array.isArray(items) ? items : [];
   const cash = summary?.cash || null;
   const byCurrency = {};
@@ -988,7 +1006,7 @@ function assessBuyingCapacity(summary, items = []) {
       continue;
     }
     const sameCur = list.filter((it) => String(it?.currency || '').toUpperCase() === cur);
-    // 🔴 `orderService` 와 **같은 식**이다(평가액 = 현금 + 그 통화 보유 평가금액)
+    // 🔴 리스크 지표와 **같은 식**이다(평가액 = 현금 + 그 통화 보유 평가금액)
     const holdingsVal = sameCur.reduce((s, it) => s + (Number(it?.marketValue) || 0), 0);
     const floor = (amount + holdingsVal) * (floorPct / 100);
     const available = amount - floor;
@@ -1600,11 +1618,6 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     const ps = require('./strategyStore').promptSection();
     if (ps) lines.push('', ps);
   } catch (e) { logWarn('analyst.promoted_section_failed', { message: e.message }); }
-
-  try {
-    const sec = ledgerSection(require('./agentLedger').status(), require('./agentControl').autonomyLevel());
-    if (sec) lines.push('', ...sec);
-  } catch (e) { logWarn('analyst.ledger_section_failed', { message: e.message }); }
 
   lines.push('', '## 보유 종목');
   for (const h of items) {
@@ -2306,7 +2319,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       systemPrompt: SYSTEM_PROMPT,
       userPrompt,
       // 🔴 **보유 전용 자리**를 가진 스키마 — 후보와 경쟁시키지 않는다(위 reportSchemaFor 참조)
-      schema: reportSchemaFor(items.map((h) => h.symbol), { budget: require('./agentLedger').status() }),
+      schema: reportSchemaFor(items.map((h) => h.symbol)),
       logLabel: 'trade_analyst',
     },
     { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
@@ -2364,7 +2377,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
           '판단이 "그대로 보유" 여도 `stance: "HOLD"` 로 **명시**하세요. 빠뜨리지 마세요.',
         ].join('\n'),
         // 🔴 **보유 전용 자리**를 가진 스키마 — 후보와 경쟁시키지 않는다(위 reportSchemaFor 참조)
-        schema: reportSchemaFor(items.map((h) => h.symbol), { budget: require('./agentLedger').status() }),
+        schema: reportSchemaFor(items.map((h) => h.symbol)),
         logLabel: 'trade_analyst_retry',
       },
       { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
@@ -2497,7 +2510,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
             ].join('\n')] : []),
           ].join('\n'),
           // 🔴 **보유 전용 자리**를 가진 스키마 — 후보와 경쟁시키지 않는다(위 reportSchemaFor 참조)
-          schema: reportSchemaFor(items.map((h) => h.symbol), { budget: require('./agentLedger').status() }),
+          schema: reportSchemaFor(items.map((h) => h.symbol)),
           logLabel: 'trade_analyst_price_fix',
         },
         { marketView: '', momentumRead: '', dataGaps: [], positions: [], proposals: [] }
@@ -2622,118 +2635,20 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   };
   report.pipeline = pipeline;
 
-  // 제안을 orderService 로 넘긴다 — **빈칸이 있으면 거기서 거부된다**
+  /**
+   * 🔴 **2026-10-12 — 제안을 만들지 않는다.**
+   *
+   * 종전에는 여기서 모델의 `proposals` 를 `orderService.propose` 로 넘겨 HITL 제안을
+   * 등록했다. 주문 집행을 걷어내면서 그 경로가 통째로 사라졌고, 라이브 스키마에서
+   * `proposals` 칸도 뺐다(`TRADE_ARRAY_SCHEMA` 주석 참조).
+   *
+   * ⚠️ `created`·`rejected` 는 **지우지 않고 빈 배열로 남긴다** — 아래 요약·로그·
+   *    텔레그램 본문이 이 이름을 읽는다. 이름만 지우면 그 자리들이 전부 깨지고,
+   *    급히 고치다 **다른 뜻으로 되살아난다**. 소비자가 0이 되면 그때 함께 지운다.
+   */
   const created = [];
   const rejected = [];
-  for (const p of dryRun ? [] : (report.proposals || [])) {
-    /**
-     * 🔴 **계좌로 먼저 막는다** — 모델이 낼 수 없는 제안을 폰으로 보내면
-     *    사용자가 승인을 누르고 나서야 실패를 안다. 그건 HITL 이 아니라 헛수고다.
-     * ⚠️ 못 물어봤으면(`unknown`) **통과가 아니다** — 막고 이유를 화면에 적는다.
-     */
-    /**
-     * 🔴 인버스 게이트 — 사용자 규칙(09-24)을 **코드로** 강제한다. 스펙트럼 시뮬 실증:
-     *    횡보 케이스에서 모델이 "추세 붕괴 확인되어 소액 헤지" 라며 PSQ 매수를 냈다 —
-     *    규칙(확정 하락추세에서만·1배만)이 프롬프트에 있는데도 어겼다. 프롬프트로 못
-     *    지키는 규칙은 코드가 정본이다(뭉뚱그림 걸러내기와 같은 가족).
-     * ⚠️ 분석(analyst) 제안만 막는다 — 채팅의 사용자 명시 요청은 사람 의사라 통과.
-     */
-    {
-      const gate = inverseGate(p, require('./regimeService').getState());
-      if (!gate.ok) {
-        rejected.push({ symbol: p.symbol, side: p.side, error: gate.why });
-        logWarn('analyst.inverse_blocked', { symbol: p.symbol, why: gate.why });
-        continue;
-      }
-    }
-    // 🔴 횡보 게이트 — 횡보+평온의 미보유 시장가 매수를 막는다(상세는 sideGate 주석)
-    {
-      const gate = sideGate(p, require('./regimeService').getState(),
-        { heldSymbols: items.map((h) => h.symbol), proposals: report.proposals });
-      if (!gate.ok) {
-        rejected.push({ symbol: p.symbol, side: p.side, error: gate.why });
-        logWarn('analyst.side_blocked', { symbol: p.symbol, why: gate.why });
-        continue;
-      }
-    }
-    /**
-     * 🔴 **사용자가 "보유 유지" 를 정한 종목의 매도를 코드가 막는다** (2026-10-01).
-     *    프롬프트에 적어 뒀는데도 12:19 에 `RAM SELL @14.1` 이 나갔고 사용자가 거절했다.
-     *    ⚠️ 막는 쪽이 **방침과 같은 설정**을 읽으므로 둘이 갈라질 수 없다.
-     */
-    /**
-     * 💸 수수료를 빼면 이익이 안 남는 제안은 **여기서 끊는다** — 한도 검사·주문 전에.
-     *    (게이트는 `feeGate` 한 함수이고 백테스트 경로도 같은 것을 쓴다)
-     */
-    const fg = feeGate(p, report.positions);
-    if (!fg.ok) {
-      rejected.push({ symbol: p.symbol, side: p.side, error: fg.why, kind: 'fee' });
-      logWarn('analyst.proposal_fee_blocked', { symbol: p.symbol, side: p.side, why: fg.why });
-      continue;
-    }
-    /** 깎인 값이 있으면 여기 담긴다 — `p` 는 상수라 덮어쓰지 않는다 */
-    let clamped = null;
-    const chk = await orderService.checkAccountLimits({
-      symbol: p.symbol, side: p.side, quantity: p.quantity, price: p.price,
-    });
-    /**
-     * 🔴 **현금을 넘으면 거부하지 말고 깎는다** (2026-10-02 실사고).
-     *    08:00 회차에서 `SHY BUY · 필요 1,622 USD > 가능 1,375` 가 **통째로 거부**됐다.
-     *    모델 판단(단기국채로 피난)은 **맞았는데** 수량 하나 때문에 제안이 0건이 됐고,
-     *    사용자 화면에는 *"매매 제안 0건"* 만 남았다.
-     * ★ `checkAccountLimits` 는 **가능 수량(maxQuantity)을 이미 계산해서 돌려주고 있었다** —
-     *   그걸 읽는 코드가 0곳이었다. *"수집해 놓고 안 쓰는"* 의 또 하나.
-     * ⚠️ 깎는 것은 **수량 부족(insufficient)** 일 때만이다 — 다른 거부(종목 제한·가격 밴드)는
-     *    판단 자체가 틀린 것이라 깎아서 통과시키면 안 된다.
-     * ⚠️ 깎았다는 사실을 **제안 사유에 적는다** — 사용자가 승인 화면에서 원래 의도를 알아야 한다.
-     */
-    if (!chk.ok) {
-      /**
-       * 🔴 불리 방향 지정가는 **현재가로 보정**해 다시 점검한다 (2026-10-05 — "왜 97.5 에 파냐").
-       *    판단(팔자)은 맞는데 가격 한 끗 때문에 제안이 0건이 되면 수량 부족 때와 같은 손실이다.
-       *    보정 사실은 사유에 적고 감사에 남긴다 — 승인하는 사람이 원제안가를 알아야 한다.
-       */
-      if (chk.kind === 'adverse-price' && Number(chk.currentPrice) > 0) {
-        const fixedPrice = Number(chk.currentPrice);
-        logInfo('analyst.price_clamped', { symbol: p.symbol, side: p.side, asked: p.price, to: fixedPrice });
-        const re = await orderService.checkAccountLimits({
-          symbol: p.symbol, side: p.side, quantity: p.quantity, price: fixedPrice,
-        });
-        if (re.ok) {
-          clamped = { price: fixedPrice,
-            reason: `${p.reason || ''} (지정가 ${p.price}→현재가 ${fixedPrice} 보정 — 불리 방향 한도)`.trim() };
-        } else {
-          rejected.push({ symbol: p.symbol, side: p.side, error: re.error, kind: re.kind });
-          continue;
-        }
-      } else {
-      const canClamp = chk.kind === 'insufficient' && Number(chk.maxQuantity) >= 1
-        && Number(chk.maxQuantity) < Number(p.quantity);
-      if (!canClamp) {
-        rejected.push({ symbol: p.symbol, side: p.side, error: chk.error, kind: chk.kind });
-        logWarn('analyst.proposal_blocked', { symbol: p.symbol, side: p.side, kind: chk.kind, error: chk.error });
-        continue;
-      }
-      logInfo('analyst.proposal_clamped', {
-        symbol: p.symbol, side: p.side, asked: p.quantity, to: chk.maxQuantity, why: chk.kind,
-      });
-      clamped = { quantity: Number(chk.maxQuantity),
-        reason: `${p.reason || ''} (현금 한도로 ${p.quantity}→${chk.maxQuantity}주 축소)`.trim() };
-      }
-    }
-    const r = orderService.propose(
-      {
-        symbol: p.symbol, side: p.side, type: 'LIMIT',
-        price: clamped?.price ?? p.price,
-        quantity: clamped?.quantity ?? p.quantity,
-        reason: clamped ? clamped.reason : p.reason,
-      },
-      { source: 'analyst' }
-    );
-    if (r.ok) created.push(r.proposal);
-    // 🔴 버려진 제안을 조용히 넘기지 않는다 — 왜 안 만들어졌는지 화면이 알아야 한다
-    else rejected.push({ symbol: p.symbol, side: p.side, error: r.error, missing: r.missing });
-  }
+
 
   /**
    * 🔴 **산수는 코드가 한다.** 모델이 준 레벨로 손익비·수량을 여기서 계산해 붙인다.
@@ -3160,7 +3075,7 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
         symbols: missed, judged: [...judged], held: heldSymbols, partial: judged.size > 0,
       });
     }
-    // 제안은 `orderService` 가 **승인 버튼과 함께** 따로 쏘므로 여기서는 건수만 적는다
+    // (2026-10-12~ 제안은 만들어지지 않는다 — 건수는 항상 0)
     if (created.length) lines.push('', `🟡 매매 제안 ${created.length}건 — 승인 버튼이 곧 옵니다`);
     /**
      * 🔴 **0건으로 끝난 회차는 "왜 0건인지" 를 사용자에게 말한다** (2026-10-01).
@@ -3278,67 +3193,7 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
  *  - VIX band ≥ 1 (공포 사다리 영역 — 거기선 기계 매수가 존재 이유다)
  *  - 추세(up/down) 발생 · VIX 모름(null — 평온을 확인 못 하면 작동하지 않는다, fail-open)
  */
-/**
- * 📒 AI 운용 예산 절 (2026-10-06 — 사용자: *"AI 자동매매 하나도 없는데? 내가 예산을 투입하면
- *    그거로 불리라는데"*). 첫 실운용 밤의 실측: 예산 $500 이 **집행 게이트에만** 배선되고
- *    판단(프롬프트)에는 안 실려서, 모델이 전용 예산의 존재 자체를 모른 채 조언자 역할만 했다 —
- *    퀀트 게이트가 후보를 매 회차 줬는데 BUY 제안 0. "수집해 놓고 안 쓰는" 가족.
- * ⚠️ 예산 미설정(null)이면 null — 절을 통째로 생략한다(종전 조언자 동작 그대로).
- * 순수 함수(입력 = 원장 status + 자율 단계) — LLM·네트워크 없이 테스트하기 위해서다.
- */
-function ledgerSection(led, autonomyLevel = 0) {
-  if (!led || led.budgetUsd == null) return null;
-  const pos = Object.entries(led.positions || {});
-  const out = [];
-  out.push(`## AI 운용 예산 — 너의 전용 자금 (자율 ${autonomyLevel}단)`);
-  const rz = Number(led.realizedUsd) || 0;
-  out.push(`- 예산 $${led.budgetUsd} · 가용 $${led.availableUsd} · 투입 중 $${led.openCostUsd} · 실현손익 ${rz >= 0 ? '+$' + rz : '-$' + Math.abs(rz)}`);
-  // 🔴 1회 한도를 안 알려주면 모델이 계속 초과 제안을 내고 집행 단계에서 거부당한다
-  //    (프롬프트와 코드가 같은 수를 말해야 한다 — 2026-10-06 사용자 질문으로 신설된 상한)
-  if (led.maxOrderUsd != null && led.maxOrderUsd < led.availableUsd) {
-    out.push(`- 🔴 **1회 주문 한도 $${led.maxOrderUsd}**(예산의 ${led.maxOrderPct}%) — 한 회차에 이보다 크게 넣는 제안은 **집행 단계에서 거부된다.** 분할로 들어가라.`);
-  }
-  if (led.effectiveBudgetUsd != null && led.effectiveBudgetUsd !== led.budgetUsd) {
-    out.push(`  ⚠️ 실현 손실이 반영돼 유효 예산은 $${led.effectiveBudgetUsd} 다 — 잃은 돈은 돌아오지 않는다.`);
-  }
-  out.push(pos.length
-    ? `- AI 보유: ${pos.map(([s, p]) => `${s} ${p.qty}주 @${p.avgUsd}`).join(' · ')} — 이 포지션의 출구(목표·손절)는 네가 관리한다. AI 보유 수량 안의 SELL 은 자동 집행된다.`
-    : '- AI 보유: 없음 — 아직 한 번도 진입하지 않았다.');
-  out.push('🔴 이 예산은 **네가 능동적으로 굴리라고 맡긴 돈**이다. 가용액이 있으면 퀀트 게이트 통과');
-  out.push('   후보(보유 종목 추가 진입 포함) 중 진입 기회를 **매 회차 검토**하고, 근거가 서면 가용액');
-  out.push(`   안에서 수량·지정가를 계산해 BUY 를 제안하라${autonomyLevel >= 1 ? ' — 자율 1단+ 라 그 제안은 자동 집행된다' : ''}.`);
-  out.push('   확신이 약하면 관망이 아니라 **작게**(가용의 1/3 이하) 들어가는 것까지 검토하고,');
-  out.push('   그래도 안 서면 이 예산에 대해 "왜 진입하지 않는지" 를 반드시 적어라.');
-  /**
-   * 🔴 **어디에 적는지**를 말해 준다 (2026-10-06) — 종전엔 *"반드시 적어라"* 만 있고 자리가 없어
-   *    `shapeReport` 가 버렸다. 스키마 `budgetDecision` 과 **이 문구가 같은 이름을 가리켜야** 한다.
-   */
-  out.push('📒 이 판단은 **`budgetDecision`** 에 적어라 — `action`(ENTER 진입 · HOLD 보유 유지 ·');
-  out.push('   EXIT 정리 · WAIT 미진입) + `reason`(2문장 이내, 숫자 인용) + ENTER·EXIT 면 `symbol`.');
-  out.push('   진입하지 않는 회차에는 반드시 `action="WAIT"` 과 그 이유를 남겨라 — 빈칸은 답이 아니다.');
-  /**
-   * 🔴 **레버리지 압박과 이 예산을 분리한다** (2026-10-06 사용자 결정).
-   *
-   * 10-06 12:17 회차가 `WAIT` 사유로 *"신규 진입보다 레버리지 축소 우선(48.4% 초과)"* 을
-   * 냈다 — 후보(QQQ·SOXX)에 정배열 근거가 **있다고 적으면서도** 안 들어갔다.
-   * 그런데 실측: AI 예산으로 **1배** 상품을 $500 사면 레버리지 비중은 **48.5% → 48.5%**
-   * (현금이 주식으로 바뀌어 분자·분모가 그대로다. 바뀌는 건 현금 50.2%→47.1%).
-   * ⇒ *"레버리지를 줄여야 한다"* 는 **1배 신규 진입을 막는 근거가 못 된다** — 사실이
-   *    아닌 전제로 판단이 묶여 있었다.
-   * ⚠️ 그래서 푸는 것은 **1배만**이다. 레버리지 상품(2x/3x) 신규는 시나리오의
-   *    "신규 금지" 가 그대로 살아 있고, 현금이 실제로 줄어드는 것은 사실이라
-   *    *"줄이는 자리"* 판단이 서면 `WAIT` 이 여전히 정답이다.
-   */
-  out.push('🔢 **레버리지 비중과 이 예산은 분리해서 판단하라.** 이 예산으로 **1배** 상품을 사면');
-  out.push('   포트 레버리지 비중은 **바뀌지 않는다**(현금이 주식으로 옮겨갈 뿐 — 분자·분모 불변).');
-  out.push('   즉 "레버리지가 과다하니 신규 진입을 미룬다" 는 **1배 후보에는 성립하지 않는다.**');
-  out.push('   ⚠️ 레버리지 상품(2x·3x) 신규는 매뉴얼의 금지가 그대로다. 그리고 현금 비중은');
-  out.push('   실제로 줄어드니, 국면이 "줄이는 자리" 라는 판단이 서면 WAIT 이 여전히 옳다.');
-  out.push('⚠️ 집중 상한(종목당 20%)·불리가격 게이트는 그대로다 — 비중이 이미 큰 종목(예: QLD)의');
-  out.push('   추가 매수는 자동으로 못 나가고 승인 대기로 남는다. 사용자 기존 보유의 매도 제안도');
-  out.push('   지금처럼 승인 대기로 간다 — **판단 자체는 계속 하라.**');
-  return out;
-}
+
 
 function sideGate(p, regimeState, { heldSymbols = [], proposals = [] } = {}) {
   if (String(p.side).toUpperCase() !== 'BUY') return { ok: true };
@@ -3392,7 +3247,7 @@ function inverseGate(p, regimeState) {
  * 이 함수는 **판단만** 한다: 같은 SYSTEM_PROMPT · 같은 REPORT_SCHEMA · 같은 shapeReport ·
  * 같은 인버스 게이트. 컨텍스트(국면·후보·보유·현금)는 호출자가 준다 — 실전은 실데이터,
  * 백테스트는 합성 세계. **판단 코드가 한 벌**이라 백테스트 결과가 실전을 대표한다.
- * ⚠️ 부작용 0: 제안을 등록하지 않는다(orderService 를 안 부른다) — 반환만.
+ * ⚠️ 부작용 0: 아무것도 등록하지 않는다 — 반환만. **백테스트 전용 경로다.**
  */
 /**
   * ⚠️ `holdings` 는 **선택**이다 — 안 주면 보유 방침을 **판정하지 않고 그 사실을 로그로 남긴다**
@@ -3404,7 +3259,8 @@ async function decideOnContext({ contextText, regimeState = null, holdings = [] 
   const raw = await generateStructuredOutput({
     systemPrompt: SYSTEM_PROMPT,
     userPrompt: String(contextText || ''),
-    schema: REPORT_SCHEMA,
+    // 🔴 백테스트는 **모의 거래 칸이 있어야** 시뮬레이션이 돈다(라이브 스키마엔 없다)
+    schema: reportSchemaFor([], { trades: true }),
     logLabel: 'trade_analyst_ctx',
     /**
      * 🔴 180초 — 기본 120초의 출력 캡(시간예산 × 24tok/s × 0.9 = 2,592)이 bear 백테스트
@@ -3442,5 +3298,5 @@ module.exports = {
   computeTrade, decideOnContext, inverseGate, sideGate, feeGate, marketOfSymbol, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
   assessBuyingCapacity, capacityDetail, capacityBand, describeNoProposal, watchMovesSection,
-  ledgerSection,
+  TRADE_ARRAY_SCHEMA,
 };

@@ -171,16 +171,6 @@ test('S7 진입 괴리 — 다른 종목 가격대(+104%)면 손익비를 내지
   assert.strictEqual(ram.trade?.rr ?? null, null, '틀린 진입으로 낸 손익비가 사용자를 설득한다');
 });
 
-test('S8 제안 전체 흐름 — 생성 → 거절이 감사에 남는다 (실행 경로는 안 태운다)', async () => {
-  // ⚠️ orderService 는 실모듈 — 디스크(data/)를 쓰므로 생성→거절까지만 태우고 정리한다
-  for (const k of Object.keys(require.cache)) if (/server\/orderService/.test(k)) delete require.cache[k];
-  const orders = require('../server/orderService');
-  const made = orders.propose({ symbol: 'QLD', side: 'SELL', quantity: 1, price: 97.5, reason: '[시나리오 테스트] 즉시 거절' });
-  assert.ok(made.ok, `제안 생성 실패: ${made.error}`);
-  const rej = orders.reject(made.proposal.id, 'scenario-test');
-  assert.ok(rej.ok);
-  assert.strictEqual(rej.proposal.status, 'REJECTED');
-});
 
 test('S9 🔭 파이프라인 집계가 **응답에 실린다** (report 에만 두면 조용히 빠진다)', async () => {
   const { analyst } = fresh({ llmResponses: [{ ...BASE, holdings: holdings3() }] });

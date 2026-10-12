@@ -1,7 +1,7 @@
 <!--
   D-5 활동 로그 (2026-10-03 와이어프레임 준용 · 10-04 사용자 지적으로 전면 손질)
-  두 원천을 한 시간축으로: 활동 기록(/api/activity — 분석·알림·제안·승인) +
-  주문 감사(/api/orders/stats recent — proposed/rejected/executed/blocked).
+  활동 기록(/api/activity — 분석·알림·동기화)을 한 시간축으로.
+  ⚠️ 2026-10-12: 주문 감사 원천은 집행 제거와 함께 사라졌다(옛 이벤트 라벨은 과거 행을 읽으려 남겨 둔다).
   🔴 와이어프레임의 핵심은 "차단·보류도 행이다" — 일어나지 않게 막은 일이 보여야
      사용자가 가드를 신뢰한다.
 
@@ -20,7 +20,6 @@
       <select v-model="filter" class="input input--sel">
         <option value="">전체</option>
         <option value="propose">제안</option>
-        <option value="decide">승인·거절</option>
         <option value="execute">체결·전송</option>
         <option value="guard">차단·만료</option>
         <option value="analysis">분석·알림</option>
@@ -28,6 +27,40 @@
       <span style="flex:1"></span>
       <span class="chip">총 <b class="mono-num">{{ merged.length }}</b>건</span>
     </header>
+
+    <!--
+      💸 LLM 사용량 (2026-10-12 신설 — D-8)
+      사용자가 *"너 계속 LLM 비용 나가잖아"* 라고 했는데 **화면 어디에도 그 숫자가 없었다.**
+      집계는 `memory.tokenUsageByMonth` 에 **이미 쌓이고 있었다** — 읽는 곳이 없었을 뿐이다.
+      ⚠️ 비용은 **추정**이다. 단가를 모르는 모델이면 금액을 **안 그린다**(0 으로 채우면 "공짜" 로 읽힌다).
+    -->
+    <section v-if="usage" class="card">
+      <h2>LLM 사용량 <small class="mut">{{ usage.model || '모델 미설정' }}</small></h2>
+      <div class="ucards">
+        <div class="ucard">
+          <small>이번 달 호출</small>
+          <b class="mono-num">{{ n(usage.current.requestCount) }}</b>
+        </div>
+        <div class="ucard">
+          <small>토큰</small>
+          <b class="mono-num">{{ n(usage.current.totalTokens) }}</b>
+          <em class="mut mono-num">입력 {{ n(usage.current.promptTokens) }} · 출력 {{ n(usage.current.candidatesTokens) }}</em>
+        </div>
+        <div class="ucard">
+          <small>추정 비용</small>
+          <b v-if="usage.current.costUsd != null" class="mono-num">${{ usage.current.costUsd }}</b>
+          <b v-else class="mono-num mut">—</b>
+          <em v-if="usage.priceNote" class="mut">{{ usage.priceNote }}</em>
+        </div>
+        <div class="ucard">
+          <small>지난 달</small>
+          <b class="mono-num">{{ n(usage.previous.requestCount) }}<span class="mut"> 회</span></b>
+          <em v-if="usage.previous.costUsd != null" class="mut mono-num">${{ usage.previous.costUsd }}</em>
+        </div>
+      </div>
+      <p v-if="usage.priceSource" class="mut">단가 {{ usage.priceSource }} · 청구액이 아니라 <b>추정</b>입니다.</p>
+    </section>
+
     <p v-if="error" class="banner banner--error">{{ error }}</p>
     <table v-else class="tbl">
       <thead><tr><th class="tbl__when">시각</th><th class="tbl__kind">유형</th><th class="tbl__sym">종목</th><th>내용</th></tr></thead>
@@ -50,6 +83,8 @@ import { apiFetch } from '../lib/apiClient';
 const acts = ref([]);
 const audit = ref([]);
 const error = ref('');
+const usage = ref(null);
+const n = (v) => (Number.isFinite(Number(v)) ? Number(v).toLocaleString('ko-KR') : '—');
 const filter = ref('');
 
 /** 활동 kind · 감사 event → 한 벌의 부류. 필터와 중복 접기가 같은 지도를 쓴다(두 벌이면 갈라진다) */
@@ -101,15 +136,32 @@ const when = (at) => {
 
 onMounted(async () => {
   try {
-    const [ra, rs] = await Promise.all([apiFetch('/api/activity'), apiFetch('/api/orders/stats')]);
-    const ba = await ra.json(); const bs = await rs.json();
+    // ⚠️ 2026-10-12 — 주문 감사(`/api/orders/stats`)가 사라졌다. 활동 기록만 읽는다.
+    const ra = await apiFetch('/api/activity');
+    const ba = await ra.json();
     acts.value = Array.isArray(ba) ? ba : (ba.items || ba.activity || []);
-    audit.value = bs?.ok ? (bs.recent || []) : [];
+    audit.value = [];
   } catch (e) { error.value = `로그를 못 읽었습니다: ${e.message}`; }
+  try {
+    const ru = await apiFetch('/api/usage/llm');
+    const bu = await ru.json();
+    if (bu?.ok) usage.value = bu;
+    // ⚠️ 사용량 실패를 **로그 실패로 보고하지 않는다** — 틀린 진단이 사용자를 엉뚱한 곳으로 보낸다.
+    //    패널이 안 그려지는 것으로 충분하다(없는 것과 못 받은 것은 패널 유무로 갈린다).
+  } catch { /* 사용량은 곁가지 — 활동 로그는 그대로 보여준다 */ }
 });
 </script>
 
 <style scoped>
+.card { background: var(--color-surface); border: 1px solid var(--color-hairline); border-radius: var(--rounded-md); padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
+.card h2 { margin: 0; font-size: var(--text-md); color: var(--color-ink); display: flex; gap: var(--space-sm); align-items: baseline; }
+.ucards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-sm); }
+.ucard { border: 1px solid var(--color-hairline); border-radius: var(--rounded-md); padding: var(--space-sm); display: flex; flex-direction: column; gap: 2px; }
+.ucard small { color: var(--color-faint); font-size: var(--text-2xs); }
+.ucard b { font-size: var(--text-md); color: var(--color-ink); }
+.ucard em { font-style: normal; font-size: var(--text-2xs); }
+.mut { color: var(--color-muted); font-size: var(--text-xs); }
+
 .page { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-base); display: flex; flex-direction: column; gap: var(--space-sm); }
 /* 🔴 2026-10-06 사용자(세 번째 지적): "max-width 주지 말라고" — 콘텐츠 폭 상한(1440px)
    제거, 표가 화면 전폭을 쓴다. 표는 페이지의 유일한 패널이라 내부 스크롤로 자르지 않는다

@@ -29,7 +29,7 @@ const { logInfo, logWarn, logError } = require('./logger');
  * ## 무엇을 보내고 무엇을 못 보내나 — **정직하게 가른다**
  *
  * ```
- * ✅ 매수/매도 제안   orderService 에 제안이 생기면 **승인/취소 버튼과 함께**
+ * ⛔ (2026-10-12 제거) 매수/매도 제안 — 주문 집행이 사라졌다. 사다리는 **알림**으로 남는다
  * ✅ 시장 개장/폐장   marketCalendar 상태 **전이**에서만
  * ✅ 주가 급변        보유·관심 종목 당일 등락 임계 초과
  * ✅ 모멘텀           위와 같은 축이지만 **보유분 전용**(있던 함수를 이제 실제로 부른다)
@@ -899,23 +899,31 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
           vixAgeMin: rgState?.vix?.ageMin ?? null,
         });
         if (lp.length) {
+          /**
+           * 🔴 **2026-10-12 — 제안을 만들지 않고 알린다.**
+           *
+           * 종전에는 여기서 `orderService.propose` 로 매수 제안을 등록했다. 주문 집행을
+           * 걷어내면서 **같은 판단을 사람에게 넘긴다** — 사다리의 존재 이유(*"LLM 은 공포에
+           * 안 산다, 그래서 코드가 제안을 만든다"*)는 **"코드가 계산한다"** 에 있지
+           * **"코드가 집행한다"** 에 있지 않았다. 숫자는 그대로 계산해서 보여준다.
+           */
           const pr = await toss.getPrices(lp.map((x) => x.symbol));
-          const orderService = require('./orderService');
+          const lines = [];
           for (const l of lp) {
             const price = pr.get(l.symbol)?.price;
             if (!(price > 0)) { logWarn('alerts.ladder_no_price', { symbol: l.symbol }); continue; }
             const qty = Math.floor(l.budget / price);
             if (qty <= 0) continue;
-            // 🔴 살 수 없는 제안을 만들지 않는다 — 구조 가드가 이 누락을 잡았다(propose 호출부는 계좌 검증 필수)
-            const chk = await orderService.checkAccountLimits({ symbol: l.symbol, side: 'BUY', quantity: qty, price, exemptCashFloor: true });
-            if (!chk.ok) { logWarn('alerts.ladder_blocked', { symbol: l.symbol, kind: chk.kind, error: chk.error }); continue; }
-            const r = orderService.propose(
-              { symbol: l.symbol, side: 'BUY', type: 'LIMIT', quantity: qty, price: Math.round(price * 100) / 100, reason: l.reason },
-              { source: 'vix-ladder' }
-            );
-            logInfo('alerts.ladder_proposed', { band: l.band, symbol: l.symbol, qty, ok: r.ok });
-            if (r.ok) out.push({ rule: 'vix-ladder', band: l.band, symbol: l.symbol });
+            lines.push(`· ${l.symbol} 약 ${qty}주 (${Math.round(price * 100) / 100} 기준 · 배정 ${Math.round(l.budget)})`);
+            out.push({ rule: 'vix-ladder', band: l.band, symbol: l.symbol, qty });
           }
+          if (lines.length && willSend) {
+            await telegram.send(
+              `🪜 VIX 사다리 ${lp[0].band} 단계\n공포 구간 진입 — 매뉴얼이 가리키는 배분입니다.\n\n${lines.join('\n')}\n\n주문은 직접 내셔야 합니다.`,
+              { reason: 'alert:vix-ladder' },
+            );
+          }
+          logInfo('alerts.ladder_notified', { band: lp[0].band, count: lines.length, sent: Boolean(lines.length && willSend) });
         }
       } catch (e) {
         failed.push({ rule: 'vix-ladder', message: e.message });
@@ -1213,69 +1221,9 @@ function stop() {
  * 제안이 생기면 **즉시** 버튼과 함께 보낸다(주기 틱을 기다리지 않는다).
  * ⚠️ 조용한 시간에도 보낸다 — 사람이 기다리는 것이고, 제안에는 **유효기간**이 있다.
  */
-/**
- * 제안이 끝났다 — **폰의 승인 버튼을 지운다.**
- * ⚠️ 조용시간을 보지 않는다. 이건 새 알림이 아니라 **이미 보낸 것의 정리**다.
- */
-async function onProposalSettled(p, why) {
-  try {
-    const r = await bot.clearProposalButtons(p, why);
-    logInfo('alerts.proposal_cleared', { id: p.id, why, cleared: Boolean(r.ok), reason: r.why || null });
-    return r;
-  } catch (e) {
-    // 🔴 버튼을 못 지워도 상태 전이는 끝났다 — 삼키되 **조용하지 않게**
-    logError('alerts.proposal_clear_failed', e, { id: p.id, why });
-    return { ok: false, error: e.message };
-  }
-}
 
-async function onProposal(p) {
-  if (!ENABLED) return { ok: false, why: 'disabled' };
-  let r;
-  try {
-    r = await bot.sendProposal(p);
-    // 🔴 메시지 id 를 제안에 붙인다 — **이게 없으면 나중에 버튼을 못 지운다**
-    if (r?.messageId != null) require('./orderService').attachNotice(p.id, { messageId: r.messageId });
-  } catch (e) {
-    logError('alerts.proposal_failed', e, { id: p.id });
-    r = { ok: false, sent: false, error: e.message };
-  }
-  logInfo('alerts.proposal_sent', { id: p.id, symbol: p.symbol, sent: Boolean(r.sent), messageId: r?.messageId ?? null });
 
-  /**
-   * 🔴 **승인 버튼이 실제로 안 갔으면 사용자가 그 사실을 안다** (2026-09-28, pm1 지시 —
-   *    브리핑 문구 "승인 버튼이 곧 옵니다" 는 약속인데, 이 발송이 실패하면(예외든
-   *    `sent:false` 든) 로그만 남고 사용자는 기다리다 10분 TTL 로 조용히 만료됐다.
-   *    `orderService.js:89~92` 의 그 거울상 — "있다고 했는데 안 왔다").
-   * ⚠️ **예외와 `sent:false` 를 한 곳에서 같이 본다** — 위 catch 가 실패를 `r.sent=false`
-   *    로 접어 넣으므로, 아래 이 한 검사가 **둘 다** 잡는다. 따로 두면 한쪽만 고치기 쉽다.
-   * ⚠️ **후속 알림도 실패할 수 있다**(텔레그램 자체가 죽은 경우) — 더 쫓지 않고 `logError`
-   *    로 끝낸다. 그리고 그 실패를 **"보냈다" 로 기록하지 않는다** — 이번 사고의 핵심이다.
-   */
-  if (!r?.sent) {
-    try {
-      const fu = await telegram.send(
-        `⚠️ ${p.symbol} 제안의 승인 버튼을 보내지 못했습니다 — 앱에서 확인해 주세요`,
-        { reason: 'proposal_button_failed' }
-      );
-      if (!fu?.sent) logError('alerts.proposal_followup_failed', new Error(fu?.error || 'unknown'), { id: p.id });
-    } catch (e2) {
-      logError('alerts.proposal_followup_failed', e2, { id: p.id });
-    }
-  }
 
-  /**
-   * 🔴 **`telegram` 값은 버튼 성공 여부만 말한다** — 후속 알림 성공을 여기 섞으면
-   *    "가렸다고 로그에 찍혔는데 실제론 원본이 나갔다"(pm2 가 오늘 잡은 사고)와 같은
-   *    모양이 된다. `r` 은 위에서 후속 알림과 무관하게 유지되므로 그대로 쓴다.
-   */
-  activity.record('proposal',
-    p.conditional
-      ? `예약 ${p.side === 'BUY' ? '매수' : '매도'} 제안 ${p.symbol} ${p.quantity}주 · 감시가 ${p.conditional.triggerPrice}`
-      : `${p.side === 'BUY' ? '매수' : '매도'} 제안 ${p.symbol} ${p.quantity}주 @ ${p.price}`,
-    { proposalId: p.id, symbol: p.symbol, side: p.side, telegram: Boolean(r.sent) });
-  return r;
-}
 
 function _resetForTest() {
   stop();
@@ -1285,6 +1233,6 @@ function _resetForTest() {
 }
 
 module.exports = {
-  onProposalSettled, setAnalystRunner, tick, start, stop, status, onProposal, isQuiet, STATE_FILE, _resetForTest,
+  setAnalystRunner, tick, start, stop, status, isQuiet, STATE_FILE, _resetForTest,
   // 시뮬레이션·검증용 — 모멘텀 평가가 무엇을 보는지 밖에서 잴 수 있어야 한다(질문에 로그로만 답하지 않는다)
   collectMomentumRows };

@@ -78,7 +78,6 @@ const history = ref([]);
 const news = ref([]);
 const newsNote = ref('');
 
-const EVENT_KO = { proposed: '제안', approved: '승인', rejected: '거절', canceled: '취소', executed: '체결', blocked: '차단(가드·정지)', expired: '만료' };
 /** 활동 로그와 같은 압축 시각 — "10. 4. 오전 12:11" 장황체의 재발 방지 */
 const when = (at) => {
   if (!at) return '';
@@ -108,10 +107,6 @@ onMounted(async () => {
     viewAt.value = rep.at || null;
     agentView.value = (rep.positions || []).find((p) => String(p.symbol).toUpperCase() === symbol.value) || null;
   } catch { /* 견해 없음으로 */ }
-  try {
-    const r = await apiFetch('/api/orders/stats'); const b = await r.json();
-    history.value = (b?.recent || []).filter((x) => String(x.symbol).toUpperCase() === symbol.value);
-  } catch { /* 이력 없음으로 */ }
   try {
     const q = new URLSearchParams({ symbol: symbol.value, name: name.value || symbol.value });
     const r = await apiFetch(`/api/news?${q}`); const b = await r.json();

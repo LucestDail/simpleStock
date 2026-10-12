@@ -164,7 +164,6 @@ test('기타법인도 파싱 목록에 있다', () => {
  * 클라이언트 함수 존재만 보면 "쓴다" 로 보이는 그 함정을 막는 자다.
  */
 const codeOnly = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-const ORDER_SVC = codeOnly(fs.readFileSync(path.join(__dirname, '..', 'server', 'orderService.js'), 'utf-8'));
 const MKT = codeOnly(fs.readFileSync(path.join(__dirname, '..', 'server', 'marketDataService.js'), 'utf-8'));
 
 test('🔴 환율: 야후 실패 시 토스 폴백이 배선돼 있다', () => {
@@ -174,13 +173,11 @@ test('🔴 환율: 야후 실패 시 토스 폴백이 배선돼 있다', () => {
   assert.match(before, /catch/, '🔴 폴백이 아니라 본선이다 — 평시에도 MARKET_INFO 한도(3/s)를 깎는다');
 });
 
-test('🔴 상하한가: KR 지정가 제안을 사전검증한다', () => {
-  assert.match(ORDER_SVC, /getPriceLimits\(/, '🔴 상하한 검증이 없다 — 승인 누른 뒤에야 거래소 거부를 안다');
-  const i = ORDER_SVC.indexOf('getPriceLimits(');
-  const around = ORDER_SVC.slice(Math.max(0, i - 400), i + 700);
-  assert.match(around, /\\d\{6\}|price-limit/, 'KR 판정 또는 거부 kind 가 없다');
-  assert.match(around, /catch/, '🔴 조회 실패가 정당한 제안을 막으면 안 된다(보조 축) — 경고만');
-});
+/**
+ * ⚠️ (2026-10-12 제거) *"상하한가: KR 지정가 제안을 사전검증한다"* —
+ *    `orderService` 가 사라져 **사전검증할 제안이 없다.** `getPriceLimits` 자체는
+ *    `tossClient` 에 남아 있으니, 주문을 되살리면 이 자를 함께 되살린다.
+ */
 
 test('🔴 호가: 보유 종목 프롬프트에 최우선 호가가 실린다', () => {
   assert.match(code, /getOrderbook\(/, '🔴 호가를 안 부른다');

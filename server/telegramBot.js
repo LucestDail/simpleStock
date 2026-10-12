@@ -1,7 +1,6 @@
 const activity = require('./activityLog');
 const { logInfo, logWarn, logError } = require('./logger');
 const telegram = require('./telegramService');
-const orderService = require('./orderService');
 
 /**
  * 텔레그램 인라인 버튼 수신 (2026-09-21)
@@ -16,7 +15,9 @@ const orderService = require('./orderService');
  * ① 기본 꺼짐            TELEGRAM_BOT_ENABLED 없으면 폴링 자체를 안 한다
  * ② 발신자 고정          콜백이 **설정된 CHAT_ID 에서 온 것**이 아니면 버린다
  *                        (봇 토큰을 아는 누군가가 다른 대화에서 눌러도 안 먹는다)
- * ③ 승인 ≠ 실행          버튼은 `approve` 까지다. 실행은 여전히 `ORDERS_LIVE` 이고
+ * ③ (2026-10-12 제거) 승인·실행 버튼 — 주문 집행이 사라졌다. 남은 것은 알림·릴레이뿐이다.
+ *    ⚠️ 옛 메시지의 버튼은 폰에 남아 있어 `handleCallback` 이 안내만 한다.
+ * ③-구 승인 ≠ 실행          버튼은 `approve` 까지다. 실행은 여전히 `ORDERS_LIVE` 이고
  *                        지금은 no-op 이다 — **버튼 하나로 돈이 나가지 않는다**
  * ④ 만료                 제안에 TTL 이 있어 옛 메시지의 버튼은 실패한다
  * ⑤ 감사                 승인·거절이 `orders-audit.jsonl` 에 남는다(출처 telegram)
@@ -91,36 +92,24 @@ async function api(method, body) {
   return json.result;
 }
 
-/** 제안 하나를 **승인/거절 버튼과 함께** 보낸다 */
-async function sendProposal(p) {
-  const sideKo = p.side === 'BUY' ? '매수' : '매도';
-  /**
-   * 조건부(예약)와 즉시 주문은 **문구가 갈려야 한다** (2026-09-23) — 예약을 즉시 주문처럼
-   * 보여주면 사용자가 "지금 팔린다" 로 읽는다. 승인해도 **감시가 도달 전엔 돈이 안 움직인다.**
-   */
-  const c = p.conditional;
-  const text = [
-    c ? '🟡 예약 주문 제안 (승인 필요 — 지금 체결되지 않습니다)' : '🟡 매매 제안 (승인 필요)',
-    '',
-    `${sideKo} ${p.symbol}`,
-    c
-      ? `감시가 ${Number(c.triggerPrice).toLocaleString('ko-KR')} 도달 시 → ${c.orderType === 'MARKET' ? '시장가' : `지정가 ${Number(c.orderPrice).toLocaleString('ko-KR')}`} ${sideKo} ${p.quantity}주`
-      : `수량 ${p.quantity}주 · 지정가 ${Number(p.price).toLocaleString('ko-KR')}`,
-    c ? `예약 만료일 ${c.expireDate} (미도달 시 자동 소멸)` : `평가금액 ${Number(p.quantity * p.price).toLocaleString('ko-KR')}`,
-    p.reason ? `\n${p.reason}` : '',
-    '',
-    `⏳ 이 승인 요청은 ${new Date(p.expiresAt).toLocaleTimeString('ko-KR')} 까지`,
-  ].filter(Boolean).join('\n');
 
-  return telegram.send(text, {
-    reason: 'proposal',
-    replyMarkup: {
-      inline_keyboard: [[
-        { text: '✅ 승인', callback_data: `ok:${p.id}` },
-        { text: '✖️ 취소', callback_data: `no:${p.id}` },
-      ]],
-    },
-  });
+
+/**
+ * 🔴 **주문 버튼은 2026-10-12 에 사라졌다 — 그런데 폰에는 옛 메시지가 남아 있다.**
+ *
+ * 조용히 무시하면 사용자는 **눌렀는데 아무 일도 안 일어나는** 화면을 본다(로딩만 돈다).
+ * 그래서 콜백 자체는 계속 받고, **무엇이 바뀌었는지 말해 준다.**
+ */
+async function handleCallback(cb) {
+  const fromChat = String(cb?.message?.chat?.id || '');
+  if (fromChat !== CHAT_ID) {
+    logWarn('tgbot.rejected_foreign_chat', { fromChat: fromChat.slice(0, 6) + '…' });
+    await answer(cb.id, '권한이 없습니다.');
+    return { ok: false, reason: 'foreign_chat' };
+  }
+  logInfo('tgbot.retired_button', { data: String(cb?.data || '').slice(0, 24) });
+  await answer(cb.id, '주문 기능은 제거됐습니다. 이 버튼은 더 이상 동작하지 않습니다.');
+  return { ok: false, reason: 'orders_removed' };
 }
 
 /** 버튼을 누른 사람에게 즉시 응답한다(안 하면 텔레그램이 로딩 표시를 계속 돌린다) */
@@ -133,163 +122,13 @@ async function answer(cbId, text) {
 }
 
 /** 버튼을 지운다 — 이미 처리된 제안에 버튼이 남아 있으면 두 번 누른다 */
-/**
- * 🔴 **끝난 제안의 버튼을 지운다** (2026-09-21)
- *
- * 종전엔 버튼 제거가 **텔레그램 콜백 경로에만** 있었다. API·화면·만료로 끝난 제안은
- * 폰에 `✅ 승인` 이 그대로 남아 **사용자가 아직 결정할 게 있다고 믿는다.**
- * ⚠️ 실패해도 조용하지 않게 남긴다 — 다만 **상태 전이는 이미 끝났다**(곁가지다).
- */
-async function clearProposalButtons(p, why = '') {
-  if (!p?.noticeMessageId) return { ok: false, why: 'no_message' };
-  const label = { approved: '✅ 승인됨', rejected: '✖️ 취소됨', expired: '⏳ 만료됨' }[why] || '처리됨';
-  await stripButtons(CHAT_ID, p.noticeMessageId, `${label} — ${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주`);
-  return { ok: true };
-}
 
-/**
- * 버튼을 **다른 버튼으로 바꾼다**(제거가 아니라 교체).
- * 🔴 실거래 실행 확인에 쓴다 — 폰 오터치가 곧 체결이 되지 않게 **두 번 탭**으로 만든다.
- */
-async function replaceButtons(chatId, messageId, text, buttons) {
-  try {
-    await api('editMessageReplyMarkup', {
-      chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: buttons },
-    });
-    if (text) await api('sendMessage', { chat_id: chatId, text });
-  } catch (e) {
-    logWarn('tgbot.replace_failed', { message: e.message });
-  }
-}
 
-async function stripButtons(chatId, messageId, suffix) {
-  try {
-    await api('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
-    if (suffix) await api('sendMessage', { chat_id: chatId, text: suffix });
-  } catch (e) {
-    logWarn('tgbot.strip_failed', { message: e.message });
-  }
-}
 
-/**
- * 콜백 한 건 처리.
- * 🔴 **여기가 권한 경계다.** 발신 대화가 설정된 CHAT_ID 가 아니면 **아무것도 하지 않는다.**
- */
-async function handleCallback(cb) {
-  const fromChat = String(cb?.message?.chat?.id || '');
-  if (fromChat !== CHAT_ID) {
-    // ⚠️ 조용히 무시하지 않는다 — 누가 남의 봇에 버튼을 누르고 있다는 뜻이다
-    logWarn('tgbot.rejected_foreign_chat', { fromChat: fromChat.slice(0, 6) + '…' });
-    await answer(cb.id, '권한이 없습니다.');
-    return { ok: false, reason: 'foreign_chat' };
-  }
 
-  const data = String(cb?.data || '');
-  const m = /^(ok|no|go):(.+)$/.exec(data);
-  if (!m) {
-    await answer(cb.id, '알 수 없는 버튼입니다.');
-    return { ok: false, reason: 'bad_data' };
-  }
-  const [, verb, id] = m;
 
-  /**
-   * 🔴 **`go` = 실제 전송** (2026-09-22 사용자 지시: *"폰 승인도 실행까지 연결해"*)
-   *
-   * ⚠️ 승인(`ok`)과 **한 탭 떼어 놓았다.** 폰 버튼은 알림을 넘기다 눌리기 쉽고,
-   *    이 경로는 **되돌릴 수 없다**(체결되면 끝이다). 화면 쪽에도 같은 확인을 넣었으니
-   *    두 경로가 **같은 규율**을 갖는다.
-   * ⚠️ 그래도 두 번째 탭은 **폰에서 끝난다** — 자리를 옮길 필요는 없다.
-   */
-  if (verb === 'go') {
-    const ex = await orderService.execute(id);
-    if (ex.unknown) {
-      // 🔴 "실패" 가 아니라 "모름" 이다 — 다시 누르면 두 번 살 수 있다
-      await answer(cb.id, '전송했으나 응답을 못 받았습니다');
-      await stripButtons(cb.message.chat.id, cb.message.message_id,
-        '⚠️ **보냈는데 응답을 못 받았습니다.**\n다시 누르지 마세요 — 주문 조회로 확정합니다.');
-      logWarn('tgbot.execute_unknown', { id });
-      return { ok: false, reason: 'unknown' };
-    }
-    if (!ex.ok) {
-      /**
-       * ⚠️ **다시 눌러도 되는 실패**는 버튼을 떼지 않는다 — 연결조차 못 맺은 경우다.
-       *    여기서 버튼을 떼면 사람이 제안을 처음부터 다시 만들어야 하고,
-       *    그러다 보면 *"실패하면 그냥 다시 만들지"* 가 습관이 돼 **모름** 도 그렇게 다룬다.
-       */
-      await answer(cb.id, ex.error || '전송 실패');
-      if (ex.retryable) {
-        await api('sendMessage', {
-          chat_id: cb.message.chat.id,
-          text: `⚠️ 보내지 못했습니다 — ${ex.error}\n**주문은 나가지 않았습니다.** 위 «전송» 을 다시 누르세요.`,
-        }).catch(() => {});
-        return { ok: false, reason: 'not_sent', error: ex.error, retryable: true };
-      }
-      await stripButtons(cb.message.chat.id, cb.message.message_id, `🔴 전송 실패 — ${ex.error}`);
-      return { ok: false, reason: 'execute_failed', error: ex.error };
-    }
-    const sent = ex.proposal;
-    await answer(cb.id, ex.dryRun ? '모의 실행했습니다' : '전송했습니다');
-    await stripButtons(cb.message.chat.id, cb.message.message_id,
-      ex.dryRun
-        ? `⚠️ 모의 실행 — 실제 주문은 나가지 않았습니다(${sent.symbol}).`
-        : `🔴 **주문을 보냈습니다** — ${sent.side === 'BUY' ? '매수' : '매도'} ${sent.symbol} ${sent.quantity}주 @ ${sent.price}\n`
-          + `주문번호 ${String(ex.orderId || '').slice(0, 12)}…\n`
-          + `⚠️ **접수**입니다. 체결 여부는 화면에서 확인하세요.`);
-    activity.record('execution', `주문 전송 — ${sent.symbol} ${sent.quantity}주 (텔레그램)`,
-      { proposalId: id, symbol: sent.symbol, orderId: ex.orderId || null, dryRun: Boolean(ex.dryRun) });
-    logInfo('tgbot.executed', { id, orderId: ex.orderId || null, dryRun: Boolean(ex.dryRun) });
-    return { ok: true, verb, id, orderId: ex.orderId || null };
-  }
 
-  const r = verb === 'ok' ? orderService.approve(id) : orderService.reject(id, 'telegram');
-  if (!r.ok) {
-    await answer(cb.id, r.error);
-    await stripButtons(cb.message.chat.id, cb.message.message_id, `⚠️ ${r.error}`);
-    return { ok: false, reason: 'order_rejected', error: r.error };
-  }
 
-  const p = r.proposal;
-  const live = orderService.status().effective === 'live';
-
-  if (verb === 'ok') {
-    /**
-     * 🔴 종전 문구가 *"주문을 보냅니다"* 였는데 **아무것도 안 보냈다.**
-     *    승인은 승인일 뿐이고 실행을 부르는 곳이 없었다 — 또 *"말과 사실이 다른 것"* 이다.
-     *    이제 실제로 보낼 수 있으니, **보내기 전에 한 번 더 묻는다.**
-     */
-    const amount = (Number(p.quantity) * Number(p.price)).toLocaleString('ko-KR');
-    /**
-     * ⚠️ **나이를 적는다** — 제안은 산출 시점의 시세로 낸 지정가다.
-     *    TTL 이 10분이라 최대 그만큼 낡을 수 있고, **낡았다는 사실 자체가 안 보이면**
-     *    사람이 "방금 나온 판단" 으로 읽는다.
-     */
-    const ageSec = Math.max(0, Math.round((Date.now() - new Date(p.createdAt).getTime()) / 1000));
-    const age = ageSec < 60 ? `${ageSec}초 전 산출` : `${Math.floor(ageSec / 60)}분 ${ageSec % 60}초 전 산출`;
-    await answer(cb.id, '승인했습니다');
-    await replaceButtons(cb.message.chat.id, cb.message.message_id,
-      live
-        ? `✅ 승인됨 — ${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주 @ ${p.price}\n`
-          + `평가금액 약 ${amount} · ${age}\n\n🔴 **아직 안 보냈습니다.** 아래 «전송» 을 눌러야 실제 주문이 나갑니다.`
-        : `✅ 승인됨 — ${p.symbol}\n⚠️ 실거래가 꺼져 있어 «전송» 을 눌러도 실제 주문은 나가지 않습니다.`,
-      [[
-        { text: live ? '🔴 전송(실주문)' : '전송(모의)', callback_data: `go:${p.id}` },
-        { text: '✖️ 취소', callback_data: `no:${p.id}` },
-      ]]);
-    logInfo('tgbot.callback', { verb, id, symbol: p.symbol, live });
-    activity.record('approval', `승인 — ${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주 (텔레그램)`,
-      { proposalId: p.id, symbol: p.symbol, via: 'telegram' });
-    return { ok: true, verb, id, awaitingSend: true };
-  }
-
-  const note = `✖️ 취소됨 — ${p.symbol}`;
-  await answer(cb.id, '취소했습니다');
-  await stripButtons(cb.message.chat.id, cb.message.message_id, note);
-  logInfo('tgbot.callback', { verb, id, symbol: p.symbol });
-  activity.record(verb === 'ok' ? 'approval' : 'rejection',
-    `${verb === 'ok' ? '승인' : '취소'} — ${p.side === 'BUY' ? '매수' : '매도'} ${p.symbol} ${p.quantity}주 (텔레그램)`,
-    { proposalId: p.id, symbol: p.symbol, via: 'telegram' });
-  return { ok: true, verb, id };
-}
 
 /**
  * 🔴 **텍스트 메시지 → 애널리스트 채팅 릴레이** (2026-09-22 사용자: *"해당 텔레그램을 통해서
@@ -299,8 +138,8 @@ async function handleCallback(cb) {
  *
  * ## 안전 경계
  * - CHAT_ID 만 받는다(버튼과 같은 규율 — 남의 채팅은 기록하고 거절)
- * - 채팅이 부를 수 있는 도구는 조회 + `propose_order`(HITL **제안 등록**)뿐이다 —
- *   **실행 도구가 아니므로** 대화로는 돈이 못 나간다. 제안이 되면 여기 승인 버튼이 온다
+ * - 채팅이 부를 수 있는 도구는 **조회·분석뿐**이다(2026-10-12~ 제안 도구 제거) —
+ *   대화로는 돈이 못 나간다
  * - 🔴 **한 번에 하나만** — chat 은 LLM+도구로 수십 초를 쓴다. 처리 중 새 질문이 오면
  *   "앞 질문 처리 중" 을 답한다(쌓으면 몇 분 뒤 낡은 답이 연달아 온다)
  */
@@ -482,7 +321,7 @@ async function pollOnce() {
     } else if (u.message) {
       /**
        * ⚠️ 릴레이는 **기다리지 않는다** — chat 이 수십 초라 await 하면 그동안
-       *    getUpdates 가 멈춰 **승인 버튼까지 같이 늦는다**(주문 경로가 대화에 볼모잡힌다).
+       *    getUpdates 가 멈춰 **가격 알림까지 같이 늦는다**.
        */
       handleUserMessage(u.message).catch((e) => logError('tgbot.msg_failed', e, {}));
     }
@@ -533,4 +372,4 @@ function _resetForTest() {
 
 module.exports = { stripLeadingMeta,
   handleUserMessage, // 릴레이 검증용
-  clearProposalButtons, start, stop, status, isConfigured, sendProposal, handleCallback, pollOnce, _resetForTest };
+  start, stop, status, isConfigured, handleCallback, pollOnce, _resetForTest };

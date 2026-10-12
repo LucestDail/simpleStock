@@ -13,7 +13,7 @@
  *    변동성 → 종목별 20일 실현 변동성(연율) + 포트폴리오 가중 변동성(보수적: 상관 1 가정)
  *    하방   → 하방 변동성(음의 일수익률만, 연율) · VaR95(1일, 정규 근사 1.65σ)
  *
- * 밸런스 판정(과/과소 하이라이트)은 **운용 한도와 같은 어원**(orderService 상수)을 쓴다 —
+ * 밸런스 판정(과/과소 하이라이트)은 **운용 한도와 같은 어원**(`portfolioRules` 상수)을 쓴다 —
  * 화면 숫자와 게이트 숫자가 갈라지면 안 된다.
  */
 const { logWarn } = require('./logger');
@@ -84,7 +84,7 @@ function compute({ items = [], candlesBySymbol = new Map(), cashPct = null, leve
     : null;
 
   // 밸런스 판정 — 게이트와 같은 상수
-  const { SINGLE_POSITION_MAX_PCT } = require('./orderService');
+  const { SINGLE_POSITION_MAX_PCT } = require('./portfolioRules');
   /**
    * 🔴 레버리지 한도 30 → **40** (2026-10-06 사용자 결정).
    *

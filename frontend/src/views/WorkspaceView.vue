@@ -110,26 +110,6 @@ async function onDeleteGroup(group) {
  * ⚠️ 조각별 성패(`parts`)를 그대로 받아 **"없음" 과 "못 받음" 을 구분해 보여준다.**
  */
 const report = ref(null);
-/**
- * 🔭 제안 성과 (2026-10-03 — 자율 트레이딩 재개편).
- *    자율의 전제 = 승인율이 **보이고 올라가는 것**. 생애 제안의 71% 가 거절인 상태에서
- *    자율은 성립하지 않는다 — 그 수치를 사용자와 에이전트가 **같이 본다.**
- */
-const orderStats = ref(null);
-/** 거절률 — 분모는 **결정이 난 것**(승인+거절)만. PENDING 을 분모에 넣으면 비율이 왜곡된다 */
-const rejectRate = computed(() => {
-  const st = orderStats.value; if (!st) return 0;
-  const decided = (st.approved || 0) + (st.executed || 0) + (st.rejected || 0);
-  return decided ? Math.round((st.rejected / decided) * 100) : 0;
-});
-async function loadOrderStats() {
-  try {
-    const res = await apiFetch('/api/orders/stats');
-    const b = await res.json();
-    orderStats.value = b?.ok ? b : null;   // ⚠️ 못 읽었으면 null — 0 으로 그리면 "제안이 없었다" 가 된다
-  } catch { orderStats.value = null; }
-}
-const proposals = ref([]);
 
 /** 'live' | 'dry-run' — 서버가 말하는 **실제** 모드. 화면이 지어내지 않는다 */
 const ordersMode = ref('dry-run');
@@ -246,60 +226,6 @@ async function loadLastReport() {
   }
 }
 
-/**
- * 🔴 **AI 예산 판단** (2026-10-06) — 자율 1단 + AI 전용 예산이 켜져 있는데 매매가 0건이다.
- *    사용자: *"안 산 날도 왜 안 샀는지"* 를 매 회차 화면에서 보고 싶다.
- *
- * 서버 계약: `report.budgetDecision` = `null` 또는
- *   `{ action: 'ENTER'|'HOLD'|'EXIT'|'WAIT', reason: string, symbol: string|null }`.
- *
- * ⚠️ **모양을 검사하고 나서 그린다** — 09-21 에 모델이 스키마를 어긴 값을 줘서
- *    `.join()` 이 터지고 **Vue 가 패널 서브트리를 통째로 버린** 전례가 있다(API 는 200 이었다).
- * ⚠️ 계약의 세 키만 읽는다 — 10-04 에 없는 필드를 추정해 **실거래를 '모의' 로** 표시한 사고가 있었다.
- */
-const BUDGET_LABEL = {
-  ENTER: '진입 제안', HOLD: 'AI 보유 유지', EXIT: 'AI 보유 정리', WAIT: '대기 (미진입)',
-};
-
-/**
- * 자율 수준·AI 예산 — 아래 경고의 **전제**를 판정하려면 이 값이 필요하다.
- * ⚠️ **새 폴링을 만들지 않는다** — 보고서를 가져오는 기존 주기(reportTimer 60초)에 얹는다.
- */
-const agentStatus = ref(null);
-async function loadAgentStatus() {
-  try {
-    const res = await apiFetch('/api/agent/status');
-    if (res.ok) agentStatus.value = await res.json();
-  } catch { /* 못 읽으면 경고를 안 띄운다 — 모르는 것을 단정하지 않는다 */ }
-}
-
-const budgetDecision = computed(() => {
-  const d = report.value?.budgetDecision;
-  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
-  if (!Object.prototype.hasOwnProperty.call(BUDGET_LABEL, d.action)) return null;
-  return {
-    action: d.action,
-    reason: typeof d.reason === 'string' ? d.reason : '',
-    symbol: typeof d.symbol === 'string' && d.symbol ? d.symbol : null,
-  };
-});
-
-/**
- * 🔴 **침묵을 경고로 바꾼다** — 예산이 설정돼 있고 자율 1단 이상인데 이 회차 보고서에
- *    판단이 안 실렸으면, 그게 바로 지금 고치고 있는 결함의 증상이다. 조용하면 또 모른다.
- * ⚠️ 보고서 자체가 없는 때는 안 띄운다 — 그 자리는 "아직 분석 기록이 없습니다" 가 맡는다
- *    (*"안 돌린 것"* 과 *"판단을 안 실은 것"* 은 다른 사실이다).
- */
-const budgetDecisionMissing = computed(() => (
-  !!report.value && !budgetDecision.value
-  && agentStatus.value?.ledger?.budgetUsd != null
-  && Number(agentStatus.value?.autonomyLevel) >= 1
-));
-
-/** 시장 국면(코드 판정) — 데몬이 5분마다 갱신한다. 화면은 읽기만 */
-const regime = ref(null);
-const regimeScenarios = ref([]);
-const TREND_KO = { up: '상승', side: '횡보', down: '하락' };
 const regimeLabel = computed(() => {
   const s = regime.value;
   if (!s) return '';
@@ -322,47 +248,7 @@ async function loadRegime() {
   } catch { /* 국면 칩은 곁가지 — 실패해도 화면은 산다 */ }
 }
 
-/** 거래소에 걸린 예약(조건부) 주문 — 제안과 별개로, **이미 등록돼 감시 중**인 것들 */
-const conditionalOrders = ref([]);
-const conditionalError = ref('');
 
-async function loadConditionals() {
-  try {
-    const res = await apiFetch('/api/orders/conditional');
-    if (res.ok) {
-      const body = await res.json();
-      conditionalOrders.value = body.items || [];
-      conditionalError.value = '';
-    } else {
-      const body = await res.json().catch(() => ({}));
-      // ⚠️ 실패를 빈 목록으로 그리지 않는다 — "예약 없음" 과 "못 읽음" 은 다르다
-      conditionalError.value = body.error || `조회 실패(${res.status})`;
-    }
-  } catch (e) {
-    conditionalError.value = e?.message || '조회 실패';
-  }
-}
-
-
-async function loadProposals() {
-  try {
-    const res = await apiFetch('/api/orders/proposals');
-    if (res.ok) {
-      const body = await res.json();
-      proposals.value = body.proposals || [];
-      /**
-       * 🔴 **실거래인지 화면이 알아야 한다** (2026-09-22).
-       *    종전 버튼 이름이 `실행(모의)` 로 **박혀** 있었다 — 스위치를 켜는 순간
-       *    그 이름이 **거짓**이 되고, 사용자는 *"모의니까"* 하고 누른다.
-       *    ★ 오늘 밤 세 번 본 *"이름이 사실과 다른 것"* 의 가장 비싼 판본이 될 뻔했다.
-       */
-      ordersMode.value = body.status?.effective || 'dry-run';
-    }
-  } catch {
-    // 조용히 넘기지 않는다 — 실패하면 목록이 비는데, 그건 "제안 없음" 과 다르다
-    analystError.value = '제안 목록을 불러오지 못했습니다.';
-  }
-}
 
 const STATUS_LABEL = {
   PENDING: '승인 대기', APPROVED: '승인됨', REJECTED: '거절',
@@ -520,40 +406,6 @@ function sessionWord(key) {
   const st = sessions.value?.[key]?.state;
   return st ? (SESSION_KO[st] || st) : '확인 중';
 }
-/** 🔴 상단에서 **승인 대기 건수**를 바로 본다 — 와이어프레임의 `매매 제안 ❷` */
-const pendingCount = computed(() => proposals.value.filter((p) => p.status === 'PENDING').length);
-
-/**
- * 🔴 **`AI 대화` 상단 버튼은 뺐다** (2026-10-02 — 사용자: *"상단에 AI 대화는 또 뭐야"*).
- *
- * 와이어프레임을 **렌더해서 상단바를 실제로 읽어 보니** 거기엔 그런 버튼이 없다
- * (로고 · 국면 칩 · 지수 티커 · 지표 편집 · 시계 · 아이콘 버튼 둘이 전부다).
- * 채팅은 **우측 컬럼 안 인라인**으로 있고, 그건 이 앱이 이미 그렇게 하고 있다.
- * ⇒ 버튼은 *"스크롤해서 데려다 주는"* 일만 했으므로 **추가 가치가 0**이었고,
- *   상단바에서 자리만 차지하며 "이건 뭐지" 를 만들었다.
- *
- * ★ 내가 이 버튼을 넣으며 적은 주석이 **"아직 레이어가 아니다"** 였다 —
- *   미완이라고 적어 두는 것과, 미완을 화면에 내보내는 것은 다른 일이다.
- */
-/**
- * 🔴 **승인 대기 제안은 모달로 띄운다** (2026-10-02 사용자 지시).
- *
- * 종전엔 대화 로그 안 카드였고, 거기에 **거절된 제안까지 쌓여** 사용자가 *"뭐냐 이건?"*
- * 이라고 했다(화면의 3건이 전부 `REJECTED`, 그중 하나는 **내가 만든 검증용 제안**).
- * ⇒ **결정을 요구하는 것은 흐름을 막아야 하고, 지난 것은 보일 이유가 없다.**
- */
-const pendingProposals = computed(() => proposals.value.filter((p) => p.status === 'PENDING'));
-/**
- * 🔔 매수/매도 **푸시** (2026-10-04 재편 — 대시보드는 보기 전용, 제안이 오면 알리기만 한다).
- *    승인·거절·전송은 "승인 대기" 메뉴가 전담한다 — 모달·버튼은 전부 그쪽으로 걷어냈다.
- */
-watch(() => pendingProposals.value.map((p) => p.id).join(','), (now, before) => {
-  const fresh = now.split(',').filter(Boolean).filter((id) => !String(before || '').includes(id));
-  if (fresh.length) {
-    notify({ message: `새 매매 제안 ${fresh.length}건 — 승인 대기 메뉴에서 확인하세요`, tone: 'info' });
-  }
-});
-
 /**
  * ⚠️ **사용자가 닫은 것은 다시 안 띄운다** — 안 그러면 닫아도 계속 떠서
  *    *"꺼지지 않는 창"* 이 된다. 같은 제안 id 를 기억한다.
@@ -746,7 +598,6 @@ function openStream() {
 }
 
 onMounted(async () => {
-  loadOrderStats();
   loadMcpStatus();
   loadTape();
   tapeTimer = setInterval(loadTape, 60000);
@@ -769,12 +620,9 @@ onMounted(async () => {
    * ⚠️ 낮에 주신 *"매매 분석은 바로 실행 시작해"* 를 되돌리는 것이라 **승인받고** 바꿨다.
    */
   loadLastReport();
-  loadAgentStatus();
   await load();
   await loadPortfolio();
   await loadDashboard();
-  await loadProposals();
-  await loadConditionals();
   await loadRegime();
   regimeTimer = setInterval(loadRegime, 5 * 60 * 1000);
   restartDashTimer();
@@ -790,11 +638,7 @@ onMounted(async () => {
   //    분석 트리거(장 시점·모멘텀·이벤트)는 서버가 돌리고, 화면은 결과를 따라간다.
   reportTimer = setInterval(() => {
     loadLastReport();
-    loadProposals();
-    loadConditionals();
-    loadOrderStats();
     // 🔴 예산 판단 경고의 전제(예산·자율 수준) — **새 타이머를 만들지 않고** 이 주기에 얹는다
-    loadAgentStatus();
   }, 60000);
   openStream();
 });
@@ -1154,7 +998,6 @@ onUnmounted(() => {
           :at="report?.at || null"
           :trigger="report?.trigger?.why || null"
           :proposal-count="report ? (report.proposals?.length ?? 0) : null"
-          :pending-count="pendingProposals.length"
         />
         <!-- ── 조각 실패를 숨기지 않는다 ─────────────────────── -->
         <p v-if="dashError" class="banner banner--error">{{ dashError }}</p>
@@ -1251,34 +1094,10 @@ onUnmounted(() => {
             <p class="analyst__view">{{ report.marketView }}</p>
             <p class="analyst__mom">{{ report.momentumRead }}</p>
 
-            <!--
-              🔴 **AI 예산 판단 한 줄** (2026-10-06) — 자율 1단 + AI 전용 예산이 도는데 매매가 0건이다.
-                 사용자: *"안 산 날도 왜 안 샀는지"*. ⇒ 회차마다 `[대기] 이유…` 를 여기서 읽는다.
-              ⚠️ 대시보드는 **보기 전용**이다(10-04 지시) — 버튼·입력 없이 텍스트만.
-              ⚠️ 판단이 없으면 **아무것도 안 그린다.** 단 하나 예외 = 아래 경고 한 줄:
-                 예산이 걸려 있고 자율 1단 이상인데 이 회차에 판단이 없으면 **그 침묵이 증상**이다.
-            -->
-            <p v-if="budgetDecision" class="bdec">
-              <span class="bdec__badge" :class="`bdec__badge--${budgetDecision.action.toLowerCase()}`">
-                {{ BUDGET_LABEL[budgetDecision.action] }}
-              </span>
-              <b v-if="budgetDecision.symbol" class="bdec__sym">{{ budgetDecision.symbol }}</b>
-              <span class="bdec__why">{{ budgetDecision.reason }}</span>
-            </p>
-            <p v-else-if="budgetDecisionMissing" class="banner banner--warn">
-              ⚠️ <b>AI 예산 판단 없음</b> — 이 회차 보고서에 판단이 실리지 않았습니다
-            </p>
-
-            <!-- 📊 성과 + 리스크 — 따로 두 카드였던 것을 한 표로(2026-10-04 사용자 지시) -->
-            <div v-if="orderStats || portfolio?.weights" class="risk">
+            <div v-if="portfolio?.weights" class="risk">
               <h3 class="panel__h">성과·리스크 <small>생애 감사 · 서버 계산</small></h3>
               <dl class="risk__grid">
-                <template v-if="orderStats">
-                  <div><dt>제안</dt><dd class="mono-num">{{ orderStats.proposed }}건</dd></div>
-                  <div><dt>승인</dt><dd class="mono-num">{{ orderStats.approved + orderStats.executed }}건</dd></div>
-                  <div><dt>거절</dt><dd class="mono-num" :class="{ down: rejectRate >= 50 }">{{ orderStats.rejected }}건 · {{ rejectRate }}%</dd></div>
-                  <div><dt>실주문</dt><dd class="mono-num">{{ orderStats.executed }}건</dd></div>
-                </template>
+
                 <template v-if="portfolio?.weights">
                   <div><dt>레버리지 노출</dt><dd class="mono-num" :class="leverageTone">{{ portfolio.weights.leveragePct }}%</dd></div>
                   <div v-if="topWeight"><dt>단일 최대</dt><dd class="mono-num" :class="topWeightTone">{{ topWeight.pct }}% {{ topWeight.symbol }}</dd></div>
@@ -1454,25 +1273,7 @@ onUnmounted(() => {
           </template>
 
           <!-- 활동 기록은 활동 로그 메뉴가 전담(2026-10-04 — 패널 중복이 난잡의 축이었다) -->
-            <!-- 거래소에 걸려 감시 중인 예약(조건부) 주문 — 제안과 다른 층이다 -->
-            <div v-if="conditionalOrders.length || conditionalError" class="props">
-              <h3 class="panel__h">예약 주문 <small>거래소가 감시가 도달을 지켜보는 중</small></h3>
-              <p v-if="conditionalError" class="prop__rej">⚠️ {{ conditionalError }}</p>
-              <article v-for="o in conditionalOrders" :key="o.conditionalOrderId || o.id" class="prop">
-                <header class="prop__head">
-                  <span class="prop__side">예약 {{ (o.first?.orderSide || o.orderSide) === 'BUY' ? '매수' : '매도' }}</span>
-                  <span class="prop__sym">{{ o.symbol }}</span>
-                  <span class="prop__status">{{ o.status || 'OPEN' }}</span>
-                </header>
-                <dl class="prop__grid">
-                  <div><dt>감시가</dt><dd class="mono-num">{{ o.first?.triggerPrice ?? '—' }}</dd></div>
-                  <div><dt>주문가</dt><dd class="mono-num">{{ o.first?.orderPrice ?? '시장가' }}</dd></div>
-                  <div><dt>수량</dt><dd class="mono-num">{{ o.quantity }}</dd></div>
-                  <div><dt>만료</dt><dd class="mono-num">{{ o.expireDate ?? '—' }}</dd></div>
-                </dl>
-                <!-- 취소는 승인 대기 메뉴에서 — 대시보드는 조작하지 않는다(2026-10-04 재편) -->
-              </article>
-            </div>
+
           </div>
         </section>
     </div>
