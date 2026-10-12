@@ -256,11 +256,13 @@ app.get('/api/risk/metrics', async (req, res) => {
   }
 });
 
-/** 📊 성과 7단계 수명주기 (2026-10-04) */
-app.get('/api/report/lifecycle', (req, res) => {
-  try { return res.json({ ok: true, ...require('./server/lifecycleReport').compute() }); }
-  catch (error) { return res.status(500).json({ ok: false, error: error.message }); }
-});
+/**
+ * ⚠️ (2026-10-12 제거) `GET /api/report/lifecycle` — 7단계 수명주기.
+ *    **3.5단계가 주문 집행 전제**였다(제안·승인·실주문 체결·정산). 집행을 걷어내면서
+ *    그 숫자들이 **영원히 고정**됐고, 화면에 남겨 두면 *"이 시스템은 주문을 한다"* 로 읽힌다.
+ *    ⇒ 화면(`ReportView`)과 함께 제거. **벤치마크 비교만** `BenchChart` 로 살려 포트폴리오에 넣었다.
+ */
+
 
 /** 🧪 전략 연구소 (2026-10-04) — 플레이북 열람·수정 · 승급 전략 */
 app.get('/api/strategy/playbook', (req, res) => {
@@ -1052,13 +1054,13 @@ app.get('/api/toss/candles', async (req, res) => {
   }
 });
 
-app.get('/api/toss/orderbook', async (req, res) => {
-  try {
-    res.json(await tossClient.getOrderbook(String(req.query.symbol || '')));
-  } catch (e) {
-    res.status(502).json({ error: e.message, kind: e.kind || 'unknown' });
-  }
-});
+
+/**
+ * ⚠️ (2026-10-12 제거) `GET /api/toss/orderbook` — 호가 조회.
+ *    주문을 **내는 쪽**이 지정가를 정하려고 쓰던 자리다. 집행이 사라져 소비자가 0곳이 됐다.
+ *    ⚠️ `tossClient.getOrderbook` 자체는 **남아 있다** — 되살릴 일이 생기면 라우트만 다시 연다.
+ */
+
 
 app.get('/api/toss/investor-trading', async (req, res) => {
   try {

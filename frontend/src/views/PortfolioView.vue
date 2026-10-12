@@ -158,29 +158,13 @@
           </section>
 
           <!--
-            📈 **자산 추이** — 와이어프레임 D-1 이 약속했는데 **만들지 않고 넘어갔다**(2026-10-12).
-               사용자: *"와이어프레임 기반으로 디자인 전면 개편한거 맞아?"* — 맞는 지적이다.
-            ⚠️ 두 점 미만이면 **그리지 않는다**(한 점짜리 선은 "변화 없음" 으로 읽힌다).
+            📈 **자산 vs 벤치마크** (2026-10-12 — 성과 화면을 없애며 이 하나만 건져 왔다)
+            🔴 종전 자산 추이 스파크라인을 **대체**한다 — 같은 `/api/performance` 데이터인데
+               *"내 돈이 늘었나"* 에 *"시장보다 잘했나"* 가 더해진다. 둘을 따로 그릴 이유가 없다.
           -->
           <section class="card">
-            <h2>자산 추이 <small class="mut" v-if="perfRange">{{ perfRange }}</small></h2>
-            <p v-if="perfSeries.length < 2" class="mut">
-              {{ perfSeries.length ? '관측이 하루치뿐입니다 — 이틀째부터 그립니다.' : '자산 스냅샷이 아직 없습니다.' }}
-            </p>
-            <template v-else>
-              <svg class="spark" :viewBox="`0 0 ${SW} ${SH}`" preserveAspectRatio="none" role="img"
-                   aria-label="총자산 추이">
-                <path :d="perfArea" class="spark__area" />
-                <path :d="perfLine" class="spark__line" />
-              </svg>
-              <div class="spark__foot">
-                <span class="mut mono-num">{{ money(perfSeries[0].totalKrw) }}</span>
-                <span class="gap"></span>
-                <span class="mono-num" :class="dirClass(perfChangePct)">
-                  {{ signedPct(perfChangePct) }} · {{ money(perfSeries[perfSeries.length - 1].totalKrw) }}
-                </span>
-              </div>
-            </template>
+            <h2>자산 추이 <small class="mut">내 계좌 · KOSPI · 나스닥</small></h2>
+            <BenchChart :series="perfSeries" />
           </section>
 
           <section v-if="income" class="card">
@@ -201,6 +185,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRouter, RouterLink } from 'vue-router';
 import { apiFetch } from '../lib/apiClient';
+import BenchChart from '../components/BenchChart.vue';
 
 const router = useRouter();
 const data = ref(null);
@@ -294,36 +279,9 @@ function goSymbol(symbol) {
 
 /* ── 📈 자산 추이 ─────────────────────────── */
 const perf = ref(null);
-const SW = 600; const SH = 90;
 const perfSeries = computed(() => {
   const rows = perf.value?.series;
   return Array.isArray(rows) ? rows.filter((r) => Number.isFinite(Number(r.totalKrw))) : [];
-});
-const perfRange = computed(() => {
-  const r = perfSeries.value;
-  return r.length >= 2 ? `${r[0].day} ~ ${r[r.length - 1].day}` : '';
-});
-const perfChangePct = computed(() => {
-  const r = perfSeries.value;
-  if (r.length < 2) return null;
-  const a = Number(r[0].totalKrw); const b = Number(r[r.length - 1].totalKrw);
-  return a > 0 ? Math.round(((b - a) / a) * 1000) / 10 : null;
-});
-function perfPoints() {
-  const r = perfSeries.value;
-  if (r.length < 2) return [];
-  const vals = r.map((x) => Number(x.totalKrw));
-  const hi = Math.max(...vals); const lo = Math.min(...vals);
-  const span = hi - lo || 1;
-  return vals.map((v, i) => [(i / (vals.length - 1)) * SW, SH - ((v - lo) / span) * SH]);
-}
-const perfLine = computed(() => {
-  const p = perfPoints();
-  return p.length ? p.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ') : '';
-});
-const perfArea = computed(() => {
-  const p = perfPoints();
-  return p.length ? `${perfLine.value} L${SW} ${SH} L0 ${SH} Z` : '';
 });
 
 async function loadPerf() {
@@ -405,10 +363,6 @@ onMounted(() => { load(); loadPerf(); });
 .unc__list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--text-xs); }
 .unc__list li { display: flex; gap: 6px; color: var(--color-body); }
 
-.spark { width: 100%; height: 92px; display: block; }
-.spark__area { fill: var(--color-primary-soft); }
-.spark__line { fill: none; stroke: var(--color-primary); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-.spark__foot { display: flex; align-items: baseline; font-size: var(--text-xs); }
 
 .dl { display: flex; gap: var(--space-lg, 24px); margin: 0; flex-wrap: wrap; }
 .dl dt { font-size: var(--text-2xs); color: var(--color-faint); }

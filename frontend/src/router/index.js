@@ -24,7 +24,6 @@ const routes = [
      */
     path: '/settings', name: 'settings', component: () => import('../views/RulesView.vue'), meta: { title: '설정' },
   },
-  { path: '/report', name: 'report', component: () => import('../views/ReportView.vue'), meta: { title: '성과' } },
   { path: '/activity', name: 'activity', component: () => import('../views/ActivityView.vue'), meta: { title: '활동 로그' } },
   { path: '/symbol/:code', name: 'symbol', component: () => import('../views/SymbolView.vue'), meta: { title: '종목 상세' } },
 
@@ -33,6 +32,12 @@ const routes = [
    *    조용히 홈으로 보내면 "왜 다른 화면이 뜨지" 가 되므로, 사라진 화면은 그 사실을 아는
    *    자리로 보낸다(`/activity` 에 개편 안내가 있다).
    */
+  /**
+   * 🔴 2026-10-12 — `/report`(성과) **제거.** 7단계 수명주기 중 **3.5단계가 박제**였다
+   *    (제안 54 · 승인 10 · 실주문 0 · 정산 0 — 주문 집행이 사라져 영원히 안 움직인다).
+   *    그 화면에만 있던 **벤치마크 비교**는 `BenchChart` 로 떼어 포트폴리오에 넣었다.
+   */
+  { path: '/report', redirect: { name: 'portfolio' } },
   { path: '/approvals', redirect: { name: 'activity' } },
   { path: '/rules', redirect: { name: 'settings' } },
   { path: '/watchlist', redirect: { name: 'settings' } },

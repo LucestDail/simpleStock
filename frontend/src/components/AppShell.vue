@@ -20,7 +20,6 @@
         <RouterLink to="/analysis" class="side__item" active-class="side__item--on">분석 리포트</RouterLink>
         <RouterLink to="/lab" class="side__item" active-class="side__item--on">전략 연구소</RouterLink>
         <RouterLink to="/risk" class="side__item" active-class="side__item--on">리스크</RouterLink>
-        <RouterLink to="/report" class="side__item" active-class="side__item--on">성과</RouterLink>
         <RouterLink to="/activity" class="side__item" active-class="side__item--on">활동 로그</RouterLink>
         <!-- 종목 상세는 종목을 클릭해 들어간다 — 메뉴 항목이 아니라 경로다 -->
         <!--

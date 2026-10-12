@@ -38,17 +38,33 @@
       </section>
     </div>
 
+    <!--
+      🧪 **종목 평가** (2026-10-12 신설) — 서버에 `/api/rate/:symbol` 이 있는데
+         **화면이 한 번도 안 불렀다**(호출 0곳). 와이어프레임 D-5 가 약속한 자리다.
+      ⚠️ 이 자리에는 종전 *"이 종목의 제안·주문 이력"* 표가 있었다 — 주문 집행이 사라져
+         **영원히 빈 표**가 됐으므로 들어내고 평가를 넣는다.
+      🔴 **ETF 는 점수가 없다** — 결손이 아니라 설계다. 점수 대신 성격·한 줄 설명을 보여준다.
+    -->
     <section class="card">
-      <h2>이 종목의 제안·주문 이력 <small class="mut">감사 기준</small></h2>
-      <table v-if="history.length" class="tbl">
-        <thead><tr><th>시각</th><th>이벤트</th><th>방향</th></tr></thead>
-        <tbody><tr v-for="(h, i) in history" :key="i">
-          <td class="mono-num">{{ when(h.at) }}</td>
-          <td>{{ EVENT_KO[h.event] || h.event }}</td>
-          <td>{{ h.side === 'BUY' ? '매수' : h.side === 'SELL' ? '매도' : '—' }}</td>
-        </tr></tbody>
-      </table>
-      <p v-else class="mut">이 종목으로 만들어진 제안이 아직 없습니다.</p>
+      <h2>종목 평가
+        <small v-if="rating?.type" class="mut">{{ rating.type }}{{ rating.leverage > 1 ? ` · ${rating.leverage}배` : '' }}</small>
+      </h2>
+      <p v-if="ratingErr" class="mut">{{ ratingErr }}</p>
+      <p v-else-if="!rating" class="mut">평가를 불러오는 중…</p>
+      <template v-else>
+        <p v-if="rating.oneLiner" class="body">{{ rating.oneLiner }}</p>
+        <p v-if="rating.total != null" class="rate__score">
+          <b class="mono-num">{{ rating.total }}</b><span class="mut"> / {{ rating.maxTotal || 100 }}</span>
+          <span v-if="rating.opinion" class="rate__op">{{ rating.opinion }}</span>
+        </p>
+        <p v-else class="mut">기업 점수는 **해당 없음** — {{ rating.type }}는 100점 채점 대상이 아닙니다.</p>
+        <ul v-if="(rating.strengths || []).length" class="rate__list">
+          <li v-for="(t, i) in rating.strengths" :key="`s${i}`"><span class="up">+</span> {{ t }}</li>
+        </ul>
+        <ul v-if="(rating.weaknesses || []).length" class="rate__list">
+          <li v-for="(t, i) in rating.weaknesses" :key="`w${i}`"><span class="down">−</span> {{ t }}</li>
+        </ul>
+      </template>
     </section>
 
     <section class="card">
@@ -74,7 +90,8 @@ const name = ref('');
 const held = ref(null);
 const agentView = ref(null);
 const viewAt = ref(null);
-const history = ref([]);
+const rating = ref(null);
+const ratingErr = ref('');
 const news = ref([]);
 const newsNote = ref('');
 
@@ -108,6 +125,12 @@ onMounted(async () => {
     agentView.value = (rep.positions || []).find((p) => String(p.symbol).toUpperCase() === symbol.value) || null;
   } catch { /* 견해 없음으로 */ }
   try {
+    const r = await apiFetch(`/api/rate/${encodeURIComponent(symbol.value)}`);
+    const b = await r.json();
+    if (b && !b.error) rating.value = b;
+    else ratingErr.value = b?.error || '평가를 불러오지 못했습니다.';
+  } catch (e) { ratingErr.value = `평가 실패: ${e.message}`; }
+  try {
     const q = new URLSearchParams({ symbol: symbol.value, name: name.value || symbol.value });
     const r = await apiFetch(`/api/news?${q}`); const b = await r.json();
     news.value = b?.items || [];
@@ -138,6 +161,10 @@ onMounted(async () => {
 .grid dd { margin: 0; font-weight: 600; color: var(--color-ink); }
 .body { font-size: var(--text-sm); }
 .sc { font-size: var(--text-xs); color: var(--color-muted); margin: 2px 0; }
+.rate__score { margin: 6px 0; display: flex; align-items: baseline; gap: var(--space-sm); }
+.rate__score b { font-size: var(--text-xl); color: var(--color-ink); }
+.rate__op { font-size: var(--text-sm); color: var(--color-primary); }
+.rate__list { margin: 4px 0 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font-size: var(--text-sm); }
 .tbl { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
 .tbl th { text-align: left; font-size: var(--text-2xs); color: var(--color-faint); padding: 4px var(--space-sm); border-bottom: 1px solid var(--color-hairline); }
 .tbl td { padding: 4px var(--space-sm); border-bottom: 1px solid var(--color-hairline-soft); }

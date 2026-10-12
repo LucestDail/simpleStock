@@ -283,6 +283,22 @@ const staleSymbols = computed(() => {
     .filter((sym) => sym && !set.has(sym));
 });
 
+/* 📜 분석 회차 이력 — 종전엔 서버에만 쌓이고 화면이 안 읽었다 */
+const history = ref([]);
+function fmtShort(iso) {
+  try {
+    return new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  } catch { return ''; }
+}
+async function loadHistory() {
+  try {
+    const r = await apiFetch('/api/analyst/history');
+    const b = await r.json();
+    const rows = Array.isArray(b) ? b : (b.items || b.rows || []);
+    history.value = rows;
+  } catch { /* 이력은 곁가지 — 본문은 그대로 */ }
+}
+
 const dash = ref(null);
 const dashError = ref('');
 const selected = ref({ symbol: '', name: '' });
@@ -649,7 +665,7 @@ onMounted(async () => {
    *    를 보여줬다(사용자 지적). 서로 의존하지 않으므로 함께 띄운다.
    */
   loadLastReport();
-  await Promise.all([load(), loadPortfolio(), loadDashboard(), loadRegime()]);
+  await Promise.all([load(), loadPortfolio(), loadDashboard(), loadRegime(), loadHistory()]);
   regimeTimer = setInterval(loadRegime, 5 * 60 * 1000);
   restartDashTimer();
   clockTimer = setInterval(() => {
@@ -1308,6 +1324,27 @@ onUnmounted(() => {
             </div>
 
             <!-- ⚠️ 무엇을 못 봤는지 밝힌다 — 안 밝히면 "다 보고 판단했다" 로 읽힌다 -->
+            <!--
+              📜 **회차 이력** (2026-10-12 신설) — 서버에 **100건이 쌓여 있는데 화면이 한 줄도
+                 안 보여주고 있었다**(`/api/analyst/history` 호출 0곳). 와이어프레임 D-2 가
+                 약속한 타임라인이 바로 이것이다.
+              ⚠️ 접어 둔다 — 평소엔 최신 회차만 보면 되고, *"어제와 뭐가 달라졌나"* 를 물을 때만 편다.
+            -->
+            <details v-if="history.length" class="hist">
+              <summary class="hist__sum">
+                회차 이력 <b class="mono-num">{{ history.length }}</b>건
+                <small class="mut">최근 {{ history[0] ? fmtShort(history[0].at) : '' }}</small>
+              </summary>
+              <ul class="hist__list">
+                <li v-for="h in history.slice(0, 20)" :key="h.id">
+                  <span class="hist__at mono-num">{{ fmtShort(h.at) }}</span>
+                  <span class="hist__trig">{{ h.trigger || '—' }}</span>
+                  <span v-if="h.dryRun" class="hist__tag">점검</span>
+                  <span class="hist__view">{{ h.marketView || '(시황 없음)' }}</span>
+                </li>
+              </ul>
+            </details>
+
             <div v-if="report.dataGaps?.length" class="gaps">
               <h3 class="panel__h">이 분석이 못 본 것</h3>
               <ul><li v-for="(g, i) in report.dataGaps" :key="i">{{ g }}</li></ul>
@@ -2395,6 +2432,15 @@ onUnmounted(() => {
 /* 모델이 한 덩어리로 주면 여기로 온다 — 실제로는 이 칸이 주된 출력이다. 줄바꿈을 살린다 */
 .rt__int { margin: 4px 0 0; font-size: var(--text-2xs); color: var(--color-body); white-space: pre-wrap; line-height: 1.45; }
 .rt__why { margin: 2px 0 0; font-size: var(--text-2xs); color: var(--color-faint); }
+.mut { color: var(--color-muted); font-size: var(--text-xs); }
+.hist { border: 1px solid var(--color-hairline); border-radius: var(--rounded-md); padding: 6px 10px; }
+.hist__sum { cursor: pointer; font-size: var(--text-sm); color: var(--color-ink); display: flex; gap: var(--space-sm); align-items: baseline; }
+.hist__list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+.hist__list li { display: flex; gap: var(--space-sm); align-items: baseline; font-size: var(--text-xs); min-width: 0; }
+.hist__at { color: var(--color-faint); flex: 0 0 auto; }
+.hist__trig { color: var(--color-body); flex: 0 0 auto; }
+.hist__tag { font-size: var(--text-2xs); color: var(--color-warn); border: 1px solid var(--color-warn); border-radius: var(--rounded-pill); padding: 0 5px; flex: 0 0 auto; }
+.hist__view { color: var(--color-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .gaps { border-top: 1px solid var(--color-hairline-soft); padding-top: var(--space-sm); }
 
 /* ── 브리핑 (AI 레이어) ──────────────────────────── */
