@@ -212,9 +212,14 @@
           </thead>
           <tbody>
             <tr v-for="h in items" :key="h.symbol" class="row--click" @click="goSymbol(h.symbol)">
-              <td>
+              <!--
+                🔴 **이름이 티커와 같으면 안 적는다** (2026-10-12 — 화면에 `DIADIA`·`QQQMQQQM`
+                   처럼 붙어 나왔다). 증권사가 이름 칸에 티커를 그대로 주는 종목이 있다.
+                ⚠️ 띄어쓰기도 없어 `O리얼티 인컴` 으로 읽혔다 — 줄을 나눈다.
+              -->
+              <td class="symcell">
                 <b>{{ h.symbol }}</b>
-                <small class="mut">{{ h.name }}</small>
+                <small v-if="h.name && h.name !== h.symbol" class="mut">{{ h.name }}</small>
               </td>
               <td class="r mono-num">{{ num(h.quantity) }}</td>
               <td class="r mono-num">{{ num(h.avgPrice) }}</td>
@@ -738,5 +743,7 @@ onMounted(async () => {
 .dl { display: flex; gap: var(--space-lg, 24px); margin: 0; flex-wrap: wrap; }
 .dl dt { font-size: var(--text-2xs); color: var(--color-faint); }
 .dl dd { margin: 0; font-weight: 600; color: var(--color-ink); }
+.symcell b { display: block; line-height: 1.15; }
+.symcell small { display: block; line-height: 1.1; }
 .over__note { font-size: var(--text-2xs); margin: 2px 0 0; }
 </style>
