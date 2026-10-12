@@ -104,6 +104,16 @@ function scriptDefinitions(sc) {
       if (/^[A-Za-z_$][\w$]*$/.test(id)) d.add(id);
     }
   }
+  /**
+   * 배열 구조분해: `const [a, b] = …` · `for (const [url, pick] of …)`
+   * ⚠️ 이걸 빠뜨려 `pick()` 을 **없는 함수**로 찍었다 — 루프 변수는 엄연한 선언이다.
+   */
+  for (const m of sc.matchAll(/\b(?:const|let|var)\s*\[([^\]]*)\]/g)) {
+    for (const part of m[1].split(',')) {
+      const id = part.trim().replace(/\s*=.*$/, '').replace(/^\.\.\./, '');
+      if (/^[A-Za-z_$][\w$]*$/.test(id)) d.add(id);
+    }
+  }
   for (const m of sc.matchAll(/import\s+([A-Za-z_$][\w$]*)/g)) d.add(m[1]);
   for (const m of sc.matchAll(/import\s*\{([^}]*)\}/g)) {
     for (const part of m[1].split(',')) {
@@ -212,6 +222,129 @@ test('③ 템플릿이 부르는 것이 스크립트에 실재한다', () => {
   }
   // ★ 대상이 0건이면 "위반 없음" 이 아니라 "안 쟀다"
   assert.ok(checked >= 10, `검사한 SFC 가 ${checked}개뿐 — 탐지가 빠졌다`);
+  assert.deepEqual(bad, []);
+});
+
+/**
+ * ③-b **스크립트 안에서만 쓰이는 식별자** — ③ 이 못 보던 구멍.
+ *
+ * 🔴 `TREND_KO` 가 **선언 없이** 쓰이고 있었는데 ③ 은 못 봤다(템플릿엔 안 나온다).
+ *    게다가 **그 코드가 죽어 있어서** 증상도 없었다 — `regime` 이 없어 `v-if` 가 영원히 거짓이라
+ *    `regimeLabel` 이 평가되지 않았다. `regime` 을 고치자 **분석 리포트 화면이 통째로 비었다.**
+ *
+ * ⚠️ 전면 스코프 분석은 정규식으로 못 한다 ⇒ **오탐이 거의 없는 모양으로 좁힌다**:
+ *    `SCREAMING_SNAKE_CASE` 상수 — 이 저장소의 룩업 테이블·임계값이 전부 이 모양이고,
+ *    속성 접근(`A.B`)·객체 키(`A:`)·문자열은 제외하므로 걸리면 거의 확실히 진짜다.
+ */
+function screamingConstants(sc) {
+  const used = new Set();
+  // 문자열·주석을 먼저 지운다 — 설명문의 대문자 낱말을 식별자로 읽으면 오탐이 된다
+  const code = sc
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+    .replace(/'[^'\n]*'/g, "''").replace(/"[^"\n]*"/g, '""')
+    /**
+     * 🔴 **백틱 문자열을 통째로 지우면 안 된다.** `${…}` 안은 **문자열이 아니라 코드**다.
+     *    첫 판이 `` /`[^`]*`/ `` 로 싹 지워서, 하필 `TREND_KO` 의 **유일한 사용처 두 곳이
+     *    전부 `` `US ${TREND_KO[...]}` `` 안**이라 **변이가 통과했다**(= 가드가 아무것도 안 봤다).
+     *    ⇒ 리터럴 부분만 버리고 **보간 안쪽은 코드로 남긴다**.
+     */
+    .replace(/`[\s\S]*?`/g, (lit) => {
+      const inner = [...lit.matchAll(/\$\{((?:[^{}]|\{[^{}]*\})*)\}/g)].map((x) => x[1]);
+      return ` ${inner.join(' ; ')} `;
+    });
+  for (const m of code.matchAll(/(?<![.\w$])([A-Z][A-Z0-9_]{2,})\b(?!\s*:)/g)) used.add(m[1]);
+  return { used, code };
+}
+
+test('③-b 스크립트의 대문자 상수가 실재한다 (TREND_KO 류)', () => {
+  const bad = [];
+  let scanned = 0;
+  for (const f of FILES) {
+    const src = fs.readFileSync(f, 'utf8');
+    if (!src.includes('<script setup>')) continue;
+    const sc = src.slice(src.indexOf('<script setup>'), src.lastIndexOf('</script>'));
+    const defined = scriptDefinitions(sc);
+    const { used } = screamingConstants(sc);
+    scanned += 1;
+    for (const id of used) {
+      if (defined.has(id) || GLOBALS.has(id) || JS_UPPER.has(id)) continue;
+      bad.push(`${path.relative(SRC, f)}: \`${id}\` — 선언 없이 쓰인다`);
+    }
+  }
+  assert.ok(scanned >= 10, `검사한 SFC ${scanned}개 — 탐지가 빠졌다`);
+  assert.deepEqual(bad, []);
+});
+
+/** 자바스크립트/브라우저 쪽 대문자 전역 — 선언 대상이 아니다 */
+const JS_UPPER = new Set(['NaN', 'Infinity', 'URL', 'URLSearchParams', 'JSON', 'Math', 'Intl', 'DOMParser']);
+
+/**
+ * ③-c **호출하는데 없는 함수** — ③·③-b 가 둘 다 못 보던 구멍.
+ *
+ * 🔴 `loadStatus()` 가 `onMounted` 와 30초 폴링에서 불리는데 **그런 함수가 없었다**
+ *    (`loadSettings` 로 이름을 바꾸면서 호출부만 남았다). 설정 화면이 **749자만 그려지고
+ *    나머지가 사라졌다**. 템플릿엔 안 나오니 ③ 이 못 보고, 대문자가 아니니 ③-b 도 못 본다.
+ *
+ * ⚠️ 판정은 **호출 자리**(`foo(`)로만 — 식별자 전체를 보면 오탐이 쏟아진다.
+ *    메서드(`a.foo()`)·선언·키워드는 빼고, **함수 매개변수까지 선언으로 센다**
+ *    (콜백 인자를 위반으로 읽으면 멀쩡한 화면이 빨간불이 된다).
+ */
+function callSites(sc) {
+  const code = sc
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+    .replace(/'[^'\n]*'/g, "''").replace(/"[^"\n]*"/g, '""')
+    .replace(/`[\s\S]*?`/g, (lit) => {
+      const inner = [...lit.matchAll(/\$\{((?:[^{}]|\{[^{}]*\})*)\}/g)].map((x) => x[1]);
+      return ` ${inner.join(' ; ')} `;
+    });
+  const out = new Set();
+  for (const m of code.matchAll(/(?<![.\w$])([a-z_$][\w$]*)\s*\(/g)) out.add(m[1]);
+  return out;
+}
+
+/** 매개변수·catch 바인딩도 선언이다 — 안 세면 콜백 인자가 전부 위반이 된다 */
+function paramNames(sc) {
+  const d = new Set();
+  for (const m of sc.matchAll(/function\s*[\w$]*\s*\(([^)]*)\)/g)) {
+    for (const t of m[1].split(',')) { const id = t.trim().replace(/[=:].*$/, '').replace(/^\.\.\./, ''); if (/^[A-Za-z_$][\w$]*$/.test(id)) d.add(id); }
+  }
+  for (const m of sc.matchAll(/\(([^()]*)\)\s*=>/g)) {
+    for (const t of m[1].split(',')) { const id = t.trim().replace(/[=:].*$/, '').replace(/^\.\.\./, ''); if (/^[A-Za-z_$][\w$]*$/.test(id)) d.add(id); }
+  }
+  for (const m of sc.matchAll(/(?:^|[^\w$])([A-Za-z_$][\w$]*)\s*=>/g)) d.add(m[1]);
+  for (const m of sc.matchAll(/catch\s*\(\s*([A-Za-z_$][\w$]*)/g)) d.add(m[1]);
+  return d;
+}
+
+const CALL_GLOBALS = new Set([
+  'require', 'fetch', 'alert', 'confirm', 'prompt', 'setTimeout', 'setInterval',
+  'clearTimeout', 'clearInterval', 'parseInt', 'parseFloat', 'isNaN', 'isFinite',
+  'encodeURIComponent', 'decodeURIComponent', 'structuredClone', 'queueMicrotask',
+  'requestAnimationFrame', 'cancelAnimationFrame', 'btoa', 'atob',
+  'if', 'for', 'while', 'switch', 'catch', 'return', 'typeof', 'function', 'await', 'async',
+  // Vue 컴파일러 매크로 — import 없이 쓰는 것이 정상이다
+  'defineProps', 'defineEmits', 'defineExpose', 'defineModel', 'defineOptions', 'withDefaults',
+  // 브라우저 전역
+  'getComputedStyle', 'matchMedia', 'scrollTo', 'open', 'close', 'print',
+]);
+
+test('③-c 호출하는데 선언이 없는 함수 (loadStatus 류)', () => {
+  const bad = [];
+  let scanned = 0;
+  for (const f of FILES) {
+    const src = fs.readFileSync(f, 'utf8');
+    if (!src.includes('<script setup>')) continue;
+    const sc = src.slice(src.indexOf('<script setup>'), src.lastIndexOf('</script>'));
+    const defined = new Set([...scriptDefinitions(sc), ...paramNames(sc)]);
+    scanned += 1;
+    for (const id of callSites(sc)) {
+      if (defined.has(id) || GLOBALS.has(id) || CALL_GLOBALS.has(id)) continue;
+      bad.push(`${path.relative(SRC, f)}: \`${id}()\` — 부르는데 **선언이 없다**`);
+    }
+  }
+  assert.ok(scanned >= 10, `검사한 SFC ${scanned}개 — 탐지가 빠졌다`);
   assert.deepEqual(bad, []);
 });
 

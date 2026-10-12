@@ -722,14 +722,20 @@ async function runAnalysis() {
 
 let timer = null;
 onMounted(() => {
-  loadStatus();
+  /**
+   * 🔴 **2026-10-12 — `loadStatus()` 는 존재한 적이 없는 함수였다**(이름을 `loadSettings` 로
+   *    바꾸면서 호출부만 남은 것). 마운트 즉시 `ReferenceError` 를 던져 **설정 화면이
+   *    749자만 그려지고 나머지가 통째로 사라졌고**, 30초 폴링도 매번 같은 자리에서 죽었다.
+   *    ⚠️ `npm run build` 는 통과한다 — 번들러는 **전역일 수도 있는 이름**을 그냥 둔다.
+   *    `verify/render-check.mjs`(CDP) 가 콘솔 에러로 잡았다.
+   */
   loadSettings();
   // ⚠️ 30초 폴링에 안 넣는다 — 서버에 아직 없는 경로를 30초마다 찌르면 로그만 쌓인다.
   //    적립 예산은 배당을 넣은 직후 addDividend() 가 직접 다시 읽는다.
   loadAllocation();
   loadIncome();
   loadRules();
-  timer = setInterval(loadStatus, 30_000);
+  timer = setInterval(loadSettings, 30_000);
 });
 onUnmounted(() => clearInterval(timer));
 </script>

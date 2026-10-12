@@ -239,12 +239,27 @@ async function loadLastReport() {
 const regime = ref(null);
 const regimeScenarios = ref([]);
 
+/**
+ * 🔴🔴 **`TREND_KO` 도 선언된 적이 없었다 — 그리고 이것이 화면을 통째로 비웠다.**
+ *
+ * 순서가 중요하다: 종전엔 `regime` 이 없어 `v-if="regime"` 가 **영원히 거짓**이었고,
+ * 그래서 `regimeLabel` 이 **한 번도 평가되지 않아** 이 참조가 드러날 길이 없었다.
+ * 위에서 `regime` 을 살리자 비로소 평가됐고 `ReferenceError: TREND_KO is not defined` 로
+ * **분석 리포트 화면 전체가 렌더되지 않았다**(사이드바만 남은 빈 화면).
+ *
+ * ★ **고친 것이 다음 결함을 깨운다** — 죽어 있던 코드 경로를 되살리면 그 안의 빚이 같이 깨어난다.
+ *   ⇒ 비어 있던 기능을 켤 때는 **그 경로 안쪽을 끝까지 읽어야** 한다.
+ * ⚠️ 값은 서버 `regimeService` 의 실제 판정이다 — `up`/`down`/`side` 셋뿐이고,
+ *   모르는 값이 오면 **지어내지 말고 그대로 보여준다**(`?? trend`).
+ */
+const TREND_KO = { up: '상승추세', down: '하락추세', side: '횡보' };
+
 const regimeLabel = computed(() => {
   const s = regime.value;
   if (!s) return '';
   const parts = [];
-  if (s.us?.trend) parts.push(`US ${TREND_KO[s.us.trend]}`);
-  if (s.kr?.trend) parts.push(`KR ${TREND_KO[s.kr.trend]}`);
+  if (s.us?.trend) parts.push(`US ${TREND_KO[s.us.trend] ?? s.us.trend}`);
+  if (s.kr?.trend) parts.push(`KR ${TREND_KO[s.kr.trend] ?? s.kr.trend}`);
   if (s.vix?.value != null) parts.push(`VIX ${s.vix.value}`);
   if (s.kr?.shock || s.us?.shock) parts.push('🔴급락');
   return parts.join(' · ') || '판정 대기';

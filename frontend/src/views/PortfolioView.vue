@@ -140,7 +140,9 @@
           <div class="mstat"><small>감마</small><b class="mstat__na">해당 없음 — 현물</b></div>
           <div class="mstat"><small>세타</small><b class="mstat__na">해당 없음 — 현물</b></div>
         </div>
-        <table v-if="metrics.per && metrics.per.length" class="rtbl">
+        <!-- ⚠️ 래퍼 — 표가 길어도 **카드 안에서** 스크롤한다(페이지를 늘리지 않는다) -->
+        <div v-if="metrics.per && metrics.per.length" class="mtblwrap">
+        <table class="rtbl">
           <thead><tr>
             <th>종목</th><th>비중</th><th>레버리지</th><th>변동성(연)</th><th>하방(연)</th><th>VaR95(1일)</th><th>감쇠/일</th>
           </tr></thead>
@@ -154,6 +156,7 @@
             <td class="num mono-num">{{ pval(p.decayDayPct) }}</td>
           </tr></tbody>
         </table>
+        </div>
         <p v-else class="mut">종목별 지표가 비어 있다 — 캔들 10개 이상부터 계산된다.</p>
         <p class="mut">※ {{ metrics.greeksNote }}</p>
         <p class="mut">※ {{ metrics.volNote }}</p>
@@ -552,8 +555,30 @@ onMounted(async () => {
  * ⚠️ 읽는 순서가 "왼쪽 위→아래→오른쪽 위" 가 된다 — **중요한 것을 맨 앞에** 두면 그대로 맨 위다.
  *    그래서 요약·기준선 초과는 `.page__lead` 로 흐름 **밖**에 두고 전폭을 준다.
  */
-.flow { columns: 460px; column-gap: var(--space-sm); }
-.flow > .card { break-inside: avoid; margin: 0 0 var(--space-sm); }
+/**
+ * 🔴 **2026-10-12 저녁 (사용자 네 번째 지적: *"내가 한 화면에 다 보이게 구성하라고 했지"*)**
+ *
+ * 460px 열 폭은 1920 화면에서 **세 열**이라 아홉 장이 세로로 길게 늘어섰다.
+ * 340px 로 좁히면 같은 폭에서 **네 열**이 되고, 열마다 쌓이는 높이가 1/4 로 준다.
+ * ⚠️ 폭만 줄이면 카드가 **옆으로** 좁아질 뿐이라 안 된다 — **밀도**(아래 `.flow` 안 규칙)와
+ *    **긴 표의 상한**(`.tblwrap`·`.mtbl`)을 함께 줄여야 세로가 실제로 준다.
+ */
+.flow { columns: 340px; column-gap: var(--space-xs, 8px); }
+.flow > .card { break-inside: avoid; margin: 0 0 var(--space-xs, 8px); padding: 10px 12px; gap: 6px; }
+.flow > .card h2 { font-size: var(--text-sm); }
+
+/* 표는 **카드 안에서** 스크롤한다 — 페이지를 늘리지 않는다 */
+.flow .tblwrap, .flow .mtblwrap { max-height: 230px; overflow: auto; }
+.flow .tbl th, .flow .tbl td,
+.flow .rtbl th, .flow .rtbl td { padding: 3px 6px; font-size: var(--text-xs); }
+.flow .tbl thead th,
+.flow .rtbl thead th { position: sticky; top: 0; background: var(--color-surface); z-index: 1; }
+/* 긴 목록(밸런스 판정·미분류)도 같은 규칙 */
+.flow .issues { max-height: 210px; overflow: auto; }
+.flow .wts { max-height: 230px; overflow: auto; }
+.flow .gauges { gap: 6px; }
+.flow .mstats { gap: 6px; }
+.flow .bc__svg { height: 150px; }
 .page__lead { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: var(--space-sm); align-items: start; }
 .page__lead > .card { min-width: 0; }
 

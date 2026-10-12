@@ -27,7 +27,14 @@ const routes = [
   { path: '/', name: 'analysis', component: () => import('../views/WorkspaceView.vue'), meta: { title: '분석 리포트' } },
   { path: '/portfolio', name: 'portfolio', component: () => import('../views/PortfolioView.vue'), meta: { title: '포트폴리오' } },
   { path: '/lab', name: 'lab', component: () => import('../views/StrategyView.vue'), meta: { title: '전략 연구소' } },
-  { path: '/lab/run/:id', name: 'backtest', component: () => import('../views/BacktestView.vue'), meta: { title: '백테스트 결과' } },
+  /**
+   * 🔴 **`:id` 는 선택이다** (2026-10-12). 전략 연구소의 *"보관된 회차 전부 →"* 링크가
+   *    `{ name: 'backtest' }` 로 param 없이 가리켜 **`Missing required param "id"`** 가 났고,
+   *    그 예외가 연구소 화면의 서브트리를 통째로 지웠다.
+   * ★ `BacktestView` 는 **이미 id 없는 경우를 처리한다**(가장 최근 회차로 `replace`) —
+   *   고칠 곳은 화면이 아니라 **라우트 선언**이었다.
+   */
+  { path: '/lab/run/:id?', name: 'backtest', component: () => import('../views/BacktestView.vue'), meta: { title: '백테스트 결과' } },
   {
     /**
      * 🔴 2026-10-12 — `/watchlist` → `/settings`. 사용자: *"감시목록 이런거 다 설정창으로 빼.
