@@ -226,6 +226,19 @@ async function loadLastReport() {
   }
 }
 
+/**
+ * 🔴🔴 **2026-10-12 — `regime`·`regimeScenarios` 가 선언된 적이 없었다.**
+ *    `loadRegime()` 이 `regime.value = …` 를 하는데 그 `regime` 이 **어디에도 없다** ⇒
+ *    매 폴링이 `ReferenceError` 로 죽었고, 하필 그 `catch` 가
+ *    *"국면 칩은 곁가지 — 실패해도 화면은 산다"* 라며 **조용히 삼켰다.**
+ *    결과: 시장 국면 칩이 **한 번도 뜬 적이 없다**(템플릿 `v-if="regime"` 가 영원히 거짓).
+ * ★ 바로 아래 `leverageTone` 의 주석이 **2026-10-04 에 같은 사고**를 적어 뒀다 —
+ *   *"재편 수술 때 computed 가 지워진 걸 모르고 참조가 남았다"*. 그때는 흰 화면이라 보였고
+ *   이번엔 **조용했다.** ⇒ 그래서 `tests/vueBindingContract.test.js` 를 만들었다(이 셋을 그 자가 찾았다).
+ */
+const regime = ref(null);
+const regimeScenarios = ref([]);
+
 const regimeLabel = computed(() => {
   const s = regime.value;
   if (!s) return '';
@@ -485,6 +498,18 @@ const leverageTone = computed(() => {
   return p >= 50 ? 'alloc__flag--danger' : p >= 25 ? 'alloc__flag--warn' : 'alloc__flag--ok';
 });
 
+/**
+ * 🔴 **2026-10-12 — `leverageWord` 도 선언이 없었다**(같은 자가 찾았다).
+ *    `{{ leverageWord }}` 가 **빈칸**으로 렌더돼, 막대 색은 위험을 말하는데 **글자는 침묵**했다.
+ *    색만으로 뜻을 전하면 색각 이상·흑백 출력에서 정보가 통째로 사라진다 ⇒ 색과 **같은 판정**을
+ *    말로도 낸다(같은 임계를 두 번 적지 않도록 `leverageTone` 결과에서 유도한다).
+ */
+const leverageWord = computed(() => ({
+  'alloc__flag--danger': '과다',
+  'alloc__flag--warn': '주의',
+  'alloc__flag--ok': '여유',
+}[leverageTone.value] || ''));
+
 /** 내 실제 보유 — 토스에서 **매번 읽는다**(저장하지 않는다) */
 async function loadPortfolio() {
   portfolioLoading.value = true;
@@ -701,11 +726,17 @@ onUnmounted(() => {
   <div class="tracker">
     <!-- ── 상단 ───────────────────────────────────────── -->
     <header class="topbar">
+      <!--
+        🔴 **2026-10-12 저녁 — 브랜드를 지우고 화면 이름을 쓴다.** 이 화면이 `/` 가 되면서
+           사이드바의 **SimpleStock** 로고 바로 옆에 또 다른 브랜드가 붙어 있었다
+           (*"종합 주식·ETF 트래커"*). 같은 화면에 상호가 둘이면 어느 쪽이 지금 보는 것인지
+           흐려진다 ⇒ 상호는 셸이 쥐고, 페이지는 **자기 이름**을 말한다.
+      -->
       <div class="brand">
         <span class="brand__mark" aria-hidden="true"></span>
         <div class="brand__text">
-          <h1 class="brand__name">종합 주식·ETF 트래커</h1>
-          <span class="brand__sub">한국 · 미국 관심종목 추적</span>
+          <h1 class="brand__name">분석 리포트</h1>
+          <span class="brand__sub">오늘의 시장 판단 · 보유 · 후보</span>
         </div>
       </div>
 

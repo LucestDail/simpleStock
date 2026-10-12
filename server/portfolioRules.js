@@ -36,8 +36,16 @@ const MAX_POSITIONS = Math.max(0, Number(process.env.MAX_POSITIONS ?? 3));
  */
 const LEVERAGE_MAX_PCT = Number(process.env.LEVERAGE_MAX_PCT ?? 40);
 
-/** 현금으로 남겨 두기로 한 비율(%) — 0 이면 버퍼 없음 */
-const CASH_FLOOR_PCT = Math.max(0, Number(process.env.CASH_FLOOR_PCT ?? 0));
+/**
+ * 현금으로 남겨 두기로 한 비율(%) — 0 이면 버퍼 없음.
+ *
+ * 🔴 **기본값 10 은 새로 고른 숫자가 아니다** (2026-10-12). 이 값을 한 벌로 모으기 전,
+ *    **지워진 두 사본이 모두 `cashMin: 10` 을 쓰고 있었다**(`RiskView.vue`·`riskMetrics.js`).
+ *    기본을 0 으로 두면 라이브(`CASH_FLOOR_PCT` 미설정)에서 **현금 판정이 통째로 사라져**,
+ *    사용자 눈에는 *"있던 줄이 없어졌다"* 로 보인다 — 통합이 기능을 삼킨 것처럼.
+ *    ⇒ **합치는 변경은 동작을 바꾸지 않는다.** 바꾸려면 따로, 보이게.
+ */
+const CASH_FLOOR_PCT = Math.max(0, Number(process.env.CASH_FLOOR_PCT ?? 10));
 
 /** 기준선 판정 한 건 */
 function check(key, label, actual, limit, { unit = '%', direction = 'max' } = {}) {

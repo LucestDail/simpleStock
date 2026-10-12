@@ -16,10 +16,16 @@
         <b>SimpleStock</b>
       </div>
       <nav class="side__nav">
-        <RouterLink to="/" class="side__item" exact-active-class="side__item--on">포트폴리오</RouterLink>
-        <RouterLink to="/analysis" class="side__item" active-class="side__item--on">분석 리포트</RouterLink>
+        <!--
+          🔴 **2026-10-12 저녁 — 여섯에서 다섯으로** (사용자: *"리스크 / 전략 연구소 / 포트폴리오
+             메뉴를 합쳐서 포트폴리오 / 전략연구소로 합쳐 … 첫 페이지는 분석 리포트로 하고."*)
+          · 리스크 → **포트폴리오에 흡수**(같은 보유를 보는 다른 각도였고, 한도를 복제해 다른 말을 했다)
+          · 분석 리포트가 **맨 위이자 `/`** — 매일 바뀌는 것이 앞에 온다
+          ⚠️ `exact-active-class` 는 `/` 에만 — `active-class` 면 어느 화면에서나 켜진 것처럼 보인다
+        -->
+        <RouterLink to="/" class="side__item" exact-active-class="side__item--on">분석 리포트</RouterLink>
+        <RouterLink to="/portfolio" class="side__item" active-class="side__item--on">포트폴리오</RouterLink>
         <RouterLink to="/lab" class="side__item" active-class="side__item--on">전략 연구소</RouterLink>
-        <RouterLink to="/risk" class="side__item" active-class="side__item--on">리스크</RouterLink>
         <RouterLink to="/activity" class="side__item" active-class="side__item--on">활동 로그</RouterLink>
         <!-- 종목 상세는 종목을 클릭해 들어간다 — 메뉴 항목이 아니라 경로다 -->
         <!--

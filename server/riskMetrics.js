@@ -84,7 +84,7 @@ function compute({ items = [], candlesBySymbol = new Map(), cashPct = null, leve
     : null;
 
   // 밸런스 판정 — 게이트와 같은 상수
-  const { SINGLE_POSITION_MAX_PCT } = require('./portfolioRules');
+  const { SINGLE_POSITION_MAX_PCT, LEVERAGE_MAX_PCT, CASH_FLOOR_PCT } = require('./portfolioRules');
   /**
    * 🔴 레버리지 한도 30 → **40** (2026-10-06 사용자 결정).
    *
@@ -98,11 +98,22 @@ function compute({ items = [], candlesBySymbol = new Map(), cashPct = null, leve
    * ⚠️ 이 한도는 **경고 축**이다 — 플레이북 시나리오의 "레버리지 신규 금지" 문장은
    *    별개로 살아 있다(그쪽이 실제로 모델의 신규 진입을 막는 쪽이다).
    */
-  const LEVERAGE_MAX_PCT = Math.max(0, Number(process.env.LEVERAGE_MAX_PCT ?? 40));
-  const LIMITS = { leverage: LEVERAGE_MAX_PCT, single: SINGLE_POSITION_MAX_PCT, cashMin: 10 };
+  /**
+   * 🔴 **2026-10-12 — 여기도 복제본이었다.** `single` 은 `portfolioRules` 에서 가져오면서
+   *    `leverage` 는 **`process.env` 를 다시 읽고** `cashMin` 은 **10 으로 박혀 있었다**
+   *    (기준선 파일의 `CASH_FLOOR_PCT` 기본값은 0 이다 — 서로 다른 말을 한다).
+   *    ⇒ 세 값을 전부 한 곳에서 가져온다. *"읽는 곳이 여럿이면 쥐는 곳은 하나"*.
+   * ⚠️ `cashMin` 이 0 이면 그 판정 자체를 내지 않는다(아래 `> 0` 가드) — 0 을 기준으로 삼으면
+   *    현금이 0.0% 여도 *"미만 아님"* 이라 **늘 통과**해 판정이 장식이 된다.
+   */
+  const LIMITS = {
+    leverage: LEVERAGE_MAX_PCT,
+    single: SINGLE_POSITION_MAX_PCT,
+    cashMin: CASH_FLOOR_PCT,
+  };
   const issues = [];
   if (leveragePct != null && leveragePct > LIMITS.leverage) {
-    issues.push({ axis: 'leverage', level: 'over', msg: `레버리지 노출 ${leveragePct}% — 기준 ${LIMITS.leverage}% 초과. 1배 전환(QLD→QQQ 류)·축소가 보완책.` });
+    issues.push({ axis: 'leverage', level: 'over', msg: `레버리지 노출 ${leveragePct}% — 기준 ${LIMITS.leverage}% 초과. 1배 ETF 로의 전환·비중 축소가 보완책.` });
   }
   for (const p of per) {
     if (p.weightPct > LIMITS.single) {
@@ -112,7 +123,7 @@ function compute({ items = [], candlesBySymbol = new Map(), cashPct = null, leve
       issues.push({ axis: 'decay', symbol: p.symbol, level: 'warn', msg: `${p.symbol} 레버리지 감쇠 ≈ 일 ${p.decayDayPct}% (횡보 가정) — 횡보가 길어지면 보유 자체가 비용.` });
     }
   }
-  if (cashPct != null && cashPct < LIMITS.cashMin) {
+  if (LIMITS.cashMin > 0 && cashPct != null && cashPct < LIMITS.cashMin) {
     issues.push({ axis: 'cash', level: 'under', msg: `현금 ${cashPct}% — 최소 ${LIMITS.cashMin}% 미만. 사다리 실탄·기회 대응력이 없다.` });
   }
   if (cashPct != null && cashPct > 40) {

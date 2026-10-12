@@ -7,7 +7,7 @@
 <template>
   <div class="page">
     <header class="page__head">
-      <RouterLink to="/risk" class="mut">포트폴리오</RouterLink><span class="mut">/</span>
+      <RouterLink to="/portfolio" class="mut">포트폴리오</RouterLink><span class="mut">/</span>
       <h1>{{ name || symbol }}</h1>
       <span v-if="name && name !== symbol" class="chip mono-num">{{ symbol }}</span>
       <span v-if="held" class="chip">보유 {{ held.quantity }}주</span>

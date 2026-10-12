@@ -139,14 +139,25 @@
     <div class="row2">
       <section class="card">
         <h2>한도 <span class="info" title="일일 손실·MDD 자동 정지는 아직 수동(위 비상정지)입니다 — 자동 발동 백엔드가 생기면 여기서 켭니다. 없는 안전장치를 있다고 적지 않습니다.">ⓘ</span></h2>
-        <table class="tbl">
-          <tr><td>종목당 최대 비중</td><td class="mono-num">20%</td><td class="mut">초과 시 추가 매수 차단</td></tr>
-          <tr><td>현금 최소 비중</td><td class="mono-num">10%</td><td class="mut">하회하는 매수 제안 경고</td></tr>
-          <tr><td>제안 유효시간</td><td class="mono-num">10분</td><td class="mut">무응답 시 자동 만료</td></tr>
+        <!--
+          🔴 **2026-10-12 — 값도 문구도 거짓이었다.** 숫자는 서버와 달랐고(위 주석),
+             설명은 *"추가 매수 차단"·"제안 유효시간"·"무응답 시 자동 만료"* 처럼
+             **이미 없는 주문 집행**을 말하고 있었다. 지금 이 값들은 **막지 않고 알린다**.
+        -->
+        <table v-if="ruleChecks.length" class="tbl">
+          <tr v-for="c in ruleChecks" :key="c.key">
+            <td>{{ c.label }}</td>
+            <td class="mono-num">{{ c.limit }}{{ c.unit }}{{ c.direction === 'min' ? ' 이상' : ' 이하' }}</td>
+            <td class="mut">
+              <template v-if="c.status === 'unknown'">판정 불가 — 지금 값을 못 쟀다</template>
+              <template v-else-if="c.over">현재 {{ c.actual }}{{ c.unit }} — <b>기준선 밖</b></template>
+              <template v-else>현재 {{ c.actual }}{{ c.unit }}</template>
+            </td>
+          </tr>
           <tr><td>신용·미수</td><td class="mono-num">불가</td><td class="mut">고정 — 설정으로도 못 켠다</td></tr>
-          <tr v-if="dailyLossPct != null"><td>일일 손실 기준</td><td class="mono-num">-{{ dailyLossPct }}%</td><td class="mut">표시 기준 — 자동 정지 아님</td></tr>
         </table>
-        <p class="mut">⚠️ 손실·MDD 자동 정지는 아직 수동(위 비상정지) — 상세는 ⓘ.</p>
+        <p v-else class="mut">기준선을 아직 받지 못했습니다.</p>
+        <p class="mut">⚠️ 이 값들은 <b>막지 않고 알린다</b> — 주문 집행이 없으므로 차단할 대상이 없다. 판정은 포트폴리오 화면에.</p>
       </section>
 
       <!-- 수동 분석 실행 — 관리 작업이라 여기가 맞다 -->
@@ -582,6 +593,38 @@ const unclassified = computed(() => (alloc.value?.unclassified || []).map((u) =>
 const recentAccruals = computed(() => (income.value?.accruals || []).slice(-3).reverse());
 
 /**
+ * 🔴 **2026-10-12 — `fmtAt` 이 선언된 적이 없었다.** `{{ fmtAt(a.at) }}` 는 호출 시점에
+ *    `fmtAt is not a function` 으로 터지고, **Vue 는 렌더 예외가 나면 그 서브트리를 통째로 버린다**
+ *    ⇒ 적립 이력 목록이 화면에서 **통째로 사라진다**(API 는 200 이고 데이터도 멀쩡한 채로).
+ *    이 저장소가 2026-09-21 에 적어 둔 *"렌더 예외 한 줄이 화면을 통째로 지운다"* 의 재현.
+ */
+function fmtAt(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString('ko-KR', {
+      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+  } catch { return '—'; }
+}
+
+/**
+ * 🔴🔴 **기준선은 서버가 쥔다 — 화면이 숫자를 적어 두지 않는다** (2026-10-12).
+ *    이 화면의 「한도」 표는 `20%`·`10%`·`10분` 을 **본문에 박아** 두고 있었고,
+ *    서버의 실제 값(`SINGLE_POSITION_MAX_PCT=40`)과 **달랐다.** 같은 날 리스크 화면에서도
+ *    똑같은 복제본(`LIMITS = {leverage:30, single:20, cashMin:10}`)이 나왔다 —
+ *    **한 벌이어야 할 값의 세 번째 사본**이었다.
+ * ⚠️ 못 받으면 **표를 안 그린다**(기본값으로 메우면 또 다른 사본이 된다).
+ */
+const ruleChecks = ref([]);
+async function loadRules() {
+  try {
+    const r = await apiFetch('/api/portfolio/summary');
+    const b = await r.json();
+    if (r.ok && Array.isArray(b?.rules?.checks)) ruleChecks.value = b.rules.checks;
+  } catch { /* 기준선을 못 받으면 표가 비는 것이 맞다 */ }
+}
+
+/**
  * 목표 배분은 전용 엔드포인트가 정본이고, `/api/risk/metrics` 에 함께 실려 오는 형태도 받는다.
  * ⚠️ 둘 다 없으면 **카드를 숨긴다** — "없다" 를 "0" 으로 그리지 않는다.
  */
@@ -685,6 +728,7 @@ onMounted(() => {
   //    적립 예산은 배당을 넣은 직후 addDividend() 가 직접 다시 읽는다.
   loadAllocation();
   loadIncome();
+  loadRules();
   timer = setInterval(loadStatus, 30_000);
 });
 onUnmounted(() => clearInterval(timer));
