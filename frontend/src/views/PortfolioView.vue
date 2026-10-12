@@ -70,7 +70,7 @@
           <small class="mut">기준 {{ c.limit }}{{ c.unit }}{{ c.direction === 'min' ? ' 이상' : ' 이하' }}</small>
         </li>
       </ul>
-      <p class="mut">⚠️ 주문을 막지 않습니다 — 지금 포트폴리오가 기준선 밖이라는 사실만 알립니다.</p>
+      <p class="mut over__note">⚠️ 막지 않습니다 — 기준선 밖이라는 사실만 알립니다.</p>
     </section>
 
     <div class="flow">
@@ -572,6 +572,7 @@ onMounted(async () => {
    헤더 글자가 세로로 쪼개져(`레/버/리/지`) 읽을 수 없다(스크린샷에서 확인). */
 .flow .tblwrap, .flow .mtblwrap { max-height: 186px; overflow: auto; }
 .flow .rtbl { min-width: 430px; }
+.flow .tblwrap .tbl { min-width: 380px; }
 .flow .tbl th, .flow .tbl td,
 .flow .rtbl th, .flow .rtbl td { padding: 3px 6px; font-size: var(--text-xs); }
 .flow .tbl thead th,
@@ -712,9 +713,16 @@ onMounted(async () => {
 .tbl th.r, .tbl td.r { text-align: right; }
 .row--click { cursor: pointer; }
 .row--click:hover { background: var(--color-surface-hover); }
-.over { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.over li { display: flex; align-items: baseline; gap: var(--space-sm); }
-.over b { color: var(--color-ink); min-width: 7rem; }
+/**
+ * 🔴 **2026-10-12 — 기준선 초과를 한 줄로 접었다.** 세 건에 세로 140px 를 쓰고 있었고,
+ *    그 높이가 **아래 아홉 장 전부를 밀어내** 사용자가 *"한 화면에 다 보이게"* 라고 한
+ *    요구를 혼자서 깨고 있었다. 내용은 그대로 두고 **배치만** 가로로 바꾼다.
+ * ⚠️ 경고를 작게 만든 것이 아니다 — 카드 테두리(`card--warn`)와 색은 그대로다.
+ */
+.over { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
+.over li { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.over li b { font-size: var(--text-xs); }
+.over li .mono-num { font-size: var(--text-sm); }
 .wts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .wts li { display: flex; align-items: center; gap: var(--space-sm); font-size: var(--text-sm); }
 .wts__k { flex: 0 0 7rem; color: var(--color-body); }
@@ -730,4 +738,5 @@ onMounted(async () => {
 .dl { display: flex; gap: var(--space-lg, 24px); margin: 0; flex-wrap: wrap; }
 .dl dt { font-size: var(--text-2xs); color: var(--color-faint); }
 .dl dd { margin: 0; font-weight: 600; color: var(--color-ink); }
+.over__note { font-size: var(--text-2xs); margin: 2px 0 0; }
 </style>
