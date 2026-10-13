@@ -1422,21 +1422,16 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   }
 
   /**
-   * 🔴 **호가(최우선 매수/매도)** (2026-09-22 — `getOrderbook` 이 만들어져 있었는데 소비 0).
-   *    지정가 제안의 근거가 **어제 종가·지표**뿐이면 모델이 스프레드 밖 가격을 부른다.
-   *    최우선 호가를 주면 "지금 시장이 서 있는 자리" 를 알고 값을 정한다.
-   * ⚠️ 장이 닫혀 있으면 비어 있을 수 있다 — 그때는 싣지 않는다(빈 호가를 0 으로 읽게 하지 않는다).
+   * ⛔ **2026-10-13 — 호가 수집을 들어냈다 (사용자 지시: "주문 부분 다 빼").**
+   *
+   * 2026-09-22 에 넣을 때 이유는 *"지정가 제안의 근거"* 였다. 그 지정가를 담을 칸이
+   * **2026-10-12 에 사라졌다**(라이브 스키마에 `proposals` 가 없다). 남은 것은 비용뿐이었다:
+   *   · 보유 6종 × **매 회차 `toss.getOrderbook()`** — `toss.ratelimit_low` 가 최다 경고였다
+   *   · 프롬프트 예산(호가 표 + 지시문) — 2026-10-05 에 출력 캡 잘림을 겪은 적이 있다
+   *   · 쓸 칸이 없는 지시(*"지정가를 내라"*)는 모델을 **행동 서술 쪽으로** 민다
+   * ⚠️ `tossClient.getOrderbook` 자체는 **남긴다** — 종목 상세 등 다른 소비자가 쓸 수 있고,
+   *    걷어낸 것은 **브리핑이 매 회차 호출하던 것**이다.
    */
-  const books = {};
-  for (const it of items.slice(0, 6)) {
-    try {
-      const ob = await toss.getOrderbook(it.symbol);
-      const bestAsk = ob.asks?.[0]; const bestBid = ob.bids?.[0];
-      if (bestAsk?.price || bestBid?.price) books[it.symbol] = { ask: bestAsk || null, bid: bestBid || null, at: ob.at };
-    } catch (e) {
-      logWarn('analyst.orderbook_failed', { symbol: it.symbol, kind: e.kind, message: e.message });
-    }
-  }
 
   // 보유 종목의 일봉을 모은다 — **계산으로 확인되는 값만** 프롬프트에 싣는다
   const tech = {};
@@ -1506,10 +1501,10 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
           '   ⇒ **매도·보유 판단에 집중**하세요. 매수 아이디어는 수량·가격 제안 대신 "현금이 생기면" 조건으로 적으세요.',
         );
       } else if (c.failed?.length) {
-        lines.push(`⚠️ ${c.failed.join('·')} 현금을 못 받았습니다 — **매수 수량의 근거가 없으니 제안하지 마세요.**`);
+        lines.push(`⚠️ ${c.failed.join('·')} 현금을 못 받았습니다 — **매수 여력을 단정하지 마세요**(근거가 없습니다).`);
       }
     } else {
-      lines.push('⚠️ 현금 정보를 받지 못했습니다 — **매수 제안을 내지 마세요**(수량 근거가 없습니다).');
+      lines.push('⚠️ 현금 정보를 받지 못했습니다 — **매수 여력을 단정하지 마세요**(근거가 없습니다).');
     }
   } else {
     lines.push('보유 정보를 받지 못했습니다.');
@@ -1555,7 +1550,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     if (said.length) {
       lines.push('', '## 사용자가 최근에 직접 한 말 (의사·방침 — 판단보다 우선한다)');
       lines.push(...said);
-      lines.push('🔴 여기에 **적립·보유 의사**가 있으면 그 종목의 매도 제안은 근거가 "가격이 내렸다"'
+      lines.push('🔴 여기에 **적립·보유 의사**가 있으면 그 종목의 매도 판단은 근거가 "가격이 내렸다"'
         + ' 보다 강해야 한다(배당 삭감·신용등급 하락·사업 훼손 같은 **종목 자체의 변화**).');
       lines.push('🔴 여기서 사용자가 **방향을 바꿨으면**(예: "레버리지는 이제 안 하는 게 맞겠다")'
         + ' 그 뒤의 판단은 바뀐 방향을 따른다.');
@@ -1582,7 +1577,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       lines.push(`- 카테고리: ${w.categories.map((c) => `${c.key} ${c.pct}%`).join(' · ')}`);
       lines.push(`- 현금 ${w.cashPct}% · 레버리지 합계 ${w.leveragePct}%`);
       if (w.krwCashUnconverted > 0) lines.push(`  ⚠️ 환율을 못 읽어 원화 현금 ${w.krwCashUnconverted} 은 분모에서 빠졌다 — 현금 비중은 실제보다 낮다`);
-      lines.push('🔴 위 "## 발동된 매뉴얼" 의 **기준 배분과 이 숫자의 차이**가 리밸런싱 제안의 근거다.');
+      lines.push('🔴 위 "## 발동된 매뉴얼" 의 **기준 배분과 이 숫자의 차이**가 리밸런싱 판단의 근거다.');
       lines.push('   기준선에서 크게 벗어난 축을 먼저 줄이고/늘려라. ⚠️ 기준선은 울타리가 아니라 나침반이다 —');
       lines.push('   추세·상대강도가 더 강하게 말하면 그쪽을 따르되, **왜 기준선을 벗어나는지 rationale 에 적어라.**');
     }
@@ -1626,10 +1621,10 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       lines.push(`- 적립 대상: ${syms} — 이 재원 안에서는 **종목 집중 상한(20%)이 면제**된다.`);
       lines.push('🔴 이 돈은 **배당·실현수익으로 만든 것**이라 원금을 건드리지 않는다 — 그래서');
       lines.push('   "레버리지 비중이 높으니 더 사지 않는다" 가 이 재원에는 적용되지 않는다.');
-      lines.push('   목표 배분에서 부족한 버킷을 이 금액 안에서 **분할로** 채우는 제안을 내라.');
+      lines.push('   목표 배분에서 부족한 버킷은 이 금액 안에서 **분할로** 채우는 것이 맞다고 판단하라.');
       lines.push('⚖️ 적립 규율: ①한 번에 전액을 쓰지 않는다(권장 1회 1/3 이하) ②국면이 나쁘면');
       lines.push('   **금액을 줄이되 방향을 바꾸지 않는다**(적립은 멈추는 것이 아니라 느려지는 것)');
-      lines.push('   ③재원을 넘는 제안은 집행 단계에서 거부된다 — 수량·가격을 재원 안에서 계산하라.');
+      lines.push('   ③재원을 넘는 규모는 **실행할 수 없다** — 판단의 크기를 재원 안에서 말하라.');
       lines.push('⚠️ 이 재원을 **기존 보유 매도 대금과 혼동하지 마라** — 매도 대금은 원금이고');
       lines.push('   적립 재원이 아니다. 여기 적힌 금액만이 집중 상한 면제를 받는다.');
     }
@@ -1884,7 +1879,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
         if (over > 0) {
           lines.push('', `🔴 **레버리지 괴리: 현재 ${weights.leveragePct}% vs 기준 ${tight.max}% — ${over}%p 초과**`
             + ` (${tight.scenario}). 기준선까지 줄이려면 약 ${Math.round((over / 100) * weights.total)} 어치 축소가 필요하다.`);
-          lines.push('   ⚠️ 한 번에 다 팔라는 뜻이 아니다 — **분할 축소 제안**을 내고, 추세가 강하면 속도를 늦춰라.'
+          lines.push('   ⚠️ 한 번에 다 팔라는 뜻이 아니다 — **분할 축소**로 보고, 추세가 강하면 속도를 늦춰라.'
             + ' 다만 **아무것도 제안하지 않는 것은 답이 아니다.**');
         }
       }
@@ -1999,16 +1994,6 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     }
     lines.push('⚠️ 읽는 법: 공매도·대차잔고 상승 = 하방 압력 축적 · 신용융자 상승 = 개인 레버리지 매수(과열 신호일 수 있음) · '
       + '프로그램 순매수 = 기관 바스켓 방향. **절대량이 아니라 추세와 조합**으로 읽어라.');
-  }
-
-  const bookSyms = Object.keys(books);
-  if (bookSyms.length) {
-    lines.push('', '## 현재 호가 (최우선)');
-    for (const sym of bookSyms) {
-      const b = books[sym];
-      lines.push(`- ${sym}: 매도호가 ${b.ask ? `${b.ask.price} (${b.ask.volume}주)` : '-'} · 매수호가 ${b.bid ? `${b.bid.price} (${b.bid.volume}주)` : '-'}`);
-    }
-    lines.push('⚠️ 지정가를 낼 때 **이 호가를 기준**으로 하라 — 스프레드 밖 가격은 체결되지 않거나 불리하게 체결된다.');
   }
 
   const heldSet = new Set(items.map((i) => String(i.symbol).toUpperCase()));
@@ -2808,6 +2793,24 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   const gaps = [...(report.dataGaps || [])];
   const notApplicable = [];
   /**
+   * 🔴 **폰에는 "코드가 찾은 결손" 만 보낸다** (2026-10-13 사용자 지시:
+   *    *"못본것 저런거 관심없는데 왜 자꾸 뜨는거야."*)
+   *
+   * `report.dataGaps` 는 **모델이 쓴 "있었으면 좋았을 데이터" 희망 목록**이다. 실측:
+   * ```
+   * 변동성(연) 미제공 · 포트폴리오 VaR 미제공 · 기관·내부자 수급 미제공 · 재무제표 상세 미제공
+   * 포지션별 진출입 비용 · 레버리지 일별 추적오차 · 기관·옵션 포지션 상세
+   * ```
+   * **매 회차 내용이 다르고, 사용자가 할 수 있는 일이 없고, 우리가 제공할 계획도 없다.**
+   * 그걸 *"못 본 것"* 이라는 이름으로 매번 폰에 띄우니 **진짜 결손이 묻힌다.**
+   *
+   * ⚠️ **코드가 찾은 것**(기업 평가 실패 · 웹 검색 불가)은 다르다 — 원인이 우리 쪽이고
+   *    고칠 수 있다. 그래서 `codeGaps` 로 따로 모아 **그것만** 보낸다.
+   * ⚠️ `gaps`(합본)는 **그대로 둔다** — 화면·프롬프트·`report` 모양이 이미 쓰고 있다.
+   *    바꾸는 것은 **폰에 무엇을 보내는가** 하나다.
+   */
+  const codeGaps = [];
+  /**
    * 🔴 구조적 부재는 결손이 아니다 (2026-09-25 — 실측: 매 회차 gapsMissing 5~8 이
    *    전부 "5년 재무·PER/PBR·기관 수급·내부자·옵션 IV·목표주가 미제공" 고정 문구였다.
    *    SYSTEM_PROMPT 가 "이 시스템에 없다" 고 명시한 축을 모델이 성실히 받아 적은 것 —
@@ -2820,7 +2823,7 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     if (STRUCTURAL.test(String(g))) notApplicable.push(g);
   }
   for (const [sym, r] of Object.entries(ratings)) {
-    if (r?.error) gaps.push(`${sym} 기업 평가 실패 — ${r.error}`);
+    if (r?.error) { const g = `${sym} 기업 평가 실패 — ${r.error}`; gaps.push(g); codeGaps.push(g); }
     else if (r?.isFund) {
       // 🔴 "안 잰 것" 과 "재서 나쁜 것" 을 화면이 구분해야 한다 — ETF 는 점수가 **없다**.
       //    다만 이건 **결손이 아니라 설계**다 ⇒ 세는 바구니를 따로 쓴다
@@ -2832,10 +2835,10 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
        *    ⚠️ 종전 주석은 *"사람에게는 한 줄에 보이는 편이 낫다"* 였다 — **사용자가 아니라고 했다.**
        */
       notApplicable.push(`${sym} 은 ETF·펀드 — 기업 100점 채점 대상이 아닙니다`);
-    } else if (r && r.total == null) gaps.push(`${sym} 기업 평가 미완 — 항목이 다 안 채워졌습니다`);
+    } else if (r && r.total == null) { const g = `${sym} 기업 평가 미완 — 항목이 다 안 채워졌습니다`; gaps.push(g); codeGaps.push(g); }
   }
   if (useWebSearch) {
-    if (!web?.ok) gaps.push(`웹 검색 사용 불가 — ${web?.error || '알 수 없음'}`);
+    if (!web?.ok) { const g = `웹 검색 사용 불가 — ${web?.error || '알 수 없음'}`; gaps.push(g); codeGaps.push(g); }
     else if (web.failedCount) gaps.push(`웹 검색 일부 실패 (${web.failedCount}/${web.results.length}종목)`);
     /**
      * 🔴 **건너뛴 검색을 조용히 넘기지 않는다** (2026-10-01) — 정식 종목명을 못 구해
@@ -3163,7 +3166,8 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
       const altSources = [...new Set((web.results || []).map((r) => r.source).filter((s) => s && !/^brave/i.test(s)))];
       lines.push('', `⚠️ 뉴스가 대체 검색 소스에서 왔습니다(품질 낮음${altSources.length ? ` — ${altSources.join('·')}` : ''})`);
     }
-    if (gaps.length) lines.push('', `못 본 것: ${gaps.join(' · ')}`);
+    // ⚠️ `gaps`(모델 희망 목록 포함)가 아니라 **`codeGaps`(코드가 찾은 결손)** 만 보낸다 — 위 주석 참조
+    if (codeGaps.length) lines.push('', `⚠️ 이번 분석이 못 받은 것: ${codeGaps.join(' · ')}`);
     // 정제는 서술 부분에만, 코드가 보장하는 안내 문구(lines)는 그대로 뒤에 붙인다.
     // analyze() 자체를 안 막는다 — 종전처럼 fire-and-forget 사슬에 한 단계만 끼운다.
     tossWriting

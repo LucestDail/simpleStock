@@ -241,7 +241,9 @@ test('적립 재원 절 — 예산 0 이면 생략, 있으면 금액·면제·DC
   // DCA 3규율
   assert.match(src, /1회 1\/3 이하/, 'DCA ① 분할 규율 누락');
   assert.match(src, /금액을 줄이되 방향을 바꾸지 않는다/, 'DCA ② 국면 대응 규율 누락');
-  assert.match(src, /재원을 넘는 제안은 집행 단계에서 거부/, 'DCA ③ 재원 상한 안내 누락');
+  // 🔴 2026-10-13: "집행 단계" 가 없어졌다(주문 제거) ⇒ 같은 규율을 **판단 언어**로 말한다
+  assert.match(src, /재원을 넘는 규모는 \*\*실행할 수 없다\*\*/, 'DCA ③ 재원 상한 안내 누락');
+  assert.ok(!/집행 단계에서 거부/.test(src), '없는 집행 단계를 다시 말하고 있다');
   // 🔴 예상 배당이 절에 실리면 안 된다
   const sectionStart = src.indexOf('## 적립 재원');
   const sectionEnd = src.indexOf('analyst.income_section_failed');

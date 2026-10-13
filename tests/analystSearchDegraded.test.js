@@ -117,12 +117,19 @@ test('오탐: degraded 자체가 없음(검색을 아예 안 한 회차) → 경
   assert.ok(!/대체 검색 소스/.test(sent[0].text), 'degraded 가 없는데 경고가 났다');
 });
 
-test('🔴 충돌 없음: "못 본 것:" 줄과 degraded 경고가 둘 다 있으면 둘 다 나온다', async () => {
+test('🔴 충돌 없음: 결손 줄과 degraded 경고가 둘 다 있으면 둘 다 나온다', async () => {
+  /**
+   * ⚠️ **픽스처를 바꿨다** (2026-10-13). 종전엔 `dataGaps: ['환율 데이터 실패']` 로 **모델이 쓴**
+   *    결손을 넣었는데, 이제 그것은 폰에 **안 간다**(희망 목록과 구분이 안 돼 매 회차 소음이었다).
+   *    ⇒ **코드가 찾는 결손**(웹 검색 사용 불가)으로 바꿔야 이 테스트가 재려던 것을 잰다.
+   * ★ *"대상이 0건인가가 아니라 재려던 그것이 대상에 들었나"* — 안 바꿨으면 이 테스트는
+   *   **고친 뒤에도 통과하지 못하는** 채로 남아 다음 사람이 가드를 지웠을 것이다.
+   */
   reportToReturn = {
     marketView: '시황', momentumRead: '', dataGaps: ['환율 데이터 실패'], positions: [], proposals: [],
   };
   mcpResultToReturn = {
-    ok: true, tool: 'brave_search', failedCount: 0, degraded: true,
+    ok: false, error: '검색 상한', tool: 'brave_search', failedCount: 1, degraded: true,
     results: [{ symbol: 'QLD', name: 'QLD', query: 'q', text: '출처 gnews\n...', source: 'gnews' }],
   };
   const analyst = fresh();
@@ -130,7 +137,16 @@ test('🔴 충돌 없음: "못 본 것:" 줄과 degraded 경고가 둘 다 있�
   await new Promise((r) => setTimeout(r, 30));
 
   assert.equal(sent.length, 1, '분석 결과가 안 나갔다');
-  assert.match(sent[0].text, /못 본 것: 환율 데이터 실패/, '기존 gaps 줄이 사라졌다');
+  /**
+   * 🔴 **2026-10-13 — 문구와 범위가 바뀌었다.** 사용자 지시로 `못 본 것:` 줄에서
+   *    **모델의 "희망 데이터 목록"** 을 뺐다(매 회차 다르고 조치 불가).
+   *    남는 것은 **코드가 찾은 결손**뿐이고, 이름도 *"이번 분석이 못 받은 것"* 으로 바뀌었다.
+   * ⚠️ 이 테스트의 본래 취지(= degraded 경고와 결손 줄이 **둘 다** 나온다)는 그대로 지킨다.
+   */
+  assert.match(sent[0].text, /이번 분석이 못 받은 것:/, '코드가 찾은 결손 줄이 사라졌다');
+  assert.ok(!/못 본 것:/.test(sent[0].text), '옛 문구가 되살아났다');
+  // 🔴 모델이 쓴 결손은 **같은 회차에 있어도** 폰에 가지 않는다
+  assert.ok(!/환율 데이터 실패/.test(sent[0].text), '모델 희망 목록이 섞여 나갔다');
   assert.match(sent[0].text, /대체 검색 소스에서 왔습니다\(품질 낮음 — gnews\)/, 'degraded 경고가 안 실렸다');
 });
 

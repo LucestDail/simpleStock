@@ -497,102 +497,20 @@ async function rulePortfolio(items, st, now, out, sup) {
 }
 
 /**
- * 🔭 예약(조건부) 주문 감시 — 전이만 알린다 (2026-09-27)
+ * ⛔ **2026-10-13 — 예약(조건부 주문) 감시를 들어냈다.**
+ *    사용자 지시: *"주문 부분 다 빼. 알림도 계속 주문 알림이 뜨고."*
  *
- * `propose_conditional_order` → HITL 승인 → `createConditionalOrder` 로 거래소에
- * 건 뒤를 아무도 안 보고 있었다. 감시가에 닿아 **실제로 주문이 나갔는지**,
- * 만료일이 지나 **조용히 사라졌는지** 사용자가 몰랐다. 여기서 매 틱 열린 목록을
- * 직전과 비교해 **사라진 것만** 사유를 갈라 알린다(엣지 규율 — 다른 규칙들과 같다).
+ * 이 규칙은 토스의 **조건부 주문 목록**(`/api/v1/conditional-orders`)을 폴링해
+ * *"🎯 예약 발동 — … **주문 나갔습니다**"* 같은 알림을 보냈다.
+ * 🔴 **우리는 2026-10-12 이후 예약을 만들 수 없다**(`createOrder` 제거).
+ *    남은 것은 **토스 API 폴링 비용**과 **주문 도메인 알림**뿐이었다.
  *
- * 🔴 **`getConditionalOrder` 의 status 필드명은 실물로 확인된 적이 없다.**
- *    여러 후보 필드·값을 넉넉히 훑되, 확신 없는 값은 절대 '발동' 으로 단정하지 않는다
- *    (모르는 것을 발동이라 말하면 돈이 움직인 것처럼 읽힌다 — 이 파일의 지배 규율).
- *    대신 사라질 때마다 **원본 응답을 통째로 로그에 남긴다**(`alerts.conditional_detail`) —
- *    실물이 확인되면 위 후보 목록을 그 필드로 좁힐 것.
+ * ⚠️ **잃는 것을 적어 둔다**: 사용자가 **토스 앱에서 직접 건 예약**의 발동·만료도
+ *    이제 알리지 않는다. 그 알림이 필요하면 이 블록을 되살리면 되고,
+ *    그때는 *"주문 나갔습니다"* 가 **토스가 집행한 것**이라는 뜻임을 분명히 적을 것.
+ *    (되살릴 코드는 git 이력에 있다 — 커밋 메시지로 찾는다)
  */
-function classifyConditionalOutcome(raw) {
-  if (!raw || typeof raw !== 'object') return 'unknown';
-  const s = String(raw.status ?? raw.state ?? raw.orderStatus ?? raw.conditionalStatus ?? '').toUpperCase();
-  if (!s) return 'unknown';
-  if (['TRIGGER', 'EXECUT', 'FILL', 'SENT', 'ORDERED', 'COMPLETE'].some((k) => s.includes(k))) return 'triggered';
-  if (['EXPIR', 'CANCEL', 'DELET', 'CLOS', 'WITHDRAW'].some((k) => s.includes(k))) return 'ended';
-  return 'unknown'; // 🔴 모르면 모른다고 한다 — '발동' 의 기본값이 아니다
-}
 
-/** 목록 응답 한 행에서 감시에 필요한 값만 뽑는다. 필드명은 후보를 넉넉히 본다(§위 주석과 같은 이유) */
-function extractConditionalMeta(row) {
-  const id = row?.conditionalOrderId ?? row?.id;
-  if (id == null) return null;
-  return {
-    id: String(id),
-    symbol: row?.symbol ?? row?.first?.symbol ?? '(알수없음)',
-    triggerPrice: row?.first?.triggerPrice ?? row?.triggerPrice ?? row?.condition?.triggerPrice ?? null,
-    expireDate: row?.expireDate ?? row?.expiryDate ?? null,
-  };
-}
-
-async function ruleConditionalWatch(st, now, out, sup) {
-  const listResp = await toss.listConditionalOrders({ status: 'OPEN' });
-  // ⚠️ 목록 응답 모양도 실물 미확인 — `list_conditional_orders`(analystChat.js) 와 같은 방식으로 넉넉히 본다
-  const rows = Array.isArray(listResp?.items) ? listResp.items : Array.isArray(listResp) ? listResp : [];
-  const current = {};
-  for (const row of rows) {
-    const meta = extractConditionalMeta(row);
-    if (meta) current[meta.id] = meta;
-  }
-
-  const prev = st.conditionalOpen;
-  if (!prev) {
-    // 🔴 첫 실행(직전 상태 없음) — 기준선만 잡는다. 재기동 때 있던 예약을 '끝났다' 로 오인하면 안 된다
-    st.conditionalOpen = current;
-    sup.push('예약 감시 기준선 설정');
-  } else {
-    const vanished = Object.keys(prev).filter((id) => !(id in current));
-    for (const id of vanished) {
-      const info = prev[id];
-      let detail = null;
-      let failedFetch = false;
-      try {
-        detail = await toss.getConditionalOrder(id);
-      } catch (e) {
-        failedFetch = true;
-        logWarn('alerts.conditional_detail_failed', { id, symbol: info.symbol, message: e.message });
-      }
-      if (failedFetch) {
-        out.push({ text: `예약 ${info.symbol} 이 목록에서 사라졌는데 사유를 확인하지 못했습니다.`, kind: 'conditional-unknown' });
-        continue;
-      }
-      // 🔴 원본을 통째로 남긴다 — status 필드명이 확인되면 위 classifyConditionalOutcome 을 좁힐 근거
-      logInfo('alerts.conditional_detail', { id, symbol: info.symbol, raw: detail });
-      const outcome = classifyConditionalOutcome(detail);
-      if (outcome === 'triggered') {
-        out.push({ text: `🎯 예약 발동 — ${info.symbol} 감시가 ${info.triggerPrice ?? '?'} 도달, 주문 나갔습니다`, kind: 'conditional-triggered' });
-      } else if (outcome === 'ended') {
-        out.push({ text: `⏳ 예약 만료 — ${info.symbol}, 감시가 미도달로 소멸했습니다`, kind: 'conditional-expired' });
-      } else {
-        logWarn('alerts.conditional_status_unknown', { id, symbol: info.symbol, status: detail?.status ?? detail?.state ?? null });
-        out.push({ text: `예약 ${info.symbol} 이 목록에서 사라졌는데 사유를 확인하지 못했습니다.`, kind: 'conditional-unknown' });
-      }
-    }
-    st.conditionalOpen = current;
-  }
-
-  // ⏰ 만료 임박 — 오늘 만료되는 열린 예약이 있으면 하루 한 번(날짜 키 — idx 규칙과 같은 패턴)
-  const day = kstDay(now);
-  const expiringToday = Object.values(current).filter((v) => v.expireDate === day);
-  if (expiringToday.length) {
-    const mark = `condExpireWarn:${day}`;
-    if (st[mark]) {
-      sup.push('오늘 만료 예약 경고 (오늘 이미 알림)');
-    } else {
-      st[mark] = 1;
-      out.push({
-        text: `⏰ 오늘 만료되는 예약이 있습니다: ${expiringToday.map((v) => `${v.symbol}(감시가 ${v.triggerPrice ?? '?'})`).join(', ')}`,
-        kind: 'conditional-expiring',
-      });
-    }
-  }
-}
 
 /**
  * 🩺 정기 브리핑 누락 감시 (2026-09-27, pm1 위임 — worker3)
@@ -1007,7 +925,6 @@ async function tick({ force = false, dryRun = false, send: sendOverride = false 
     ['indices', ruleIndices],
     ['portfolio', (a, b, c, d) => rulePortfolio(items, a, b, c, d)],
     ['targets', (a, b, c, d) => ruleTargets(items, a, c, d)],
-    ['conditional', ruleConditionalWatch],
   ]) {
     try {
       await fn(st, now, out, suppressed);

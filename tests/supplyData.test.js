@@ -74,7 +74,12 @@ test('⚠️ 지수 API 가 잘못된 심볼을 **부르기 전에** 막는다',
 test('⚠️ 세 조회 모두 실패 시 로그가 남는다', () => {
   // ⚠️ 2026-09-22 저녁: 공매도 단독 → KR 4축 세트가 되며 short_selling_failed 가
   //    kr_supply_failed(axis 라벨 포함)로 바뀌었다 — 의도된 변화라 자를 따라 옮긴다
-  for (const ev of ['analyst.warnings_failed', 'analyst.kr_supply_failed', 'analyst.index_flow_failed', 'analyst.orderbook_failed', 'analyst.index_candles_failed']) {
+  /**
+   * ⚠️ `analyst.orderbook_failed` 는 **2026-10-13 에 목록에서 빠졌다** — 호가 수집 자체를
+   *    걷어냈기 때문이다(주문이 없으니 지정가를 담을 칸이 없다. 남은 건 토스 호출 비용뿐).
+   *    로그가 사라진 것이 아니라 **그 조회가 사라졌다** — 아래 전용 테스트가 그것을 잠근다.
+   */
+  for (const ev of ['analyst.warnings_failed', 'analyst.kr_supply_failed', 'analyst.index_flow_failed', 'analyst.index_candles_failed']) {
     assert.ok(code.includes(ev), `🔴 ${ev} 가 없다 — 실패가 "데이터 없음" 으로 보인다`);
   }
 });
@@ -179,9 +184,17 @@ test('🔴 환율: 야후 실패 시 토스 폴백이 배선돼 있다', () => {
  *    `tossClient` 에 남아 있으니, 주문을 되살리면 이 자를 함께 되살린다.
  */
 
-test('🔴 호가: 보유 종목 프롬프트에 최우선 호가가 실린다', () => {
-  assert.match(code, /getOrderbook\(/, '🔴 호가를 안 부른다');
-  assert.match(code, /이 호가를 기준/, '🔴 모으고 프롬프트에 안 싣는다');
+/**
+ * ⛔ **뒤집은 테스트** (2026-10-13 사용자 지시: *"주문 부분 다 빼"*).
+ *
+ * 2026-09-22 에 호가를 넣은 이유는 *"지정가 제안의 근거"* 였다. 그 지정가를 담을 칸이
+ * **2026-10-12 에 사라졌다**(라이브 스키마에 `proposals` 없음). 남은 비용만 컸다:
+ *   보유 6종 × 매 회차 `getOrderbook()` — `toss.ratelimit_low` 가 그날 최다 경고였다.
+ * ⇒ 이제 **되살아나면 실패**한다. 되살리려면 이 테스트를 먼저 보게 된다.
+ */
+test('🔴 호가 수집이 되살아나지 않는다 (주문이 없으면 지정가도 없다)', () => {
+  assert.ok(!/getOrderbook\(/.test(code), '🔴 브리핑이 다시 호가를 부른다 — 토스 호출만 쓴다');
+  assert.ok(!/이 호가를 기준/.test(code), '🔴 쓸 칸이 없는 지정가 지시가 되살아났다');
 });
 
 test('🔴 지수 캔들: 국장 브리핑에 추세가 실린다 (같은 판정 함수 재사용)', () => {

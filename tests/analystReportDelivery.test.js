@@ -193,3 +193,26 @@ test('오탐 축: 전부 HOLD 면 아무 말도 안 한다', async () => {
   await new Promise((r) => setTimeout(r, 60));
   assert.ok(!/판단은 났는데/.test(body()), 'HOLD 뿐인데 경고가 났다');
 });
+
+/**
+ * 🔴 **모델의 "희망 데이터 목록" 은 폰에 보내지 않는다** (2026-10-13 사용자 지시:
+ *    *"못본것 저런거 관심없는데 왜 자꾸 뜨는거야."*)
+ *
+ * `report.dataGaps` 는 모델이 *"있었으면 좋았을 데이터"* 를 적는 칸이다. 라이브 실측:
+ *   `변동성(연) 미제공 · 포트폴리오 VaR 미제공 · 기관·내부자 수급 미제공 · 재무제표 상세 미제공`
+ * **매 회차 내용이 다르고, 사용자가 할 수 있는 일이 없고, 우리가 제공할 계획도 없다.**
+ * 반면 **코드가 찾은 결손**(웹 검색 불가 등)은 원인이 우리 쪽이라 보낼 값이 있다.
+ */
+test('🔴 모델이 적은 dataGaps 는 폰에 안 간다 (희망 목록 ≠ 결손)', async () => {
+  REPORT.positions = [{ symbol: 'QLD', stance: 'HOLD', confidence: 'LOW', rationale: 'x', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' }];
+  REPORT.dataGaps = ['포트폴리오 VaR 미제공', '기관·내부자 수급 미제공'];
+  try {
+    const analyst = fresh();
+    await analyst.analyze(DASH(), { useWebSearch: false });
+    await new Promise((r) => setTimeout(r, 60));
+    const b = body();
+    assert.ok(!/포트폴리오 VaR 미제공/.test(b), `🔴 모델 희망 목록이 폰에 갔다: ${b.slice(0, 300)}`);
+    assert.ok(!/기관·내부자 수급 미제공/.test(b), '🔴 모델 희망 목록이 폰에 갔다');
+    assert.ok(!/못 본 것:/.test(b), '🔴 옛 문구가 되살아났다');
+  } finally { REPORT.dataGaps = []; }
+});
