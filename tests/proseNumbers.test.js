@@ -184,11 +184,23 @@ test('🔴 배선 — analyze() 가 주제 이탈도 실제로 탄다', () => {
   const fs = require('node:fs'); const path = require('node:path');
   const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+  // ⚠️ 이 문자열들은 **서버 코드의 호출 모양**이다 — 테스트의 별칭(`P.`)으로 바꾸면 안 된다
+  //    (2026-10-13: 전역 치환이 이 리터럴까지 먹어 멀쩡한 배선을 "끊겼다" 로 찍었다)
   for (const call of ['prose.findSubjectDrift(', 'prose.driftNote(']) {
     assert.ok(src.includes(call), `배선이 끊겼다: ${call}`);
   }
   assert.match(src, /analyst\.prose_subject_drift/, '검출 로그가 없다');
   assert.match(src, /analyst\.prose_subject_drift_unfixed/, '최종 처리 로그가 없다');
+  /**
+   * 🔴 **참조값이 넘어가는지까지 본다** (2026-10-13). `findSubjectDrift` 는 4번째 인자가
+   *    없으면 **이름만 보는 옛 규칙**으로 조용히 되돌아간다 — 그러면 1배↔3배 짝 과탐이
+   *    되살아나고 **멀쩡한 분석이 다시 지워진다.** 호출부가 빠뜨리는 것을 자가 막는다.
+   */
+  const driftCalls = src.match(/prose\.findSubjectDrift\([^)]*\)/g) || [];
+  assert.ok(driftCalls.length >= 3, `호출부가 ${driftCalls.length}개뿐 — 탐지가 빠졌다`);
+  for (const c of driftCalls) {
+    assert.match(c, /refBySymbol/, `참조값을 안 넘긴다 — 숫자 판정이 꺼진다: ${c}`);
+  }
   // ⚠️ **둘을 합쳐서** 나아졌는지 보는가 — 한쪽만 보면 다른 쪽 회귀를 채택한다
   assert.match(src, /stillBad\.length \+ stillDrift\.length/, '합산 판정이 없다');
 });
@@ -279,4 +291,59 @@ test('🔴 배선 — 세 축이 **같은 단계**에서 함께 판정되고 합
   assert.match(src, /outliers\.length \|\| drift\.length \|\| zeros\.length/, '재요청 조건에 빠졌다');
   // 🔴 **합산**으로 채택해야 한 축의 회귀를 안 받는다
   assert.match(src, /stillBad\.length \+ stillDrift\.length \+ stillZero\.length/, '합산 판정이 아니다');
+});
+
+/**
+ * 🔴 **주제이탈 검출기의 과탐 — 라이브가 증명했다** (2026-10-13)
+ *
+ * 종전 규칙은 **이름**만 봤다: *"자기 티커·이름이 없고 남의 티커가 있으면 오염"*.
+ * 라이브 8건이 **전부 같은 지수의 1배↔3배 짝**이었고(DIA←UDOW 6 · SOXX←SOXL 2),
+ * 그 짝은 비교 서술이 자연스러워 **진짜 분석도 찍혔다.**
+ * 처방이 **문장 교체**라, 오탐 하나가 멀쩡한 설명을 지우고 사용자에게
+ * *"모델이 다른 종목 이야기를 했습니다"* 라는 **또 다른 거짓**을 보여줬다.
+ *
+ * ⚠️ 아래 문장 둘은 **손으로 지어낸 것이 아니라 2026-10-13 09:02 라이브 로그에서 그대로 가져온 것**이다.
+ *    (외부 응답·모델 출력 파싱은 실제 관측본을 픽스처로 — 이 저장소의 반복된 교훈)
+ */
+const REAL_KNOWN = ['DIA', 'UDOW', 'SOXX', 'SOXL'];
+const REAL_NAMES = { DIA: '다우존스', UDOW: '3x다우', SOXX: '반도체', SOXL: '반도체3x' };
+const REAL_REFS = { DIA: { last: 517.91 }, UDOW: { last: 66.31 }, SOXX: { last: 562.1 }, SOXL: { last: 141.37 } };
+const pos = (symbol, rationale) => ([{
+  symbol, rationale, evidence: [], risk: '', scenarioUp: '', scenarioDown: '',
+}]);
+
+test('🔴 1배↔3배 짝: 자기 숫자로 말하면 오염이 아니다 (라이브 실관측 문장)', () => {
+  // DIA 현재가 517.91 — 524.93·508.55 는 **DIA 자신의 값**이다(UDOW 는 66.31)
+  const dia = pos('DIA', '종가가 20>60(종가>20일선>60일선) 정배열로 전환되면 UDOW 교체 신호가 가능합니다.'
+    + ' 60일선(524.93) 이탈이 지속되며 최근20일 저가(508.55) 재시험 가능.');
+  assert.deepEqual(P.findSubjectDrift(dia, REAL_KNOWN, REAL_NAMES, REAL_REFS), []);
+
+  const soxx = pos('SOXX', '20일선(561.23) 회복 후 최근20일 고가(589.51) 재도달 시 업사이드 확인.'
+    + ' 20일선 이탈 지속 시 최근20일 저가(502.06) 재시험. SOXL 대비 완만.');
+  assert.deepEqual(P.findSubjectDrift(soxx, REAL_KNOWN, REAL_NAMES, REAL_REFS), []);
+});
+
+test('★ 자의 판별력 — 남의 숫자로 말하면 **여전히** 잡는다', () => {
+  // DIA 슬롯인데 숫자가 전부 UDOW(66.31) 가격대다
+  const bad = pos('DIA', 'UDOW는 66.31로 20일선(65.23) 위에 있어 3배 레버리지 감쇠가 우려됩니다.');
+  const hits = P.findSubjectDrift(bad, REAL_KNOWN, REAL_NAMES, REAL_REFS);
+  assert.equal(hits.length, 1, '🔴 숫자 판정을 넣고 진짜 오염을 놓쳤다 — 가드가 무력해졌다');
+  assert.equal(hits[0].symbol, 'DIA');
+  assert.deepEqual(hits[0].others, ['UDOW']);
+});
+
+test('⚠️ 숫자가 하나도 없으면 종전대로 오염으로 본다 (근거 없을 때 봐주지 않는다)', () => {
+  const noNum = pos('DIA', 'UDOW 쪽이 더 매력적으로 보입니다.');
+  assert.equal(P.findSubjectDrift(noNum, REAL_KNOWN, REAL_NAMES, REAL_REFS).length, 1);
+});
+
+test('⚠️ 참조값을 안 주면 **종전 동작 그대로** (호출부가 빠뜨려도 조용히 느슨해지지 않는다)', () => {
+  const dia = pos('DIA', '60일선(524.93) 이탈 지속. UDOW 교체 신호 가능.');
+  assert.equal(P.findSubjectDrift(dia, REAL_KNOWN, REAL_NAMES).length, 1,
+    '🔴 참조값 없이도 통과시키면, 배선이 끊긴 날 가드가 조용히 사라진다');
+});
+
+test('⚠️ 자기 이름을 부르면 숫자와 무관하게 통과한다 (기존 계약 보존)', () => {
+  const dia = pos('DIA', 'DIA는 UDOW 대비 방어적입니다.');
+  assert.deepEqual(P.findSubjectDrift(dia, REAL_KNOWN, REAL_NAMES, REAL_REFS), []);
 });

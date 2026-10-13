@@ -2503,7 +2503,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     ])].filter(Boolean);
     const nameBySym = {};
     for (const h of items) nameBySym[String(h.symbol || '').toUpperCase()] = h.name || '';
-    const drift = prose.findSubjectDrift(report.positions, knownSyms, nameBySym);
+    const drift = prose.findSubjectDrift(report.positions, knownSyms, nameBySym, refBySymbol);
     /**
      * 🔴 **가격 자리의 0** — `priceNumbers` 가 `<1` 을 거르므로 **원리상 안 걸리던 축**.
      *    사용자: *"o 는 진입 0.00, 손절 0.00, 목표 0.00 이거 대체 뭐하는 짓이야"*
@@ -2568,7 +2568,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       );
       const fixed = shapeReport(fixRaw);
       const stillBad = prose.findPriceOutliers(fixed.positions, refBySymbol);
-      const stillDrift = prose.findSubjectDrift(fixed.positions, knownSyms, nameBySym);
+      const stillDrift = prose.findSubjectDrift(fixed.positions, knownSyms, nameBySym, refBySymbol);
       const stillZero = prose.findZeroLevels(fixed.positions);
       /**
        * 🔴 **`after: 0` 이 "고쳐졌다" 로 읽히면 안 된다** (2026-10-02 라이브에서 드러났다).
@@ -2619,7 +2619,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
        *    ⇒ 조용히 두지 않고 **그 문장을 비우고 무슨 일이 있었는지 적는다.**
        *       틀린 종목 이야기를 그대로 두면 사용자가 그걸 그 종목 근거로 읽는다.
        */
-      const remainDrift = prose.findSubjectDrift(report.positions, knownSyms, nameBySym);
+      const remainDrift = prose.findSubjectDrift(report.positions, knownSyms, nameBySym, refBySymbol);
       if (remainDrift.length) {
         const bad = new Set(remainDrift.map((d) => d.symbol));
         logWarn('analyst.prose_subject_drift_unfixed', {

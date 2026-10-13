@@ -225,7 +225,44 @@ function replaceWithFacts(position, ref) {
  * ⇒ 좁게 판정한다: **자기 자신을 한 번도 안 부르면서 다른 종목만 주어로 쓰는 경우.**
  *    `QLD` 도 `리얼티 인컴` 같은 자기 이름도 안 나오고 `SOXX` 만 나오면 — 그건 바뀐 것이다.
  */
-function findSubjectDrift(positions = [], knownSymbols = [], nameBySymbol = {}) {
+/**
+ * 🔴 **숫자가 주인을 가린다** (2026-10-13 신설 — 이 자가 과탐하던 것을 라이브가 증명했다).
+ *
+ * 종전 규칙은 **이름**만 봤다: *"자기 티커·이름이 없고 남의 티커가 있으면 오염"*.
+ * 그런데 라이브 8건이 **전부 같은 지수의 1배↔3배 짝**이었다(DIA←UDOW 6 · SOXX←SOXL 2).
+ * 그런 짝은 **비교 서술이 자연스럽고**, 모델은 자기 티커를 안 부르고 **숫자로** 말한다:
+ *
+ * ```
+ * DIA 슬롯: "정배열로 전환되면 UDOW 교체 신호가 가능합니다.
+ *            60일선(524.93) 이탈이 지속되며 최근20일 저가(508.55)…"
+ *            ↑ DIA 현재가 517.91 — 524.93·508.55 는 **DIA 자신의 값**이다.
+ *              UDOW(66.31)는 "정배열이 되면 교체" 라는 **조건부 미래 행동**으로 한 번 불렸을 뿐.
+ * ```
+ * 명백한 DIA 분석인데 오염으로 찍혔고, **지워진 뒤 사용자 폰에
+ * *"모델이 다른 종목 이야기를 했습니다"* 라는 또 다른 거짓**이 갔다.
+ *
+ * ⇒ **이름이 아니라 숫자로 가른다.** 가격류 숫자가 **자기 가격대**에 있으면 자기 얘기다.
+ * ⚠️ `priceNumbers` 는 이미 이동평균 **기간**(`20일선`·`종가>20>60`)과 연도·비율을 걸러낸다 —
+ *    그래서 "60일선" 의 60 이 아니라 **괄호 안의 524.93** 만 후보가 된다.
+ * ⚠️ 숫자가 **하나도 없으면 종전대로 오염으로 본다** — 근거가 없을 때 봐주면
+ *    진짜 오염(숫자 없이 남 얘기만 하는 경우)을 놓친다.
+ * ⚠️ **참조값을 안 주면 종전 동작 그대로**다(하위호환). 호출부가 빠뜨려도 조용히 느슨해지지 않는다.
+ */
+const OWN_BAND = 1.8; // 자기 가격대로 볼 비율 — 1배↔3배 짝은 4~8배라 넉넉히 갈린다
+
+function numbersBelongTo(text, ownLast, otherLasts = []) {
+  const nums = priceNumbers(text).map((x) => Math.abs(x.n)).filter((n) => n > 0);
+  if (!nums.length) return { own: 0, other: 0, total: 0 };
+  const near = (n, base) => base > 0 && n / base <= OWN_BAND && base / n <= OWN_BAND;
+  let own = 0; let other = 0;
+  for (const n of nums) {
+    if (near(n, ownLast)) own += 1;
+    else if (otherLasts.some((b) => near(n, b))) other += 1;
+  }
+  return { own, other, total: nums.length };
+}
+
+function findSubjectDrift(positions = [], knownSymbols = [], nameBySymbol = {}, refBySymbol = null) {
   const known = [...new Set((knownSymbols || []).map((s) => String(s).toUpperCase()).filter(Boolean))];
   const hits = [];
   for (const p of positions || []) {
@@ -239,7 +276,19 @@ function findSubjectDrift(positions = [], knownSymbols = [], nameBySymbol = {}) 
     const selfName = String(nameBySymbol[sym] || '').trim();
     if (says(sym) || (selfName && text.includes(selfName))) continue;
     const others = known.filter((k) => k !== sym && says(k));
-    if (others.length) hits.push({ symbol: sym, others, sample: text.slice(0, 90) });
+    if (!others.length) continue;
+    /**
+     * 숫자로 재판정한다 — 자기 가격대의 숫자가 남의 것보다 적지 않으면 **자기 얘기**다.
+     * ⚠️ 동점(`own >= other`)도 자기 얘기로 본다: 이 가드의 처방은 **문장 교체**라
+     *    오탐 하나가 멀쩡한 설명을 지운다. 애매하면 **안 지우는 쪽**으로 기운다.
+     */
+    if (refBySymbol) {
+      const ownLast = Number(refBySymbol[sym]?.last) || 0;
+      const otherLasts = others.map((k) => Number(refBySymbol[k]?.last) || 0).filter((x) => x > 0);
+      const score = numbersBelongTo(text, ownLast, otherLasts);
+      if (score.own > 0 && score.own >= score.other) continue; // 자기 숫자로 말하고 있다
+    }
+    hits.push({ symbol: sym, others, sample: text.slice(0, 90) });
   }
   return hits;
 }
@@ -256,6 +305,6 @@ function driftNote(hits) {
 
 module.exports = {
   priceNumbers, findPriceOutliers, unverifiable, retryNote, replaceWithFacts, refHint,
-  findSubjectDrift, driftNote, findZeroLevels, PRICE_LABEL_ZERO,
+  findSubjectDrift, driftNote, numbersBelongTo, findZeroLevels, PRICE_LABEL_ZERO,
   UNIT_AFTER, FIELDS,
 };
