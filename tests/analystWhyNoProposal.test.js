@@ -95,9 +95,18 @@ test('🔴 요약이 **결손**과 **해당 없음**을 갈라 센다', () => {
   const code = codeOnly(SRC);
   const i = code.indexOf("logInfo('analyst.report'");
   const block = code.slice(i, i + 900);
-  assert.match(block, /gapsMissing/, '🔴 진짜 결손 수가 없다 — 7건이 전부 결손처럼 보인다');
+  /**
+   * 🔴 **2026-10-14 — 갈래가 셋이 됐다.** `gapsMissing` 은 식이 **이중 차감**이라
+   *    라이브에서 **음수(-2)** 를 찍고 있었다(`notApplicable` 은 `gaps` 에 섞이지 않는데 또 뺐다).
+   *    ⇒ `gapsCode`(코드가 찾은 결손 = **고칠 수 있는 것**) · `gapsModel`(모델 희망 목록 =
+   *      조치 불가) · `gapsNotApplicable`(설계상 해당 없음)로 **뜻대로** 나눴다.
+   */
+  assert.match(block, /gapsCode/, '🔴 코드가 찾은 결손 수가 없다 — 전부 결손처럼 보인다');
+  assert.match(block, /gapsModel/, '🔴 모델 희망 목록 수가 없다 — 조치 불가한 것이 결손에 섞인다');
   assert.match(block, /gapsNotApplicable/, '🔴 "해당 없음" 수가 없다');
   assert.match(block, /\bgaps:/, '⚠️ 합계도 남겨야 한다(종전 소비자)');
+  // ★ 음수가 다시 나오지 않게 — 이중 차감 식이 되살아나면 실패한다
+  assert.ok(!/gaps\.length\s*-\s*notApplicable\.length/.test(block), '🔴 이중 차감 식이 되살아났다');
 });
 
 /**

@@ -2861,9 +2861,22 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     // ★ 제안이 0 인 **이유**가 여기서 갈린다(판단했는데 HOLD / 판단 자체가 없음)
     stances,
     lowConfidence,
-    // 🔴 `gaps` 는 **합계**다. 그중 "해당 없음"(설계대로 동작한 것)을 빼야 진짜 결손이 보인다
+    /**
+     * 🔴 **2026-10-14 — `gapsMissing` 이 음수였다**(라이브 실측 `gaps 3 · notApplicable 5 → -2`).
+     *
+     * 식은 `gaps.length - notApplicable.length` 였는데, **`notApplicable` 은 `gaps` 에 섞이지
+     * 않는다** — 2721행에서 **별도 바구니에 담기만** 한다. 즉 이미 빠진 것을 또 뺐다(이중 차감).
+     * ⚠️ **음수는 있을 수 없는 값**이다 — 그런 수가 로그에 찍히고 있었는데 아무도 안 봤다.
+     *    *"검사했는데 0" 과 "검사 자체가 없음" 을 구분 못 하게 만드는* 그 가족이다.
+     *
+     * ⇒ 세 수를 **뜻대로** 나눈다:
+     *    · `gapsCode`        코드가 찾은 결손(웹 검색 실패 등) — **고칠 수 있는 것**
+     *    · `gapsModel`       모델이 쓴 희망 데이터 목록 — 조치 불가(폰에도 안 보낸다)
+     *    · `gapsNotApplicable` 설계상 해당 없음(ETF 는 기업 점수 대상이 아니다)
+     */
     gaps: gaps.length,
-    gapsMissing: gaps.length - notApplicable.length,
+    gapsCode: codeGaps.length,
+    gapsModel: Math.max(0, gaps.length - codeGaps.length),
     gapsNotApplicable: notApplicable.length,
     // ★ 새 기능이 **실제로 돌았다는 증거**를 지표에 함께 넣는다 — 0 이면 결과가 스스로 알려준다
     webTool: web?.tool || null,
@@ -3106,7 +3119,8 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     stances,
     lowConfidence,
     gaps: gaps.length,
-    gapsMissing: gaps.length - notApplicable.length,
+    gapsCode: codeGaps.length,
+    gapsModel: Math.max(0, gaps.length - codeGaps.length),
     webHits: (web?.results || []).filter((r) => r.text).length,
   });
 
