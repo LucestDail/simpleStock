@@ -245,6 +245,57 @@ test('🔴 ④ live.at 없음 — 우리 시계로 추측하지 않고 warn 을 
 });
 
 /**
+ * 🔴 **2026-10-14 — 이 경고가 재려던 것을 안 재고 있었다** (라이브 20시간 실측).
+ *
+ * 위 ④ 테스트는 `getPrices` 가 **빈 Map** 을 주는 경우 = *"달라고 했는데 안 왔다"* 다.
+ * 그런데 라이브에서 실제로 잡힌 13건은 **전혀 다른 상황**이었다:
+ * ```
+ * KST 09:02~09:37 (한국장 개장 직후) · 전부 watch 역할의 미국 ETF 4종
+ *   XLP 8 · XLK 3 · FAS 1 · TECL 1   (보유 0건)
+ * 미국장은 그 시각 기준 3~4시간 전에 마감 ⇒ 시세 시각이 없는 것이 **정상**
+ * ```
+ * 캔들 캐시는 통과 종목(SOXX·DIA)과 완전히 동일했다 — 변수는 `live.at` 하나뿐이었고,
+ * 거래가 뜸한 `XLP` 가 8/13 이었다(**마감 후 갱신이 멈춘 종목일수록 많이 걸린다**).
+ *
+ * ⇒ **동작은 안 바꾼다**(모르면 마지막 봉을 확정 봉으로 안 쓴다 — 그 판단은 옳다).
+ *   바꾼 것은 **무엇을 경고로 부를 것인가** 하나다. 아래 둘이 그 양방향이다.
+ */
+test('🔴 ④-b live 는 받았는데 at 만 없다 — 장이 닫힌 정상 상태이므로 **침묵**한다', async () => {
+  freshRequire(['alertService', 'tossClient', 'logger']);
+  const warnCalls = captureLogWarn();
+  const { collectMomentumRows } = require('../server/alertService');
+  const toss = require('../server/tossClient');
+  toss.getCandles = async () => ({
+    rows: [{ t: '2026-09-25', c: 100 }, { t: '2026-09-26', c: 101 }, { t: '2026-09-27', c: 102 }],
+  });
+  // 라이브 모양 그대로: 값은 왔는데 **거래소가 시각을 안 줬다**(마감 후 갱신 정지)
+  toss.getPrices = async () => new Map([['TEST4D', { price: 83.88, at: null }]]);
+
+  const rows = await collectMomentumRows({}, { TEST4D: { role: 'watch' } }, [], kstMs('2026-09-28T18:00:00'));
+
+  // 동작은 그대로 — 모르면 보수적으로 버린다
+  assert.equal(rows[0].history.length, 1, '🔴 동작이 바뀌었다 — 판정 불가인데 마지막 봉을 확정 봉으로 썼다');
+  assert.equal(warnCalls.length, 0, '🔴 장이 닫혀 시각이 없는 정상 상태에 경고가 났다(오탐)');
+});
+
+test('★ 자의 판별력 — live 자체가 안 오면 **여전히** 짖는다 (침묵시키는 수정의 반대 축)', async () => {
+  freshRequire(['alertService', 'tossClient', 'logger']);
+  const warnCalls = captureLogWarn();
+  const { collectMomentumRows } = require('../server/alertService');
+  const toss = require('../server/tossClient');
+  toss.getCandles = async () => ({
+    rows: [{ t: '2026-09-25', c: 100 }, { t: '2026-09-26', c: 101 }, { t: '2026-09-27', c: 102 }],
+  });
+  toss.getPrices = async () => new Map(); // 달라고 했는데 안 왔다 = 진짜 결손
+
+  await collectMomentumRows({}, { TEST4E: { role: 'watch' } }, [], kstMs('2026-09-28T18:00:00'));
+
+  assert.equal(warnCalls.length, 1, '🔴 오탐을 고치면서 진짜 결손까지 침묵시켰다');
+  assert.equal(warnCalls[0].event, 'analyst.trigger_live_at_missing');
+  assert.equal(warnCalls[0].ctx.symbol, 'TEST4E');
+});
+
+/**
  * 🔴 2026-09-28 pm1 반영: 보유 종목은 **매 틱(5분) 마다** 이 경로를 타므로(위 주석 참조,
  * 보유 2종이면 하루 576건) `live.at` 없음 warn 을 보유에도 내면 **오탐이 정말 이상한
  * 경우(감시 심볼인데 시세가 안 온 것)를 묻어 버린다.** ⇒ `if (!held) logWarn(...)` 로

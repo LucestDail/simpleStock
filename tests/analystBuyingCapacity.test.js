@@ -274,24 +274,23 @@ test('⚠️ 현금이 넉넉하면 프롬프트에 그 문구가 **안 나온�
 
 // ── ④ 이유 문구 생성기 (갈래별) ──────────────────────────────
 
-test('🔴 네 갈래가 **서로 다른 문장**을 낸다', () => {
+/**
+ * ⛔ **2026-10-14 — `describeNoProposal` 을 재던 두 테스트를 정리했다.**
+ *
+ * 그 함수는 *"왜 제안이 0건인가"* 를 설명했는데, **2026-10-12 에 라이브가 제안을 묻지 않게**
+ * 되면서 호출부가 0 이 됐다(죽은 코드). 네 갈래를 가르던 테스트는 **잴 대상이 사라졌다.**
+ *
+ * 🔴 **그런데 한 축은 살려서 옮긴다** — *"매수 여력은 **매수에만** 걸린다. 현금이 0 이어도
+ *    매도는 할 수 있다"* 는 규율은 지금 쓰는 `describeCashCapacity` 에도 **그대로 유효**하고,
+ *    지우면 **아무도 안 재게 된다**(위 209행은 *"여력 없음"* 만 보고 **범위**는 안 본다).
+ * ★ *"지우기 전에 그 테스트가 무엇을 지키려 했는지 본다"* — 함수가 죽어도 **규율은 살아 있다.**
+ */
+test('⚠️ 문구가 "거래 불가" 가 아니라 "**신규 매수** 불가" 라고 적는다 (현금 0 이어도 매도는 된다)', () => {
   const analyst = fresh();
   const cap = analyst.assessBuyingCapacity(dash(LIVE_CASH).portfolio.summary, LIVE_ITEMS);
-  const reasons = ['no_buying_capacity', 'cash_unknown', 'all_rejected', 'model_proposed_none'];
-  const texts = reasons.map((r) => analyst.describeNoProposal(r, cap, {
-    proposed: 2, rejected: [{ error: '지정가가 현재가에서 멀다' }],
-  }));
-  assert.equal(new Set(texts).size, reasons.length, '🔴 갈래가 겹친다 — 구분이 안 되면 이유를 적는 의미가 없다');
-  assert.match(texts[2], /전부.*거부/, '거부된 이유를 말해야 한다');
-  assert.match(texts[2], /지정가가 현재가에서 멀다/, '🔴 거부 사유를 안 실었다');
-});
-
-/** ⚠️ 매수 여력은 **매수에만** 걸린다 — 현금 0 이어도 매도 제안은 가능하다 */
-test('⚠️ 문구가 "제안 불가" 가 아니라 "**신규 매수** 불가" 라고 적는다', () => {
-  const analyst = fresh();
-  const cap = analyst.assessBuyingCapacity(dash(LIVE_CASH).portfolio.summary, LIVE_ITEMS);
-  const t = analyst.describeNoProposal('no_buying_capacity', cap, {});
+  const t = analyst.describeCashCapacity(cap);
   assert.match(t, /신규 매수/, '🔴 매도까지 불가능한 것처럼 읽힌다');
+  assert.doesNotMatch(t, /거래 불가|매매 불가/, '🔴 매도까지 막힌 것처럼 적었다');
 });
 
 test('⚠️ capacityDetail 은 못 읽은 통화를 **"확인 못 함"** 으로 적는다', () => {
