@@ -14,6 +14,13 @@ const { shapeReport } = require('../server/analystService');
  * ```
  * `marketView`·`positions`·`proposals` 가 통째로 없었다.
  *
+ * ## ⚠️ 2026-10-14 — **계약이 바뀌었다** (보고서 제품으로 재정의)
+ *
+ * `stance`(BUY/SELL/HOLD)·`entry`·`stop`·`target` 이 **스키마에서 사라졌고**, 유효한 항목인지는
+ * 이제 `trend`(추세 서술)로 가른다. 아래 테스트가 지키려는 것은 **"모델이 어떤 모양으로 줘도
+ * 읽어낸다"** 이지 BUY/SELL 자체가 아니므로, **픽스처와 단언의 축만** 옮겼다.
+ * 🔴 옛 모양(`stance`)으로 오면 **버리고 `legacyStanceKey` 로 짖는다** — 아래 전용 테스트가 그걸 잠근다.
+ *
  * ★ 도구 판단기에서 **키 이름**(name/tool/id)과 **깊이**로 세 번 데이고도,
  *   리포트에는 같은 처방을 안 해 뒀다. *"규칙을 정하면 적용 범위를 그 자리에서 훑는다"* 를
  *   또 어겼다. 아래는 **관측된 모양과 그 변형**이다.
@@ -22,12 +29,12 @@ const { shapeReport } = require('../server/analystService');
 test('정상 스키마를 그대로 읽는다', () => {
   const r = shapeReport({
     marketView: '지수는 혼조입니다', momentumRead: '큰 움직임 없음', dataGaps: ['재무 없음'],
-    positions: [{ symbol: 'QLD', stance: 'HOLD', confidence: 'MEDIUM', rationale: '20일선 위', evidence: [], risk: '변동성' }],
+    positions: [{ symbol: 'QLD', trend: '20일선 부근 횡보', confidence: 'MEDIUM', rationale: '20일선 위', evidence: [], risk: '변동성' }],
     proposals: [],
   });
   assert.equal(r.marketView, '지수는 혼조입니다');
   assert.equal(r.positions.length, 1);
-  assert.equal(r.positions[0].stance, 'HOLD');
+  assert.equal(r.positions[0].trend, '20일선 부근 횡보');
   assert.equal(r.dataGaps.length, 1);
 });
 
@@ -35,12 +42,12 @@ test('정상 스키마를 그대로 읽는다', () => {
 test('평평하게 와도 판단을 건진다 (실측된 모양)', () => {
   const r = shapeReport({
     dataGaps: ['5년 재무제표 미제공', '환율 미제공'],
-    stance: 'HOLD', stanceConfidence: 'MEDIUM', symbol: 'QLD',
+    trend: '20일선 부근 횡보', stanceConfidence: 'MEDIUM', symbol: 'QLD',
     rationale: '20일선 위에서 버티는 중이라 보유',
   });
   assert.equal(r.positions.length, 1, '평평한 응답을 통째로 버렸다');
   assert.equal(r.positions[0].symbol, 'QLD');
-  assert.equal(r.positions[0].stance, 'HOLD');
+  assert.equal(r.positions[0].trend, '20일선 부근 횡보');
   assert.equal(r.dataGaps.length, 2);
   assert.equal(r._unreadable, null, '읽었는데 못 읽었다고 표시했다');
 });
@@ -48,12 +55,13 @@ test('평평하게 와도 판단을 건진다 (실측된 모양)', () => {
 test('키 이름을 바꿔도 읽는다', () => {
   const r = shapeReport({
     market_view: '시황입니다', momentum: '조용', gaps: ['g'],
-    judgements: [{ ticker: 'RAM', action: 'SELL', conviction: 'HIGH', why: '손실 확대' }],
+    // ⚠️ 2026-10-14: 축이 action→trend 로 바뀌었다. 별칭(ticker/conviction/why)은 그대로 읽어야 한다
+    judgements: [{ ticker: 'RAM', 추세: '20일선 아래 역배열', conviction: 'HIGH', why: '손실 확대' }],
   });
   assert.equal(r.marketView, '시황입니다');
   assert.equal(r.momentumRead, '조용');
   assert.equal(r.positions[0].symbol, 'RAM');
-  assert.equal(r.positions[0].stance, 'SELL');
+  assert.equal(r.positions[0].trend, '20일선 아래 역배열');
 });
 
 /**
@@ -80,7 +88,7 @@ test('판단과 제안이 섞여 와도 갈라낸다', () => {
   const r = shapeReport({
     view: '시황',
     calls: [
-      { ticker: 'RAM', action: 'BUY', conviction: 'LOW', why: 'w' },
+      { ticker: 'RAM', trendRead: '20일선 위 정배열', conviction: 'LOW', why: 'w' },
       { symbol: 'QLD', side: 'SELL', quantity: 5, price: 90, reason: 'r' },
     ],
   });
@@ -114,26 +122,27 @@ test('같은 종목이 상반된 판단으로 중복되면 1건만 남고 확신
   const r = shapeReport({
     marketView: 'v',
     positions: [
-      { symbol: 'QLD', stance: 'HOLD', confidence: 'MEDIUM', rationale: '20일선 위' },
-      { symbol: 'RAM', stance: 'HOLD', confidence: 'MEDIUM', rationale: '손실 방어' },
-      { symbol: 'SOXX', stance: 'BUY', confidence: 'MEDIUM', rationale: '신규 후보' },
-      { symbol: 'QQQ', stance: 'BUY', confidence: 'MEDIUM', rationale: '신규 후보2' },
-      { symbol: 'RAM', stance: 'SELL', confidence: 'HIGH', rationale: '손절가 이탈' },
-      { symbol: 'QLD', stance: 'SELL', confidence: 'HIGH', rationale: '추세 이탈' },
+      { symbol: 'QLD', trend: '20일선 부근 횡보', confidence: 'MEDIUM', rationale: '20일선 위' },
+      { symbol: 'RAM', trend: '20일선 부근 횡보', confidence: 'MEDIUM', rationale: '손실 방어' },
+      { symbol: 'SOXX', trend: '20일선 위 정배열', confidence: 'MEDIUM', rationale: '신규 후보' },
+      { symbol: 'QQQ', trend: '20일선 위 정배열', confidence: 'MEDIUM', rationale: '신규 후보2' },
+      { symbol: 'RAM', trend: '20일선 아래 역배열', confidence: 'HIGH', rationale: '손절가 이탈' },
+      { symbol: 'QLD', trend: '20일선 아래 역배열', confidence: 'HIGH', rationale: '추세 이탈' },
     ],
   });
 
   assert.equal(r.positions.length, 4, '중복이 걸러지지 않았다');
   const bySymbol = Object.fromEntries(r.positions.map((p) => [p.symbol, p]));
 
-  // 먼저 나온 stance(HOLD)를 남긴다 — 모델이 보유를 먼저 판단하는 순서를 존중
-  assert.equal(bySymbol.QLD.stance, 'HOLD');
-  assert.equal(bySymbol.RAM.stance, 'HOLD');
-  // 모순(HOLD vs SELL)이므로 남긴 쪽의 확신도를 낮춘다
+  // 먼저 나온 서술을 남긴다 — 모델이 보유를 먼저 서술하는 순서를 존중
+  assert.equal(bySymbol.QLD.trend, '20일선 부근 횡보');
+  assert.equal(bySymbol.RAM.trend, '20일선 부근 횡보');
+  // 모순(횡보 vs 역배열)이므로 남긴 쪽의 확신도를 낮춘다
   assert.equal(bySymbol.QLD.confidence, 'LOW');
   assert.equal(bySymbol.RAM.confidence, 'LOW');
-  assert.match(bySymbol.QLD.rationale, /상반된 판단/);
-  assert.match(bySymbol.QLD.rationale, /SELL/);
+  assert.match(bySymbol.QLD.rationale, /상반된 서술/);
+  // ⚠️ **버려진 쪽이 무엇이었는지** 적어야 한다 — 그게 이 테스트의 핵심이다(축만 바뀌었다)
+  assert.match(bySymbol.QLD.rationale, /20일선 아래 역배열/);
   assert.match(bySymbol.QLD.rationale, /20일선 위/, '원래 rationale 을 지우지 않고 붙였다');
   // 모순 없는 종목은 그대로
   assert.equal(bySymbol.SOXX.confidence, 'MEDIUM');
@@ -144,8 +153,8 @@ test('같은 종목·같은 stance 중복은 1건만 남고 확신도는 원래�
   const r = shapeReport({
     marketView: 'v',
     positions: [
-      { symbol: 'QLD', stance: 'HOLD', confidence: 'MEDIUM', rationale: '20일선 위' },
-      { symbol: 'QLD', stance: 'HOLD', confidence: 'MEDIUM', rationale: '20일선 위(재확인)' },
+      { symbol: 'QLD', trend: '20일선 부근 횡보', confidence: 'MEDIUM', rationale: '20일선 위' },
+      { symbol: 'QLD', trend: '20일선 부근 횡보', confidence: 'MEDIUM', rationale: '20일선 위(재확인)' },
     ],
   });
   assert.equal(r.positions.length, 1);
@@ -158,8 +167,8 @@ test('중복 없는 정상 입력은 그대로다', () => {
   const r = shapeReport({
     marketView: 'v',
     positions: [
-      { symbol: 'QLD', stance: 'HOLD', confidence: 'MEDIUM', rationale: '20일선 위' },
-      { symbol: 'SOXX', stance: 'BUY', confidence: 'HIGH', rationale: '신규 후보' },
+      { symbol: 'QLD', trend: '20일선 부근 횡보', confidence: 'MEDIUM', rationale: '20일선 위' },
+      { symbol: 'SOXX', trend: '20일선 위 정배열', confidence: 'HIGH', rationale: '신규 후보' },
     ],
   });
   assert.equal(r.positions.length, 2);

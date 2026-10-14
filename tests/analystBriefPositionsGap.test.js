@@ -93,7 +93,7 @@ afterEach(() => { global.fetch = realFetch; });
 
 const heldKr = [{ symbol: '005930', market: 'KR', name: '삼성전자', dailyRate: 0, profitRate: 0, lastPrice: 70000 }];
 const samplePositions = (items) => items.map((it) => (
-  { symbol: it.symbol, stance: 'HOLD', confidence: 'MEDIUM', rationale: 'x', evidence: [], risk: 'y' }
+  { symbol: it.symbol, trend: '20일선 부근 횡보', confidence: 'MEDIUM', rationale: 'x', evidence: [], risk: 'y' }
 ));
 
 // ── ① "대상 시장 … 판단하라" 지시 ────────────────────────────
@@ -169,7 +169,7 @@ test('🔴 보유 3종 중 2종만 판단하면 빠진 종목을 이름으로 �
   const held3 = [{ symbol: 'QLD', market: 'US' }, { symbol: 'RAM', market: 'US' }, { symbol: 'O', market: 'US' }];
   reportToReturn = {
     marketView: '시황', momentumRead: '', dataGaps: [], proposals: [],
-    positions: [{ symbol: 'QLD', stance: 'HOLD' }, { symbol: 'RAM', stance: 'HOLD' }],
+    positions: [{ symbol: 'QLD', trend: '20일선 부근 횡보' }, { symbol: 'RAM', trend: '20일선 부근 횡보' }],
   };
   const analyst = fresh();
   await analyst.analyze(
@@ -189,7 +189,7 @@ test('오탐 축: 보유를 전부 판단했으면 아무 말도 안 한다 (대
   const held2 = [{ symbol: 'QLD', market: 'US' }, { symbol: 'RAM', market: 'US' }];
   reportToReturn = {
     marketView: '시황', momentumRead: '', dataGaps: [], proposals: [],
-    positions: [{ symbol: 'QLD', stance: 'HOLD' }, { symbol: 'ram', stance: 'HOLD' }],
+    positions: [{ symbol: 'QLD', trend: '20일선 부근 횡보' }, { symbol: 'ram', trend: '20일선 부근 횡보' }],
   };
   const analyst = fresh();
   await analyst.analyze(

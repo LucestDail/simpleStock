@@ -1239,16 +1239,12 @@ onUnmounted(() => {
               <article v-for="ps in report.positions" :key="ps.symbol" class="pos">
                 <header>
                   <b>{{ ps.symbol }}</b>
-                  <span class="pos__stance" :class="`pos--${ps.stance.toLowerCase()}`">{{ ps.stance }}</span>
+
                   <span class="pos__conf">{{ ps.confidence }}</span>
                   <!--
                     🔴 손익비는 **코드가 계산**한 값이다(모델이 아니라).
                     ⚠️ 계산이 안 된 이유가 있으면 그걸 보여준다 — 빈칸은 "위험 없음" 으로 읽힌다.
                   -->
-                  <span v-if="ps.trade?.rr" class="pos__rr">R/R {{ ps.trade.rr }}</span>
-                  <span v-else-if="ps.trade?.error || ps.trade?.rrNote" class="pos__rrbad">
-                    {{ ps.trade.error || ps.trade.rrNote }}
-                  </span>
                 </header>
                 <p>{{ ps.rationale }}</p>
 
@@ -1258,43 +1254,24 @@ onUnmounted(() => {
                      그게 추격매수인지 지정가 대기인지, 목표가 이미 지났는지를 알 수 없었다.
                      ⇒ 맨 앞에 현재가를 둔다 — 나머지 숫자는 전부 이것과의 관계로 읽힌다.
                 -->
-                <dl v-if="ps.entry || ps.stop || ps.target" class="pos__lv">
-                  <div v-if="priceOf(ps.symbol)" class="pos__lv--now">
-                    <dt>현재</dt><dd class="mono-num">{{ priceOf(ps.symbol) }}</dd>
-                  </div>
-                  <!--
-                    🔴 **숫자만 있고 맥락이 없어서 "뭔 말도 안 되는 수치" 로 보였다** (2026-10-02).
-                       `진입 29.59` 가 현재가 28.44 보다 높은 건지 낮은 건지 화면에 안 적혔다.
-                       `+4%` 면 추격매수, `-5%` 면 지정가 대기 — **전혀 다른 제안**인데
-                       숫자만 보면 구분이 안 된다. ⇒ 괴리를 **진입 옆에** 붙인다.
-                  -->
-                  <div v-if="ps.entry">
-                    <dt>진입</dt>
-                    <dd class="mono-num">
-                      {{ ps.entry }}
-                      <!-- ⚠️ 코드가 현재가로 메운 자리라는 표시 — 모델이 정한 값과 구분된다 -->
-                      <small v-if="ps._entryFromPrice" class="pos__auto" title="모델이 진입가를 비워 현재가로 채웠습니다">자동</small>
-                      <small v-if="ps.trade?.entryGapPct != null"
-                             :class="ps.trade.entryGapPct > 0 ? 'down' : 'up'"
-                             :title="ps.trade.entryGapPct > 0 ? '현재가보다 높다 — 추격매수' : '현재가보다 낮다 — 지정가 대기'">
-                        {{ ps.trade.entryGapPct > 0 ? '+' : '' }}{{ ps.trade.entryGapPct }}%
-                      </small>
-                    </dd>
-                  </div>
-                  <div v-if="ps.stop"><dt>손절</dt><dd class="mono-num">{{ ps.stop }}</dd></div>
-                  <div v-if="ps.target"><dt>목표</dt><dd class="mono-num">{{ ps.target }}</dd></div>
-                  <div v-if="ps.trade?.sizedQuantity != null">
-                    <dt>수량</dt><dd class="mono-num">{{ ps.trade.sizedQuantity }}주</dd>
-                  </div>
+                <!--
+                  ⛔ **2026-10-14 — 진입·손절·목표 표를 들어냈다** (사용자 지시: 보고서만 쓴다).
+                     그 값들은 **스키마에서 사라졌다** — 남겨 두면 그 값이 늘 undefined 라
+                     `v-if` 가 영원히 거짓인 **죽은 마크업**이 된다.
+                  ⚠️ 대신 **관측 서술**(추세·상대강도·변동성)을 아래에 싣는다.
+                -->
+                <dl v-if="ps.trend || ps.relative || ps.volatility" class="pos__obs">
+                  <div v-if="ps.trend"><dt>추세</dt><dd>{{ ps.trend }}</dd></div>
+                  <div v-if="ps.relative"><dt>상대강도</dt><dd>{{ ps.relative }}</dd></div>
+                  <div v-if="ps.volatility"><dt>변동성</dt><dd>{{ ps.volatility }}</dd></div>
+                  <div v-if="ps.watchPoint"><dt>관찰</dt><dd>{{ ps.watchPoint }}</dd></div>
                 </dl>
-                <p v-if="ps.trade?.sizeNote" class="pos__rrbad">{{ ps.trade.sizeNote }}</p>
                 <!--
                   🔴 **이미 달성된 목표를 조용히 두지 않는다** — QLD 목표 97 이 현재가 97.6
                      아래였는데 화면은 그냥 `목표 97` 만 보여줬다. 손익비(rr)는 코드가
                      이미 `null` 로 만들지만, **왜 비었는지**를 적지 않으면 사용자는
                      "계산이 안 됐나" 로 읽는다.
                 -->
-                <p v-if="ps.trade?.levelNote" class="pos__rrbad">🔴 {{ ps.trade.levelNote }}</p>
                 <p v-if="ps.scenarioUp" class="pos__sc pos__sc--up">▲ {{ ps.scenarioUp }}</p>
                 <p v-if="ps.scenarioDown" class="pos__sc pos__sc--dn">▼ {{ ps.scenarioDown }}</p>
 
@@ -2433,6 +2410,15 @@ onUnmounted(() => {
 */
 .pos__rr { font-size: var(--text-2xs); color: var(--color-up); font-weight: 700; }
 .pos__rrbad { font-size: var(--text-2xs); color: var(--color-down); margin: 2px 0 0; }
+/**
+ * ⛔ `.pos__lv`(진입·손절·목표 표)는 2026-10-14 에 마크업과 함께 사라졌다 — 규칙도 지운다.
+ *    남겨 두면 "쓰이지 않는 CSS" 가 쌓여 다음 사람이 되살릴 자리인 줄 안다.
+ */
+/* 관측 서술 — 라벨:값 한 줄씩. 숫자 표가 아니라 **문장**이라 세로로 쌓는다 */
+.pos__obs { display: flex; flex-direction: column; gap: 2px; margin: 3px 0 0; }
+.pos__obs div { display: flex; gap: 6px; align-items: baseline; }
+.pos__obs dt { flex: 0 0 3.6rem; font-size: var(--text-2xs); color: var(--color-faint); }
+.pos__obs dd { margin: 0; font-size: var(--text-xs); color: var(--color-body); }
 .pos__lv { display: flex; flex-wrap: wrap; gap: 8px; margin: 3px 0 0; }
 .pos__lv div { display: flex; gap: 3px; align-items: baseline; }
 /**

@@ -86,7 +86,8 @@ test('🔴 보유가 아니므로 **수량·평단을 근거로 쓰지 말라**�
   await analyst.analyze(HELD, { dryRun: true, useWebSearch: false, trigger: TRIG('RAM', 'reentry') });
   const p = seen.join('\n');
   assert.match(p, /수량·평단·평가손익이 없으니/, '🔴 없는 값을 근거로 쓰라고 두면 지어낸다');
-  assert.match(p, /`SELL` 은 쓸 수 없습니다/, '🔴 없는 걸 팔라고 할 수 있다');
+  // ⚠️ 2026-10-14: 문구가 바뀌었다 — enum 금지에서 **행동 어휘 금지**로(보고서 제품)
+  assert.match(p, /사고파는 말은 쓰지 않습니다/, '🔴 안 들고 있는 종목에 행동 지시가 나갈 수 있다');
 });
 
 test('🔴 **분할 매수**를 물어본다 (사용자가 지적한 그 지점)', async () => {

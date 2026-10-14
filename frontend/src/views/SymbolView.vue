@@ -27,12 +27,20 @@
       </section>
       <section class="card">
         <h2>에이전트 견해 <small class="mut" v-if="viewAt">{{ when(viewAt) }} 분석</small></h2>
+        <!--
+          ⛔ **2026-10-14 — BUY/SELL 배지와 시나리오를 들어냈다** (사용자 지시: 보고서만 쓴다).
+             `stance`·`scenarioUp`·`scenarioDown` 은 **스키마에서 사라졌다**.
+          🔴 `agentView.stance === 'BUY'` 같은 비교는 undefined 에 안전하지만,
+             **값이 늘 비어 배지가 빈칸으로 남는다** — 죽은 마크업이다.
+          ⚠️ 대신 **관측 서술**을 싣는다.
+        -->
         <template v-if="agentView">
-          <p><b :class="agentView.stance === 'BUY' ? 'up' : agentView.stance === 'SELL' ? 'down' : ''">{{ agentView.stance }}</b>
-            <small class="mut"> · 확신도 {{ agentView.confidence }}</small></p>
+          <p v-if="agentView.confidence" class="mut">확신도 {{ agentView.confidence }}</p>
           <p class="body">{{ agentView.rationale }}</p>
-          <p v-if="agentView.scenarioUp" class="sc">▲ {{ agentView.scenarioUp }}</p>
-          <p v-if="agentView.scenarioDown" class="sc">▼ {{ agentView.scenarioDown }}</p>
+          <p v-if="agentView.trend" class="sc">추세 · {{ agentView.trend }}</p>
+          <p v-if="agentView.relative" class="sc">상대강도 · {{ agentView.relative }}</p>
+          <p v-if="agentView.volatility" class="sc">변동성 · {{ agentView.volatility }}</p>
+          <p v-if="agentView.watchPoint" class="sc">관찰 · {{ agentView.watchPoint }}</p>
         </template>
         <p v-else class="mut">최근 분석에 이 종목 판단이 없습니다 — 보유·후보가 아니면 분석 대상이 아닙니다.</p>
       </section>

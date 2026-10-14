@@ -61,8 +61,8 @@ test('🔴 배선 — 분석 3경로가 전부 동적 스키마를 쓴다', () =
 test('⚠️ shapeReport 가 holdings 배열도 모은다 (합치는 코드를 따로 안 쓴 전제)', () => {
   const r = svc._shapeReport({
     marketView: 'x', momentumRead: 'y', dataGaps: [],
-    holdings: [{ symbol: 'O', stance: 'HOLD', confidence: 'LOW', rationale: 'r', evidence: [], risk: 'k' }],
-    positions: [{ symbol: 'SOXX', stance: 'HOLD', confidence: 'LOW', rationale: 'r', evidence: [], risk: 'k' }],
+    holdings: [{ symbol: 'O', trend: '20일선 부근 횡보', confidence: 'LOW', rationale: 'r', evidence: [], risk: 'k' }],
+    positions: [{ symbol: 'SOXX', trend: '20일선 부근 횡보', confidence: 'LOW', rationale: 'r', evidence: [], risk: 'k' }],
     proposals: [],
   });
   const syms = r.positions.map((p) => p.symbol).sort();

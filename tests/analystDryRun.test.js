@@ -167,7 +167,8 @@ const HELD = {
   momentum: [], warnings: {}, rankings: {},
 };
 
-const POS = (symbol) => ({ symbol, stance: 'HOLD', confidence: 'MEDIUM', rationale: 'r', evidence: [], risk: 'k' });
+// ⚠️ 2026-10-14: 유효 판정축이 stance → trend(추세 서술)로 바뀌었다
+const POS = (symbol) => ({ symbol, trend: '20일선 부근 횡보', confidence: 'MEDIUM', rationale: 'r', evidence: [], risk: 'k' });
 
 test('🔴 보유가 있는데 판단이 비면 한 번 되묻는다 (라이브: 3회 중 0·1·0건)', async () => {
   // 라이브 실측 모양 — 서술형 한 덩어리만 주고 종목 배열이 없다

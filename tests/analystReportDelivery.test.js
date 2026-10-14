@@ -34,7 +34,7 @@ const REPORT = {
   dataGaps: [],
   proposals: [],
   positions: [{
-    symbol: 'O', stance: 'HOLD', confidence: 'LOW',
+    symbol: 'O', trend: '20일선 부근 횡보', confidence: 'LOW',
     entry: 54.3, stop: 52.5, target: 57.52,
     rationale: '배당주로서 약세 흐름이지만 20일선 회복 전까지 보류한다.',
     evidence: ['120일 고점대비 -18.59%', '52주 신저가 54.30 (검색)'],
@@ -90,40 +90,50 @@ afterEach(() => { global.fetch = realFetch; });
 
 const body = () => sent.join('\n');
 
-test('🔴 종목별 entry/stop/target 이 폰으로 간다', async () => {
-  const analyst = fresh();
-  await analyst.analyze(DASH());
-  await new Promise((r) => setTimeout(r, 60));
-  assert.ok(sent.length, '텔레그램으로 아무것도 안 갔다');
-  const b = body();
-  assert.match(b, /54\.30/, '진입가가 없다');
-  assert.match(b, /52\.50/, '손절가가 없다 — "여기가 깨지면 틀린 것" 이 안 간다');
-  assert.match(b, /57\.52/, '목표가가 없다');
-});
-
-test('🔴 근거·리스크·양방향 시나리오가 폰으로 간다', async () => {
-  const analyst = fresh();
-  await analyst.analyze(DASH());
-  await new Promise((r) => setTimeout(r, 60));
-  const b = body();
-  assert.match(b, /120일 고점대비 -18\.59%/, 'evidence 가 버려졌다');
-  assert.match(b, /52주 신저가 54\.30 \(검색\)/, '검색 근거가 버려졌다');
-  assert.match(b, /20일선을 회복하지 못하면/, 'risk 가 버려졌다');
-  assert.match(b, /↑/, 'scenarioUp 이 없다');
-  assert.match(b, /↓/, 'scenarioDown 이 없다');
-});
-
-test('R:R 은 시스템이 계산한 값이 실린다 (모델이 아니라)', async () => {
-  const analyst = fresh();
-  await analyst.analyze(DASH());
-  await new Promise((r) => setTimeout(r, 60));
-  assert.match(body(), /R:R\s*\d/, '손익비가 안 갔다 — 계산해 놓고 안 쓰는 자리다');
-});
-
 /**
- * ⚠️ **오탐 축** — 판단이 0건이면 이 절을 아예 만들지 않는다. 빈 머리글만 가면
- *    사용자는 "뭔가 고장났나" 로 읽는다.
+ * ⛔ **2026-10-14 — 세 테스트를 뒤집었다** (사용자 지시: 보고서만 쓴다).
+ *
+ * 종전에는 폰 본문에 **진입·손절·목표·R:R·시나리오**가 실리는지 쟀다(2026-10-02 에
+ * *"O 한 종목에만 생성됐는데 단 한 줄도 전달되지 않았다"* 를 고치며 만든 가드다).
+ * 그 칸들이 **스키마에서 사라졌으므로** 잴 대상이 없다.
+ *
+ * 🔴 **그런데 원래 취지는 살린다** — *"계산해 놓고 전달 안 하는 자리를 만들지 말 것"*.
+ *    축만 옮긴다: 이제 **관측 서술**(추세·상대강도·변동성·관찰)이 폰에 닿는지 잰다.
+ * 🔴 그리고 **옛 것이 되살아나면 실패**하게 한다.
  */
+test('🔴 관측 서술이 폰으로 간다 (만들어 놓고 전달 안 하는 자리를 만들지 않는다)', async () => {
+  REPORT.positions = [{
+    symbol: 'QLD', trend: '20일선 위 정배열', relative: '지수 대비 +3.2%p',
+    volatility: '연 42% — 포트폴리오 중간', watchPoint: '60일선 이탈 시 서술이 달라진다',
+    confidence: 'MEDIUM', rationale: '기술주 반등', evidence: ['현재가 97.50'], risk: '감쇠',
+  }];
+  const analyst = fresh();
+  await analyst.analyze(DASH(), { useWebSearch: false });
+  await new Promise((r) => setTimeout(r, 60));
+  const b = body();
+  for (const [label, v] of [['추세', '20일선 위 정배열'], ['상대강도', '지수 대비 +3.2%p'],
+    ['변동성', '연 42%'], ['관찰', '60일선 이탈']]) {
+    assert.ok(b.includes(v), `🔴 ${label} 이 폰에 안 갔다 — 만들어 놓고 버리는 자리다: ${b.slice(0, 200)}`);
+  }
+  assert.match(b, /근거: 현재가 97\.50/);
+});
+
+test('🔴 진입·손절·목표·R:R 이 폰에 되살아나지 않는다', async () => {
+  // 모델이 옛 모양으로 답해도 — 파서가 버리므로 폰에 닿지 않아야 한다
+  REPORT.positions = [{
+    symbol: 'QLD', trend: '20일선 위 정배열', confidence: 'MEDIUM',
+    rationale: 'x', evidence: [], risk: 'y',
+    entry: 97.5, stop: 92.7, target: 103.2,
+  }];
+  const analyst = fresh();
+  await analyst.analyze(DASH(), { useWebSearch: false });
+  await new Promise((r) => setTimeout(r, 60));
+  const b = body();
+  for (const word of ['진입 ', '손절 ', '목표 ', 'R:R']) {
+    assert.ok(!b.includes(word), `🔴 "${word}" 이 폰에 되살아났다`);
+  }
+});
+
 test('오탐 축: 종목 판단이 0건이면 근거 절을 만들지 않는다', async () => {
   REPORT.positions = [];
   try {
@@ -133,7 +143,7 @@ test('오탐 축: 종목 판단이 0건이면 근거 절을 만들지 않는다'
     assert.ok(!body().includes('종목별 근거'), '판단이 없는데 빈 근거 절이 갔다');
   } finally {
     REPORT.positions = [{
-      symbol: 'O', stance: 'HOLD', confidence: 'LOW', entry: 54.3, stop: 52.5, target: 57.52,
+      symbol: 'O', trend: '20일선 부근 횡보', confidence: 'LOW', entry: 54.3, stop: 52.5, target: 57.52,
       rationale: '배당주로서 약세 흐름이지만 20일선 회복 전까지 보류한다.',
       evidence: ['120일 고점대비 -18.59%', '52주 신저가 54.30 (검색)'],
       risk: '20일선을 회복하지 못하면 추세적 하락이 이어질 수 있다.',
@@ -171,8 +181,8 @@ test('🔴 라이브 스키마에는 `proposals` 칸이 없다 (이 계약이 �
 
 test('🔴 SELL 판단이 있어도 폰에 "제안이 없다" 는 말을 하지 않는다 (라이브는 제안을 묻지 않는다)', async () => {
   REPORT.positions = [
-    { symbol: 'QLD', stance: 'SELL', confidence: 'MEDIUM', rationale: '레버리지 축소', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' },
-    { symbol: 'RAM', stance: 'HOLD', confidence: 'LOW', rationale: '보유', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' },
+    { symbol: 'QLD', trend: '20일선 아래 역배열', confidence: 'MEDIUM', rationale: '레버리지 축소', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' },
+    { symbol: 'RAM', trend: '20일선 부근 횡보', confidence: 'LOW', rationale: '보유', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' },
   ];
   REPORT.proposals = [];
   const analyst = fresh();
@@ -187,7 +197,7 @@ test('🔴 SELL 판단이 있어도 폰에 "제안이 없다" 는 말을 하지 
 });
 
 test('오탐 축: 전부 HOLD 면 아무 말도 안 한다', async () => {
-  REPORT.positions = [{ symbol: 'QLD', stance: 'HOLD', confidence: 'LOW', rationale: 'x', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' }];
+  REPORT.positions = [{ symbol: 'QLD', trend: '20일선 부근 횡보', confidence: 'LOW', rationale: 'x', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' }];
   const analyst = fresh();
   await analyst.analyze(DASH(), { useWebSearch: false });
   await new Promise((r) => setTimeout(r, 60));
@@ -204,7 +214,7 @@ test('오탐 축: 전부 HOLD 면 아무 말도 안 한다', async () => {
  * 반면 **코드가 찾은 결손**(웹 검색 불가 등)은 원인이 우리 쪽이라 보낼 값이 있다.
  */
 test('🔴 모델이 적은 dataGaps 는 폰에 안 간다 (희망 목록 ≠ 결손)', async () => {
-  REPORT.positions = [{ symbol: 'QLD', stance: 'HOLD', confidence: 'LOW', rationale: 'x', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' }];
+  REPORT.positions = [{ symbol: 'QLD', trend: '20일선 부근 횡보', confidence: 'LOW', rationale: 'x', evidence: [], risk: '', scenarioUp: '', scenarioDown: '' }];
   REPORT.dataGaps = ['포트폴리오 VaR 미제공', '기관·내부자 수급 미제공'];
   try {
     const analyst = fresh();

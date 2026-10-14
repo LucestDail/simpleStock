@@ -107,7 +107,16 @@ function findZeroLevels(positions = []) {
 }
 
 /** 검사 대상 필드 — 모델이 쓴 산문만 본다(코드가 채운 자리는 제외) */
-const FIELDS = ['scenarioUp', 'scenarioDown', 'rationale', 'risk'];
+/**
+ * 🔴 **2026-10-14 — 스캔 대상을 새 계약에 맞췄다.**
+ *    `scenarioUp`·`scenarioDown` 은 스키마에서 사라졌고, 대신 `trend`·`relative`·
+ *    `volatility`·`watchPoint` 가 생겼다. **목록을 안 고치면 거기 들어간 지어낸 가격을
+ *    통째로 놓친다** — 가드가 있는데 안 보는 자리가 생기는 것이 가장 나쁘다.
+ * ⚠️ 옛 둘은 **남겨 둔다** — 모델이 옛 모양으로 답해 파서가 흘려보낸 경우에도
+ *    그 안의 숫자는 검사받아야 한다(비용은 빈 문자열 스캔 두 번뿐이다).
+ */
+const FIELDS = ['trend', 'relative', 'volatility', 'watchPoint', 'rationale', 'risk',
+  'scenarioUp', 'scenarioDown'];
 
 /**
  * 보유·후보 종목 산문에서 **기준값과 동떨어진 가격 수치**를 찾는다.
@@ -199,12 +208,28 @@ function retryNote(hits, refBySymbol) {
  */
 function replaceWithFacts(position, ref) {
   const fmt = (v) => (Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '-');
-  return {
-    ...position,
-    scenarioUp: `20일선 ${fmt(ref?.ma20)} 회복 시 반등 시도 (코드 대체 — 모델이 제공하지 않은 수치를 썼습니다)`,
-    scenarioDown: `60일선 ${fmt(ref?.ma60)} 이탈 시 추가 하락 (코드 대체 — 모델이 제공하지 않은 수치를 썼습니다)`,
-    _priceFabricated: true,
+  const note = '(코드 대체 — 모델이 제공하지 않은 수치를 썼습니다)';
+  /**
+   * 🔴 **2026-10-14 — 교체 대상이 낡아 있었다.**
+   *    종전에는 `scenarioUp`·`scenarioDown` **둘만** 덮었다. 그 칸이 스키마에서 사라지면서
+   *    지어낸 값이 `trend`·`relative` 등에 들어가면 **덮이지 않고 그대로 화면으로 간다.**
+   *    가드가 검출은 하는데 처방이 빗나가는 자리였다(`FIELDS` 는 고쳤는데 여기는 안 고쳤다).
+   * ⇒ **검출한 바로 그 칸들**(`FIELDS`)을 덮는다. 값이 없던 칸은 만들지 않는다 —
+   *    빈 칸을 코드 문장으로 채우면 "모델이 안 쓴 것" 과 "지어낸 것" 이 구분되지 않는다.
+   */
+  const out = { ...position, _priceFabricated: true };
+  const facts = {
+    trend: `20일선 ${fmt(ref?.ma20)} · 60일선 ${fmt(ref?.ma60)} 기준으로 다시 보십시오 ${note}`,
+    relative: `상대강도 서술에 확인되지 않은 수치가 있었습니다 ${note}`,
+    volatility: `변동성 서술에 확인되지 않은 수치가 있었습니다 ${note}`,
+    watchPoint: `20일선 ${fmt(ref?.ma20)} 회복 여부 ${note}`,
+    scenarioUp: `20일선 ${fmt(ref?.ma20)} 회복 시 반등 시도 ${note}`,
+    scenarioDown: `60일선 ${fmt(ref?.ma60)} 이탈 시 추가 하락 ${note}`,
   };
+  for (const [k, v] of Object.entries(facts)) {
+    if (position?.[k]) out[k] = v;   // ⚠️ 원래 값이 있던 칸만 덮는다
+  }
+  return out;
 }
 
 

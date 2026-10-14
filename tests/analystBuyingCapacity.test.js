@@ -120,8 +120,8 @@ function dash(cash, items = LIVE_ITEMS) {
 const HOLD_ONLY = {
   marketView: '혼조입니다.', momentumRead: '', dataGaps: [],
   positions: [
-    { symbol: 'QLD', stance: 'HOLD', confidence: 'LOW', rationale: '20일선 위', evidence: [], risk: 'x' },
-    { symbol: 'RAM', stance: 'HOLD', confidence: 'LOW', rationale: '평단 회복 대기', evidence: [], risk: 'y' },
+    { symbol: 'QLD', trend: '20일선 부근 횡보', confidence: 'LOW', rationale: '20일선 위', evidence: [], risk: 'x' },
+    { symbol: 'RAM', trend: '20일선 부근 횡보', confidence: 'LOW', rationale: '평단 회복 대기', evidence: [], risk: 'y' },
   ],
   proposals: [],
 };
@@ -206,9 +206,16 @@ test('🔴 현금 부족 회차: 폰 브리핑이 **왜 0건인지** 숫자와 �
    *    ⇒ 거짓 틀은 **없어야** 하고, 사실은 **있어야** 한다. 둘 다 단언한다.
    */
   assert.doesNotMatch(text, /매매 제안 \d+건/, '🔴 라이브에는 "제안" 이라는 개념이 없다');
-  assert.match(text, /신규 매수 여력 없음/, '🔴 매수 여력이 막혔다는 **사실**이 사라졌다');
-  assert.match(text, /3\.76/, '🔴 숫자가 없다 — "부족하다" 만으로는 소급 확인이 안 된다');
-  assert.match(text, /1주도 살 수 없/, '🔴 "1주도 못 산다" 는 핵심 사실이 빠졌다');
+  /**
+   * ⛔ **2026-10-14 — 뒤집었다** (사용자 지시). 10-13 에 내가 *"직접 거래하는 사람에게
+   *    유용한 사실"* 이라며 남긴 줄인데, **"매수 여력" 은 살 것을 전제한 개념**이라
+   *    보고서 제품에는 자리가 없다. 사용자: *"신규 매수 여력 없음 저거도 왜 나오는거야?"*
+   * ⚠️ **현금 비중 자체는 안 사라진다** — 포트폴리오 화면과 `portfolioRules` 에 숫자로 남는다.
+   */
+  assert.doesNotMatch(text, /신규 매수 여력 없음/, '🔴 매수 전제 문구가 폰에 되살아났다');
+  assert.doesNotMatch(text, /1주도 살 수 없/, '🔴 매수 전제 문구가 폰에 되살아났다');
+  // ⛔ 2026-10-14: 현금 줄 자체가 브리핑에서 빠졌으므로 금액도 없다(위 주석 참조)
+  assert.doesNotMatch(text, /3\.76/, '🔴 매수 여력 문구가 금액과 함께 되살아났다');
 });
 
 test('🔴 현금 충분 회차: **같은 0건인데 다른 이유**가 나온다 (모델이 제안 안 함)', async () => {
@@ -244,7 +251,7 @@ test('🔴 현금을 못 읽은 회차: 0 이라 하지 않고 **"확인 못 함
 
   const text = sent[0].text;
   assert.doesNotMatch(text, /매매 제안 \d+건/);
-  assert.match(text, /현금을 확인하지 못했습니다/, '🔴 조회 실패가 "여력 없음" 으로 둔갑했다');
+  assert.doesNotMatch(text, /현금을 확인하지 못했습니다/, '🔴 매수 여력 문구가 폰에 되살아났다');
   // 🔴 **양방향** — 한쪽 갈래가 죽어도 다른 테스트가 통과해 버리는 것을 막는다
   assert.doesNotMatch(text, /신규 매수 여력 없음/, '🔴 못 읽은 것을 "없다" 로 단정했다');
 });
@@ -382,12 +389,19 @@ test('🔴 구간이 **갈린다** — ok / under_one_share / unknown', () => {
  *    가리는 기준은 *"민감하냐"* 가 아니라 ***"디스크에 남느냐"*** 다.
  *    이 단언이 없으면 다음 사람이 "금액 금지" 를 브리핑까지 확대해 **진단력을 날린다.**
  */
-test('⚠️ 브리핑 본문의 금액은 **유지**된다 (로그와 기준이 다르다)', async () => {
+/**
+ * ⛔ **2026-10-14 — 뒤집었다.** 종전에는 *"폰 본문에 현금 금액이 유지되는가"* 를 쟀다.
+ *    현금 줄 자체를 들어냈으므로(사용자 지시) 금액도 안 간다.
+ * ⚠️ **`capacity` 계산은 살아 있다** — 프롬프트와 `portfolioRules` 가 쓴다.
+ *    사라진 것은 **폰에 적는 문장** 하나다. 아래 로그 테스트가 계산이 도는 것을 지킨다.
+ */
+test('🔴 브리핑 본문에 현금 금액이 되살아나지 않는다', async () => {
   reportToReturn = HOLD_ONLY;
   const analyst = fresh();
   await analyst.analyze(dash(LIVE_CASH));
   await new Promise((r) => setTimeout(r, 40));
-  assert.match(sent[0].text, /3\.76/, '🔴 사용자 본문에서까지 숫자를 지웠다 — "부족하다" 만 남으면 확인이 안 된다');
+  assert.doesNotMatch(sent[0].text, /3\.76/, '🔴 매수 전제 문구가 되살아났다');
+  assert.doesNotMatch(sent[0].text, /매수 여력|1주도 살 수 없/, '🔴 매수 전제 문구가 되살아났다');
 });
 
 /**

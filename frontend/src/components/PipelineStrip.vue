@@ -41,7 +41,7 @@
       <button class="stage" :class="{ 'stage--on': open === 'propose' }" @click="toggle('propose')">
         <small>⑤ 종목 판단</small>
         <b class="mono-num">{{ num(proposalCount) }}</b>
-        <small>stance 가 붙은 종목</small>
+        <small>서술이 채워진 종목</small>
       </button>
     </div>
 

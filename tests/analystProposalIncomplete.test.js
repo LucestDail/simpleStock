@@ -99,10 +99,11 @@ test('⚠️ 두 건이 반쪽이면 **두 줄**이 난다 (건수를 셀 수 �
 test('🔴 오탐 축: 보유 **판단**(수량·가격 칸이 아예 없음)에는 짖지 않는다', () => {
   const r = analyst.shapeReport({
     marketView: 'v',
-    positions: [{ symbol: 'QLD', action: 'BUY', confidence: 'HIGH', rationale: '추세 전환' }],
+    // ⚠️ 2026-10-14: 유효 판정축이 action/stance → trend(추세 서술)로 바뀌었다
+    positions: [{ symbol: 'QLD', trend: '20일선 위 정배열', confidence: 'HIGH', rationale: '추세 전환' }],
   });
   assert.equal(warns.length, 0, '🔴 판단을 반쪽 제안으로 오인했다 — 매 회차 소음이 된다');
-  assert.equal(r.positions.length, 1, '판단은 판단으로 읽혀야 한다');
+  assert.equal(r.positions.length, 1, '서술은 서술로 읽혀야 한다');
 });
 
 test('🔴 오탐 축: 아무 관련 키도 없는 객체는 조용하다', () => {

@@ -74,92 +74,65 @@ function violations(src, stances) {
 }
 
 // ── ⓐ 발동 축 ──────────────────────────────────────────────────────────
-test('🔴 프롬프트가 enum 밖 값을 stance 예시로 주지 않는다', () => {
+/**
+ * ⚠️ **2026-10-14 — 지킬 계약이 바뀌었다.**
+ *
+ * 종전에는 *"프롬프트 예시가 `stance` enum 안인가"* 를 쟀다. 그 enum 이 **스키마에서
+ * 사라졌으므로**(보고서 제품으로 재정의) 그 자는 잴 대상이 없다.
+ *
+ * 🔴 **그런데 같은 가족의 위험은 더 커졌다**: 프롬프트가 *"BUY 라고 분명히 말하라"* 처럼
+ *    **행동 어휘를 예시로 주면**, 모델이 그대로 답하고 `asPosition` 이 **그 항목을 버린다**
+ *    (= `positions 0`, 사용자에겐 "판단이 없다" 로 보인다). 종전과 **증상이 똑같다.**
+ * ⇒ 축을 옮긴다: 프롬프트의 인용 지시문이 **행동 어휘를 모범으로 보여주지 않는가**.
+ * ★ 2026-10-14 사주 파이프라인에서 *"✓ 예문이 고정돼 모델이 거짓을 베꼈다"* 와 같은 가족 —
+ *   **프롬프트에 사실을 넣는 것과 모범으로 보여주는 것은 힘이 다르다.**
+ */
+const ACTION_WORDS = ['BUY', 'SELL', 'HOLD', '매수', '매도', '보유', '관망', '유지', '청산', '익절', '손절'];
+
+test('🔴 프롬프트가 행동 어휘를 예시로 주지 않는다', () => {
   const src = fs.readFileSync(SRC, 'utf8');
-  const stances = readStances(src);
-  assert.ok(
-    stances.every((s) => /^[A-Z_]+$/.test(s)),
-    `STANCES 가 영문 대문자가 아니다(${stances.join(',')}) — 계약이 바뀌었으면 이 자도 다시 설계하라`,
-  );
-  const bad = violations(src, stances);
-  assert.equal(
-    bad.length, 0,
-    `프롬프트가 enum 밖 값을 예시로 준다: ${bad.map((b) => `"${b.token}"`).join(', ')}\n`
-    + `→ 모델이 그대로 답하면 asPosition 이 버린다(positions 0). 허용: ${stances.join('|')}`,
-  );
-});
-
-test('🔴 자기검증: enum 밖 예시를 심으면 이 자가 잡는다', () => {
-  const src = fs.readFileSync(SRC, 'utf8');
-  const stances = readStances(src);
-  const mutated = src.replace(
-    '그대로면 그대로라고 분명히 말하라(그 종목 stance 는 HOLD). ',
-    '그대로면 "유지" 라고 분명히 말하라. ',
-  );
-  assert.notEqual(mutated, src, '변이가 반영되지 않았다 — no-op 는 통과가 아니다. 원문이 바뀌었으면 이 줄부터 고쳐라');
-  const caught = violations(mutated, stances);
-  assert.ok(caught.length > 0, '심은 위반을 못 잡았다 — 탐지기가 죽어 있다');
-  assert.equal(caught[0].token, '유지');
-});
-
-test('🔴 자기검증: enum 안 값을 인용하는 것은 위반이 아니다(허용목록이 실제로 통과시킨다)', () => {
-  const src = fs.readFileSync(SRC, 'utf8');
-  const stances = readStances(src);
-  const ok = src.replace(
-    '그대로면 그대로라고 분명히 말하라(그 종목 stance 는 HOLD). ',
-    '그대로면 "HOLD" 라고 분명히 말하라. ',
-  );
-  assert.notEqual(ok, src, '변이 미반영');
-  assert.equal(violations(ok, stances).length, 0, 'enum 안 값을 위반으로 읽었다 — 금지목록처럼 동작하고 있다');
-});
-
-// ── ⓑ 오탐 축 (pm2: "이게 제일 위험하다") ──────────────────────────────
-test('⚠️ 오탐 없음: 규칙을 설명하는 주석이 이 자를 깨뜨리지 않는다', () => {
-  const src = fs.readFileSync(SRC, 'utf8');
-  assert.ok(
-    /"유지"\s*라고/.test(src),
-    '전제가 깨졌다 — 주석에서 종전 문구가 사라졌다면 이 오탐 테스트는 아무것도 검사하지 않는다',
-  );
-  assert.equal(violations(src, readStances(src)).length, 0, '주석을 위반으로 읽었다(자기 참조 오탐)');
-});
-
-test('⚠️ 오탐 없음: 부정 예시와 서술 속 인용은 걸리지 않는다', () => {
-  const stances = ['BUY', 'SELL', 'HOLD'];
-  const benign = [
-    `const a = '"관망 필요", "시장 상황에 따라" 같은 말은 답이 아닙니다.';`,
-    `const b = '"## 시장 국면" 절의 판정을 그대로 쓰라 — 다시 판정하지 마라.';`,
-    `const c = '웹검색에서 온 사실은 "(검색)" 을 붙여 구분합니다.';`,
-  ].join('\n');
-  assert.equal(violations(benign, stances).length, 0, '부정 예시·서술 인용을 위반으로 읽었다');
-});
-
-// ── ⓒ 대상 축 ─────────────────────────────────────────────────────────
-test('🔴 검사 대상이 실재한다 — 공허한 통과 금지', () => {
-  const src = stripComments(fs.readFileSync(SRC, 'utf8'));
-  const lits = promptLiterals(src);
-  assert.ok(lits.length >= 50, `프롬프트 리터럴이 ${lits.length}개뿐 — 추출기가 대상을 놓치고 있다`);
-  for (const sym of ['BRIEF_JOB', 'STANCES', 'asPosition']) {
-    assert.ok(src.includes(sym), `${sym} 이 검사 범위 밖이다 — 주석 제거가 코드를 지웠거나 심볼이 옮겨졌다`);
+  const bad = [];
+  for (const lit of promptLiterals(stripComments(src))) {
+    for (const m of lit.matchAll(QUOTED_DIRECTIVE)) {
+      const token = m[1].trim();
+      if (ACTION_WORDS.some((w) => token.toUpperCase() === w.toUpperCase())) {
+        bad.push({ token, lit: lit.slice(0, 90) });
+      }
+    }
   }
+  assert.deepEqual(bad, [], `🔴 프롬프트가 행동을 모범으로 보여준다: ${JSON.stringify(bad)}`);
 });
 
-// ── ⓓ 전수 축: 프롬프트 상수를 거꾸로 계정 ────────────────────────────
-test('🔴 프롬프트를 담는 상수는 전부 계정된다 — 새로 생기면 강제로 드러난다', () => {
-  const src = stripComments(fs.readFileSync(SRC, 'utf8'));
-  // 프롬프트 리터럴을 3개 이상 품은 대문자 상수 = 프롬프트 상수 후보
-  const candidates = new Set();
-  for (const m of src.matchAll(/const ([A-Z][A-Z0-9_]{3,})\s*=\s*([[{])/g)) {
-    const start = m.index;
-    const chunk = src.slice(start, start + 2000);
-    if (promptLiterals(chunk).filter((s) => /[가-힣]/.test(s)).length >= 3) candidates.add(m[1]);
+test('🔴 자기검증: 행동 어휘 예시를 심으면 이 자가 잡는다', () => {
+  const fake = `const X = ['같으면 "HOLD" 라고 분명히 말하라'];`;
+  const found = [];
+  for (const lit of promptLiterals(fake)) {
+    for (const m of lit.matchAll(QUOTED_DIRECTIVE)) {
+      if (ACTION_WORDS.some((w) => m[1].trim().toUpperCase() === w.toUpperCase())) found.push(m[1]);
+    }
   }
-  // 검사됨: 이 자는 파일 전체 리터럴을 훑으므로 후보는 모두 자동으로 검사 범위 안이다.
-  // 면제: 없음. 대상 아님: 없음. ⇒ 어느 후보도 범위 밖이면 실패한다.
-  for (const c of candidates) {
-    assert.ok(src.includes(c), `${c} 가 범위 밖`);
+  assert.equal(found.length, 1, '🔴 심은 위반을 못 잡는다 — 이 자는 아무것도 안 보고 있다');
+});
+
+test('⚠️ 오탐 없음: 관측 어휘를 인용하는 것은 위반이 아니다', () => {
+  const ok = `const X = ['변화가 없으면 "그대로다" 라고 적으세요'];`;
+  const found = [];
+  for (const lit of promptLiterals(ok)) {
+    for (const m of lit.matchAll(QUOTED_DIRECTIVE)) {
+      if (ACTION_WORDS.some((w) => m[1].trim().toUpperCase() === w.toUpperCase())) found.push(m[1]);
+    }
   }
-  assert.ok(
-    candidates.size >= 1,
-    `프롬프트 상수를 하나도 못 찾았다(${[...candidates].join(',')}) — 추출기가 고장났거나 상수가 옮겨졌다`,
-  );
+  assert.deepEqual(found, [], '🔴 멀쩡한 관측 지시문을 위반으로 찍는다 — 오탐하면 다음 사람이 자를 끈다');
+});
+
+test('🔴 스키마에 행동 칸이 되살아나지 않는다', () => {
+  const a = require('../server/analystService');
+  const it = a._REPORT_SCHEMA.properties.positions.items;
+  for (const k of ['stance', 'entry', 'stop', 'target', 'scenarioUp', 'scenarioDown']) {
+    assert.ok(!(k in it.properties), `🔴 \`${k}\` 칸이 되살아났다 — 칸이 있으면 모델은 채운다`);
+  }
+  // ★ 판별력 — 관측 칸은 **있어야** 한다(둘 다 없으면 이 테스트는 공허하다)
+  for (const k of ['trend', 'rationale', 'evidence', 'risk']) {
+    assert.ok(k in it.properties, `🔴 관측 칸 \`${k}\` 이 사라졌다`);
+  }
 });

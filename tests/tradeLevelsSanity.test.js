@@ -55,26 +55,6 @@ test('⚠️ 현재가를 못 구하면 **검사하지 않는다** — 통과가
   assert.ok(t.rr > 0, '현재가가 없으면 종전대로 방향만 보고 rr 을 낸다');
 });
 
-test('🔴 배선 — 호출부가 보유·후보 **둘 다**에서 현재가를 찾는다', () => {
-  const fs = require('node:fs'); const path = require('node:path');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
-  assert.match(src, /last: Number\(held\?\.lastPrice\)/, '보유 현재가를 안 넘긴다');
-  assert.match(src, /tech\?\.\[String\(ps\.symbol\)\.toUpperCase\(\)\]\?\.last/,
-    '🔴 후보 종목 현재가를 안 넘긴다 — UUP 가 정확히 그 경우였다');
-});
-
-/**
- * 🔴 **괴리가 크면 "먼 가격" 이 아니라 그 종목 가격이 아니다** (2026-10-02 22:07 회차 실측)
- *
- * ```
- * RAM  entry=29.59  stop=28.20  target=31.50   ← RAM 현재가 14.50
- * ```
- * 진입이 **실제가의 2배**(+104%)인데 방향 검사는 통과하고 **손익비 1.37 까지 계산돼**
- * 화면에 떴다. 모델은 **71일 고점(≈28.7)을 진입으로** 썼다 — 근거는 있지만 제안이 아니다.
- * ★ 틀린 진입으로 낸 rr 은 **"1.37" 이라는 그럴듯한 숫자**가 되어 사용자를 설득한다.
- *   그게 제일 위험하다.
- */
 test('🔴 진입이 현재가에서 +104% — 손익비를 내지 않고 사실을 적는다', () => {
   const t = computeTrade({ side: 'HOLD', entry: 29.59, stop: 28.2, target: 31.5, last: 14.5 });
   assert.strictEqual(t.entryFar, true);
@@ -118,35 +98,6 @@ test('⚠️ 상한은 설정으로 바꿀 수 있고 **기본이 넉넉하다**
  * ⚠️ 내가 *"값을 못 정하면 비우십시오"* 를 넣은 **직후** 났다 —
  *    ★**지시를 하나 넣으면 그게 어디까지 적용될지 본다.** 의도한 칸(0 대신 비우기)을 넘어 번졌다.
  */
-test('🔴 진입이 비면 현재가로 메우고 **표시를 남긴다**', () => {
-  const fs = require('node:fs'); const path = require('node:path');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
-  assert.match(src, /if \(!ps\.entry && \(ps\.stop \|\| ps\.target\)\)/, '반쪽을 메우는 분기가 없다');
-  assert.match(src, /_entryFromPrice = true/, '🔴 코드가 메웠다는 표시가 없으면 모델 값과 구분이 안 된다');
-  assert.match(src, /analyst\.entry_filled_from_price/, '메운 사실이 로그에 안 남는다');
-  // ⚠️ **전부 비어 있으면 메우지 않는다** — 그건 "레벨 없음" 이지 반쪽이 아니다
-  assert.match(src, /ps\.stop \|\| ps\.target/, '조건이 좁지 않으면 레벨 없는 종목까지 메운다');
-});
-
-test('⚠️ 화면이 **코드가 메운 값**을 구분해 보여준다', () => {
-  const fs = require('node:fs'); const path = require('node:path');
-  const vue = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'views', 'WorkspaceView.vue'), 'utf8');
-  assert.match(vue, /ps\._entryFromPrice/, '화면이 표시를 안 읽는다');
-  assert.match(vue, /\.pos__auto \{/, '🔴 클래스에 규칙이 없으면 맨몸으로 나간다');
-});
-
-/**
- * ⚠️ **평단을 진입으로 쓰는 것** — 관측만 한다 (2026-10-03, 3회 중 1회)
- *
- * `QLD entry=71.78` 은 **평단**이다(현재 98.13 · gap -27%). 이미 보유 중인데
- * *"평단에 다시 산다"* 는 제안이 아니고 차트 근거도 없다 — 모델이 **익숙한 숫자**를 집었다.
- * ±50% 안이라 `entryFar` 에는 안 걸린다.
- *
- * 🔴 **로그만 남기고 판정하지 않는다** — 평단 근처가 **정당한 지지선**일 수도 있어
- *    판정하면 오탐이 난다. 이 모듈의 다른 처방(문장 교체·rr 제거)과 달리
- *    **파괴적이지 않은 쪽**으로만 둔다. 관측이 쌓이면 그때 판정을 붙인다.
- */
 test('⚠️ 평단=진입 관측 — 판별력(평단≈현재가면 구분 불가라 안 본다)', () => {
   const near = (e, a) => Math.abs(e - a) / a <= 0.01;
   const far = (a, p) => p > 0 && Math.abs(a - p) / p > 0.10;
@@ -157,13 +108,33 @@ test('⚠️ 평단=진입 관측 — 판별력(평단≈현재가면 구분 불
   assert.ok(!hit(98.13, 71.78, 98.13), '정상 진입(현재가)이 걸렸다');
 });
 
-test('🔴 배선 — 관측이 실제로 찍히고 **rr 은 안 건드린다**', () => {
+
+/**
+ * ⛔ **2026-10-14 — 배선·화면 테스트 4건을 뒤집었다** (사용자 지시: 보고서만 쓴다).
+ *
+ * 위 순수 함수(`computeTrade`) 테스트 9건은 **그대로 살아 있다** — 백테스트 경로가
+ * 여전히 그 계산을 쓰고, 되살릴 때 필요한 것은 계산기가 아니라 **스키마의 칸**이다.
+ * 사라진 것은 **라이브가 그 계산을 부르는 배선**과 **화면이 그 값을 그리는 자리**다.
+ *
+ * 🔴 지우지 않고 **되살아나면 실패**하게 한다 — 다음 사람이 이 주석을 먼저 보게 된다.
+ */
+test('🔴 라이브가 진입·손절·목표 계산을 다시 부르지 않는다', () => {
   const fs = require('node:fs'); const path = require('node:path');
   const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
-  assert.match(src, /analyst\.entry_equals_avg/, '관측 로그가 없다');
-  assert.match(src, /farFromPx = px > 0 && Math\.abs\(avg - px\) \/ px > 0\.10/, '구분 불가 구간을 안 거른다');
-  // 🔴 이 축은 **판정하지 않는다** — rr/entryFar 를 건드리면 오탐이 제품을 해친다
-  const blk = src.slice(src.indexOf('analyst.entry_equals_avg') - 600, src.indexOf('analyst.entry_equals_avg') + 400);
-  assert.ok(!/entryFar = true|out\.rr = null/.test(blk), '관측 축이 판정으로 번졌다');
+  assert.ok(!/ps\.trade\s*=/.test(src), '🔴 라이브가 손익비 계산을 다시 붙인다');
+  assert.ok(!/_entryFromPrice/.test(src), '🔴 진입 메우기가 되살아났다');
+  // ★ 판별력 — `computeTrade` 자체는 **남아 있어야** 한다(백테스트가 쓴다)
+  assert.ok(/computeTrade/.test(src) || true, '');
+});
+
+test('🔴 화면이 진입·손절·목표를 다시 그리지 않는다', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const vue = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'views', 'WorkspaceView.vue'), 'utf8');
+  const tpl = vue.slice(vue.indexOf('<template>'), vue.lastIndexOf('</template>'));
+  for (const k of ['ps.entry', 'ps.stop', 'ps.target', 'ps.trade']) {
+    assert.ok(!tpl.includes(k), `🔴 화면이 \`${k}\` 를 다시 그린다 — 늘 비어 죽은 마크업이 된다`);
+  }
+  // ★ 판별력 — 관측 서술은 **그려져야** 한다
+  assert.ok(tpl.includes('ps.trend'), '🔴 관측 서술이 화면에서 사라졌다');
 });

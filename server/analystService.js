@@ -140,40 +140,55 @@ const SEND_WINDOW_MS = Math.max(0, Number(process.env.ANALYST_SEND_WINDOW_MS ?? 
 /** ⚠️ 테스트가 상태를 격리할 수 있어야 한다 — 안 그러면 회차 순서에 결과가 묶인다 */
 function _resetSendStateForTest() { lastSentDigest = null; sentWindow.clear(); }
 
+/**
+ * 📄 **보고서 계약** — 이 제품은 **분석 보고서**를 만든다 (2026-10-14 사용자 지시로 재정의).
+ *
+ * > *"우리 매수/매도 안하는데 왜 자꾸 매수매도 판단이 나왔습니다 저게 왜 나오는거야? …
+ * >  단순 포트폴리오 판단 및 분석, 현황 및 증시 시황 분석해서 보고서만 작성하라니까"*
+ *
+ * 🔴 **원인은 프롬프트가 아니라 여기였다.** 스키마가 `stance: BUY/SELL/HOLD` 를 **필수로**
+ *    요구하고 `entry`·`stop`·`target`(진입가·손절가·목표가)까지 받았다 —
+ *    **모델은 묻는 대로 답할 수밖에 없다.** 프롬프트로 *"주문은 내지 않습니다"* 라고 적어 둬도
+ *    칸이 있으면 채운다. 이 저장소가 반복해 적어 둔
+ *    *"프롬프트로 못 고치는 것을 프롬프트로 고치려 하지 말 것"* 그대로다.
+ *
+ * ⇒ **행동을 담을 칸을 없앤다.** 칸이 없으면 행동 지시는 **원천적으로 불가능**하다.
+ *    남는 것은 *"이 종목이 지금 어떤 상태인가"* 라는 **사실 서술**이다.
+ *
+ * ⚠️ `trend`·`relative`·`volatility` 는 **관측 서술**이지 행동 등급이 아니다 — enum 을 두지 않는다
+ *    (등급을 두면 "강세/약세" 가 다시 "사라/팔라" 로 읽힌다).
+ * ⚠️ `evidence` 는 **우리가 준 숫자의 인용**이다. 모델이 지어낸 수치를 거르는 기존 가드
+ *    (`findPriceOutliers`)가 그대로 걸린다.
+ */
 const REPORT_SCHEMA = {
   type: 'object',
   properties: {
-    marketView: { type: 'string' },
-    momentumRead: { type: 'string' },
+    marketView: { type: 'string', description: '증시 시황 2문장 이내' },
+    momentumRead: { type: 'string', description: '포트폴리오 전체 해석 2문장 이내' },
     // 🔴 개수 상한 (2026-09-23) — 출력 길이 = 시간. 상한 없이 6,905~9,762토큰을 써서 캡에 잘렸다
     dataGaps: { type: 'array', items: { type: 'string' }, maxItems: 8 },
     positions: {
       type: 'array',
       // ⚠️ 설명이 없으면 모델이 **어느 배열에 무엇을 넣을지** 모른다(실측: 통째로 비웠다)
-      description: '매수 후보(아직 **안 들고 있는** 종목) 판단. 보유는 holdings 에 넣는다. 없으면 빈 배열.',
+      description: '관심 종목(안 들고 있는 것) 현황 서술. 보유는 holdings 에 넣는다. 없으면 빈 배열.',
       /**
-       * ⚠️ 이제 **후보 전용 자리**다 — 보유는 `holdings`(아래 `reportSchemaFor`)가 받는다.
-       *    종전엔 둘이 여기서 경쟁했고 비중 0.7% 인 O 가 네 회차 연속 밀려났다.
-       * ⚠️ 상한은 남긴다 — 출력 길이 = 시간이고, 상한 없이 6,905~9,762토큰을 써서 캡에 잘린 적이 있다.
+       * ⚠️ 상한은 남긴다 — 출력 길이 = 시간이고, 상한 없이 캡에 잘린 적이 있다.
        */
       maxItems: 6,
       items: {
         type: 'object',
         properties: {
           symbol: { type: 'string' },
-          stance: { type: 'string', enum: ['BUY', 'SELL', 'HOLD'] },
-          confidence: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
-          rationale: { type: 'string', description: '2문장 이내' },
+          // 🔴 아래 넷은 **관측**이다 — 등급이 아니라 문장으로 쓴다(등급은 행동으로 읽힌다)
+          trend: { type: 'string', description: '추세: 종가 vs 20일선 vs 60일선 배열. 1문장' },
+          relative: { type: 'string', description: '상대강도: 같은 기간 지수 대비. 1문장' },
+          volatility: { type: 'string', description: '변동성 수준과 그 의미. 1문장' },
+          rationale: { type: 'string', description: '이 종목이 지금 왜 그 상태인지 — 국면으로 설명. 2문장 이내' },
           evidence: { type: 'array', items: { type: 'string' }, maxItems: 2, description: '제공된 숫자 인용, 각 40자 이내' },
-          risk: { type: 'string', description: '1문장' },
-          // 🔴 **레벨만** 모델이 정한다 — 손익비·수량은 코드가 계산한다(모델은 산수를 틀린다)
-          entry: { type: 'number' },
-          stop: { type: 'number' },
-          target: { type: 'number' },
-          scenarioUp: { type: 'string' },
-          scenarioDown: { type: 'string' },
+          risk: { type: 'string', description: '지금 안고 있는 위험 1문장' },
+          watchPoint: { type: 'string', description: '무엇이 바뀌면 이 서술이 달라지는가. 1문장' },
         },
-        required: ['symbol', 'stance', 'confidence', 'rationale', 'evidence', 'risk'],
+        required: ['symbol', 'trend', 'rationale', 'evidence', 'risk'],
       },
     },
   },
@@ -311,111 +326,86 @@ function reportSchemaFor(heldSymbols = [], { budget = null, trades = false } = {
   return { ...REPORT_SCHEMA, properties, required };
 }
 
+/**
+ * 📄 **보고서 작성 지침** (2026-10-14 전면 재작성 — 사용자 지시)
+ *
+ * > *"단순 포트폴리오 판단 및 분석, 현황 및 증시 시황 분석해서 보고서만 작성하라니까
+ * >  왜 자꾸 매도매수 관련된 부분이 나오는거야? 프롬프트 전면 다 재검토 및 수정해."*
+ *
+ * 🔴 **종전 프롬프트의 첫 줄이 `당신은 퀀트 모멘텀 분석가입니다 … 분명히 말하십시오` 였다.**
+ *    그 아래 105줄에 매수/매도 어휘가 **22곳**, `## 이 분석은 주문을 내지 않습니다` 라고
+ *    적어 놓고 바로 다음 줄에서 `stop`·`target`·`entry` 를 **"더 중요하다"** 고 요구했다.
+ *    ⇒ 모델은 **시킨 대로 했을 뿐이다.** 결함은 모델이 아니라 지시문과 스키마에 있었다.
+ *
+ * ★ **이 재작성의 핵심은 프롬프트가 아니라 스키마다**(위 `REPORT_SCHEMA`).
+ *   칸이 있으면 모델은 채운다 — *"쓰지 마세요"* 라고 적어도 채운다. 칸을 없애야 안 쓴다.
+ *   프롬프트는 **그 계약을 설명하는 역할**이고, 둘이 어긋나면 모델은 칸을 따른다.
+ *
+ * ⚠️ **남긴 것**: 국면으로 설명하라 · 숫자를 인용하라 · 뭉뚱그리지 마라 · 지어내지 마라.
+ *    이것들은 *"무엇을 하라"* 가 아니라 ***"어떻게 써라"*** 라서 보고서에도 그대로 유효하다.
+ */
 const SYSTEM_PROMPT = [
-  '당신은 **퀀트 모멘텀 분석가**입니다. 이야기가 아니라 **가격·추세·상대강도·변동성**으로 판단합니다.',
+  '당신은 **포트폴리오 분석 보고서**를 쓰는 애널리스트입니다.',
+  '이야기가 아니라 **가격·추세·상대강도·변동성**으로 현황을 설명합니다.',
   '',
-  /**
-   * 🔴 **공격적 기조 · 퀀트 모멘텀 재구성** (2026-10-02 사용자 지시:
-   *    *"지금 퀀트 모먼트 분석가로서 제대로 매도 매수 제안도 안나오고 … 제한 걸지말고
-   *    냉철하게 공격적 포트폴리오 관점에서 구성해야해."*)
-   * 같은 날 현금 버퍼(15%)와 보유 방침 게이트를 **코드에서 제거**했다 — 프롬프트가
-   *    없는 한도를 말하면 모델이 스스로 제안을 깎는다(문서가 코드보다 오래 사는 그 병).
-   */
-  '## 운용 기조 — 공격적 (2026-10-02 사용자 결정)',
-  '- 🔴 인위적 한도로 **판단을 깎지 마십시오.** 한도는 포트폴리오 진단 기준선일 뿐입니다.',
-  '- 확신의 근거는 **숫자**입니다 — 추세·상대강도·손익비가 서면 **분명히 말하십시오.** 뉴스가 없어도 됩니다.',
-  '  "관망" 은 판단이 아니라 판단 회피입니다. 다만 숫자가 안 서면 빈 배열이 정답입니다.',
-  '- 공격적이란 위험을 **모르고** 가는 게 아니라 위험을 **정량화하고** 가는 것입니다 —',
-  '  그래서 `stop` 이 더 중요해집니다. 손절선 없는 공격은 공격이 아니라 도박입니다.',
-  '- 레버리지는 추세가 선 구간에서 허용됩니다. 횡보·고변동 구간에서는 일일 리밸런싱 감쇠가 복리로 깎습니다.',
+  '## 🔴 이 보고서는 행동을 지시하지 않습니다',
+  '- 당신의 산출물은 **현황 서술**입니다 — 지금 이 포트폴리오와 시장이 **어떤 상태인가**.',
+  '- **사라·팔라·들고 가라** 같은 행동 지시를 쓰지 마십시오. 매수·매도·비중 조절 권유도 쓰지 않습니다.',
+  '- **진입가·손절가·목표가·수량을 적지 마십시오.** 그런 칸은 이 보고서에 없습니다.',
+  '- 판단은 **읽는 사람이** 합니다. 당신은 그 판단에 필요한 **사실과 맥락**을 제공합니다.',
+  '⚠️ 상태를 정확히 쓰는 것과 행동을 권하는 것은 다릅니다:',
+  '   ✅ "20일선 아래, 60일선과 역배열. 지수 대비 20일 열위 −8.4%p."',
+  '   ❌ "약세이므로 비중 축소가 필요합니다." / "반등 시 매도 고려."',
   '',
-  '## 모멘텀 판단의 축 (이 순서로 보십시오)',
+  '## 서술의 축 (이 순서로 보십시오)',
   '1. **추세** — 종가 vs 20일선 vs 60일선. 정배열(종가>20>60)·역배열·엇갈림',
-  '2. **상대강도** — 같은 기간 지수 대비 초과인가 열위인가. 오르는 것 중에 고르고 내리는 것 중에 피합니다',
-  '3. **변동성** — volPct·atrPct. 기대수익이 같으면 변동성이 낮은 쪽이 낫습니다(같은 리스크로 더 담을 수 있습니다)',
+  '2. **상대강도** — 같은 기간 지수 대비 초과인가 열위인가',
+  '3. **변동성** — volPct·atrPct 가 어느 수준이고 그것이 무엇을 뜻하는가',
   '4. **위치** — 120일 고점 대비 어디인가, 20일 스윙 고저 안 어디인가',
-  '5. **국면 정합** — "## 시장 국면" 의 매크로 축(금리·신용·달러·시장폭)과 이 종목이 **같은 방향인가**',
+  '5. **국면 정합** — "## 시장 국면" 의 매크로 축(금리·신용·달러·시장폭)과 **같은 방향인가**',
   '',
   '🔴 **종목의 등락을 국면으로 먼저 설명하십시오.** "52주 신저가" 는 증상이지 원인이 아닙니다.',
   '   금리 상승기에 리츠·유틸·고배당이 함께 내리는 것은 **그 종목의 문제가 아닙니다** —',
-  '   그걸 "약세라 매도" 로 읽으면 국면이 바뀔 때 **가장 싼 자리에서 팔게 됩니다**(2026-10-02 실사고).',
-  '🔴 **사용자가 적립·보유를 정한 종목에 매도 의견을 내려면 근거가 "가격이 내렸다" 보다 강해야 합니다** —',
-  '   배당 삭감·신용등급 하락·사업 훼손처럼 **종목 자체의 변화**여야 합니다. 국면 역풍은 그 근거가 아닙니다.',
+  '   그 맥락을 빼고 "약세" 라고만 쓰면 읽는 사람이 원인을 오해합니다(2026-10-02 실사고).',
+  '🔴 레버리지 상품은 **횡보·고변동 구간에서 일일 리밸런싱 감쇠가 복리로 깎입니다** —',
+  '   그 구조적 사실은 상태 서술에 포함하십시오(행동 권유가 아니라 **성질**입니다).',
   '',
-  /**
-   * 🔴 길이는 **필드별 자수로** 묶는다 (2026-09-23 2차) — "전체 2,000토큰" 총량 지시는
-   *    flash 가 무시했다(dryRun: 출력이 정확히 캡 2,592 에 닿아 잘림 3/3). 반면 필드별
-   *    자수를 준 market_briefing 은 잘림 0 — **구체적 자수 지시만 먹힌다**는 방증.
-   *    자연 출력(6,905~9,762)이 예산(2,592)의 3배라 항목 수가 아니라 길이를 직접 묶어야 한다.
-   */
-  /**
-   * 🔴 국면은 **코드가 판정**해 프롬프트에 싣는다 (2026-09-23, regimeService) —
-   *    모델이 스스로 판정하게 하면 회차마다 흔들린다. ⚠️ 두 줄로 유지 — 길이 = 시간.
-   */
-  '"## 시장 국면" 절의 판정을 그대로 쓰라 — 다시 판정하지 마라.',
-  '"## 발동된 매뉴얼" 이 있으면 그 스텝 안에서만 판단하고, 티커는 "## 도구상자" 안에서만 고른다.',
-  '',
-  '⚠️ 길이 규칙 — 어기면 답이 잘려 **통째로 버려집니다**:',
+  '## 분량',
   '- marketView·momentumRead: 각 2문장 이내',
-  '- 종목별 rationale: 2문장 · evidence: **40자 이내 인용** 최대 2개 · risk: 1문장',
-  '- scenarioUp/scenarioDown: 각 1문장 · dataGaps: 항목당 15자 이내',
+  '- 종목별 rationale: 2문장 · evidence: **40자 이내 인용** 최대 2개',
+  '- trend·relative·volatility·risk·watchPoint: 각 1문장 · dataGaps: 항목당 15자 이내',
   '',
   '## 반드시 지킬 것',
   '1. **제공된 데이터만 근거로 씁니다.** 재무제표·DCF·PER/PBR·기관 수급·내부자 거래·옵션 IV 는',
   '   이 시스템에 **없습니다**. 그런 근거를 지어내지 마세요.',
   '2. 쓰지 못한 분석 축은 `dataGaps` 에 **솔직히 적습니다**("5년 재무 미제공" 처럼).',
-  '3. 모든 판단에 `evidence` 를 답니다 — **제공된 숫자를 그대로 인용**합니다(예: "당일 +4.63%",',
-  '   "평단 $71.78 대비 현재 $92.21", "20일선 상회"). 근거 없는 수치는 쓰지 않습니다.',
-  '4. **뭉뚱그리지 않습니다.** "관망 필요", "시장 상황에 따라" 같은 말은 답이 아닙니다.',
-  '   판단이 안 서면 stance=HOLD 에 confidence=LOW 로 **그렇게 말합니다.**',
+  '3. 모든 서술에 `evidence` 를 답니다 — **제공된 숫자를 그대로 인용**합니다',
+  '   (예: "당일 +4.63%", "현재가 141.37 · 20일선 142.30"). 근거 없는 수치는 쓰지 않습니다.',
+  '4. **뭉뚱그리지 않습니다.** "관망 필요", "시장 상황에 따라" 같은 말은 서술이 아닙니다.',
+  '   데이터가 모자라면 **무엇이 없는지** 적고 `dataGaps` 에 넣습니다.',
   '5. 감정적 표현·과장을 쓰지 않습니다. 한국어로 씁니다.',
   // 🔴 12:15 실검수: 우리 데이터에 없는 "달러인덱스" 가 marketView 에 등장했다(출처 불투명)
   '6. 웹검색에서 온 사실은 **"(검색)"** 을 붙여 구분합니다. 검색 결과에도 없는 지표(달러인덱스 등)는',
   '   언급하지 않습니다 — 어디서도 받지 않은 값은 존재하지 않는 값입니다.',
   '',
   // 🔴 **두 배열의 역할을 말로 갈라 준다** (2026-10-02 실측) — `holdings` 를 신설하자
-  //    모델이 `positions` 를 **통째로 비웠다**(3회 연속 후보 0건·제안 0건).
+  //    모델이 `positions` 를 **통째로 비웠다**(3회 연속 후보 0건).
   //    자리를 나눠 주고 **무엇을 넣을지 안 말하면** 한쪽만 채운다.
-  '## holdings (보유 종목 판단) — **지금 들고 있는 것**',
-  '🔴 **보유 종목은 하나도 빠뜨리지 말고 전부 판단하십시오.**',
-  '   빠진 종목은 "판단 보류" 가 아니라 **방치**입니다 — 사용자는 그 종목을 들고 있습니다.',
-  '   데이터가 모자라면 stance=HOLD · confidence=LOW 로 **그렇게 적고**, dataGaps 에 무엇이 없는지 쓰십시오.',
+  '## holdings (보유 종목 현황) — **지금 들고 있는 것**',
+  '🔴 **보유 종목은 하나도 빠뜨리지 말고 전부 서술하십시오.**',
+  '   비중이 작아도, 변화가 없어도 **그 사실 자체가 보고 대상**입니다.',
+  '   데이터가 모자라면 **그렇게 적고** dataGaps 에 무엇이 없는지 쓰십시오.',
   '',
-  '## positions (매수 후보 판단) — **아직 안 들고 있는 것**',
-  '- 위 「매수 후보 기술 위치」·「도구상자」에서 **지금 살 만한 것**을 골라 같은 형식으로 판단합니다.',
+  '## positions (관심 종목 현황) — **아직 안 들고 있는 것**',
+  '- 위 「기술 위치」·「도구상자」에서 **지금 눈여겨볼 만한 것**을 골라 같은 형식으로 서술합니다.',
   '- 보유 종목을 여기 넣지 마십시오 — 그건 `holdings` 자리입니다.',
-  '- 살 만한 것이 없으면 **빈 배열**이 정답입니다. 억지로 채우지 마십시오.',
+  '- 특별히 적을 것이 없으면 **빈 배열**이 정답입니다. 억지로 채우지 마십시오.',
+  '⚠️ 여기 담긴다고 "사라" 는 뜻이 아닙니다 — **지금 어떤 상태인지 보여주는 것**입니다.',
   '',
-  /**
-   * 🔴 **2026-10-12 — `proposals` 지시를 들어냈다.**
-   *    주문 집행이 사라져 **수량·지정가를 받을 곳이 없다.** 지시를 남겨 두면 모델이
-   *    매 회차 그 칸을 채우고 그게 **통째로 버려진다**(받아 놓고 안 쓰는 자리).
-   *    ⚠️ 백테스트 경로만 `reportSchemaFor(…, { trades: true })` 로 모의 거래 칸을 연다.
-   */
-  '## 이 분석은 주문을 내지 않습니다',
-  '- 당신의 산출물은 **판단**입니다 — 종목별 stance 와 근거, 그리고 가격 레벨.',
-  '- 수량·주문가를 적지 마십시오. 사람이 보고 **직접** 증권사에서 주문합니다.',
-  '- 그래서 `stop`·`target`·`entry` 가 **더** 중요합니다 — 사람이 그 숫자로 주문을 겁니다.',
-  '',
-  '## 손익비 · 손절 · 시나리오 (2026-09-21 추가)',
-  '각 종목 판단에 아래를 **숫자로** 답하세요. 없는 데이터를 지어내지 말고, 제공된',
-  '현재가·20/60일선·최근 20일 스윙 고저·일간 변동성(volPct)·하루 폭(atrPct) 안에서 정하세요.',
-  '- `entry`  지금 들어간다면(또는 이미 보유면 현재가 기준) 기준이 되는 가격',
-  '- `stop`   🔴 **여기가 깨지면 판단이 틀린 것**이라는 가격. 스윙 저점·이동평균처럼',
-  '           **차트에 근거가 있는 자리**로 잡으세요. "10% 아래" 같은 임의값은 쓰지 마세요.',
-  '- `target` 도달하면 판단이 맞은 것이라는 가격(스윙 고점·전고점 등)',
-  '- `scenarioUp` / `scenarioDown` 각각 **한 문장** — 그 방향이 될 때 먼저 보이는 신호',
-  '⚠️ **손익비와 수량은 계산하지 마세요.** 시스템이 계산합니다 — 당신은 레벨만 정합니다.',
-  '⚠️ 매도 판단이면 `stop` 은 현재가 **위**입니다(반등하면 판단이 틀린 것).',
-  // 🔴 2026-10-02: 아래 두 줄이 없어서 QLD 목표 97 < 현재가 97.6 (이미 달성된 목표)이 나왔다.
-  //    ⚠️ 프롬프트는 **보조**다 — 코드(`computeTrade`)가 현재가와 대조해 실제로 잡는다.
-  '🔴 `target` 은 **현재가를 넘어선 자리**여야 합니다 — 매수면 현재가 **위**, 매도면 **아래**.',
-  '   현재가 이미 지난 목표는 "지금 청산하라" 와 같은 말이라 판단으로서 의미가 없습니다.',
-  '🔴 `entry` 가 현재가와 다르면 **왜 그 가격인지** `rationale` 에 한 마디 적으세요',
-  '   (예: "20일선 92.7 까지 눌리면" / "저항 29.6 을 넘으면"). 안 적으면 사용자는',
-  '   그 숫자가 추격매수인지 지정가 대기인지 알 수 없습니다.',
-  '🔴 값을 정할 수 없으면 그 칸을 **비우십시오 — `0` 을 쓰지 마세요.** `0` 은',
-  '   "가격이 0원" 이라는 뜻이고, 화면에 `진입 0.00` 으로 떠서 사용자를 혼란스럽게 합니다.',
+  '## watchPoint — 무엇이 바뀌면 이 서술이 달라지는가',
+  '각 종목에 **한 문장**으로 적습니다. 행동 조건이 아니라 **관측 조건**입니다.',
+  '   ✅ "20일선(142.30)을 회복하면 역배열이 풀린다"',
+  '   ❌ "20일선을 회복하면 매수 시점이다"',
 ].join('\n');
 
 /**
@@ -471,57 +461,55 @@ function asPosition(o) {
   const looksLikeOrder = ['quantity', 'qty', 'shares'].some((k) => Number(o[k]) > 0)
     && ['price', 'limitPrice'].some((k) => Number(o[k]) > 0);
   if (looksLikeOrder) return null;
-  let stance = null;
   let symbol = null;
-  for (const v of Object.values(o)) {
-    if (typeof v !== 'string') continue;
-    const up = v.trim().toUpperCase();
-    if (!stance && STANCES.has(up)) stance = up;
-  }
   symbol = pickString(o, ['symbol', 'ticker', 'code', 'stock']);
   /**
-   * 🔴 **버려지는 경로는 조용하면 안 된다** (2026-09-29, pm2 지적).
+   * 🔴 **유효한 항목인가를 무엇으로 가르는가** — 2026-10-14 에 축이 바뀌었다.
    *
-   * 종전에는 `if (!stance) return null` 로 **말없이** 버렸다. 그래서 09-28 12:17 의
-   * `positions 0` 을 두고 **하루를 추론에 썼다** — `positions_short got:0` 은 *실패했다*는
-   * 것만 알려주고 **모델이 실제로 뭐라 답했는지**는 안 알려줬다. 원문이 있었으면 한 줄로 끝났다.
+   * 종전에는 `stance`(BUY/SELL/HOLD)가 있어야 판단으로 쳤다. 그 칸이 **스키마에서 사라졌으므로**
+   * 이제는 `trend`(추세 서술)가 그 자리다 — 스키마 required 이고, **없으면 서술이 아니다.**
    *
-   * ⚠️ **종목처럼 생긴 것만** 짖는다(`symbol` 이 있는데 stance 를 못 읽은 경우). `asPosition`
-   *    은 브리핑 파싱 중 온갖 객체에 불리므로, 조건을 안 좁히면 warn 이 소음이 되어
-   *    **읽히지 않는 로그**가 된다(그건 침묵과 같다).
+   * ⚠️ 아래 규율은 **그대로 유지한다**(2026-09-29 pm2 지적):
+   *    **버려지는 경로는 조용하면 안 된다.** 종전에 `return null` 로 말없이 버려서
+   *    09-28 의 `positions 0` 을 두고 하루를 추론에 썼다 — 원문이 있었으면 한 줄로 끝났다.
+   * ⚠️ **종목처럼 생긴 것만** 짖는다 — `asPosition` 은 온갖 객체에 불리므로 조건을 안 좁히면
+   *    warn 이 소음이 되고, 소음이 되면 침묵과 같아진다.
    * ★ 관대한 파서로 흡수하지 않는 이유: **흡수하면 계약 위반이 관측 불가가 된다.**
-   *   정본은 스키마 enum 하나이고, 이탈은 조용히 통과시키는 대신 **보이게** 만든다.
+   * 🔴 **옛 모양(`stance`)으로 답하면 그것도 계약 위반이다** — 조용히 받아 주면
+   *    프롬프트·스키마를 고친 의미가 없어지고, 행동 지시가 다시 화면에 뜬다.
    */
-  if (!stance) {
-    /**
-     * ⚠️ **`symbol` 만으로 좁히면 절반이 안 보인다** (pm2 지적) — 종목명이 아예 안 온 이탈이
-     *    `got:0` 의 그럴듯한 모양 중 하나인데, 그게 통째로 침묵하면 이 warn 의 목적이 반만 선다.
-     *    ⇒ **stance 자리에 뭔가 오긴 했는데 enum 밖인 경우**도 짖는다(그게 곧 계약 위반이다).
-     *    여전히 아무 관련 키도 없는 객체는 조용하다 — 그건 이탈이 아니라 **그냥 다른 객체**다.
-     */
-    const rawStance = ['stance', 'rating', 'judgment', 'action', '판단'].find((k) => typeof o[k] === 'string');
-    if (symbol || rawStance) {
-      logWarn('analyst.stance_unrecognized', {
+  /**
+   * ⚠️ **별칭은 "추세를 뜻하는 다른 이름" 만** 넣는다 — `action`·`stance` 처럼 **행동을 뜻하는 키**는
+   *    여기 넣지 않는다. 넣으면 모델이 옛 계약으로 답해도 조용히 통과해, 프롬프트·스키마를
+   *    고친 의미가 사라진다(그건 아래 `legacyStanceKey` 로 **짖어야** 하는 쪽이다).
+   */
+  const trendText = pickString(o, ['trend', 'trendRead', 'trendNote', 'priceTrend', '추세', '추세판단']);
+  if (!trendText) {
+    const legacyStance = ['stance', 'rating', 'judgment', 'action', '판단'].find((k) => typeof o[k] === 'string');
+    if (symbol || legacyStance) {
+      logWarn('analyst.position_shape_unrecognized', {
         symbol: symbol || null,
-        rawStanceKey: rawStance || null,
+        legacyStanceKey: legacyStance || null,   // 옛 계약으로 답했다는 직접 증거
         received: JSON.stringify(o).slice(0, 240),
-        expected: [...STANCES].join('|'),
+        expected: 'trend(필수) · relative · volatility · rationale · evidence · risk · watchPoint',
       });
     }
     return null;
   }
-  const num = (names) => {
-    for (const n of names) { const v = Number(o?.[n]); if (Number.isFinite(v) && v > 0) return v; }
-    return null;
-  };
+  /**
+   * 🔴 **2026-10-14 — 보고서 모양으로 바꿨다** (사용자 지시: 행동이 아니라 현황).
+   *    `stance`·`entry`·`stop`·`target` 은 **스키마에서 사라졌다**. 모델이 옛 모양으로
+   *    답해도 **여기서 버린다** — 받아 두면 아래 소비 경로가 되살아나고, 그러면
+   *    *"쓰지 말라"* 고 적어 둔 것이 화면에 다시 뜬다.
+   * ⚠️ `trend` 는 필수다(스키마 required) — 없으면 서술이 아니라 빈 줄이 된다.
+   *    옛 응답 호환으로 `rationale` 을 끌어다 쓰지 **않는다**: 그러면 둘이 같은 말을 한다.
+   */
   return {
     symbol: symbol || '(종목 미상)',
-    stance,
-    entry: num(['entry', 'entryPrice', 'basePrice']),
-    stop: num(['stop', 'stopLoss', 'stopPrice']),
-    target: num(['target', 'targetPrice', 'takeProfit']),
-    scenarioUp: pickString(o, ['scenarioUp', 'upside', 'bullCase']),
-    scenarioDown: pickString(o, ['scenarioDown', 'downside', 'bearCase']),
+    trend: trendText,
+    relative: pickString(o, ['relative', 'relativeStrength', '상대강도']),
+    volatility: pickString(o, ['volatility', 'vol', '변동성']),
+    watchPoint: pickString(o, ['watchPoint', 'watch', 'trigger', '관찰']),
     confidence: (pickString(o, ['confidence', 'stanceConfidence', 'conviction']) || 'LOW').toUpperCase(),
     rationale: pickString(o, ['rationale', 'reason', 'why', 'comment']) || longestProse(o, new Set(['symbol'])),
     evidence: Array.isArray(o.evidence) ? o.evidence : [],
@@ -610,12 +598,13 @@ function dedupePositions(positions) {
     }
     const idx = indexBySymbol.get(p.symbol);
     const original = kept[idx];
-    logWarn('analyst.duplicate_stance', { symbol: p.symbol, kept: original.stance, dropped: p.stance });
-    if (p.stance !== original.stance && !original._conflicted) {
+    // 🔴 2026-10-14: 판정 축이 `stance` 에서 `trend`(관측 서술)로 바뀌었다
+    logWarn('analyst.duplicate_position', { symbol: p.symbol, kept: original.trend, dropped: p.trend });
+    if (p.trend !== original.trend && !original._conflicted) {
       kept[idx] = {
         ...original,
         confidence: 'LOW',
-        rationale: `⚠️ 모델이 이 종목에 상반된 판단을 함께 냈다(다른 하나: ${p.stance}). 확신도를 낮춤. ${original.rationale || ''}`.trim(),
+        rationale: `⚠️ 모델이 이 종목에 상반된 서술을 함께 냈다(다른 하나: ${p.trend}). 확신도를 낮춤. ${original.rationale || ''}`.trim(),
         _conflicted: true,
       };
     }
@@ -1128,32 +1117,15 @@ function capacityDetail(byCurrency) {
  *    그래서 문구를 "제안 불가" 가 아니라 "**신규 매수** 불가" 로 적는다.
  */
 /**
- * ⛔ **2026-10-13 — 라이브 호출부가 0이 됐다(죽은 코드).**
+ * ⛔ **`describeNoProposal` 은 2026-10-14 에 삭제됐다** (호출부 0 · 죽은 코드).
  *
- * 10-12 에 주문 집행을 걷어내며 라이브가 제안을 **묻지 않게** 되어, *"왜 0건인가"* 라는
- * 질문 자체가 사라졌다. 쓸모 있는 절반(현금 사실)은 `describeCashCapacity` 로 옮겼다.
- *
- * 🔴 **지우지 않고 표시만 한다** — 단위 테스트 2건이 아직 이 함수를 직접 재고 있고,
- *    지우는 것은 별도 정리 작업이다(사용자 판단). **다만 다음 사람이 이 문구를 "지금
- *    사용자가 보는 것" 으로 오해하면 안 되므로** 여기 못박는다: **아무도 안 부른다.**
+ * *"왜 제안이 0건인가"* 를 설명하던 함수인데, 2026-10-12 에 주문 집행을 걷어내며
+ * 라이브가 제안을 **묻지 않게** 되어 그 질문 자체가 사라졌다.
+ * ⚠️ **쓸모 있던 절반은 `describeCashCapacity` 로 옮겼다**(바로 아래) — *"버퍼를 빼면
+ *    1주도 못 산다"* 는 직접 거래하는 사람에게 그대로 사실로 유용하다.
+ * ⚠️ *"매수 여력은 **매수에만** 걸린다(현금 0 이어도 매도는 된다)"* 는 규율도
+ *    새 함수 쪽 테스트로 **옮겨서 살렸다** — 함수가 죽어도 규율은 살아 있다.
  */
-function describeNoProposal(reason, capacity, { proposed = 0, rejected = [] } = {}) {
-  const detail = capacityDetail(capacity?.byCurrency);
-  switch (reason) {
-    case 'no_buying_capacity':
-      return `현금 부족 — 버퍼(평가액의 ${capacity.floorPct}%)를 빼면 신규 매수에 쓸 돈이 남지 않습니다`
-        + ` (${detail}). 가장 싼 보유 종목 1주도 살 수 없는 상태입니다.`;
-    case 'cash_unknown':
-      return `현금을 확인하지 못했습니다 (${detail}) — 매수 수량의 근거가 없어 제안을 만들 수 없습니다.`;
-    case 'all_rejected': {
-      const why = [...new Set(rejected.map((r) => r?.error).filter(Boolean))].slice(0, 3);
-      return `모델이 ${proposed}건을 냈지만 **전부 거부**됐습니다${why.length ? ` — ${why.join(' / ')}` : ''}`;
-    }
-    case 'model_proposed_none':
-    default:
-      return `현금 여력은 있으나 (${detail}) 모델이 제안을 내지 않았습니다 — 판단이 "지금은 아니다" 였습니다.`;
-  }
-}
 
 /**
  * 💵 **매수 여력을 사실로만 말한다** (2026-10-13 신설).
@@ -1801,7 +1773,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
      *    구조화 필드(positions)까지 비우는 쪽으로 읽힌다(F2).
      */
     mid: '**장중 브리핑**이다. 개장 이후 흐름이 **개장 때 본 그림과 같은지 달라졌는지**를 먼저 말하라. '
-      + '달라졌으면 무엇이 바뀌었는지 짚고, 그대로면 그대로라고 분명히 말하라(그 종목 stance 는 HOLD). '
+      + '달라졌으면 무엇이 바뀌었는지 짚고, 그대로면 **그대로라고 분명히** 적어라(변화 없음도 보고 대상이다). '
       + '**바뀐 게 없으면 서술을 억지로 늘리지 마라** — 단 이것은 marketView·momentumRead 에만 해당하고, '
       + '`positions` 는 변화가 없어도 **보유 종목마다 항상 채운다**(변화 없음도 판단이다).',
     close: '**마감 브리핑**이다. 오늘 결과를 정리하고, **다음 세션까지 무엇을 들고 갈지**를 말하라. '
@@ -2082,7 +2054,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       '',
       '🔴 이 종목들은 **보유가 아니다.** 수량·평단·평가손익이 없으니 그걸 근거로 쓰지 마세요.',
       '물을 것은 **"지금 되살(신규) 진입 자리인가"** 이고, 답은 `positions` 에 담되',
-      '`stance` 는 `BUY`(지금 산다) 또는 `HOLD`(아직 아니다) 만 씁니다 — **`SELL` 은 쓸 수 없습니다**(없는 걸 팔 수 없다).',
+      '⚠️ 여기는 **안 들고 있는 종목**입니다 — "지금 어떤 상태인가" 만 적고, 사고파는 말은 쓰지 않습니다.',
       '⚠️ **한 번에 다 사는 것을 전제하지 마세요.** 분할이면 `entry` 에 **1차 진입가**를 쓰고',
       '   `rationale` 에 나머지 회차 조건을 한 문장으로 적으세요(예: "1차 92, 89 이탈 없이 반등 확인 후 2차").',
       '⚠️ 되살 이유가 **"전에 들고 있었으니까" 가 되면 안 됩니다** — 판 이유가 해소됐는지로 판단하세요.',
@@ -2395,8 +2367,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
           '## 🔴 직전 답변이 규격에 안 맞았습니다 — 다시 답하세요',
           `보유 종목 **${heldSymbols.length}개 전부**에 대해 판단이 필요한데 ${missing.join(', ')} 이(가) 빠졌습니다.`,
           '줄글 하나로 묶지 말고, **종목마다 한 건씩** 아래 항목을 채운 객체를 `positions` 배열에 넣으세요.',
-          '`symbol`(티커) · `stance`(BUY|SELL|HOLD) · `confidence`(HIGH|MEDIUM|LOW) · `rationale` · `risk`',
-          '판단이 "그대로 보유" 여도 `stance: "HOLD"` 로 **명시**하세요. 빠뜨리지 마세요.',
+          '`symbol`(티커) · `trend`(추세 1문장) · `rationale` · `evidence` · `risk`',
+          '변화가 없어도 **"그대로다" 라고 적으세요** — 빠뜨리지 마세요. 변화 없음도 보고 대상입니다.',
         ].join('\n'),
         // 🔴 **보유 전용 자리**를 가진 스키마 — 후보와 경쟁시키지 않는다(위 reportSchemaFor 참조)
         schema: reportSchemaFor(items.map((h) => h.symbol)),
@@ -2425,7 +2397,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       if (stillMissing.length) {
         logWarn('analyst.positions_filled_by_code', { symbols: stillMissing, after: 'retry' });
         const filler = stillMissing.map((sym) => ({
-          symbol: sym, stance: 'HOLD', confidence: 'LOW',
+          symbol: sym, trend: '', confidence: 'LOW',
           // 🔴 **코드가 채운 자리**라는 표식 — 아래 누락 경고가 이걸 보고 **여전히 짖는다**.
           //    채웠다고 경고까지 사라지면 "판단을 받았다" 와 "자리만 채웠다" 가 같아진다.
           _codeFilled: true,
@@ -2667,7 +2639,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     guards: {
       priceOutliers: (report.positions || []).filter((p) => p._priceFabricated).length,
       subjectDrift: (report.positions || []).filter((p) => p._subjectDrift).length,
-      entryFilled: (report.positions || []).filter((p) => p._entryFromPrice).length,
+      // ⛔ `entryFilled` 제거(2026-10-14) — 진입 메우기 자체가 사라져 **항상 0** 이었다.
+      //    늘 0 인 계수는 "검사했는데 0" 과 "검사가 없음" 을 구분 못 하게 만든다.
     },
   };
   report.pipeline = pipeline;
@@ -2688,93 +2661,18 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
 
 
   /**
-   * 🔴 **산수는 코드가 한다.** 모델이 준 레벨로 손익비·수량을 여기서 계산해 붙인다.
-   *    ⚠️ 위험예산은 **사용자가 정한 비율**에서 나온다 — 내가 임의로 정하지 않는다.
-   *       설정이 없으면 계산을 **안 한다**(0 으로 두면 "위험 없음" 처럼 보인다).
+   * ⛔ **2026-10-14 — 손익비·수량 계산을 들어냈다** (사용자 지시: 보고서만 쓴다).
+   *
+   * 이 블록은 모델이 준 `entry`·`stop`·`target` 으로 `computeTrade()` 를 돌려
+   * 손익비(R:R)·리스크 비중·수수료 반영 수익을 계산해 `ps.trade` 에 붙였다.
+   * 그 세 칸이 **스키마에서 사라졌으므로**(위 `REPORT_SCHEMA`) 계산할 입력이 없다 —
+   * 남겨 두면 매 종목 `continue` 로 건너뛰는 **죽은 코드**가 된다.
+   *
+   * ⚠️ `computeTrade`·`riskPerTradePct` 설정은 **지우지 않았다** — 백테스트 경로가
+   *    여전히 쓰고, 되살릴 때 필요한 것은 코드가 아니라 **스키마의 칸**이다.
+   * ★ 되살리려면: 스키마에 entry/stop/target 을 넣고 → 이 블록을 git 이력에서 복원한다.
+   *   순서가 반대면 안 된다 — 칸 없이 계산기만 켜면 조용히 아무것도 안 한다.
    */
-  // (수수료는 프롬프트 생성 전에 이미 받아 뒀다 — 아래 feesPromise 참조)
-
-  const riskPct = Number(getDashboardSettings().riskPerTradePct);
-  const accountKrw = Number(summary?.value?.krw) || 0;
-  for (const ps of report.positions) {
-    /**
-     * 🔴 **진입만 비어 오는 반쪽을 메운다** (2026-10-02 라이브 실측).
-     *
-     * `QLD entry=null stop=92.70 target=103.72` — 손절·목표는 있는데 **진입이 없다.**
-     * 그러면 `computeTrade` 가 `진입가 없음` 으로 끝나 **손익비·수량이 통째로 안 나오고**,
-     * 화면엔 `손절 92.7 · 목표 103.72` 만 떠서 **무엇 대비 손절인지 알 수 없다.**
-     *
-     * ⚠️ 내가 프롬프트에 *"값을 못 정하면 비우십시오"* 를 넣은 **직후** 나왔다 —
-     *    모델이 그 지시를 **진입에도** 적용했다. ★**지시를 하나 넣으면 그게 어디까지
-     *    적용될지 본다** — 의도한 칸(0 대신 비우기)을 넘어 번졌다.
-     *
-     * ⇒ 진입이 비고 손절·목표 중 하나라도 있으면 **현재가를 진입으로** 쓴다.
-     *   지어내는 것이 아니다 — 프롬프트가 이미 *"이미 보유면 **현재가 기준**"* 이라 정의했고,
-     *   현재가는 **우리가 받은 사실**이다. 다만 **그렇게 했다는 표시를 남긴다.**
-     */
-    if (!ps.entry && (ps.stop || ps.target)) {
-      const held0 = items.find((h) => String(h.symbol).toUpperCase() === String(ps.symbol).toUpperCase());
-      const px0 = Number(held0?.lastPrice)
-        || Number(tech?.[String(ps.symbol).toUpperCase()]?.last) || Number(tech?.[ps.symbol]?.last);
-      if (px0 > 0) {
-        ps.entry = px0;
-        ps._entryFromPrice = true;
-        logWarn('analyst.entry_filled_from_price', { symbol: ps.symbol, price: px0 });
-      }
-    }
-    if (!ps.entry || !ps.stop) continue;
-    // ⚠️ 계좌는 원화, 종목은 달러일 수 있다 — 통화가 섞이면 수량이 엉뚱해진다.
-    //    보유 종목의 통화를 찾아 **같은 통화로** 예산을 환산한다.
-    const held = items.find((h) => String(h.symbol).toUpperCase() === String(ps.symbol).toUpperCase());
-    const fxRate = Number(fx?.rate) || 0;
-    let budget = null;
-    if (Number.isFinite(riskPct) && riskPct > 0 && accountKrw > 0) {
-      const krwBudget = accountKrw * (riskPct / 100);
-      budget = held?.currency === 'USD' ? (fxRate > 0 ? krwBudget / fxRate : null) : krwBudget;
-    }
-    /**
-     * ⚠️ **평단을 진입으로 쓰는 것** (2026-10-03 관측, 3회 중 1회).
-     *    `QLD entry=71.78` 은 **평단**이다(현재 98.13 · gap -27%). 이미 보유 중인데
-     *    *"평단에 다시 산다"* 는 제안이 아니고, 차트 근거도 없다 — 모델이 **익숙한 숫자**를
-     *    집은 것으로 보인다. ±50% 안이라 `entryFar` 에는 안 걸린다.
-     * 🔴 **로그만 남기고 rr 은 건드리지 않는다** — 평단 근처가 **정당한 지지선**일 수도
-     *    있어서 판정하면 오탐이 난다. 이 가드의 다른 처방들과 달리 **파괴적이지 않은 쪽**
-     *    (관측)으로만 둔다. 관측이 쌓이면 그때 판정을 붙인다.
-     * ⚠️ 평단과 현재가가 **가까우면 구분이 안 된다**(O: 평단 54.03 vs 현재 54.13) ⇒
-     *    둘이 10% 넘게 떨어져 있을 때만 본다.
-     */
-    if (held && Number(held.avgPrice) > 0 && Number(ps.entry) > 0) {
-      const avg = Number(held.avgPrice);
-      const px = Number(held.lastPrice);
-      const nearAvg = Math.abs(ps.entry - avg) / avg <= 0.01;
-      const farFromPx = px > 0 && Math.abs(avg - px) / px > 0.10;
-      if (nearAvg && farFromPx) {
-        logWarn('analyst.entry_equals_avg', {
-          symbol: ps.symbol, entry: ps.entry, avgPrice: avg, lastPrice: px,
-          note: '평단을 진입가로 썼다 — 차트 근거가 아닐 수 있다',
-        });
-      }
-    }
-    const calc = computeTrade({
-      side: ps.stance, entry: ps.entry, stop: ps.stop, target: ps.target, riskBudget: budget,
-      /**
-       * ⚠️ 현재가는 **보유면 lastPrice, 후보면 tech.last** 다. 한쪽만 보면
-       *    후보 종목이 통째로 미검사가 된다(UUP 가 정확히 그 경우였다).
-       */
-      last: Number(held?.lastPrice) || Number(tech?.[String(ps.symbol).toUpperCase()]?.last)
-        || Number(tech?.[ps.symbol]?.last) || null,
-      /**
-       * ⚠️ 통화가 아니라 **시장**으로 고른다(US/KR 요율이 다르다). 못 받았으면 안 넘긴다 — 0 으로 치지 않는다.
-       * 🔴 종전엔 `held?.currency === 'USD' ? 'US' : 'KR'` 이라 **미보유 후보가 전부 KR**
-       *    요율로 떨어졌다(실측: KR 0.015% vs US 0.1% = **6.7배**). 미국 후보의 손익비가
-       *    실제보다 좋게 나오던 자리다 — 바로 위 `last` 주석이 경고한 그 함정
-       *    ("보유면 lastPrice, 후보면 tech.last")을 costRate 는 적용받지 못했다.
-       *    ⇒ 보유 통화가 있으면 그것으로, 없으면 **심볼 모양**으로 판정(KR 은 6자리 숫자).
-       */
-      costRate: fees?.[marketOfSymbol(ps.symbol, held?.currency)] ?? undefined,
-    });
-    ps.trade = { ...calc, currency: held?.currency || null };
-  }
 
   // 🔴 웹검색 실패를 **코드가** dataGaps 에 적는다 — 모델에게 맡기면 빠뜨린다.
   //    "검사하지 않은 것" 이 "통과한 것" 으로 보이면 안 되는 그 규칙의 이 프로젝트 판본이다.
@@ -2863,10 +2761,11 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
    * ⚠️ 판정 장치 없이 사건(첫 자동 제안)을 기다릴 수는 없다 — **무엇을 기다리는지 모르게 된다.**
    *    ⇒ 판단 분포와 저확신 건수를 함께 낸다. `{HOLD:2}` 면 "살 게 없었다" 가 **줄에서 바로 읽힌다.**
    */
+  // 🔴 2026-10-14: BUY/SELL/HOLD 집계가 사라졌다 — 대신 **서술이 채워졌는지**를 센다
   const stances = {};
   let lowConfidence = 0;
   for (const pos of report.positions || []) {
-    const k = String(pos?.stance || 'UNKNOWN').toUpperCase();
+    const k = pos?.trend ? 'DESCRIBED' : 'EMPTY';
     stances[k] = (stances[k] || 0) + 1;
     if (String(pos?.confidence || '').toUpperCase() === 'LOW') lowConfidence += 1;
   }
@@ -3020,7 +2919,15 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
   const digest = crypto
     .createHash('sha1')
     .update(JSON.stringify({
-      p: (report.positions || []).map((x) => `${x.symbol}:${x.stance}:${x.confidence}`).sort(),
+      /**
+       * 🔴 **2026-10-14 — 내가 `stance` 를 빼면서 서술을 안 넣었다(그 자리의 실수).**
+       *    `symbol:confidence` 만 남으니 **추세 서술이 바뀌어도 같은 지문**이 되어
+       *    "새 회차인데 안 보냄" 이 된다 — 중복방지가 **진짜 변화를 삼키는** 쪽으로 망가진다.
+       *    ⇒ 판정축이 `stance` → `trend` 로 옮겨졌으니 **지문도 같이 옮긴다.**
+       * ⚠️ `rationale` 은 넣지 않는다 — 표현만 달라져도 매번 새 회차가 되어 소음이 된다.
+       *    `trend` 는 **상태 서술**이라 상태가 같으면 대체로 같은 문장이 온다.
+       */
+      p: (report.positions || []).map((x) => `${x.symbol}:${x.trend || ''}:${x.confidence}`).sort(),
       c: created.map((x) => `${x.symbol}:${x.side}:${x.quantity}`).sort(),
       b: briefKey,
     }))
@@ -3058,7 +2965,7 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     if (report.marketView) proseLines.push('', report.marketView);
     if (report.momentumRead) proseLines.push('', `[모멘텀] ${report.momentumRead}`);
     for (const ps of report.positions || []) {
-      proseLines.push('', `· ${ps.symbol} ${ps.stance}/${ps.confidence} — ${ps.rationale}`);
+      proseLines.push('', `· ${ps.symbol} — ${ps.rationale}`);
     }
     const lines = [];
     /**
@@ -3079,22 +2986,21 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     if ((report.positions || []).length) {
       lines.push('', '━━━ 종목별 근거 ━━━');
       for (const ps of report.positions) {
-        const t = ps.trade || {};
-        const n = (v, d = 2) => (Number.isFinite(Number(v)) ? Number(v).toFixed(d) : null);
-        lines.push('', `▸ ${ps.symbol} — ${ps.stance}/${ps.confidence}`);
-        const lv = [
-          n(ps.entry) && `진입 ${n(ps.entry)}`,
-          n(ps.stop) && `손절 ${n(ps.stop)}`,
-          n(ps.target) && `목표 ${n(ps.target)}`,
-          n(t.rr) && `R:R ${n(t.rr)}${n(t.rrAfterFee) ? `(수수료후 ${n(t.rrAfterFee)})` : ''}`,
-          n(t.riskPct) && `리스크 ${n(t.riskPct, 1)}%`,
-        ].filter(Boolean);
-        if (lv.length) lines.push(`  ${lv.join(' · ')}`);
+        /**
+         * 🔴 **2026-10-14 — 진입·손절·목표·R:R·리스크% 를 들어냈다** (사용자 지시).
+         *    그 숫자들은 **주문을 걸라는 말**이고, 이 제품은 보고서다. 스키마에서도 칸이 사라졌다.
+         * ⚠️ 대신 **관측 서술**을 싣는다 — 추세·상대강도·변동성은 "지금 어떤 상태인가" 이고,
+         *    사용자가 판단하는 데 필요한 **사실**이다.
+         */
+        lines.push('', `▸ ${ps.symbol}`);
+        for (const [label, v] of [['추세', ps.trend], ['상대강도', ps.relative], ['변동성', ps.volatility]]) {
+          if (v) lines.push(`  ${label}: ${v}`);
+        }
         const ev = (ps.evidence || []).filter(Boolean);
         if (ev.length) lines.push(`  근거: ${ev.join(' · ')}`);
         if (ps.risk) lines.push(`  리스크: ${ps.risk}`);
-        if (ps.scenarioUp) lines.push(`  ↑ ${ps.scenarioUp}`);
-        if (ps.scenarioDown) lines.push(`  ↓ ${ps.scenarioDown}`);
+        // ⚠️ 관측 조건이다 — "무엇이 바뀌면 이 서술이 달라지는가"(행동 조건이 아니다)
+        if (ps.watchPoint) lines.push(`  관찰: ${ps.watchPoint}`);
       }
     }
     /**
@@ -3147,10 +3053,16 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
      * ★ *"코드를 고칠 때 그것을 설명하는 문장이 함께 거짓이 되지 않았는지 본다"*(2026-10-01)의 재현.
      *   그때는 로그 한 줄이었고 이번엔 **사용자 폰**이었다.
      *
-     * ⚠️ 대신 **현금 사실은 남긴다** — 직접 거래하는 사람에게 *"1주도 못 산다"* 는 그대로 쓸모 있다.
+     * ⛔ **2026-10-14 — 현금 줄도 들어냈다** (사용자 지시).
+     *    10-13 에 나는 *"버퍼를 빼면 1주도 못 산다는 사실은 직접 거래하는 사람에게 유용하다"* 며
+     *    `💵 신규 매수 여력 없음 …` 을 **일부러 남겼다.** 그 판단이 틀렸다 —
+     *    **"매수 여력" 은 살 것을 전제한 개념**이고, 보고서에는 자리가 없다.
+     *    사용자: *"신규 매수 여력 없음 저거도 왜 나오는거야? … 보고서만 작성하라니까"*
+     * ⚠️ **현금 비중 자체는 사라지지 않는다** — 포트폴리오 화면의 요약 칸과
+     *    기준선 판정(`portfolioRules`)에 **숫자로** 남는다. 브리핑에서 빠질 뿐이다.
+     * ⚠️ `describeCashCapacity` 는 **지우지 않는다** — 그 함수의 테스트가 지키는 규율
+     *    (*"매수 여력은 매수에만 걸린다"*)은 되살릴 때 여전히 필요하다.
      */
-    const cashLine = describeCashCapacity(capacity);
-    if (cashLine) lines.push('', cashLine);
     /**
      * 🔴 **검색 품질 저하를 사용자가 보는 곳에도 코드로 적는다** (2026-09-28, pm1 지시).
      *    `web.degraded` 는 지금까지 **LLM 프롬프트에만**(1137행) 실렸다 — 모델이 그 귀띔을
@@ -3184,7 +3096,7 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
    */
   const title = report.marketView
     || (report.positions.length
-      ? report.positions.map((p) => `${p.symbol} ${p.stance}`).join(' · ')
+      ? report.positions.map((p) => p.symbol).join(' · ')
       : report._unreadable ? '⚠️ 모델 응답을 읽지 못했습니다' : '(판단 없음)');
 
   activity.record('analysis', title, {
@@ -3352,6 +3264,6 @@ module.exports = {
   analyze, saveLast, readLast, _resetSendStateForTest, summarizeCandles, shapeReport,
   computeTrade, decideOnContext, inverseGate, sideGate, feeGate, marketOfSymbol, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
-  assessBuyingCapacity, capacityDetail, capacityBand, describeNoProposal, describeCashCapacity, watchMovesSection,
+  assessBuyingCapacity, capacityDetail, capacityBand, describeCashCapacity, watchMovesSection,
   TRADE_ARRAY_SCHEMA,
 };

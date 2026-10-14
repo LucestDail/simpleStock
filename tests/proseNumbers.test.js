@@ -84,12 +84,23 @@ test('재요청 문구에 **맞는 값**이 들어간다 — 거부만 하면 �
 });
 
 test('재요청까지 실패하면 코드가 **사실로** 교체한다', () => {
-  const p = P.replaceWithFacts({ symbol: 'QLD', scenarioUp: '20일선(약 806)' }, REF.QLD);
-  assert.match(p.scenarioUp, /92\.69/);
-  assert.match(p.scenarioDown, /90\.13/);
+  // ⚠️ 2026-10-14: 교체 대상이 새 칸(trend 등)으로 확장됐다. **값이 있던 칸만** 덮는다
+  const p = P.replaceWithFacts({ symbol: 'QLD', trend: '20일선(약 806) 회복' }, REF.QLD);
+  assert.match(p.trend, /92\.69/, '교체본에 우리가 준 20일선이 안 들어갔다');
   assert.strictEqual(p._priceFabricated, true, '무슨 일이 있었는지 표시가 남아야 한다');
   // ⚠️ 교체본에는 지어낸 값이 **한 글자도** 남으면 안 된다
   assert.ok(!/806/.test(JSON.stringify(p)));
+});
+
+/**
+ * 🔴 **빈 칸은 만들지 않는다** (2026-10-14). 값이 없던 칸까지 코드 문장으로 채우면
+ *    *"모델이 안 쓴 것"* 과 *"지어낸 것"* 이 구분되지 않는다.
+ */
+test('⚠️ 값이 없던 칸은 코드가 만들어내지 않는다', () => {
+  const p = P.replaceWithFacts({ symbol: 'QLD', trend: '20일선(약 806) 회복' }, REF.QLD);
+  for (const k of ['relative', 'volatility', 'watchPoint', 'scenarioUp', 'scenarioDown']) {
+    assert.ok(!p[k], `🔴 비어 있던 \`${k}\` 를 코드가 채웠다 — 안 쓴 것과 지어낸 것이 섞인다`);
+  }
 });
 
 test('🔴 자가 살아 있는지 — 허용 배수를 풀면 반드시 놓친다', () => {
@@ -250,9 +261,10 @@ test('🔴 두 배열의 역할이 **지시문과 스키마 둘 다**에 적혀 
   const fs = require('node:fs'); const path = require('node:path');
   const raw = fs.readFileSync(path.join(__dirname, '..', 'server', 'analystService.js'), 'utf8');
   // ⚠️ 여기서는 주석을 지우지 않는다 — **프롬프트 문자열 자체**를 보는 자다
-  assert.match(raw, /## holdings \(보유 종목 판단\)/, '지시문이 holdings 를 설명하지 않는다');
-  assert.match(raw, /## positions \(매수 후보 판단\)/, '지시문이 positions 를 설명하지 않는다');
-  assert.match(raw, /description: '매수 후보/, '스키마가 positions 를 설명하지 않는다');
+  // ⚠️ 2026-10-14: 제목이 '판단' → '현황' 으로 바뀌었다(보고서 제품으로 재정의)
+  assert.match(raw, /## holdings \(보유 종목 현황\)/, '지시문이 holdings 를 설명하지 않는다');
+  assert.match(raw, /## positions \(관심 종목 현황\)/, '지시문이 positions 를 설명하지 않는다');
+  assert.match(raw, /description: '관심 종목/, '스키마가 positions 를 설명하지 않는다');
   // 🔴 설명이 없으면 모델이 한쪽을 통째로 비운다(3회 연속 후보 0건으로 실측됐다)
 });
 

@@ -16,9 +16,14 @@ const HELD = [
   { symbol: 'RAM', name: 'RAM', quantity: 300, avgPrice: 19.08, lastPrice: 14.5, currency: 'USD', market: 'US', marketValue: 4350 },
   { symbol: 'O', name: '리얼티 인컴', quantity: 2, avgPrice: 54.03, lastPrice: 53.7, currency: 'USD', market: 'US', marketValue: 107 },
 ];
-const pos = (symbol, stance, extra = {}) => ({
-  symbol, stance, confidence: 'MEDIUM',
-  rationale: `${symbol} 판단`, evidence: [], risk: '위험',
+/**
+ * ⚠️ **2026-10-14 — 계약이 바뀌었다**: `stance`(BUY/SELL/HOLD) 가 사라지고 `trend`(추세 서술)가
+ *    유효 판정축이다. 두 번째 인자는 **그 서술**이다(옛 호출부가 'HOLD' 를 넘기면 그대로
+ *    서술 문자열이 되므로 파서는 통과시킨다 — 의미만 바뀐다).
+ */
+const pos = (symbol, trend, extra = {}) => ({
+  symbol, trend: trend || '20일선 부근 횡보', confidence: 'MEDIUM',
+  rationale: `${symbol} 현황`, evidence: [], risk: '위험',
   ...extra,
 });
 const BASE = { marketView: '시황.', momentumRead: '모멘텀.', dataGaps: [], proposals: [] };
@@ -109,7 +114,7 @@ test('S2 보유 누락 — 재시도 후에도 없으면 코드가 채우고 그
 
 test('S3 가격 지어내기 — 재요청이 고치면 채택된다', async () => {
   const bad = { ...BASE, holdings: [
-    pos('QLD', 'HOLD', { scenarioUp: '20일선(약 806) 회복 시 반등' }),  // 실제가의 8배
+    pos('QLD', '20일선(약 806) 회복 시 반등'),  // 실제가의 8배 — trend 칸에 지어낸 값
     pos('RAM', 'HOLD'), pos('O', 'HOLD'),
   ] };
   const good = { ...BASE, holdings: holdings3() };
@@ -122,14 +127,14 @@ test('S3 가격 지어내기 — 재요청이 고치면 채택된다', async () 
 
 test('S4 가격 지어내기 — 재요청도 틀리면 코드가 사실로 교체한다', async () => {
   const bad = { ...BASE, holdings: [
-    pos('QLD', 'HOLD', { scenarioUp: '목표 806 도달 시' }),
+    pos('QLD', '목표 806 도달 시'),
     pos('RAM', 'HOLD'), pos('O', 'HOLD'),
   ] };
   const { analyst } = fresh({ llmResponses: [bad, bad] });          // 두 번 다 틀림
   const r = await analyst.analyze(DASH(), { dryRun: true });
   const qld = r.positions.find((p) => p.symbol === 'QLD');
   assert.strictEqual(qld._priceFabricated, true, '교체 표식이 없다');
-  assert.ok(!/806/.test(qld.scenarioUp || ''), '지어낸 값이 화면으로 간다');
+  assert.ok(!/806/.test(qld.trend || ''), '지어낸 값이 화면으로 간다');
 });
 
 test('S5 주제 이탈 — QLD 가 SOXX 이야기만 하면 잡히고, 재요청 채택은 심볼 보존을 요구한다', async () => {
@@ -147,30 +152,31 @@ test('S5 주제 이탈 — QLD 가 SOXX 이야기만 하면 잡히고, 재요청
   assert.strictEqual(qld._subjectDrift, true, '이탈을 끝내 못 고쳤으면 그 사실이 표시돼야 한다');
 });
 
-test('S6 반쪽 레벨 — 진입만 비면 현재가로 메우고 표식이 남는다', async () => {
+/**
+ * ⛔ **S6·S7 은 2026-10-14 에 뒤집었다** (사용자 지시: 보고서만 쓴다).
+ *
+ * 두 테스트는 **진입가 메우기**와 **손익비 거부**를 쟀다 — 그 입력(`entry`·`stop`·`target`)이
+ * **스키마에서 사라졌고**, 계산 블록(88줄)도 함께 걷어냈다. 잴 대상이 없다.
+ *
+ * 🔴 **지우지 않고 뒤집는다**: 되살아나면 실패하게 한다. 그래야 다음 사람이
+ *    "왜 없지?" 하고 이 주석을 먼저 보게 된다.
+ * ⚠️ 되살리려면 **스키마에 칸을 먼저** 넣어야 한다 — 칸 없이 계산기만 켜면 조용히 아무것도 안 한다.
+ */
+test('🔴 S6-b 레벨 칸이 되살아나지 않는다 (주문이 없으면 진입·손절·목표도 없다)', async () => {
   const half = { ...BASE, holdings: [
-    pos('QLD', 'HOLD', { stop: 92.7, target: 103 }),               // entry 없음
-    pos('RAM', 'HOLD'), pos('O', 'HOLD'),
+    pos('QLD', '20일선 부근 횡보', { stop: 92.7, target: 103 }),   // 옛 모양으로 와도
+    pos('RAM', '20일선 부근 횡보'), pos('O', '20일선 부근 횡보'),
   ] };
   const { analyst } = fresh({ llmResponses: [half, half] });
   const r = await analyst.analyze(DASH(), { dryRun: true });
   const qld = r.positions.find((p) => p.symbol === 'QLD');
-  assert.ok(Number(qld.entry) > 0, '진입이 안 메워졌다 — 손익비·수량이 통째로 안 나온다');
-  assert.strictEqual(qld._entryFromPrice, true, '코드가 메운 표식이 없다');
+  assert.ok(qld, 'QLD 자리가 통째로 사라졌다');
+  // 🔴 모델이 옛 칸을 줘도 **파서가 버린다** — 받아 두면 화면에 다시 뜬다
+  assert.strictEqual(qld.entry ?? null, null, '🔴 진입가가 되살아났다');
+  assert.strictEqual(qld.stop ?? null, null, '🔴 손절가가 되살아났다');
+  assert.strictEqual(qld.target ?? null, null, '🔴 목표가가 되살아났다');
+  assert.strictEqual(qld.trade ?? null, null, '🔴 손익비 계산이 되살아났다');
 });
-
-test('S7 진입 괴리 — 다른 종목 가격대(+104%)면 손익비를 내지 않는다', async () => {
-  const far = { ...BASE, holdings: [
-    pos('RAM', 'HOLD', { entry: 29.59, stop: 28.2, target: 31.5 }), // RAM 현재가 14.5
-    pos('QLD', 'HOLD'), pos('O', 'HOLD'),
-  ] };
-  const { analyst } = fresh({ llmResponses: [far, far] });
-  const r = await analyst.analyze(DASH(), { dryRun: true });
-  const ram = r.positions.find((p) => p.symbol === 'RAM');
-  assert.strictEqual(ram.trade?.entryFar, true);
-  assert.strictEqual(ram.trade?.rr ?? null, null, '틀린 진입으로 낸 손익비가 사용자를 설득한다');
-});
-
 
 test('S9 🔭 파이프라인 집계가 **응답에 실린다** (report 에만 두면 조용히 빠진다)', async () => {
   const { analyst } = fresh({ llmResponses: [{ ...BASE, holdings: holdings3() }] });
