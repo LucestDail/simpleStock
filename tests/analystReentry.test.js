@@ -76,9 +76,11 @@ test('🔴 판 종목이 모멘텀으로 깨우면 **되살 자리**를 묻는�
   const { analyst, seen } = freshWithCapture();
   await analyst.analyze(HELD, { dryRun: true, useWebSearch: false, trigger: TRIG('RAM', 'reentry') });
   const p = seen.join('\n');
-  assert.match(p, /되살\/신규 진입 후보/, '🔴 판 종목이 프롬프트에 안 실린다 — 되살 자리를 못 본다');
+  // ⚠️ 2026-10-14: 절 제목이 `되살/신규 진입 후보` → `감시 중인 미보유 종목` 으로 바뀌었다
+  //    (보고서 제품에서 "진입 자리" 는 행동 프레임이다). **축은 그대로** — 판 종목이 실리는가.
+  assert.match(p, /감시 중인 미보유 종목/, '🔴 판 종목이 프롬프트에 안 실린다 — 상태를 못 본다');
   assert.match(p, /RAM/);
-  assert.match(p, /최근까지 보유했다 매도/);
+  assert.match(p, /최근까지 보유했다 처분/);
 });
 
 test('🔴 보유가 아니므로 **수량·평단을 근거로 쓰지 말라**고 명시한다', async () => {
@@ -90,18 +92,29 @@ test('🔴 보유가 아니므로 **수량·평단을 근거로 쓰지 말라**�
   assert.match(p, /사고파는 말은 쓰지 않습니다/, '🔴 안 들고 있는 종목에 행동 지시가 나갈 수 있다');
 });
 
-test('🔴 **분할 매수**를 물어본다 (사용자가 지적한 그 지점)', async () => {
+/**
+ * ⛔ **2026-10-14 — 뒤집었다** (지우지 않았다). 종전 단언: *"한 번에 다 사는 것을 전제하지
+ *    마세요"* · *"1차 진입가"* 가 프롬프트에 **있어야** 한다.
+ * 🔴 사용자 지시로 전제가 뒤집혔다 — **분할 매수는 행동**이고 이 제품은 보고서만 쓴다.
+ *    게다가 `entry` 칸이 스키마에서 사라져 *"1차 진입가를 쓰고"* 는 **없는 칸을 요구**했다.
+ * ★ **축을 옮긴다**: "분할을 묻는가" → "**행동을 묻지 않고 상태를 묻는가**". 양방향으로 잰다.
+ */
+test('🔴 미보유 종목에 **행동이 아니라 상태**를 묻는다 (사용자가 지적한 그 지점)', async () => {
   const { analyst, seen } = freshWithCapture();
   await analyst.analyze(HELD, { dryRun: true, useWebSearch: false, trigger: TRIG('RAM', 'reentry') });
   const p = seen.join('\n');
-  assert.match(p, /한 번에 다 사는 것을 전제하지 마세요/);
-  assert.match(p, /1차 진입가/);
+  assert.match(p, /지금 어떤 상태인가/, '🔴 상태를 묻지 않는다');
+  assert.match(p, /상태를 서술/, '🔴 서술하라는 지시가 없다');
+  for (const gone of [/한 번에 다 사는 것을 전제하지 마세요/, /1차 진입가/, /`entry`/]) {
+    assert.doesNotMatch(p, gone, `🔴 행동·없는 칸 지시가 되살아났다: ${gone}`);
+  }
 });
 
 test('⚠️ 되살 이유가 "전에 들고 있었으니까" 가 되지 않게 못박는다', async () => {
   const { analyst, seen } = freshWithCapture();
   await analyst.analyze(HELD, { dryRun: true, useWebSearch: false, trigger: TRIG('RAM', 'reentry') });
-  assert.match(seen.join('\n'), /판 이유가 해소됐는지로 판단/);
+  // ⚠️ 2026-10-14: "판단" 어휘를 서술로 바꿨다 — **축은 그대로**(과거 보유가 근거가 되면 안 된다)
+  assert.match(seen.join('\n'), /빠져나온 이유가 지금도/, '🔴 "전에 들고 있었으니까" 를 못 막는다');
 });
 
 /** 🔴 판별력 — **보유 중인 종목**은 되살 후보로 들어가면 안 된다(질문이 뒤바뀐다) */
@@ -198,8 +211,11 @@ test('🔴 네 축을 **각각** 대라고 못박는다 (재무·성장성·모�
   for (const axis of ['재무·회계', '성장성', '모멘텀', '증시 상황']) {
     assert.ok(p.includes(axis), `🔴 "${axis}" 축을 안 묻는다`);
   }
-  assert.match(p, /넷 중 하나라도 \*\*근거를 못 대면 `HOLD`\*\*/, '🔴 근거 없이도 BUY 가 나갈 수 있다');
-  assert.match(p, /모멘텀만으로 사지 마세요/);
+  // ⚠️ 2026-10-14: `HOLD`·`BUY` 가 스키마에서 사라져 그 문구는 **없는 칸을 가르치는 지시**가 됐다.
+  //    ★ 축은 그대로 — **근거 없이 통과하지 못하게** 한다. 처방만 "확인 못 함" 으로 바뀌었다.
+  assert.match(p, /근거를 못 대는 것은 \*\*"확인 못 함" 이라고 적으세요\*\*/, '🔴 근거 없이 빈칸으로 통과한다');
+  assert.match(p, /모멘텀 하나로 설명하지 마세요/);
+  assert.doesNotMatch(p, /`BUY` 를 내려면/, '🔴 없는 칸을 가르치는 지시가 되살아났다');
 });
 
 test('한국 6자리 코드는 야후 티커로 바꿔 평가한다', async () => {

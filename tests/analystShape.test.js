@@ -118,16 +118,32 @@ test('빈 응답·null 도 터지지 않는다', () => {
  * 🔴 라이브에서 실제로 나온 배열: QLD·RAM 이 각각 HOLD 와 SELL 로 **동시에** 나왔다
  *    (보유2+후보2=4건이 정상인데 6건). "팔라는 건가 들라는 건가" 를 사용자가 모른다.
  */
-test('같은 종목이 상반된 판단으로 중복되면 1건만 남고 확신도가 낮아진다', () => {
+/**
+ * ⛔ **2026-10-14 — 뒤집었다: 모순은 `rationale` 로 말하고 `confidence` 는 안 건드린다.**
+ *
+ * 종전엔 모순이 나오면 `confidence: 'LOW'` 로 덮었다. 그때 `confidence` 는 *"판단에 얼마나
+ * 확신하는가"* 였으니 말이 됐다. 2026-10-14 에 그 칸을 **근거 충실도**(코드가 센다)로
+ * 재정의하면서 **축이 달라졌고**, 덮어쓰면 *"모순이라 깎인 것"* 과 *"근거가 없어 낮은 것"* 이
+ * **같은 값**이 된다 — 이 저장소가 반복해 밟은 **「검사했는데 0 ≠ 애초에 없음」** 가족이다.
+ * ★ **내가 재정의하면서 만든 결함이고, 이 테스트 3건이 잡았다.**
+ *
+ * ⇒ 축을 가른다: 모순 = `rationale` 맨 앞 ⚠️(화면·폰에 보인다) · 근거 충실도 = 근거만.
+ * ★ **판별력을 위해 픽스처에 근거를 채웠다** — 서술 3축 + 인용 2개를 주면 HIGH 가 나오므로,
+ *   *"모순인데도 HIGH 가 유지되는가"* 로 **축이 실제로 분리됐는지**를 잰다.
+ *   (근거를 안 채우면 어차피 LOW 라 분리됐는지 **원리상 못 본다** — 공허한 통과였을 것이다.)
+ * ⚠️ 입력의 `confidence` 는 **일부러 주지 않는다** — 주면 "모델 값을 쓰지 않는다" 를 못 잰다.
+ */
+test('같은 종목이 상반된 서술로 중복되면 1건만 남고 rationale 이 그 사실을 말한다', () => {
+  const rich = (extra) => ({ relative: '지수 대비 강세', volatility: '일간 1.1%', evidence: ['20일선 55.0', '거래량 평균 대비 1.3배'], ...extra });
   const r = shapeReport({
     marketView: 'v',
     positions: [
-      { symbol: 'QLD', trend: '20일선 부근 횡보', confidence: 'MEDIUM', rationale: '20일선 위' },
-      { symbol: 'RAM', trend: '20일선 부근 횡보', confidence: 'MEDIUM', rationale: '손실 방어' },
-      { symbol: 'SOXX', trend: '20일선 위 정배열', confidence: 'MEDIUM', rationale: '신규 후보' },
-      { symbol: 'QQQ', trend: '20일선 위 정배열', confidence: 'MEDIUM', rationale: '신규 후보2' },
-      { symbol: 'RAM', trend: '20일선 아래 역배열', confidence: 'HIGH', rationale: '손절가 이탈' },
-      { symbol: 'QLD', trend: '20일선 아래 역배열', confidence: 'HIGH', rationale: '추세 이탈' },
+      { symbol: 'QLD', trend: '20일선 부근 횡보', ...rich({ rationale: '20일선 위' }) },
+      { symbol: 'RAM', trend: '20일선 부근 횡보', ...rich({ rationale: '손실 방어' }) },
+      { symbol: 'SOXX', trend: '20일선 위 정배열', ...rich({ rationale: '신규 후보' }) },
+      { symbol: 'QQQ', trend: '20일선 위 정배열', ...rich({ rationale: '신규 후보2' }) },
+      { symbol: 'RAM', trend: '20일선 아래 역배열', ...rich({ rationale: '기준선 이탈' }) },
+      { symbol: 'QLD', trend: '20일선 아래 역배열', ...rich({ rationale: '추세 이탈' }) },
     ],
   });
 
@@ -137,16 +153,16 @@ test('같은 종목이 상반된 판단으로 중복되면 1건만 남고 확신
   // 먼저 나온 서술을 남긴다 — 모델이 보유를 먼저 서술하는 순서를 존중
   assert.equal(bySymbol.QLD.trend, '20일선 부근 횡보');
   assert.equal(bySymbol.RAM.trend, '20일선 부근 횡보');
-  // 모순(횡보 vs 역배열)이므로 남긴 쪽의 확신도를 낮춘다
-  assert.equal(bySymbol.QLD.confidence, 'LOW');
-  assert.equal(bySymbol.RAM.confidence, 'LOW');
   assert.match(bySymbol.QLD.rationale, /상반된 서술/);
-  // ⚠️ **버려진 쪽이 무엇이었는지** 적어야 한다 — 그게 이 테스트의 핵심이다(축만 바뀌었다)
+  // ⚠️ **버려진 쪽이 무엇이었는지** 적어야 한다 — 그게 이 테스트의 핵심이다
   assert.match(bySymbol.QLD.rationale, /20일선 아래 역배열/);
   assert.match(bySymbol.QLD.rationale, /20일선 위/, '원래 rationale 을 지우지 않고 붙였다');
-  // 모순 없는 종목은 그대로
-  assert.equal(bySymbol.SOXX.confidence, 'MEDIUM');
-  assert.equal(bySymbol.QQQ.confidence, 'MEDIUM');
+  // 🔴 더 이상 낮추지 않으므로 그 문구도 거짓이 됐다 — 함께 지웠는지 본다
+  assert.doesNotMatch(bySymbol.QLD.rationale, /확신도를 낮춤/, '🔴 거짓이 된 문구가 남았다');
+
+  // ★ 축 분리의 증거 — 모순이어도 **근거가 충실하면 등급은 그대로**다
+  assert.equal(bySymbol.QLD.confidence, 'HIGH', '🔴 모순이 근거 충실도를 덮었다 — 두 뜻이 한 값에 섞인다');
+  assert.equal(bySymbol.SOXX.confidence, 'HIGH', '🔴 모순 없는 종목의 등급이 바뀌었다');
 });
 
 test('같은 종목·같은 stance 중복은 1건만 남고 확신도는 원래대로다(모순이 아니므로)', () => {
@@ -158,7 +174,8 @@ test('같은 종목·같은 stance 중복은 1건만 남고 확신도는 원래�
     ],
   });
   assert.equal(r.positions.length, 1);
-  assert.equal(r.positions[0].confidence, 'MEDIUM', '모순이 아닌데 확신도를 낮췄다');
+  // ⚠️ 2026-10-14: 입력 `confidence` 는 무시된다(코드가 센다) — 서술 1축뿐이라 LOW 가 **맞는 값**
+  assert.equal(r.positions[0].confidence, 'LOW', '🔴 모델이 준 값을 그대로 썼다 — 정본이 둘이 된다');
   assert.equal(r.positions[0].rationale, '20일선 위', '모순이 아닌데 경고 문구를 붙였다');
 });
 
@@ -172,8 +189,10 @@ test('중복 없는 정상 입력은 그대로다', () => {
     ],
   });
   assert.equal(r.positions.length, 2);
-  assert.equal(r.positions[0].confidence, 'MEDIUM');
-  assert.equal(r.positions[1].confidence, 'HIGH');
+  // ⚠️ 2026-10-14: 입력값(MEDIUM/HIGH)이 아니라 **계산값**이다 — 서술 1축 + 근거 0 ⇒ LOW
+  assert.equal(r.positions[0].confidence, 'LOW', '🔴 모델이 준 값을 그대로 썼다');
+  // ⚠️ SOXX 도 서술 1축 + 근거 0 이라 LOW — 입력의 'HIGH' 는 무시된다
+  assert.equal(r.positions[1].confidence, 'LOW', '🔴 모델이 준 값을 그대로 썼다');
   assert.equal(r.positions[0].rationale, '20일선 위');
 });
 

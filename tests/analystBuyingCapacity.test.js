@@ -258,25 +258,62 @@ test('🔴 현금을 못 읽은 회차: 0 이라 하지 않고 **"확인 못 함
 
 // ── ③ 모델에게 가는 프롬프트 — **지시가 아니라 사실** ─────────
 
-test('🔴 프롬프트가 "살 수 없다는 **사실**" 을 주고 매도·보유로 돌린다', async () => {
+/**
+ * ⛔ **2026-10-14 — 이 테스트를 뒤집었다** (지우지 않았다 — 왜 바뀌었는지가 남아야 한다).
+ *
+ * 종전 단언: 프롬프트에 *"신규 매수는 불가능합니다"* · *"**매도·보유 판단에 집중**하세요"* ·
+ * *"계좌의 상태"* 가 **있어야** 한다. 주문 집행이 있던 시절엔 **제약 사실**이라 옳았다.
+ *
+ * 🔴 **사용자 지시(2026-10-14)로 전제가 뒤집혔다**: *"우리 매수/매도 안하는데 왜 자꾸
+ *    매수매도 판단이 나왔습니다 저게 왜 나오는거야? **신규 매수 여력 없음** 저거도 왜
+ *    나오는거야? … 보고서만 작성하라니까"* ⇒ 그 세 줄은 모델에게 **매매 판단을 가르치는
+ *    지시**로만 남았고, 사용자가 폰에서 본 문구의 뿌리였다.
+ *
+ * ✅ **현금 금액 자체는 계속 준다** — 현금 비중은 포트폴리오 **상태**이고, 그게 없으면
+ *    모델이 0 으로 읽는다(`⚠️ 못 받은 통화는 "확인 못 함"` 규율과 같은 가족).
+ * ★ **축을 옮긴 것이지 검사를 없앤 것이 아니다**: 종전은 *"처방이 있는가"*, 지금은
+ *   *"사실은 있고 처방은 없는가"*. 둘 다 양방향으로 잰다.
+ */
+test('🔴 프롬프트가 현금 **사실**은 주고 매수 처방은 주지 않는다', async () => {
   reportToReturn = HOLD_ONLY;
   const analyst = fresh();
   await analyst.analyze(dash(LIVE_CASH));
   await new Promise((r) => setTimeout(r, 40));
 
-  assert.match(analystPrompt(), /신규 매수는 불가능합니다/, '🔴 모델이 제약을 모른 채 판단한다');
-  assert.match(analystPrompt(), /매도·보유 판단에 집중/, '🔴 남은 선택지를 안 알려줬다');
-  assert.match(analystPrompt(), /계좌의 상태/, '⚠️ 금지 지시로 읽히면 모델이 판단을 왜곡한다');
+  // ⓐ 사실은 반드시 있다 — 없으면 모델이 현금을 0 으로 읽는다
+  assert.match(analystPrompt(), /현금 잔고:/, '🔴 현금 사실이 사라졌다 — 모델이 0 으로 읽는다');
+  assert.match(analystPrompt(), /\$3\.76/, '🔴 금액이 안 실렸다');
+
+  // ⓑ 처방은 없다
+  for (const gone of [/신규 매수는 불가능합니다/, /매도·보유 판단에 집중/, /현금이 생기면/, /매수 가능\)/]) {
+    assert.doesNotMatch(analystPrompt(), gone, `🔴 매수 처방이 되살아났다: ${gone}`);
+  }
 });
 
-test('⚠️ 현금이 넉넉하면 프롬프트에 그 문구가 **안 나온다** (오탐 축)', async () => {
+test('⚠️ 현금이 넉넉해도 같은 모양이다 — 분기가 사라졌으므로 (오탐 축)', async () => {
   reportToReturn = HOLD_ONLY;
   const analyst = fresh();
   const cash = { usd: { raw: '$10,000', amount: 10000 }, krw: { raw: '0원', amount: 0 }, failed: [] };
   await analyst.analyze(dash(cash, [{ symbol: 'QLD', name: 'QLD', market: 'US', currency: 'USD', quantity: 10, lastPrice: 88.93, marketValue: 889 }]));
   await new Promise((r) => setTimeout(r, 40));
 
+  assert.match(analystPrompt(), /현금 잔고:/, '🔴 넉넉할 때 현금 사실이 빠졌다');
   assert.doesNotMatch(analystPrompt(), /신규 매수는 불가능합니다/, '🔴 살 수 있는데 못 산다고 모델에게 말했다');
+});
+
+/**
+ * 🔴 **"못 받았다" 는 계속 말한다** — 빈칸으로 두면 모델이 0 으로 읽는다.
+ *    처방을 걷으면서 **이 경고까지 함께 사라지는 것**이 이 수정의 위험 방향이었다.
+ */
+test('🔴 현금 조회가 실패하면 그 사실을 프롬프트가 말한다', async () => {
+  reportToReturn = HOLD_ONLY;
+  const analyst = fresh();
+  const cash = { usd: null, krw: { raw: '0원', amount: 0 }, failed: ['달러'] };
+  await analyst.analyze(dash(cash, [{ symbol: 'QLD', name: 'QLD', market: 'US', currency: 'USD', quantity: 10, lastPrice: 88.93, marketValue: 889 }]));
+  await new Promise((r) => setTimeout(r, 40));
+
+  assert.match(analystPrompt(), /현금을 못 받았습니다/, '🔴 조회 실패가 조용하다 — 모델이 0 으로 읽는다');
+  assert.match(analystPrompt(), /단정하지 마세요/, '🔴 근거 없이 단정하지 말라는 경고가 사라졌다');
 });
 
 // ── ④ 이유 문구 생성기 (갈래별) ──────────────────────────────
@@ -369,7 +406,15 @@ test('🔴 대신 **구간**이 실린다 (목적은 살아 있다)', async () =
   assert.equal(o.cashBandKrw, 'none');
   // 건수·성패는 남긴다(그건 금지 대상이 아니다)
   assert.equal(o.positions, 2);
-  assert.equal(o.proposed, 0);
+  /**
+   * ⛔ **2026-10-14 — `proposed` 를 뺐다.** 라이브 스키마에 `proposals` 칸이 없어
+   *    **구조적으로 항상 0** 이었다. 거짓 0 이 매 회차 찍히면 **진짜 이상값이 그 사이에 묻힌다**
+   *    (같은 로그의 `gapsMissing: -2` 를 한 번 지나친 것이 그 실례다).
+   * ★ 0 을 단언하는 테스트는 *"항상 0 인 것"* 과 *"0 이어야 하는 것"* 을 구분하지 못한다 —
+   *   그래서 **필드가 없는 것**을 단언한다(되살아나면 깨진다).
+   */
+  assert.ok(!('proposed' in o), '🔴 항상 0 인 거짓 필드가 되살아났다');
+  assert.ok(!('created' in o) && !('rejected' in o), '🔴 항상 0 인 거짓 필드가 되살아났다');
 });
 
 test('🔴 구간이 **갈린다** — ok / under_one_share / unknown', () => {

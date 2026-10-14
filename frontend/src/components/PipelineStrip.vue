@@ -61,7 +61,10 @@
     <div v-if="open === 'guard'" class="pstrip__detail">
       <p>가격 지어내기 교체 <b class="mono-num">{{ num(pipeline.guards?.priceOutliers) }}</b> ·
          주제 이탈 <b class="mono-num">{{ num(pipeline.guards?.subjectDrift) }}</b> ·
-         진입 자동채움 <b class="mono-num">{{ num(pipeline.guards?.entryFilled) }}</b></p>
+         <!-- ⛔ 2026-10-14: `진입 자동채움`(entryFilled) 제거 — 진입 메우기 자체가 사라져
+              서버가 그 값을 더 이상 내지 않는다. 남겨 두면 **항상 0 인 지표**가 "가드가
+              일하고 있다" 처럼 보인다. -->
+      </p>
       <p class="pstrip__mut">가드는 값을 지우지 않고 **사실로 교정**한다 — 발동은 결함이 아니라 잡힌 것이다.</p>
     </div>
   </section>

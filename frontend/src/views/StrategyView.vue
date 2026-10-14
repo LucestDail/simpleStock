@@ -123,7 +123,7 @@
 
     <!-- ── 승급된 전략 ── -->
     <section class="card">
-      <h2>승급된 전략 <small class="mut">활성이면 애널리스트 매수/매도 판단의 참고 축(RAG)으로 실린다</small></h2>
+      <h2>승급된 전략 <small class="mut">활성이면 애널리스트 분석의 참고 축(RAG)으로 실린다</small></h2>
       <table v-if="promoted.length" class="tbl">
         <thead><tr><th>이름</th><th>시나리오 조합</th><th>백테스트 근거</th><th>승급일</th><th>RAG</th></tr></thead>
         <tbody>

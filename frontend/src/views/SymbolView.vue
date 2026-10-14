@@ -35,7 +35,7 @@
           ⚠️ 대신 **관측 서술**을 싣는다.
         -->
         <template v-if="agentView">
-          <p v-if="agentView.confidence" class="mut">확신도 {{ agentView.confidence }}</p>
+          <p v-if="agentView.confidence" class="mut">근거 충실도 {{ agentView.confidence }}</p>
           <p class="body">{{ agentView.rationale }}</p>
           <p v-if="agentView.trend" class="sc">추세 · {{ agentView.trend }}</p>
           <p v-if="agentView.relative" class="sc">상대강도 · {{ agentView.relative }}</p>

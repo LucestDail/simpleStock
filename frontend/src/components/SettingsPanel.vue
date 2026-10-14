@@ -324,8 +324,8 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
 
         <section class="sp__sec">
           <h3 class="sp__h">
-            목표가 · 손절선
-            <small>종목별 기준선을 넘으면 텔레그램으로 알립니다</small>
+            가격 기준선
+            <small>종목별 기준선을 넘으면 텔레그램으로 알립니다 — 용도는 직접 정합니다</small>
           </h3>
           <!--
             🔴 **사람이 정한 기준이라 오경보가 없다** — 급변(%)은 시장이 정하지만 이건 내가 정한다.
@@ -343,8 +343,14 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
                 {{ h.name }} ({{ h.symbol }})
               </option>
             </select>
-            <input v-model="row.target" class="sp__xs" type="number" placeholder="목표가" />
-            <input v-model="row.stop" class="sp__xs" type="number" placeholder="손절가" />
+            <!--
+              🔴 2026-10-06 사용자 분노의 자리 — "손절가 90" 이라 떴는데 사용자 용도는 **$90 진입 대기**였다.
+                 그때 서버·알림 문구는 중립화했는데 **이 입력 라벨이 누락분**으로 남아 있었다(10-14 발견).
+              ⚠️ `row.target`/`row.stop` 은 **서버 필드명**이라 그대로 둔다 — 라벨만 바꾼다.
+                 ★ 필드명을 화면 라벨로 그대로 쓰면 **시스템이 사용자의 용도를 단정하게 된다.**
+            -->
+            <input v-model="row.target" class="sp__xs" type="number" placeholder="상향 알림가" />
+            <input v-model="row.stop" class="sp__xs" type="number" placeholder="하향 알림가" />
             <button class="sp__icon" aria-label="삭제" title="삭제" @click="form.targetRows.splice(i, 1)">×</button>
             <!-- ⚠️ 현재가를 옆에 적는다 — 없으면 기준선을 **감으로** 넣게 된다 -->
             <small v-if="priceOf(row.symbol) != null" class="sp__now mono-num">

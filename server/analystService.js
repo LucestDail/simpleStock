@@ -452,6 +452,42 @@ function longestProse(obj, exclude = new Set()) {
   return best;
 }
 
+/**
+ * 📊 **근거 충실도** (2026-10-14 — 사용자 판단으로 `confidence` 의 뜻을 바꿨다)
+ *
+ * 🔴 **있었던 것: 묻지도 않고 최악으로 단정하고 있었다.**
+ *    `confidence: pickString(o, [...]) || 'LOW'` 였는데, **스키마 position 칸에 `confidence` 가
+ *    없다** — 모델은 그 값을 **절대 주지 않으므로 폴백 `'LOW'` 가 100% 적용**됐다.
+ *    라이브 실측 `lowConfidence: 7`(7종목 전부)이 그 결과이고, 화면·폰의 *"확신도 LOW"* 는
+ *    **모델이 자신 없어한다**로 읽히지만 실제로는 **우리가 묻지 않았다**는 뜻이었다.
+ *    ★ *"현금은 못 읽었으면 `null`(= 모른다). 0 으로 적으면 '돈이 없다' 와 '조회가 실패했다' 가
+ *      같은 숫자가 된다"*(10-01)와 **같은 가족** — 모르는 것에 값을 찍으면 거짓이 된다.
+ *
+ * 🔴 **왜 "판단 확신" 이 아니라 "근거 충실도" 인가** (사용자 선택):
+ *    이 제품은 **행동을 권하지 않는다** — *"얼마나 확신하는가"* 가 걸릴 대상이 없다.
+ *    대신 *"이 서술을 뒷받침하는 데이터가 얼마나 있나"* 는 보고서에서 **계속 의미가 있고**,
+ *    화면·폰에 이미 표시 자리가 있다(지우면 그걸 말할 곳이 사라진다).
+ *
+ * ⚠️ **모델에게 묻지 않고 코드가 센다** — 정본을 하나로 둔다. 모델이 주더라도 쓰지 않는다.
+ *    ★ *"판정이 흔들리는 축은 LLM 을 빼고 코드로"*(09-08)를 이 칸에도 적용한 것이다.
+ * ⚠️ **스키마에 `confidence` 칸을 열지 않는다** — 열면 모델이 채우고, 그 순간 정본이 둘이 된다.
+ */
+function evidenceConfidence(o) {
+  const described = ['trend', 'relative', 'volatility']
+    .filter((k) => String(o?.[k] || '').trim()).length;
+  const cited = Array.isArray(o?.evidence)
+    ? Math.min(2, o.evidence.filter((x) => String(x || '').trim()).length) : 0;
+  // ⚠️ 모델이 스스로 "확인 못 함" 이라고 밝히면 **깎는다** — 정직한 결손이 점수를 올리면 안 된다
+  const admitsGap = /확인 못 함|알 수 없|받지 못|없습니다/.test(String(o?.rationale || ''));
+  const score = described + cited - (admitsGap ? 1 : 0);
+  /**
+   * ⚠️ 임계를 **5/2** 로 둔다(만점 5 = 서술 3축 + 인용 근거 2). 처음엔 4 로 잡았다가 올렸다 —
+   *    4 면 *"서술만 채우고 근거 0"* 과 *"근거까지 붙임"* 이 **같은 HIGH** 가 되어 판별력이 죽는다.
+   *    ★ 자를 만들면 **자의 판별력을 따로 잰다**(09-11) — 한쪽으로 쏠리면 등급이 뜻을 잃는다.
+   */
+  return score >= 5 ? 'HIGH' : score >= 2 ? 'MEDIUM' : 'LOW';
+}
+
 function asPosition(o) {
   if (!o || typeof o !== 'object') return null;
   /**
@@ -510,7 +546,7 @@ function asPosition(o) {
     relative: pickString(o, ['relative', 'relativeStrength', '상대강도']),
     volatility: pickString(o, ['volatility', 'vol', '변동성']),
     watchPoint: pickString(o, ['watchPoint', 'watch', 'trigger', '관찰']),
-    confidence: (pickString(o, ['confidence', 'stanceConfidence', 'conviction']) || 'LOW').toUpperCase(),
+    confidence: evidenceConfidence(o),
     rationale: pickString(o, ['rationale', 'reason', 'why', 'comment']) || longestProse(o, new Set(['symbol'])),
     evidence: Array.isArray(o.evidence) ? o.evidence : [],
     risk: pickString(o, ['risk', 'downside']) || '',
@@ -601,10 +637,23 @@ function dedupePositions(positions) {
     // 🔴 2026-10-14: 판정 축이 `stance` 에서 `trend`(관측 서술)로 바뀌었다
     logWarn('analyst.duplicate_position', { symbol: p.symbol, kept: original.trend, dropped: p.trend });
     if (p.trend !== original.trend && !original._conflicted) {
+      /**
+       * ⛔ **2026-10-14 — `confidence: 'LOW'` 덮어쓰기를 걷었다.**
+       *
+       * 종전엔 모순이 나오면 확신도를 LOW 로 내렸다. 그때는 `confidence` 가 *"판단에 얼마나
+       * 확신하는가"* 였으니 말이 됐다. **지금은 `confidence` = 근거 충실도**(코드가 센다)라
+       * 축이 다르고, 덮어쓰면 **"모순이라 깎인 것" 과 "근거가 없어 낮은 것" 이 같은 값**이 된다
+       * — 이 저장소가 반복해 밟은 *"검사했는데 0" 과 "애초에 없음" 을 구분 못 하게 만드는 자*다.
+       *   (★ 내가 confidence 를 재정의하며 **만든** 결함이고, `analystShape` 3건이 잡았다.)
+       *
+       * ⇒ 모순은 **`rationale` 맨 앞 ⚠️ 로 말한다**(화면·폰에 그대로 보인다).
+       *   근거 충실도는 **근거만** 잰다 — 한 값에 두 뜻을 담지 않는다.
+       * ⚠️ 문구에서 *"확신도를 낮춤"* 도 뺐다 — 더 이상 낮추지 않으므로 **거짓이 된다**
+       *   (*"코드를 고칠 때 그것을 설명하는 문장이 함께 거짓이 되지 않았는지 본다"*).
+       */
       kept[idx] = {
         ...original,
-        confidence: 'LOW',
-        rationale: `⚠️ 모델이 이 종목에 상반된 서술을 함께 냈다(다른 하나: ${p.trend}). 확신도를 낮춤. ${original.rationale || ''}`.trim(),
+        rationale: `⚠️ 모델이 이 종목에 상반된 서술을 함께 냈다(다른 하나: ${p.trend}). ${original.rationale || ''}`.trim(),
         _conflicted: true,
       };
     }
@@ -1454,7 +1503,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     const c = summary.cash;
     if (c) {
       const part = (cur, v) => (v ? `${cur} ${v.raw}` : `${cur} 확인 못 함`);
-      lines.push(`현금(매수 가능): ${part('원화', c.krw)} · ${part('달러', c.usd)}`);
+      lines.push(`현금 잔고: ${part('원화', c.krw)} · ${part('달러', c.usd)}`);
       /**
        * 🔴 **종전 판정이 실제 상태를 못 잡았다** (2026-10-01). 조건이 `krw<=0 && usd<=0`
        *    이라, 실측 **USD 3.76**(> 0)에서 **한 번도 안 걸렸다** — 3.76 달러로는 아무것도
@@ -1465,18 +1514,24 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
        *    제약이다. 제약을 알아야 모델이 남은 선택지(매도·보유)에 집중한다 —
        *    사실을 숨기고 금지만 걸면 모델은 왜 금지인지 모른 채 서술을 지어낸다.
        */
-      if (capacity.state === 'blocked') {
-        lines.push(
-          `🔴 **지금 신규 매수는 불가능합니다(사실).** 현금 버퍼(평가액의 ${capacity.floorPct}%)를 빼면`
-          + ` 매수에 쓸 수 있는 돈이 남지 않습니다 — ${capacityDetail(capacity.byCurrency)}.`,
-          '   가장 싼 보유 종목 1주조차 체결될 수 없습니다. 이것은 금지 지시가 아니라 **계좌의 상태**입니다.',
-          '   ⇒ **매도·보유 판단에 집중**하세요. 매수 아이디어는 수량·가격 제안 대신 "현금이 생기면" 조건으로 적으세요.',
-        );
-      } else if (c.failed?.length) {
-        lines.push(`⚠️ ${c.failed.join('·')} 현금을 못 받았습니다 — **매수 여력을 단정하지 마세요**(근거가 없습니다).`);
+      /**
+       * ⛔ **2026-10-14 — 매수 여력 처방 세 줄을 들어냈다** (사용자 지시).
+       *
+       * 종전엔 `blocked` 일 때 *"지금 신규 매수는 불가능합니다 … **매도·보유 판단에 집중**하세요.
+       * 매수 아이디어는 … '현금이 생기면' 조건으로 적으세요"* 를 프롬프트에 실었다.
+       * 주문 집행이 있던 시절엔 **제약 사실**이었지만, 지금 이 제품은 **보고서만 쓴다** —
+       * 그 문장은 모델에게 *"매수·매도를 판단하라"* 를 **가르치는 지시**로만 남았고,
+       * 사용자가 폰에서 본 *"매수매도 판단이 나왔습니다 · 신규 매수 여력 없음"* 의 뿌리였다.
+       *
+       * ✅ **현금 금액 자체는 남긴다** — 현금 비중은 포트폴리오 **상태**이고, 기준선 대비
+       *    판정은 `portfolioRules` 가 따로 말한다(두 곳에서 말하면 숫자가 갈린다).
+       * ⚠️ **못 받았다는 사실은 계속 말한다** — 빈칸으로 두면 모델이 0 으로 읽는다.
+       */
+      if (c.failed?.length) {
+        lines.push(`⚠️ ${c.failed.join('·')} 현금을 못 받았습니다 — **현금 잔고를 단정하지 마세요**(근거가 없습니다).`);
       }
     } else {
-      lines.push('⚠️ 현금 정보를 받지 못했습니다 — **매수 여력을 단정하지 마세요**(근거가 없습니다).');
+      lines.push('⚠️ 현금 정보를 받지 못했습니다 — **현금 잔고를 단정하지 마세요**(근거가 없습니다).');
     }
   } else {
     lines.push('보유 정보를 받지 못했습니다.');
@@ -1522,8 +1577,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     if (said.length) {
       lines.push('', '## 사용자가 최근에 직접 한 말 (의사·방침 — 판단보다 우선한다)');
       lines.push(...said);
-      lines.push('🔴 여기에 **적립·보유 의사**가 있으면 그 종목의 매도 판단은 근거가 "가격이 내렸다"'
-        + ' 보다 강해야 한다(배당 삭감·신용등급 하락·사업 훼손 같은 **종목 자체의 변화**).');
+      lines.push('🔴 여기에 **적립·보유 의사**가 있으면 그 종목을 부정적으로 서술할 때 근거가'
+        + ' "가격이 내렸다" 보다 강해야 한다(배당 삭감·신용등급 하락·사업 훼손 같은 **종목 자체의 변화**).');
       lines.push('🔴 여기서 사용자가 **방향을 바꿨으면**(예: "레버리지는 이제 안 하는 게 맞겠다")'
         + ' 그 뒤의 판단은 바뀐 방향을 따른다.');
     }
@@ -1592,13 +1647,25 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
       lines.push(`- 적립 가능 $${budget} (배당 수령 $${il.dividendUsd} + AI 실현손익 $${il.realizedUsd} − 이미 적립 $${il.accruedUsd})`);
       lines.push(`- 적립 대상: ${syms} — 이 재원 안에서는 **종목 집중 상한(20%)이 면제**된다.`);
       lines.push('🔴 이 돈은 **배당·실현수익으로 만든 것**이라 원금을 건드리지 않는다 — 그래서');
-      lines.push('   "레버리지 비중이 높으니 더 사지 않는다" 가 이 재원에는 적용되지 않는다.');
-      lines.push('   목표 배분에서 부족한 버킷은 이 금액 안에서 **분할로** 채우는 것이 맞다고 판단하라.');
-      lines.push('⚖️ 적립 규율: ①한 번에 전액을 쓰지 않는다(권장 1회 1/3 이하) ②국면이 나쁘면');
-      lines.push('   **금액을 줄이되 방향을 바꾸지 않는다**(적립은 멈추는 것이 아니라 느려지는 것)');
-      lines.push('   ③재원을 넘는 규모는 **실행할 수 없다** — 판단의 크기를 재원 안에서 말하라.');
-      lines.push('⚠️ 이 재원을 **기존 보유 매도 대금과 혼동하지 마라** — 매도 대금은 원금이고');
+      lines.push('   레버리지 비중 기준선이 이 재원에는 같은 방식으로 적용되지 않는다.');
+      /**
+       * ⛔ **2026-10-14 — 적립 집행 규율 다섯 줄을 들어냈다** (사용자 지시: 보고서만 쓴다).
+       *
+       * 종전엔 *"부족한 버킷은 이 금액 안에서 **분할로** 채우는 것이 맞다고 판단하라"* 와
+       * *"적립 규율: ①한 번에 전액을 쓰지 않는다(권장 1회 1/3 이하) ②… ③판단의 크기를
+       * 재원 안에서 말하라"* 를 실었다. **얼마를 어떻게 사라**는 집행 지시다.
+       *
+       * ✅ **재원 금액·대상·"원금이 아니다"·집중 상한 면제는 남긴다** — 그건 계좌의 **사실**이고
+       *    목표 배분 괴리를 읽는 데 필요하다.
+       * ⚠️ **라이브 실증 불가**: `accrualBudgetUsd` 가 0 이라 이 절은 **한 번도 실린 적이 없다**
+       *    (0 이면 생략한다). 즉 사용자가 본 *"매수 판단"* 의 원인은 아니고, **0 이 아니게 되는
+       *    날 드러날 자리**를 미리 막은 것이다 — *"아직 안 아픈 것"* 이지 판정 불가가 아니다.
+       * 🔴 내 어휘 스캔이 이 다섯 줄 중 **한 줄만** 잡았다(`분할`·`적립`·`버킷` 이 목록에 없었다).
+       *    열거하는 쪽이 지는 그 비대칭 — 목록을 넓혀 다시 쟀다.
+       */
+      lines.push('⚠️ 이 재원은 **기존 보유를 처분한 대금과 다르다** — 처분 대금은 원금이고');
       lines.push('   적립 재원이 아니다. 여기 적힌 금액만이 집중 상한 면제를 받는다.');
+      lines.push('   이 재원이 목표 배분 괴리를 **얼마나 메울 수 있는 규모인지** 한 문장으로 서술하라.');
     }
   } catch (e) { logWarn('analyst.income_section_failed', { message: e.message }); }
 
@@ -1693,7 +1760,14 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     }
     lines.push(
       '',
-      '🔴 위 **투자의견은 기업의 질**에 대한 것이고, 당신이 낼 것은 **지금 사고팔 것인가**다.',
+      /**
+       * 🔴 **2026-10-14 — 여기가 가장 직접적인 행동 명령이었다.**
+       *    종전 문장: *"당신이 낼 것은 **지금 사고팔 것인가**다."*
+       *    시스템 프롬프트·스키마를 보고서로 바꾸고도 **이 한 줄이 매매 판단을 명령**하고 있었다.
+       *    ⚠️ 내 첫 어휘 스캔(31건)이 이것을 **못 잡았다** — 목록에 `팔` 이 없었다.
+       * ✅ **질 평가 ≠ 현재 상태**라는 구분은 분석적으로 값지므로 **유지**하고 축만 옮긴다.
+       */
+      '🔴 위 **투자의견은 기업의 질**에 대한 것이고, 당신이 서술할 것은 **지금 어떤 상태인가**다.',
       '둘이 갈릴 수 있다 — 좋은 회사인데 지금 비쌀 수 있고, 약한 회사인데 단기 반등 구간일 수 있다.',
       '**어긋나면 왜 어긋나는지 한 문장으로 밝히세요.**',
     );
@@ -1722,7 +1796,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     lines.push(
       '',
       '🔴 레버리지·일일 리밸런싱 상품은 **방향이 맞아도 횡보하면 깎입니다.**',
-      '보유 기간과 손절선을 그 전제로 잡으세요. 기업 점수와 같은 잣대로 비교하지 마세요.',
+      '그 전제로 **보유 기간과 변동성**을 읽으세요. 기업 점수와 같은 잣대로 비교하지 마세요.',
     );
   }
 
@@ -1758,7 +1832,7 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    */
   const BRIEF_JOB = {
     preopen: '**프리장 개장 브리핑**이다. 밤사이 미국장 결과와 오늘 국내장 계획을 정리하라. '
-      + '정규장 시작 전이라 **지금은 체결이 안 되는 시간대**임을 전제로, 개장 직후 대응안을 제시하라.',
+      + '정규장 시작 전임을 전제로, 개장 직후 **무엇을 지켜볼 것인지**를 정리하라.',
     open: '**개장 브리핑**이다. 직전 세션(밤사이 해외장 포함)에서 넘어온 흐름과 **시가 갭**을 먼저 짚고, '
       + '오늘 이 종목들에서 **무엇을 지켜볼 것인지**를 말하라. 지금 당장의 매매보다 **관전 포인트**가 중심이다.',
     /**
@@ -1850,9 +1924,9 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
         const over = Math.round((weights.leveragePct - tight.max) * 10) / 10;
         if (over > 0) {
           lines.push('', `🔴 **레버리지 괴리: 현재 ${weights.leveragePct}% vs 기준 ${tight.max}% — ${over}%p 초과**`
-            + ` (${tight.scenario}). 기준선까지 줄이려면 약 ${Math.round((over / 100) * weights.total)} 어치 축소가 필요하다.`);
-          lines.push('   ⚠️ 한 번에 다 팔라는 뜻이 아니다 — **분할 축소**로 보고, 추세가 강하면 속도를 늦춰라.'
-            + ' 다만 **아무것도 제안하지 않는 것은 답이 아니다.**');
+            + ` (${tight.scenario}). 기준선과의 차이는 약 ${Math.round((over / 100) * weights.total)} 어치에 해당한다.`);
+          lines.push('   ⚠️ 이것은 **처분 지시가 아니라 기준선 대비 상태**다 — 이 괴리가 어떤 위험을'
+            + ' 뜻하는지(횡보 시 감가·급락 시 손실 확대) `marketView` 에 한 문장으로 적어라.');
         }
       }
     }
@@ -1927,13 +2001,13 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
 
   const warnSyms = Object.keys(warnings).filter((k) => Array.isArray(warnings[k]) && warnings[k].length);
   if (warnSyms.length) {
-    lines.push('', '## ⚠️ 매수 유의사항 (점수보다 우선한다)');
+    lines.push('', '## ⚠️ 거래 유의 종목 (점수보다 우선한다)');
     for (const sym of warnSyms) {
       const kinds = warnings[sym].map((w) => w?.type || w?.code || w?.name || JSON.stringify(w)).slice(0, 5);
       lines.push(`- **${sym}**: ${kinds.join(' · ')}`);
     }
     lines.push('🔴 위 종목은 **정리매매·거래정지·투자경고·과열** 등에 걸려 있다. '
-      + '점수가 높아도 **매수 제안을 내지 마라.** 보유 중이면 위험을 분명히 적어라.');
+      + '점수가 높아도 **이 사실을 먼저 적어라.** 보유 중이면 위험을 분명히 적어라.');
   }
 
   const supplySyms = Object.keys(supply);
@@ -2009,8 +2083,8 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
   ).values()].slice(0, 3);
 
   if (reentry.length) {
-    lines.push('', '## 되살/신규 진입 후보 (보유 아님 — 다른 질문이다)');
-    const ROLE_LABEL = { reentry: '최근까지 보유했다 매도', targeted: '목표·손절 지정', watch: '감시 표시(미보유)' };
+    lines.push('', '## 감시 중인 미보유 종목 (보유 아님 — 다른 질문이다)');
+    const ROLE_LABEL = { reentry: '최근까지 보유했다 처분', targeted: '가격 기준선 지정', watch: '감시 표시(미보유)' };
     for (const r of reentry) {
       let tech = null;
       try {
@@ -2053,23 +2127,21 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     lines.push(
       '',
       '🔴 이 종목들은 **보유가 아니다.** 수량·평단·평가손익이 없으니 그걸 근거로 쓰지 마세요.',
-      '물을 것은 **"지금 되살(신규) 진입 자리인가"** 이고, 답은 `positions` 에 담되',
       '⚠️ 여기는 **안 들고 있는 종목**입니다 — "지금 어떤 상태인가" 만 적고, 사고파는 말은 쓰지 않습니다.',
-      '⚠️ **한 번에 다 사는 것을 전제하지 마세요.** 분할이면 `entry` 에 **1차 진입가**를 쓰고',
-      '   `rationale` 에 나머지 회차 조건을 한 문장으로 적으세요(예: "1차 92, 89 이탈 없이 반등 확인 후 2차").',
-      '⚠️ 되살 이유가 **"전에 들고 있었으니까" 가 되면 안 됩니다** — 판 이유가 해소됐는지로 판단하세요.',
+      '   답은 `positions` 에 담되 `trend`·`relative`·`volatility` 로 **상태를 서술**하세요.',
+      '⚠️ **과거에 보유했다는 사실 자체는 상태가 아닙니다** — 그때 빠져나온 이유가 지금도',
+      '   유효한지를 `rationale` 에 서술하세요.',
       '',
-      '## 🔴 모멘텀만으로 사지 마세요 (사용자 지시)',
+      '## 🔴 모멘텀 하나로 설명하지 마세요 (사용자 지시)',
       '이 종목들이 여기 올라온 이유는 **"오늘 평소보다 크게 움직였다"** 뿐입니다.',
-      '그건 **깨우는 신호**이지 매수 근거가 아닙니다. `BUY` 를 내려면 아래를 **함께** 보고',
-      '`rationale` 에 **각각을 한 문장씩** 적으세요:',
+      '그건 **깨우는 신호**일 뿐이므로, `rationale` 에 아래 넷을 **함께** 보고 한 문장씩 적으세요:',
       '1. **재무·회계** — 위 기업 평가 점수와 항목(없으면 "확인 못 함" 이라고 쓰세요)',
       '2. **성장성** — 매출·이익이 실제로 늘고 있는가(주어진 숫자로만)',
       '3. **모멘텀** — 오늘 움직임이 추세의 시작인지 과열인지',
-      '4. **증시 상황** — 위 지수·환율 구간에서 이 종목을 살 때인가',
-      '🔴 넷 중 하나라도 **근거를 못 대면 `HOLD`** 로 두세요. "일단 조금 사본다" 는 답이 아닙니다.',
+      '4. **증시 상황** — 위 지수·환율 구간에서 이 종목이 **어떤 자리에 있는가**',
+      '🔴 넷 중 근거를 못 대는 것은 **"확인 못 함" 이라고 적으세요** — 빈칸으로 두지 마세요.',
       '⚠️ 기업 평가가 **실패했거나 ETF 라 점수가 없으면** 그 사실을 `rationale` 에 적고',
-      '   확신도를 낮추세요 — 모르는 것을 모른다고 적는 것이 지어내는 것보다 낫습니다.',
+      '   그 사실을 그대로 적으세요 — 모르는 것을 모른다고 적는 것이 지어내는 것보다 낫습니다.',
     );
   }
 
@@ -2294,9 +2366,9 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     if (Object.keys(fees).length) {
       lines.push('', `## 수수료율 (편도 · 왕복은 2배)`);
       lines.push(Object.entries(fees).map(([k, v]) => `- ${k} ${(v * 100).toFixed(3)}%`).join('\n'));
-      lines.push('🔴 **수수료가 차익을 먹는 주문을 내지 마라.** 목표가와 진입가의 차이가');
-      lines.push('   **왕복 수수료보다 충분히 크지 않으면 제안하지 않는다** — 소액·1주 주문이');
-      lines.push('   특히 위험하다(가격이 맞아도 비용으로 손해가 난다).');
+      lines.push('🔴 **가격 변동폭이 왕복 수수료보다 작으면 비용이 차익을 먹는다.** 좁은 구간의');
+      lines.push('   움직임을 서술할 때는 이 비용을 함께 짚어라 — 소액 단위일수록 비중이 크다');
+      lines.push('   (가격이 맞아도 비용으로 손해가 나는 구간이 있다).');
       lines.push('⚠️ 세금·제비용은 이 숫자에 **빠져 있다** — 실제 비용은 이보다 크다.');
       const soon = rows.filter((r) => r.endsSoon);
       if (soon.length) {
@@ -2656,8 +2728,13 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
    *    텔레그램 본문이 이 이름을 읽는다. 이름만 지우면 그 자리들이 전부 깨지고,
    *    급히 고치다 **다른 뜻으로 되살아난다**. 소비자가 0이 되면 그때 함께 지운다.
    */
-  const created = [];
-  const rejected = [];
+  /**
+   * ⛔ **2026-10-14 — `created`/`rejected` 선언을 지웠다.**
+   *    2026-10-12 에 주문 집행을 걷으면서 **push 하는 쪽만 사라지고 빈 배열이 남았다.**
+   *    그 뒤로 네 자리(로그 2 · 활동 1 · 지문 1)가 **항상 0/빈 값**을 싣고 있었다.
+   * ⚠️ 백테스트 경로(`decideOnContext`)의 동명 `rejected` 는 **정상**(게이트가 실제로 push 한다).
+   *    같은 이름이라고 같이 지우지 말 것 — 이름이 아니라 **생산자가 있는가**로 판단한다.
+   */
 
 
   /**
@@ -2785,13 +2862,26 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
    * ⚠️ 매수 여력은 **매수에만** 걸린다 — 현금 0 이어도 SELL 제안은 나올 수 있으므로
    *    제안이 실재하면 그쪽이 이유다(여력 판정으로 덮지 않는다).
    */
-  const proposedCount = report.proposals?.length || 0;
-  const noProposalReason = dryRun && proposedCount ? 'dry_run_proposals'
-    : created.length ? 'has_proposals'
-      : proposedCount ? 'all_rejected'
-        : capacity.state === 'unknown' ? 'cash_unknown'
-          : capacity.state === 'blocked' ? 'no_buying_capacity'
-            : 'model_proposed_none';
+  /**
+   * ⛔ **2026-10-14 — 도달 불가 분기 세 개를 들어냈다** (사용자 판단).
+   *
+   * `dry_run_proposals` · `has_proposals` · `all_rejected` 는 **원리상 날 수 없었다**:
+   *   · `report.proposals` — 라이브 스키마에 **그 칸이 없다**(2026-10-12 에 백테스트 전용으로 분리)
+   *   · `created` — 이 함수 안에서 **push 하는 곳이 0곳**이다(주문 제거 때 생산자만 사라졌다)
+   * ⇒ 여섯 갈래 중 **셋이 장식**이었고, 남은 셋은 전부 현금 상태다.
+   *
+   * 🔴 **"검사했는데 0" 과 "애초에 없음" 을 못 가르는 그 가족.** 매 회차 `created: 0`·
+   *    `rejected: 0`·`proposed: 0` 이 찍혀 *"제안을 만들 수 있는데 안 만들었다"* 처럼 읽혔다 —
+   *    같은 로그에서 `gapsMissing: -2` 를 찾은 것도 **거짓 0 들 사이에 섞여 있었기 때문**에
+   *    한 번 지나쳤다(2026-10-14 실측).
+   * ⚠️ **이벤트 이름 `analyst.no_proposal_reason` 은 그대로 둔다** — 런북과 테스트가
+   *    *"그 회차가 돌았는가"* 의 표식으로 grep 한다. 바꾸면 그 자들이 **조용히 0건을 보고**한다.
+   *    ⇒ 읽을 때 `reason` 은 **현금 상태**로 읽는다(제안이 없는 원인이 아니다).
+   * ⚠️ 백테스트 경로(`decideOnContext`)의 동명 배열은 **정상**(push 가 실재한다) — 섞지 말 것.
+   */
+  const noProposalReason = capacity.state === 'unknown' ? 'cash_unknown'
+    : capacity.state === 'blocked' ? 'no_buying_capacity'
+      : 'cash_available';
 
   /**
    * ⛔ **2026-10-13 — `analyst.stance_without_proposal` 경고를 들어냈다.**
@@ -2841,9 +2931,6 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     cashBandKrw: capacityBand(capacity.byCurrency.KRW),
     positions: report.positions?.length || 0,
     stances,
-    proposed: proposedCount,
-    created: created.length,
-    rejected: rejected.length,
   });
 
   logInfo('analyst.report', {
@@ -2855,10 +2942,14 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
      */
     dryRun,
     positions: report.positions?.length || 0,
-    proposed: report.proposals?.length || 0,
-    created: created.length,
-    rejected: rejected.length,
-    // ★ 제안이 0 인 **이유**가 여기서 갈린다(판단했는데 HOLD / 판단 자체가 없음)
+    /**
+     * ⛔ **2026-10-14 — `proposed`·`created`·`rejected` 를 뺐다** (사용자 판단).
+     *    셋 다 **구조적으로 항상 0** 이었다(스키마에 `proposals` 칸이 없고 `created`/`rejected` 에
+     *    push 하는 곳이 0곳). 거짓 0 이 매 회차 찍히면 **진짜 이상값이 그 사이에 묻힌다** —
+     *    같은 로그의 `gapsMissing: -2` 를 한 번 지나친 것이 그 실례다.
+     * ★ *"검사했는데 0" 과 "애초에 없음" 을 구분하지 못하게 만드는 자를 만들지 말 것*(09-10).
+     */
+    // ★ 서술이 실제로 채워졌는지가 여기서 갈린다(DESCRIBED / EMPTY)
     stances,
     lowConfidence,
     /**
@@ -2941,7 +3032,14 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
        *    `trend` 는 **상태 서술**이라 상태가 같으면 대체로 같은 문장이 온다.
        */
       p: (report.positions || []).map((x) => `${x.symbol}:${x.trend || ''}:${x.confidence}`).sort(),
-      c: created.map((x) => `${x.symbol}:${x.side}:${x.quantity}`).sort(),
+      /**
+       * ⛔ **2026-10-14 — `c: created.map(…)` 를 뺐다.** 라이브에서 `created` 는 **항상 빈 배열**이라
+       *    (push 하는 곳이 0곳) 지문에 `"c":[]` 가 **매번 똑같이** 들어갔다 — 변별 기여 0.
+       * ⚠️ 지문을 건드리는 변경이라 **방향을 확인했다**: 항상 같은 값을 빼는 것은 지문을
+       *    **덜 엄격하게 만들지 않는다**(같은 상수는 해시에 정보를 더하지 않는다).
+       *    ★ 반대 방향(어제 `stance` 를 빼며 서술을 안 넣은 것)은 **진짜 변화를 삼켰다** —
+       *      그래서 *"무엇을 빼는가"* 가 아니라 *"변별이 줄어드는가"* 로 판단한다.
+       */
       b: briefKey,
     }))
     .digest('hex');
@@ -3114,8 +3212,7 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
 
   activity.record('analysis', title, {
     positions: report.positions?.length || 0,
-    proposals: created.length,
-    rejected: rejected.length,
+    // ⛔ 2026-10-14: `proposals`·`rejected` 제거 — 항상 0 인 거짓 필드였다(위 analyst.report 주석 참조)
     stances,
     lowConfidence,
     gaps: gaps.length,
@@ -3140,8 +3237,17 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
     // ⚠️ 합친 목록은 그대로 두고 **분류만 함께** 낸다(화면·프롬프트가 `dataGaps` 를 쓴다)
     dataGapsNotApplicable: notApplicable,
     positions: report.positions || [],
-    created,
-    rejected,
+    /**
+     * ⛔ **2026-10-14 — 응답에서 `created`·`rejected` 를 뺐다.**
+     *    라이브에서 **항상 빈 배열**이었다(push 하는 곳이 0곳). 화면이 `report.rejected` 로
+     *    "버려진 제안" 카드를 그리는데 **절대 보일 수 없는 죽은 UI** 였다.
+     * 🔴 **선언만 지우고 여기를 못 봐서 런타임 `created is not defined` 가 났다** —
+     *    객체 축약(`created,`)이라 내 전수 스캔이 범위 계산 오류로 놓쳤다(중괄호로 셌어야 했다).
+     *    ★ **`require()` 로드가 통과한 것은 아무것도 증명하지 않았다** — 함수를 안 불렀으니까.
+     *      잡은 것은 **배선 테스트**였다(순수 함수만 재면 못 잡는 그 자리).
+     * ⚠️ `analystHistory` 의 `created → proposals` 매핑은 **남긴다** — 2026-10-12 이전
+     *    옛 이력에는 실제 제안이 들어 있고, 지우면 **과거 기록이 화면에서 사라진다.**
+     */
     tech,
     ratings,
     web: web
@@ -3279,5 +3385,6 @@ module.exports = {
   computeTrade, decideOnContext, inverseGate, sideGate, feeGate, marketOfSymbol, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
   assessBuyingCapacity, capacityDetail, capacityBand, describeCashCapacity, watchMovesSection,
+  _evidenceConfidence: evidenceConfidence,
   TRADE_ARRAY_SCHEMA,
 };

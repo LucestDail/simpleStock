@@ -111,8 +111,11 @@ async function onDeleteGroup(group) {
  */
 const report = ref(null);
 
-/** 'live' | 'dry-run' — 서버가 말하는 **실제** 모드. 화면이 지어내지 않는다 */
-const ordersMode = ref('dry-run');
+/**
+ * ⛔ 2026-10-14 — `ordersMode` 를 지웠다. 주문 집행이 없어 **표시할 모드가 없다.**
+ *    ⚠️ 서버 설정(`ordersLive`)은 그대로 둔다 — 되살릴 때를 위한 값이고, 화면이
+ *    그것을 **"주문이 나간다"** 로 번역하던 것이 문제였다.
+ */
 /**
  * 🔴 사용자: *"내부 분석시 **분석 상태 표시**"*
  *    분석은 20~30초 걸린다(도구·LLM). 버튼만 "분석 중…" 이면 멈춘 것처럼 보인다.
@@ -911,9 +914,11 @@ onUnmounted(() => {
             </div>
             <!-- 🔴 2026-09-22 사용자: "웹 화면에 내 잔고 잔액이 안보이는데" —
                  서버는 summary.cash 를 이미 주고 있었다. 화면만 안 그렸다.
-                 ⚠️ 라벨은 "주문 가능" — 예수금 총액과 다를 수 있어 정직하게 붙인다 -->
+                 ⚠️ 라벨 = "가용 현금"(2026-10-14 변경). 증권사 용어는 "주문가능금액" 이고 예수금 총액과
+                     다를 수 있는데, **주문을 하지 않는 제품**에서 "주문 가능" 이라 쓰면 없는 기능을
+                     가리킨다. 숫자의 뜻(즉시 쓸 수 있는 현금)은 그대로다. -->
             <div class="mini">
-              <span class="mini__label">주문 가능</span>
+              <span class="mini__label">가용 현금</span>
               <span class="mini__value mono-num">{{ cashCell(portfolio.summary.cash) }}</span>
             </div>
           </div>
@@ -1018,7 +1023,7 @@ onUnmounted(() => {
             <li v-if="portfolio.weights" class="hold hold--cash">
               <span class="hold__name">현금</span>
               <span class="hold__val mono-num">{{ cashCell(portfolio.summary.cash) }}</span>
-              <span class="hold__meta">주문 가능 잔고</span>
+              <span class="hold__meta">가용 현금</span>
               <span class="hold__pl mono-num">비중 {{ portfolio.weights.cashPct }}%</span>
             </li>
           </ul>
@@ -1222,25 +1227,30 @@ onUnmounted(() => {
               ⇒ 제안은 **대화가 끝나는 자리**에 둔다. 승인·거절도 거기서 한다.
             -->
 
-            <div v-if="report.rejected?.length" class="props">
-              <h3 class="panel__h">버려진 제안</h3>
-              <!-- 🔴 조용히 버리지 않는다 — 왜 안 만들어졌는지 보여준다 -->
-              <p v-for="(r, i) in report.rejected" :key="i" class="prop__rej">
-                {{ r.symbol }} {{ r.side }} — {{ r.error }}
-              </p>
-            </div>
-
-            <!-- 🔴 실거래 모드는 **버튼을 누르기 전에** 보여야 한다 -->
-            <p v-if="ordersMode === 'live'" class="ordmode">
-              🔴 <b>실거래 모드</b> — 승인한 제안을 실행하면 <b>실제 주문</b>이 나갑니다.
-            </p>
+            <!--
+              ⛔ 2026-10-14 — "버려진 제안" 카드와 "실거래 모드" 경고를 지웠다.
+                 · 버려진 제안: `report.rejected` 가 라이브에서 **항상 빈 배열**이라
+                   (2026-10-12 주문 제거 때 생산자가 사라졌다) **절대 보일 수 없는 죽은 UI** 였다.
+                 · 실거래 모드: "승인한 제안을 실행하면 **실제 주문**이 나갑니다" 는 이제 거짓이다
+                   (승인할 제안도, 실행할 주문도 없다).
+                   🔴 **그런데 이 경고는 한 번도 뜬 적이 없다** — `ordersMode` 는
+                   `ref('dry-run')` 으로 초기화되고 **대입하는 곳이 0곳**이라 `v-if` 가
+                   **원리상 영원히 거짓**이었다(git 으로 확인).
+                   ★ 즉 이것은 *"거짓을 보여주던 잔재"* 가 아니라 **"선언만 있고 도달 불가였던
+                     안전 경고"** 다 — 주석에 *"실거래 모드는 **버튼을 누르기 전에** 보여야 한다"*
+                     라고 적어 놓고 **그 경고가 실재하지 않았다.** 주문이 있던 시절엔 진짜 구멍이고
+                     (실거래인데 경고가 안 떴다), 지금은 주문이 없어 무해하다.
+                   ⚠️ 나는 처음에 *"실제로 떴을 수 있다"* 고 적었다가 git 으로 재서 정정했다 —
+                     **추측으로 사고 경위를 적으면 다음 세션이 그 틀린 사실을 인용한다.**
+              ⚠️ 과거 이력의 승인·거절 기록은 **활동 로그가 계속 보여준다**(거기 라벨은 남긴다).
+            -->
             <div v-if="report.positions?.length" class="props">
               <h3 class="panel__h">종목 판단</h3>
               <article v-for="ps in report.positions" :key="ps.symbol" class="pos">
                 <header>
                   <b>{{ ps.symbol }}</b>
 
-                  <span class="pos__conf">{{ ps.confidence }}</span>
+                  <span class="pos__conf" title="근거 충실도 — 추세·상대강도·변동성 서술과 인용 근거가 얼마나 채워졌는지(코드가 계산)">{{ ps.confidence }}</span>
                   <!--
                     🔴 손익비는 **코드가 계산**한 값이다(모델이 아니라).
                     ⚠️ 계산이 안 된 이유가 있으면 그걸 보여준다 — 빈칸은 "위험 없음" 으로 읽힌다.
@@ -1780,7 +1790,7 @@ onUnmounted(() => {
 .hero__sep { color: var(--color-hairline-strong); }
 .hero__today { color: var(--color-muted); font-weight: 500; font-size: var(--text-xs); }
 
-/* 배경 정보 2칸 — 와이어프레임의 `[레버리지 노출][주문 가능]` 자리 */
+/* 배경 정보 2칸 — 와이어프레임의 `[레버리지 노출][가용 현금]` 자리 */
 .minis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-xs); }
 .mini {
   display: flex; flex-direction: column; gap: 1px;
