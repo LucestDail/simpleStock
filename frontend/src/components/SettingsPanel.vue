@@ -293,12 +293,12 @@ watch(() => props.open, (v) => { if (v) load(); }, { immediate: true });
 
       <label class="sp__row">
         <span class="sp__label">
-          매매 분석 추가 지시 (프롬프트)
+          포트폴리오 분석 추가 지시 (프롬프트)
           <em v-if="usingDefault.includes('briefingPrompt')">없음</em>
         </span>
         <textarea v-model="form.briefingPrompt" class="sp__area" rows="5"
           placeholder="예: 보유 비중과 환율 영향을 먼저 보고, 단기 대응보다 리스크를 우선해서 써 줘." />
-        <small>매매 분석 AI 가 <b>이 문장을 그대로</b> 따릅니다. 비워도 됩니다.</small>
+        <small>포트폴리오 분석 AI 가 <b>이 문장을 그대로</b> 따릅니다. 비워도 됩니다.</small>
       </label>
 
       <label class="sp__row">

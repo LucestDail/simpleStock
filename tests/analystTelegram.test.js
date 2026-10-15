@@ -100,7 +100,8 @@ test('판단이 나오면 **버튼 없이 바로** 텔레그램으로 간다', a
   await new Promise((r) => setTimeout(r, 30));
 
   assert.equal(sent.length, 1, '분석했는데 안 보냈다');
-  assert.match(sent[0].text, /매매 분석/);
+  // 🔄 2026-10-15: 제목에서 "매매" 를 걷었다 — 주문을 안 내는 제품의 폰 **첫 줄**이었다
+  assert.match(sent[0].text, /포트폴리오 분석/);
   assert.match(sent[0].text, /지수는 혼조/);
   assert.match(sent[0].text, /QLD/);
 });

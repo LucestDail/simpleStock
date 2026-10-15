@@ -1097,9 +1097,17 @@ const WATCH_ROLE_LABEL = { reentry: '되살후보', targeted: '목표지정', wa
 function watchMovesSection(rows, { heldSet = new Set(), nameOf = () => null, zOf = () => null } = {}) {
   const HEAD = '## 감시 종목 오늘의 움직임 (보유 밖 · **보고 대상**)';
   const RULE = [
-    '🔴 **이 종목들은 제안 대상이 아니다.** 매수 제안의 티커는 위 "## 도구상자" 안에서만 고른다(기존 규칙 그대로).',
+    // 🔄 2026-10-15: 종전 문장은 *"이 종목들은 **제안 대상**이 아니다 — **매수 제안**의 티커는 …"*
+    //    이었다. 제안이라는 행위가 **10-12 에 사라졌는데** 지시문이 그 개념을 두 번 쓰면서
+    //    모델에게 *"제안이라는 게 있다"* 를 가르치고 있었다(바로 아래 줄에서 같은 이유로 한 번
+    //    더 걷었다 — 한 배열 안에서 **형제 중 하나만 고친** 모양이 또 나올 뻔했다).
+    '🔴 **이 종목들은 종목별 칸의 대상이 아니다.** 종목별 칸에 적는 티커는 위 "## 도구상자" 안에서만 고른다(기존 규칙 그대로).',
     '   이 절의 쓰임은 **"오늘 무슨 일이 있었나"** 를 `marketView`·`momentumRead` 에 반영하는 것이다.',
-    '   ⚠️ 여기 티커로 매매를 제안하면 계좌·게이트 검증에서 **전부 거부**된다 — 지금보다 나빠진다.',
+    // ⚠️ 2026-10-15: 종전 문장은 *"여기 티커로 매매를 제안하면 계좌·게이트 검증에서 전부 거부된다"*
+    //    였다. 그 검증 장치는 **10-12 에 사라졌고**(주문 집행 제거), 없는 장치를 근거로 드는 지시는
+    //    모델에게 아무 힘이 없다. 게다가 *"제안하면"* 이라는 말 자체가 **제안이 가능하다는 전제**를
+    //    되살린다 — 이 제품은 보고서만 쓴다. ⇒ 이 절의 **쓰임 범위**만 말한다.
+    '   ⚠️ 그래서 이 절의 티커는 **시황 서술 안에서만** 등장한다 — 종목별 칸의 대상은 위 "## 도구상자" 에서 고른 것뿐이다.',
   ];
   if (!Array.isArray(rows)) {
     /**
@@ -1262,6 +1270,79 @@ function portfolioWeights(items = [], summary = null, catalog = null) {
       .sort((a, b) => b.pct - a.pct),
     categories: [...byCategory.entries()].map(([k, v]) => ({ key: k, pct: pct(v) })).sort((a, b) => b.pct - a.pct),
   };
+}
+
+/**
+ * 🔴 **폰 본문의 제목** — 사용자가 **가장 먼저 보는 글자**다.
+ *    종전 제목(자동 발송 `🧭 …`·수동 라우트 `📋 …`)은 앞에 **"매매"** 두 글자를 달고 있었고,
+ *    10-12 에 주문 집행을 걷어낸 뒤로 **첫 줄부터 제품의 정체를 거짓으로** 말하고 있었다
+ *    — 이 제품은 보고서만 쓴다.
+ * ⚠️ **상수로 둔다** — 배열 리터럴에 직접 박으면 *"제목을 자기 손으로 만드는 사본"* 과
+ *    구분이 안 되고, `briefBodyContract` ⓒ축이 그 모양을 정본 둘의 표식으로 본다.
+ */
+const BRIEF_TITLE = '🧭 포트폴리오 분석';
+
+/**
+ * 🔴 **폰으로 가는 브리핑 본문을 만드는 단 한 곳** (2026-10-15 신설).
+ *
+ * 종전에는 조립이 **두 벌**이었다 — `analyze()` 안의 인라인 코드(살아 있는 자동 발송)와
+ * `server.js` 의 `POST /api/analyst/telegram`(화면이 들고 있는 리포트를 보내는 라우트).
+ * 10-12~10-14 에 주문 집행을 걷어내며 **앞쪽만 고쳤고**, 뒤쪽은 이미 사라진 것들을
+ * 그대로 말하고 있었다:
+ *   - `p.stance` — 10-14 에 스키마에서 사라진 칸(실제로 보내면 `undefined/HIGH` 가 찍힌다)
+ *   - `r.created` — 10-14 에 제거된 제안 배열(생산자 0곳인데 *"(승인 대기)"* 를 말할 수 있게 열려 있었다)
+ *   - `못 본 것:` — 10-13 에 **일부러** 걷어낸 줄(모델이 쓴 희망 목록이라 조치 불가·소음)
+ * ★ *"코드를 고칠 때 그것을 설명하는 문장이 함께 거짓이 되지 않았는지 본다"* 의 재현이고,
+ *   이번에는 **같은 문장이 두 군데 있어서** 한쪽만 고친 것이 원인이었다 ⇒ 한 곳으로 모은다.
+ *
+ * ⚠️ **반환을 둘로 가르는 이유**: `prose` 만 토스 라이팅 정제를 거친다. 정제는 LLM 이 쓴
+ *    서술을 다듬는 것이고, `detail`(종목별 근거)은 **코드가 모양을 보장하는 사실**이라
+ *    통째로 넘기면 스타일 모델이 숫자·라벨을 "잡초" 로 쳐낼 수 있다(09-28 에 겪은 자리).
+ * ⚠️ `report` **하나만** 받는다 — 회차 지역 상태(보유 판단 누락 경고·`web.degraded`·
+ *    `codeGaps`)는 호출자마다 있고 없고가 달라서 여기 넣지 않는다. 그 줄들은 `detail`
+ *    **뒤에** 호출자가 직접 붙인다.
+ *
+ * @param {object} report `shapeReport()` 를 거친 보고서
+ * @returns {{prose: string[], detail: string[]}} 정제 대상 / 정제 제외
+ */
+function composeBriefBody(report) {
+  const r = report || {};
+  const prose = [BRIEF_TITLE];
+  if (r.marketView) prose.push('', r.marketView);
+  if (r.momentumRead) prose.push('', `[모멘텀] ${r.momentumRead}`);
+  for (const ps of r.positions || []) {
+    prose.push('', `· ${ps.symbol} — ${ps.rationale}`);
+  }
+
+  const detail = [];
+  /**
+   * 🔴 **종목별 근거 보고서를 폰으로 보낸다** (2026-10-02 사용자 지시:
+   *    *"매도 매수 제안 근거 보고서도 없고 뭐하는거야? 토큰비용이 너무 아까운데?"*).
+   *    모델이 종목마다 만들어 두고도 폰에는 `marketView`+`momentumRead` 두 문장만 가던
+   *    *"수집해 놓고 안 쓰는"* 자리였다.
+   * ⚠️ 길어지면 `telegramService` 가 4096자 경계에서 나눠 보낸다(10-02 추가).
+   */
+  if ((r.positions || []).length) {
+    detail.push('', '━━━ 종목별 근거 ━━━');
+    for (const ps of r.positions) {
+      /**
+       * 🔴 **2026-10-14 — 진입·손절·목표·R:R·리스크% 를 들어냈다** (사용자 지시).
+       *    그 숫자들은 **주문을 걸라는 말**이고, 이 제품은 보고서다. 스키마에서도 칸이 사라졌다.
+       * ⚠️ 대신 **관측 서술**을 싣는다 — 추세·상대강도·변동성은 "지금 어떤 상태인가" 이고,
+       *    사용자가 판단하는 데 필요한 **사실**이다.
+       */
+      detail.push('', `▸ ${ps.symbol}`);
+      for (const [label, v] of [['추세', ps.trend], ['상대강도', ps.relative], ['변동성', ps.volatility]]) {
+        if (v) detail.push(`  ${label}: ${v}`);
+      }
+      const ev = (ps.evidence || []).filter(Boolean);
+      if (ev.length) detail.push(`  근거: ${ev.join(' · ')}`);
+      if (ps.risk) detail.push(`  리스크: ${ps.risk}`);
+      // ⚠️ 관측 조건이다 — "무엇이 바뀌면 이 서술이 달라지는가"(행동 조건이 아니다)
+      if (ps.watchPoint) detail.push(`  관찰: ${ps.watchPoint}`);
+    }
+  }
+  return { prose, detail };
 }
 
 async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = null, dryRun = false, trigger = null } = {}) {
@@ -3067,53 +3148,15 @@ const STRUCTURAL = /5년 재무|PER\/?PBR|기관 수급|내부자 거래|옵션 
      * 🔴 **사용자 발화 직전 토스 라이팅 정제** (2026-09-30 사용자 지시) — "모든 내부 분석
      *    시스템이 최종적으로 답변 나가기 전에 토스라이팅으로 정제되어 나갈 수 있게".
      *    ⚠️ **LLM 이 쓴 서술(marketView·momentumRead·종목별 rationale)만** 정제한다 —
-     *    아래 이어지는 안내 문구(보유 판단 누락·제안 건수·검색 저하·못 본 것)는 **코드가
+     *    아래 이어지는 안내 문구(보유 판단 누락·검색 저하·코드가 찾은 결손)는 **코드가
      *    보장하는 사실**이라 정제 대상에 안 넣는다. 통째로 넣으면 스타일 다듬는 모델이
      *    "잡초"로 보고 쳐낼 위험이 있고, 그건 이 저장소가 09-28 에 이미 겪은
      *    "코드가 보장한 사실을 프롬프트 단계에서 잃는다" 사고와 같은 자리다.
+     * ⚠️ 조립은 **`composeBriefBody()` 한 곳**이다 — `server.js` 의 수동 발송 라우트와
+     *    같은 함수를 쓴다(종전에는 두 벌이었고 한쪽만 고쳐져 거짓을 말하고 있었다).
      */
-    const proseLines = ['🧭 매매 분석'];
-    if (report.marketView) proseLines.push('', report.marketView);
-    if (report.momentumRead) proseLines.push('', `[모멘텀] ${report.momentumRead}`);
-    for (const ps of report.positions || []) {
-      proseLines.push('', `· ${ps.symbol} — ${ps.rationale}`);
-    }
-    const lines = [];
-    /**
-     * 🔴 **종목별 근거 보고서를 폰으로 보낸다** (2026-10-02 사용자 지시:
-     *    *"매도 매수 제안 근거 보고서도 없고 뭐하는거야? 토큰비용이 너무 아까운데?"*).
-     *
-     * 모델은 종목마다 `entry/stop/target/evidence/risk/scenarioUp/scenarioDown` 을 **이미
-     * 만들고 있었다.** 시스템은 거기에 `trade`(R:R·수수료 반영·리스크 비중)까지 계산해
-     * 붙였다. 그런데 폰으로 가는 건 `marketView`+`momentumRead` **두 문장뿐**이었고
-     * 나머지는 전부 버려졌다 — *"수집해 놓고 안 쓰는"* 의 가장 비싼 형태다.
-     * (실측 2026-10-02 05:48 회차: O 한 종목에만 진입 54.3·손절 52.5·목표 57.52·R:R 1.79·
-     *  근거 2건·리스크·양방향 시나리오가 생성됐고 **단 한 줄도 전달되지 않았다.**)
-     *
-     * ⚠️ `lines` 에 넣는다 — 토스 라이팅 정제 대상이 아니다. 정제 모델이 숫자를 "잡초" 로
-     *    쳐내면 **근거가 사라진 근거 보고서**가 된다(09-28 에 겪은 그 자리).
-     * ⚠️ 길어지면 `telegramService` 가 4096자 경계에서 나눠 보낸다(10-02 추가).
-     */
-    if ((report.positions || []).length) {
-      lines.push('', '━━━ 종목별 근거 ━━━');
-      for (const ps of report.positions) {
-        /**
-         * 🔴 **2026-10-14 — 진입·손절·목표·R:R·리스크% 를 들어냈다** (사용자 지시).
-         *    그 숫자들은 **주문을 걸라는 말**이고, 이 제품은 보고서다. 스키마에서도 칸이 사라졌다.
-         * ⚠️ 대신 **관측 서술**을 싣는다 — 추세·상대강도·변동성은 "지금 어떤 상태인가" 이고,
-         *    사용자가 판단하는 데 필요한 **사실**이다.
-         */
-        lines.push('', `▸ ${ps.symbol}`);
-        for (const [label, v] of [['추세', ps.trend], ['상대강도', ps.relative], ['변동성', ps.volatility]]) {
-          if (v) lines.push(`  ${label}: ${v}`);
-        }
-        const ev = (ps.evidence || []).filter(Boolean);
-        if (ev.length) lines.push(`  근거: ${ev.join(' · ')}`);
-        if (ps.risk) lines.push(`  리스크: ${ps.risk}`);
-        // ⚠️ 관측 조건이다 — "무엇이 바뀌면 이 서술이 달라지는가"(행동 조건이 아니다)
-        if (ps.watchPoint) lines.push(`  관찰: ${ps.watchPoint}`);
-      }
-    }
+    const { prose: proseLines, detail } = composeBriefBody(report);
+    const lines = [...detail];
     /**
      * 🔴 **보유가 있는데 재시도(위 1262~1295행) 후에도 판단이 통째로 비면 조용히 넘어가지
      *    않는다** (2026-09-28 실사고 — 08:47·12:17 두 회차가 시황만 오고 종목 판단이
@@ -3385,6 +3428,8 @@ module.exports = {
   computeTrade, decideOnContext, inverseGate, sideGate, feeGate, marketOfSymbol, REPORT_SCHEMA, SYSTEM_PROMPT,
   // ⚠️ 검증용 노출 — 매수 여력 판정은 **네트워크·LLM 없이** 재야 한다(순수 함수로 유지한 이유)
   assessBuyingCapacity, capacityDetail, capacityBand, describeCashCapacity, watchMovesSection,
+  // ⚠️ `server.js` 의 수동 발송 라우트가 **같은 본문**을 쓰게 하려고 내보낸다 — 숨기면 또 두 벌이 된다
+  composeBriefBody,
   _evidenceConfidence: evidenceConfidence,
   TRADE_ARRAY_SCHEMA,
 };

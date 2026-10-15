@@ -578,7 +578,10 @@ app.post('/api/analyst/chat', async (req, res) => {
 });
 
 /**
- * 매매 분석을 텔레그램으로 보낸다(사용자 지시: *"매매 분석 및 시황 분석 / 텔레그램 발송"*).
+ * 분석 보고서를 텔레그램으로 보낸다.
+ * ⚠️ 2026-09-21 사용자 지시(*"매매 분석 및 시황 분석 / 텔레그램 발송"*)로 생긴 경로인데,
+ *    그 인용의 앞 두 글자는 **더 이상 이 제품을 설명하지 않는다** — 10-12 에 주문 집행을
+ *    걷어내고 10-14 에 스키마에서 행동 칸을 지웠다. 인용은 *언제 유효했는지*의 기록으로만 남긴다.
  * ⚠️ 분석을 **다시 돌리지 않는다** — 화면이 들고 있는 리포트를 그대로 보낸다.
  *    다시 돌리면 화면과 폰의 내용이 달라져 "어느 쪽이 맞나" 가 된다.
  * 🔴 기본이 dry-run 이다(`TELEGRAM_SEND_ENABLED`). 안 갔으면 **안 갔다고** 돌려준다.
@@ -586,16 +589,18 @@ app.post('/api/analyst/chat', async (req, res) => {
 app.post('/api/analyst/telegram', async (req, res) => {
   const r = req.body?.report;
   if (!r || typeof r !== 'object') return res.status(400).json({ error: '보낼 리포트가 없습니다.' });
-  const lines = ['📋 매매 분석'];
-  if (r.marketView) lines.push('', r.marketView);
-  if (r.momentumRead) lines.push('', `[모멘텀] ${r.momentumRead}`);
-  for (const p of r.positions || []) {
-    lines.push('', `· ${p.symbol} ${p.stance}/${p.confidence} — ${p.rationale}`);
-  }
-  for (const c of r.created || []) {
-    lines.push('', `🟡 제안 ${c.side} ${c.symbol} ${c.quantity}주 @ ${c.price} (승인 대기)`);
-  }
-  if (r.dataGaps?.length) lines.push('', `못 본 것: ${r.dataGaps.join(' · ')}`);
+  /**
+   * 🔴 **본문은 `composeBriefBody()` 한 곳에서만 만든다** (2026-10-15).
+   *    종전에는 여기에 조립이 **한 벌 더** 있었고, 자동 발송 쪽만 고쳐져서 이 라우트는
+   *    이미 사라진 것 셋을 말하고 있었다 — ①판단 등급 칸(10-14 에 스키마에서 삭제 ⇒ 실제로
+   *    보내면 `undefined/HIGH` 가 찍힌다) ②제안 배열(10-14 에 제거됐는데 *"(승인 대기)"* 를
+   *    말할 수 있게 열려 있었다) ③모델이 쓴 결손 희망 목록 줄(10-13 에 일부러 걷어낸 소음).
+   *    공용 함수를 쓰면 **되살릴 길이 없어진다** — 그게 한 곳으로 모으는 이유다.
+   * ⚠️ 여기서는 토스 라이팅 정제를 안 거친다 — 화면이 들고 있는 **이미 만들어진 리포트**를
+   *    그대로 보내는 경로이고, 정제는 분석이 막 끝난 자동 발송 쪽의 단계다.
+   */
+  const { prose, detail } = analyst.composeBriefBody(r);
+  const lines = [...prose, ...detail];
 
   const out = await telegram.send(lines.join('\n'), { reason: 'analyst' });
   return res.json(out);
@@ -1375,7 +1380,7 @@ async function startAiSchedule() {
   alerts.start();
 
   /**
-   * 🔴 매매 분석 **자동 실행** (2026-09-21 사용자: *"분석 실행해야 시작하는거야?"*).
+   * 🔴 포트폴리오 분석 **자동 실행** (2026-09-21 사용자: *"분석 실행해야 시작하는거야?"*).
    * ⚠️ **기본 꺼짐**이다 — LLM 을 주기적으로 부르면 비용이 선형으로 는다.
    *    `ANALYST_AUTO_CRON` 에 cron 을 주면 그때만 돈다(예: 장 시작·마감).
    * ★ 결과는 화면이 아니라 **활동 기록**에 남는다 — 그래서 새로고침해도 시간순으로 보인다.
@@ -1404,7 +1409,10 @@ async function startAiSchedule() {
     // 🔴 **마지막 분석을 저장한다** — 화면 진입 자동 실행을 껐으므로, 저장하지 않으면
     //    사용자는 사건이 날 때까지 **빈 화면**을 본다(껐다는 사실보다 고장으로 보인다).
     analyst.saveLast({ ...r, trigger: meta, at: new Date().toISOString() });
-    logInfo('analyst.auto', { why: meta.why || null, positions: r.positions?.length || 0, created: r.created?.length || 0 });
+    // ⛔ 2026-10-15: `created` 제거 — 생산자가 **0곳**이라(10-14 에 제안 배열을 들어냈다)
+    //    항상 `0` 을 찍는 거짓 지표였고, 그 옆의 진짜 이상값을 묻는다.
+    //    (10-14 에 `analystService.js` 에서 같은 이유로 네 자리를 지우며 이 파일을 빠뜨렸다)
+    logInfo('analyst.auto', { why: meta.why || null, positions: r.positions?.length || 0 });
     return r;
   }
   alerts.setAnalystRunner(runAnalysisNow);
