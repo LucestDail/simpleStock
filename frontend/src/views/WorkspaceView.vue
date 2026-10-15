@@ -1107,11 +1107,20 @@ onUnmounted(() => {
       <div class="cell cell--chart">
         <!-- 🔭 의사결정 파이프라인 (2026-10-03 자율 트레이딩 재개편) — 차트 위 스트립.
              수집→게이트→판단→가드→제안 을 숫자 다섯으로. 단계 클릭 = 상세(탈락 사유 등) -->
+        <!--
+          🔴 `described-count` — 2026-10-15 에 바꿨다. 종전은 `report.proposals?.length ?? 0`
+             이었는데 `proposals` 는 10-12 에 **백테스트 전용**으로 옮겨져 라이브 스키마에
+             없고, `?? 0` 때문에 **항상 0** 이 떴다(모델이 7종목을 다 서술한 회차에도
+             "종목 판단 0"). 라벨은 10-12 에 "서술이 채워진 종목" 으로 바꿔 놓고 **값을
+             안 바꿨다** — 라벨만 고치면 거짓이 더 그럴듯해진다.
+          ⚠️ `?? 0` 을 쓰지 않는다 — 서버가 안 주면 **"못 쟀다"(—)** 로 보여야 한다.
+          ⚠️ 이 주석을 **태그 안 속성 자리**에 두면 Vue 파서가 거부한다(10-15 에 밟았다).
+        -->
         <PipelineStrip
           :pipeline="report?.pipeline || null"
           :at="report?.at || null"
           :trigger="report?.trigger?.why || null"
-          :proposal-count="report ? (report.proposals?.length ?? 0) : null"
+          :described-count="report ? (report.pipeline?.judged?.described ?? null) : null"
         />
         <!-- ── 조각 실패를 숨기지 않는다 ─────────────────────── -->
         <p v-if="dashError" class="banner banner--error">{{ dashError }}</p>

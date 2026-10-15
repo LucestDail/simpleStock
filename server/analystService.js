@@ -2788,6 +2788,18 @@ async function analyze(dash, { userInstruction = '', useWebSearch = true, fx = n
     judged: {
       positions: report.positions.length,
       codeFilled: report.positions.filter((p) => p._codeFilled).length,
+      /**
+       * 🔴 **서술이 실제로 채워진 종목 수** (2026-10-15 신설).
+       *    화면 ⑤단계가 *"서술이 채워진 종목"* 이라고 **라벨만 바꿔 놓고**(10-12) 값은
+       *    `report.proposals?.length ?? 0` 을 읽고 있었다 — `proposals` 는 같은 날
+       *    **백테스트 전용으로 옮겨져 라이브 스키마에 없다** ⇒ 화면에 **항상 0**.
+       *    모델이 7종목을 다 서술한 회차에도 *"종목 판단 0"* 이 떴다.
+       * ★ 라벨을 고치고 값을 안 고치면 **거짓이 더 그럴듯해진다** — 숫자가 그대로라
+       *   아무도 안 본다. "형제 중 하나만 고쳐짐" 의 화면판.
+       * ⚠️ 판정 기준은 로그의 `stances`(DESCRIBED/EMPTY)와 **같은 `trend`** 다 —
+       *    두 곳이 갈리면 로그와 화면이 다른 말을 한다.
+       */
+      described: report.positions.filter((p) => String(p?.trend || '').trim()).length,
     },
     guards: {
       priceOutliers: (report.positions || []).filter((p) => p._priceFabricated).length,

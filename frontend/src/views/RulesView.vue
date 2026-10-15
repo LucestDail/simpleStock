@@ -709,9 +709,17 @@ async function runAnalysis() {
     if (!res.ok) throw new Error(b.error || `분석 실행 실패 (${res.status})`);
     const parts = [];
     if (b.marketView) parts.push(b.marketView);
-    parts.push(`제안 ${Array.isArray(b.proposals) ? b.proposals.length : 0}건`);
+    /**
+     * 🔴 2026-10-15: 종전은 `제안 ${b.proposals?.length ?? 0}건` 이었다. `proposals` 는
+     *    10-12 에 **백테스트 전용**으로 옮겨져 라이브 응답에 없고, `Array.isArray` 폴백
+     *    때문에 **항상 `제안 0건`** 이 떴다 — 이 제품은 제안을 내지 않는다.
+     * ⚠️ `?? 0` 을 쓰지 않는다 — 못 받았으면 **그 조각을 아예 안 붙인다**.
+     *    0 으로 메우면 "서술이 하나도 없었다" 는 거짓이 된다.
+     */
+    const described = b.pipeline?.judged?.described;
+    if (described != null) parts.push(`서술 ${described}종목`);
     if (Number(b.dashFailed) > 0) parts.push(`데이터 부분 실패 ${b.dashFailed}건`);
-    runMsg.value = `${b.dryRun ? '[점검 실행 — 발송·제안 없음] ' : ''}${parts.join(' · ')}`
+    runMsg.value = `${b.dryRun ? '[점검 실행 — 발송 없음] ' : ''}${parts.join(' · ')}`
       + (b.dryRun ? '' : ' — 전체 보고서는 대시보드 분석 패널에 저장됐습니다.');
   } catch (e) {
     runErr.value = e.message;

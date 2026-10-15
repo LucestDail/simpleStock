@@ -40,7 +40,7 @@
       </button>
       <button class="stage" :class="{ 'stage--on': open === 'propose' }" @click="toggle('propose')">
         <small>⑤ 종목 판단</small>
-        <b class="mono-num">{{ num(proposalCount) }}</b>
+        <b class="mono-num">{{ num(describedCount) }}</b>
         <small>서술이 채워진 종목</small>
       </button>
     </div>
@@ -77,7 +77,8 @@ const props = defineProps({
   pipeline: { type: Object, default: null },
   at: { type: String, default: null },
   trigger: { type: String, default: null },
-  proposalCount: { type: Number, default: null },
+  /** 서술이 채워진 종목 수. ⚠️ 2026-10-15 이전 이름은 `proposalCount` 였고 **제안 건수**를 받고 있었다 */
+  describedCount: { type: Number, default: null },
   pendingCount: { type: Number, default: null },
 });
 
