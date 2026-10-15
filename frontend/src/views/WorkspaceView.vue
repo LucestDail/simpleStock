@@ -10,6 +10,7 @@ import { formatMarketClock } from '../lib/marketClock';
 import { heatmapStyleFromChangePct, formatChangePct } from '../lib/heatmapColor';
 import { readSse } from '../lib/sse';
 import { apiFetch, apiStreamUrl, readApiError } from '../lib/apiClient';
+import { summarizeEvidenceConfidence, confidenceWord } from '../lib/evidenceConfidence';
 
 const {
   groups,
@@ -635,6 +636,26 @@ function rated(symbol) {
   const r = report.value?.ratings?.[symbol];
   return r && !r.error ? r : null;
 }
+
+/**
+ * 📊 **근거 충실도 — 전부 같으면 접는다** (2026-10-15 사용자 결정)
+ *
+ * 평소에는 전 종목이 같은 등급으로 나오므로(10-15 소급 채점 42/42 HIGH) 7칸에
+ * 같은 배지를 늘어놓으면 **정보량이 0 이고 종목 간 비교로 오독된다.**
+ * ⇒ 같으면 한 줄, 갈리면 종목별 + **낮은 쪽을 지목**한다.
+ *
+ * 🔴 판정 규칙은 `lib/evidenceConfidence` 한 곳에 있다 — 화면에 흩으면 갈린다.
+ *    등급 값 자체는 **서버가 계산한 것을 읽기만** 한다(정본은 서버).
+ */
+const evidenceConf = computed(() => summarizeEvidenceConfidence(report.value?.positions));
+
+/** 근거 충실도 설명 — 요약 줄과 종목 배지가 **같은 문구**를 쓴다(갈리면 뜻이 둘이 된다) */
+const CONF_TITLE = '근거 충실도 — 추세·상대강도·변동성 서술과 인용 근거가 얼마나 채워졌는지(코드가 계산)';
+
+/** 이 종목이 지목 대상인가 — 배지를 눈에 띄게 할지 판정 */
+function confLow(symbol) {
+  return (evidenceConf.value?.lowSymbols || []).includes(String(symbol ?? '').trim());
+}
 /**
  * 목록을 사람이 읽는 한 줄로 — **배열이 아니어도 죽지 않는다.**
  * 🔴 `unverified` 가 문자열로 와서 `.join()` 이 터졌고 **패널 전체가 사라졌다**(2026-09-21).
@@ -1246,11 +1267,28 @@ onUnmounted(() => {
             -->
             <div v-if="report.positions?.length" class="props">
               <h3 class="panel__h">종목 판단</h3>
+              <!--
+                📊 **근거 충실도는 평소에 전부 같다** (2026-10-15 사용자 결정: *"전부 같으면 접는다"*)
+                   10-15 소급 채점에서 **새 코드 7회차 × 7종목 = 42건 전부 HIGH** 였다.
+                   이 값은 코드가 *"서술을 채웠나 + 근거를 댔나"* 를 세는 것이라, 데이터가
+                   정상이면 전 종목이 같은 등급이 된다 ⇒ **종목 간 비교용이 아니라 이상 탐지용**이다.
+                ⇒ 같으면 **한 줄 요약만**, 갈리면 종목별 배지 + 낮은 쪽을 지목한다.
+                ⚠️ `label` 이 null 이면 **줄 자체를 그리지 않는다**(종목 1개처럼 말할 것이 없는 경우).
+              -->
+              <p v-if="evidenceConf?.label" class="conf-sum" :class="{ 'conf-sum--warn': evidenceConf.warn }" :title="CONF_TITLE">
+                {{ evidenceConf.label }}
+              </p>
               <article v-for="ps in report.positions" :key="ps.symbol" class="pos">
                 <header>
                   <b>{{ ps.symbol }}</b>
 
-                  <span class="pos__conf" title="근거 충실도 — 추세·상대강도·변동성 서술과 인용 근거가 얼마나 채워졌는지(코드가 계산)">{{ ps.confidence }}</span>
+                  <!--
+                    🔴 **전 종목이 같으면 이 배지를 그리지 않는다** — 위 한 줄 요약이 대신 말한다.
+                    ⚠️ `confidence` 가 비면 **빈칸이 아니라 "확인 못 함"** 을 적는다 —
+                       빈칸은 "값이 좋다" 로도 "칸이 없다" 로도 읽혀서 둘을 구분할 수 없다.
+                  -->
+                  <span v-if="!evidenceConf?.collapsed" class="pos__conf"
+                        :class="{ 'pos__conf--low': confLow(ps.symbol) }" :title="CONF_TITLE">{{ confidenceWord(ps.confidence) }}</span>
                   <!--
                     🔴 손익비는 **코드가 계산**한 값이다(모델이 아니라).
                     ⚠️ 계산이 안 된 이유가 있으면 그걸 보여준다 — 빈칸은 "위험 없음" 으로 읽힌다.
@@ -2407,6 +2445,18 @@ onUnmounted(() => {
 .pos--sell { background: var(--color-down-soft); color: var(--color-down); }
 .pos--hold { background: var(--color-flat-soft); color: var(--color-muted); }
 .pos__conf { margin-left: auto; font-size: var(--text-2xs); color: var(--color-faint); }
+/*
+ * 🔴 **`.pos__conf--low` 는 반드시 `.pos__conf` **뒤**에 와야 한다** — 특이성이 (0,1,0) 로
+ *    같아서 **소스 순서가 승패를 가른다.** 앞에 두면 `color` 가 되묻혀 강조가 조용히 사라진다
+ *    (이 저장소에서 `.tbl th` 특이성에 져 헤더 정렬이 반대로 붙을 뻔한 것과 같은 함정).
+ */
+.pos__conf--low { color: var(--color-warn); font-weight: 700; }
+/*
+ * 한 줄 요약 — `.props` 가 flex column 이라 목록 **맨 위**에 놓인다.
+ * ⚠️ `.pos p` (0,1,1) 의 영향권 밖이다(이 `<p>` 는 `.pos` 안이 아니라 형제다).
+ */
+.conf-sum { margin: 0; font-size: var(--text-2xs); color: var(--color-faint); }
+.conf-sum--warn { color: var(--color-warn); font-weight: 700; }
 .pos p { margin: 4px 0; font-size: var(--text-xs); color: var(--color-body); line-height: 1.5; }
 .pos ul, .gaps ul { margin: 2px 0; padding-left: 16px; }
 .pos li, .gaps li { font-size: var(--text-xs); color: var(--color-muted); line-height: 1.5; }
